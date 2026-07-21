@@ -58,6 +58,12 @@ def test_parse_dates_range_keywords_and_flags():
     assert named.expiry == date(2026, 1, 7)
     assert named.note == ""
 
+    # ISO (YYYY-MM-DD) dates must NOT be read dayfirst.
+    iso = migrate.parse_dates("03 - 2022-01-06 to 2022-03-27 Sea Service Testimonial")
+    assert iso.issue == date(2022, 1, 6)
+    assert iso.expiry == date(2022, 3, 27)
+    assert iso.note == ""  # 4-digit year -> confident
+
     assert migrate.parse_dates("Home office BRP Letter") == migrate.DateParse()
 
 

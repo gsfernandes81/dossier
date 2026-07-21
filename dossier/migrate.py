@@ -112,10 +112,15 @@ _DATE_TOKEN = re.compile(
 
 
 def _parse_token(token: str) -> date | None:
+    # ISO-style tokens lead with a 4-digit year (YYYY-MM-DD) and must NOT be read
+    # dayfirst, or "2022-01-06" flips to 2022-06-01. Only DD-first numeric tokens
+    # (10-07-26) are dayfirst.
+    iso_like = bool(re.match(r"\d{4}[-/]", token))
     try:
-        return du_parser.parse(token, dayfirst=True).date()
+        parsed = du_parser.parse(token, dayfirst=not iso_like, yearfirst=iso_like)
     except (ValueError, OverflowError, TypeError):
         return None
+    return parsed.date()
 
 
 def _token_unambiguous(token: str) -> bool:
