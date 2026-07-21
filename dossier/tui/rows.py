@@ -31,8 +31,8 @@ Three shapes, one status vocabulary (see :data:`_STATUS_STYLE`):
 * :attr:`RowMode.MULTILINE` — narrow panes / portrait: name (+ marker) on line
   one, a dim meta line (date · slot · tags · flags) below.
 
-Status glyphs are ASCII by default (``!`` expired, ``~`` expiring) because emoji
-cell widths misalign in many terminals; ``ascii_only=False`` switches to ⚠.
+Icons come from a :class:`~dossier.tui.glyphs.GlyphSet` (Nerd Font or ASCII),
+chosen per device — see :mod:`dossier.tui.glyphs`.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ from rich.text import Text
 
 from dossier.model import Document, ExpiryStatus, FileStatus
 from dossier.query import DocumentView
+from dossier.tui.glyphs import ASCII, GlyphSet
 
 
 class RowMode(StrEnum):
@@ -64,8 +65,6 @@ _STATUS_STYLE = {
     ExpiryStatus.OK: "green",
     ExpiryStatus.NONE: "",
 }
-_ASCII_MARKER = {ExpiryStatus.EXPIRED: "!", ExpiryStatus.EXPIRING: "~"}
-_EMOJI_MARKER = {ExpiryStatus.EXPIRED: "⚠", ExpiryStatus.EXPIRING: "⚠"}
 
 
 def doc_row(
@@ -74,42 +73,41 @@ def doc_row(
     mode: RowMode = RowMode.DENSE,
     superseded: bool = False,
     show_issue: bool = False,
-    ascii_only: bool = True,
+    glyphs: GlyphSet = ASCII,
 ) -> RenderableType:
     """Render one document row in the given ``mode``.
 
     ``superseded`` dims the whole row (the doc has been renewed away but is kept).
     ``show_issue`` swaps the displayed date from expiry to issue (the ``i``
     toggle); the expiry *colour and marker* stay, so urgency reads either way.
+    ``glyphs`` picks the icon set (Nerd Font vs ASCII).
     """
     if mode is RowMode.COMPACT:
-        return _compact(view, superseded=superseded, ascii_only=ascii_only)
+        return _compact(view, superseded=superseded, glyphs=glyphs)
     if mode is RowMode.MULTILINE:
         return _multiline(
-            view, superseded=superseded, show_issue=show_issue, ascii_only=ascii_only
+            view, superseded=superseded, show_issue=show_issue, glyphs=glyphs
         )
-    return _dense(
-        view, superseded=superseded, show_issue=show_issue, ascii_only=ascii_only
-    )
+    return _dense(view, superseded=superseded, show_issue=show_issue, glyphs=glyphs)
 
 
 # -- the three shapes --------------------------------------------------------
 
 
 def _dense(
-    view: DocumentView, *, superseded: bool, show_issue: bool, ascii_only: bool
+    view: DocumentView, *, superseded: bool, show_issue: bool, glyphs: GlyphSet
 ) -> Table:
     doc = view.document
     dim = _dim(superseded)
     name = Text(doc.name or doc.id, no_wrap=True, overflow="ellipsis", style=dim)
 
     right = Text(style=dim)
-    _append_status(right, view, show_issue=show_issue, ascii_only=ascii_only, dim=dim)
-    glyphs = _file_glyphs(doc, ascii_only)
-    if glyphs:
+    _append_status(right, view, show_issue=show_issue, glyphs=glyphs, dim=dim)
+    files = _file_glyphs(doc, glyphs)
+    if files:
         if right.plain:
             right.append("  ")
-        right.append(glyphs, style=dim)
+        right.append(files, style=dim)
 
     grid = Table.grid(expand=True, padding=(0, 1))
     grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
@@ -118,10 +116,10 @@ def _dense(
     return grid
 
 
-def _compact(view: DocumentView, *, superseded: bool, ascii_only: bool) -> Text:
+def _compact(view: DocumentView, *, superseded: bool, glyphs: GlyphSet) -> Text:
     doc = view.document
     dim = _dim(superseded)
-    marker = _marker(view.expiry, ascii_only)
+    marker = _marker(view.expiry, glyphs)
     row = Text(style=dim)
     row.append(f"{marker or ' '} ", style=_join(dim, _STATUS_STYLE[view.expiry]))
     row.append(doc.name or doc.id, style=dim)
@@ -129,17 +127,17 @@ def _compact(view: DocumentView, *, superseded: bool, ascii_only: bool) -> Text:
 
 
 def _multiline(
-    view: DocumentView, *, superseded: bool, show_issue: bool, ascii_only: bool
+    view: DocumentView, *, superseded: bool, show_issue: bool, glyphs: GlyphSet
 ) -> Text:
     doc = view.document
     dim = _dim(superseded)
     row = Text(style=dim)
-    marker = _marker(view.expiry, ascii_only)
+    marker = _marker(view.expiry, glyphs)
     if marker:
         row.append(f"{marker} ", style=_join(dim, _STATUS_STYLE[view.expiry]))
     row.append(doc.name or doc.id, style=dim)
 
-    meta = _meta_parts(view, show_issue=show_issue, ascii_only=ascii_only)
+    meta = _meta_parts(view, show_issue=show_issue, glyphs=glyphs)
     if meta:
         row.append("\n  " + "  ·  ".join(meta), style=_join(dim, "dim"))
     return row
@@ -153,12 +151,12 @@ def _append_status(
     view: DocumentView,
     *,
     show_issue: bool,
-    ascii_only: bool,
+    glyphs: GlyphSet,
     dim: str,
 ) -> None:
     """Append ``[marker ]label date`` (styled by expiry) to ``text`` in place."""
     style = _join(dim, _STATUS_STYLE[view.expiry])
-    marker = _marker(view.expiry, ascii_only)
+    marker = _marker(view.expiry, glyphs)
     if marker:
         text.append(f"{marker} ", style=style)
     dated = _date_str(view.document, show_issue)
@@ -166,7 +164,7 @@ def _append_status(
         text.append(dated, style=style)
 
 
-def _meta_parts(view: DocumentView, *, show_issue: bool, ascii_only: bool) -> list[str]:
+def _meta_parts(view: DocumentView, *, show_issue: bool, glyphs: GlyphSet) -> list[str]:
     doc = view.document
     parts: list[str] = []
     dated = _date_str(doc, show_issue)
@@ -177,9 +175,9 @@ def _meta_parts(view: DocumentView, *, show_issue: bool, ascii_only: bool) -> li
         parts.append(f"slot {slot}")
     if doc.tags:
         parts.append(" ".join(doc.tags))
-    glyphs = _file_glyphs(doc, ascii_only)
-    if glyphs:
-        parts.append(glyphs)
+    files = _file_glyphs(doc, glyphs)
+    if files:
+        parts.append(files)
     if view.file is FileStatus.MISSING:
         parts.append("file missing")
     return parts
@@ -195,14 +193,17 @@ def _fmt(when: date) -> str:
     return when.strftime("%d %b %y")
 
 
-def _marker(status: ExpiryStatus, ascii_only: bool) -> str:
-    table = _ASCII_MARKER if ascii_only else _EMOJI_MARKER
-    return table.get(status, "")
+def _marker(status: ExpiryStatus, glyphs: GlyphSet) -> str:
+    return {
+        ExpiryStatus.EXPIRED: glyphs.expired,
+        ExpiryStatus.EXPIRING: glyphs.expiring,
+    }.get(status, "")
 
 
-def _file_glyphs(doc: Document, ascii_only: bool) -> str:
-    physical, digital = ("P", "D") if ascii_only else ("📄", "📎")
-    return (physical if doc.has_physical else "") + (digital if doc.has_digital else "")
+def _file_glyphs(doc: Document, glyphs: GlyphSet) -> str:
+    physical = glyphs.physical if doc.has_physical else ""
+    digital = glyphs.digital if doc.has_digital else ""
+    return f"{physical}{digital}"
 
 
 def _slot_str(doc: Document) -> str:

@@ -22,7 +22,7 @@ from rich.text import Text
 
 from dossier import query
 from dossier.model import Document, ExpiryStatus, FileStatus
-from dossier.tui import rows
+from dossier.tui import glyphs, rows
 from dossier.tui.rows import RowMode
 
 
@@ -68,14 +68,15 @@ def test_expired_has_permanent_marker_ok_does_not():
     assert ok.plain.strip() == "IDP 1926"
 
 
-def test_marker_switches_ascii_to_emoji():
+def test_marker_switches_ascii_to_nerd():
     doc = Document(id="x", name="Cert", expiry_date=date(2026, 3, 10))
     view = _view(doc, expiry=ExpiryStatus.EXPIRED)
-    ascii_row = rows.doc_row(view, mode=RowMode.COMPACT, ascii_only=True)
-    emoji_row = rows.doc_row(view, mode=RowMode.COMPACT, ascii_only=False)
-    assert isinstance(ascii_row, Text) and isinstance(emoji_row, Text)
+    ascii_row = rows.doc_row(view, mode=RowMode.COMPACT, glyphs=glyphs.ASCII)
+    nerd_row = rows.doc_row(view, mode=RowMode.COMPACT, glyphs=glyphs.NERD)
+    assert isinstance(ascii_row, Text) and isinstance(nerd_row, Text)
     assert ascii_row.plain.startswith("!")
-    assert emoji_row.plain.startswith("⚠")
+    assert nerd_row.plain.startswith(glyphs.NERD.expired)
+    assert glyphs.NERD.expired != "!"  # a real Nerd Font codepoint, not ASCII
 
 
 def test_superseded_dims_the_row():

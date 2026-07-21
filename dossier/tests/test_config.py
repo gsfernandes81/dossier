@@ -71,3 +71,19 @@ def test_load_without_device_config_errors(
     )
     with pytest.raises(ConfigError):
         Config.load()
+
+
+def test_glyphs_defaults_to_nerd_and_loads_from_device(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    assert Config(syncthing_root=tmp_path).glyphs == "nerd"  # per-device default
+
+    root = tmp_path / "docs"
+    (root / ".dossier").mkdir(parents=True)
+    device = tmp_path / "device.toml"
+    device.write_text(
+        f'syncthing_root = "{root.as_posix()}"\nglyphs = "ascii"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+
+    assert Config.load().glyphs == "ascii"
