@@ -15,9 +15,11 @@
 
 """Integrity and review diagnostics for the store (drives ``ds doctor``).
 
-Checks: Syncthing conflict files, location-slug referential integrity, round-trip
-lint (files that would change on next save), missing rendition files, and
-ambiguous dates — 2-digit-year dates whose day/month order can't be pinned down.
+Checks: Syncthing conflict files, location-slug referential integrity,
+supersession integrity (dangling / self / cyclic ``supersedes`` links),
+round-trip lint (files that would change on next save), missing rendition files,
+and ambiguous dates — 2-digit-year dates whose day/month order can't be pinned
+down.
 """
 
 from __future__ import annotations
@@ -59,6 +61,7 @@ def run(store: Store, config: Config) -> Report:
     docs = store.load_all()
     locations = store.load_locations()
     report.findings += _check_location_refs(docs, locations)
+    report.findings += _check_supersession(docs)
     report.findings += _check_round_trip(store, docs)
     report.findings += _check_files(docs, config.syncthing_root)
     report.findings += _check_dates(docs)
@@ -79,6 +82,54 @@ def _check_location_refs(
                         f"{kind}_location {slug!r} is not a known location",
                     )
                 )
+    return out
+
+
+def _check_supersession(docs: list[Document]) -> list[Finding]:
+    """Referential integrity of ``supersedes`` links: dangling, self, cyclic.
+
+    Each document supersedes at most one other, so the graph is functional and
+    cycles are cheap to find by walking each link chain to its end.
+    """
+    ids = {doc.id for doc in docs}
+    by_id = {doc.id: doc for doc in docs}
+    out: list[Finding] = []
+
+    for doc in docs:
+        target = doc.supersedes
+        if target and target != doc.id and target not in ids:
+            out.append(
+                Finding(
+                    "supersession",
+                    doc.id,
+                    f"supersedes {target!r}, which is not a known document",
+                )
+            )
+
+    reported: set[str] = set()
+    for start in docs:
+        if start.id in reported:
+            continue
+        path: list[str] = []
+        current: str | None = start.id
+        while current is not None and current in by_id and current not in path:
+            path.append(current)
+            current = by_id[current].supersedes
+        if current is None or current not in path:
+            continue  # chain ended or ran into a dangling link — no cycle
+        cycle = path[path.index(current) :]
+        reported.update(cycle)
+        if len(cycle) == 1:
+            out.append(Finding("supersession", cycle[0], "document supersedes itself"))
+        else:
+            joined = " -> ".join(cycle)
+            out.append(
+                Finding(
+                    "supersession",
+                    cycle[0],
+                    f"supersession cycle: {joined} -> {cycle[0]}",
+                )
+            )
     return out
 
 

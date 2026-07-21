@@ -37,6 +37,8 @@ def _doc(
     perm_subslot: int | None = None,
     temp_location: str | None = None,
     expiry_date: date | None = None,
+    ignore_expiry: bool = False,
+    supersedes: str | None = None,
 ) -> Document:
     return Document(
         id=id_,
@@ -50,6 +52,8 @@ def _doc(
         perm_subslot=perm_subslot,
         temp_location=temp_location,
         expiry_date=expiry_date,
+        ignore_expiry=ignore_expiry,
+        supersedes=supersedes,
     )
 
 
@@ -116,6 +120,40 @@ def test_expiry_filter_and_expiring_ordering():
 
     ordered = query.expiring(docs, today=TODAY, threshold_days=90)
     assert [d.id for d in ordered] == ["expired", "soon"]  # soonest date first
+
+
+def test_superseded_ids_and_watch_is_opt_out():
+    docs = [
+        _doc("passport-2016", expiry_date=date(2026, 1, 1)),
+        _doc("passport-2026", expiry_date=date(2036, 1, 1), supersedes="passport-2016"),
+        _doc("coc", expiry_date=date(2027, 3, 1)),
+        _doc("old-cdc", expiry_date=date(2025, 1, 1), ignore_expiry=True),
+        _doc("no-expiry"),
+    ]
+    assert query.superseded_ids(docs) == {"passport-2016"}
+
+    watch = [d.id for d in query.tracked(docs, today=TODAY)]
+    # superseded old passport, opted-out CDC, and the undated doc are all hidden;
+    # order is soonest expiry first.
+    assert watch == ["coc", "passport-2026"]
+
+
+def test_supersession_chain_follows_links_and_is_cycle_safe():
+    docs = [
+        _doc("v1"),
+        _doc("v2", supersedes="v1"),
+        _doc("v3", supersedes="v2"),
+    ]
+    by_id = {d.id: d for d in docs}
+    chain = query.supersession_chain(docs, by_id["v3"])
+    assert [d.id for d in chain] == ["v2", "v1"]  # newest replaced first
+
+    assert query.supersession_chain(docs, by_id["v1"]) == []
+
+    # A cycle must not loop forever.
+    a = _doc("a", supersedes="b")
+    b = _doc("b", supersedes="a")
+    assert {d.id for d in query.supersession_chain([a, b], a)} == {"b"}
 
 
 def test_plan_move_inserts_and_shifts():

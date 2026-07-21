@@ -109,6 +109,24 @@ def test_candidate_readings():
     assert date(2021, 8, 23) in readings  # YY-MM-DD
 
 
+def test_supersession_integrity(store: Store):
+    store.save(Document(id="v1", name="Old"))
+    store.save(Document(id="v2", name="New", supersedes="v1"))  # clean chain
+    store.save(Document(id="dangling", name="D", supersedes="ghost"))
+    store.save(Document(id="selfie", name="S", supersedes="selfie"))
+    store.save(Document(id="a", name="A", supersedes="b"))  # a <-> b cycle
+    store.save(Document(id="b", name="B", supersedes="a"))
+
+    findings = doctor.run(store, store.config).by_check().get("supersession", [])
+    by_subject = {f.subject: f.detail for f in findings}
+    assert "not a known document" in by_subject["dangling"]
+    assert "supersedes itself" in by_subject["selfie"]
+    cycle = {f.subject for f in findings if "cycle" in f.detail}
+    assert cycle and cycle <= {"a", "b"}  # reported once, on one member
+    assert "v1" not in by_subject and "v2" not in by_subject  # clean chain is silent
+    assert len(findings) == 3  # dangling + self + one cycle
+
+
 def test_date_order_violation(store: Store):
     store.save(
         Document(
