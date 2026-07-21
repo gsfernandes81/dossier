@@ -24,14 +24,22 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, OptionList, TextArea
+from textual.widgets import (
+    Button,
+    Input,
+    Label,
+    OptionList,
+    SelectionList,
+    TextArea,
+)
 from textual.widgets.option_list import Option
+from textual.widgets.selection_list import Selection
 
 from dossier import doctor, query
 from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
 from dossier.migrate import slugify
-from dossier.model import Document
+from dossier.model import Bundle, Document
 from dossier.store import Store
 
 
@@ -316,6 +324,111 @@ class SupersedeScreen(ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+
+class BundleScreen(ModalScreen[bool]):
+    """Toggle a document's bundle membership; type a name to make a new bundle."""
+
+    CSS = """
+    BundleScreen { align: center middle; }
+    #bpanel {
+        width: 70%; max-width: 80; height: auto; max-height: 90%;
+        padding: 1 2; background: $panel; border: round $primary;
+    }
+    #bundles { height: auto; max-height: 12; margin-bottom: 1; }
+    #bnew { margin-bottom: 1; }
+    #bbuttons { height: auto; align: right middle; }
+    #bbuttons Button { margin-left: 2; }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+s", "save", "Save"),
+    ]
+
+    def __init__(self, store: Store, docs: list[Document], doc: Document) -> None:
+        super().__init__()
+        self._store = store
+        self._docs = docs
+        self._doc = doc
+        self._slugs: set[str] = set()
+        self._new_titles: dict[str, str] = {}
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="bpanel"):
+            yield Label(f'Bundles for "{self._doc.name or self._doc.id}"')
+            yield SelectionList[str](id="bundles")
+            yield Label("Add to a new bundle (type a name, Enter):")
+            yield Input(placeholder="new bundle name…", id="bnew")
+            with Horizontal(id="bbuttons"):
+                yield Button("Cancel", id="bcancel")
+                yield Button("Save", id="bsave", variant="primary")
+
+    def on_mount(self) -> None:
+        current = set(self._doc.bundles)
+        selection = self.query_one("#bundles", SelectionList)
+        for slug, title in self._known_bundles():
+            self._slugs.add(slug)
+            selection.add_option(Selection(title, slug, slug in current))
+
+    def _known_bundles(self) -> list[tuple[str, str]]:
+        titles = {
+            slug: bundle.title for slug, bundle in self._store.load_bundles().items()
+        }
+        for doc in self._docs:
+            for slug in doc.bundles:
+                titles.setdefault(slug, slug)
+        return sorted(titles.items())
+
+    @on(Input.Submitted, "#bnew")
+    def _add_new(self, event: Input.Submitted) -> None:
+        name = event.value.strip()
+        event.input.value = ""
+        if not name:
+            return
+        slug = slugify(name)
+        if slug in self._slugs:
+            self.notify(f"{slug} is already listed")
+            return
+        self._slugs.add(slug)
+        self._new_titles[slug] = name
+        self.query_one("#bundles", SelectionList).add_option(
+            Selection(name, slug, True)
+        )
+
+    @on(Button.Pressed, "#bcancel")
+    def _on_cancel(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#bsave")
+    def _on_save(self) -> None:
+        self.action_save()
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    def action_save(self) -> None:
+        selected = list(self.query_one("#bundles", SelectionList).selected)
+        self._doc.bundles = sorted(selected)
+
+        bundles = self._store.load_bundles()
+        new = [slug for slug in selected if slug not in bundles]
+        if new:
+            for slug in new:
+                title = self._new_titles.get(slug, slug.replace("-", " "))
+                bundles[slug] = Bundle(slug=slug, title=title)
+            self._store.save_bundles(bundles)
+
+        try:
+            self._store.save(self._doc)
+        except StaleWriteError:
+            self.notify(
+                "changed on disk since load; reopen and retry", severity="error"
+            )
+            return
+        except StoreError as exc:
+            self.notify(str(exc), severity="error")
+            return
+        self.dismiss(True)
 
 
 def _iso(value: date | None) -> str:

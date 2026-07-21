@@ -57,6 +57,7 @@ from dossier.store import Store
 from dossier.tui import detail, rows
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
+    BundleScreen,
     DetailScreen,
     DoctorScreen,
     MoveScreen,
@@ -121,6 +122,7 @@ class HomeScreen(Screen[None]):
         Binding("left", "drill_out", "Back", show=False),
         Binding("o", "open_file", "Open"),
         Binding("i", "toggle_dates", "Iss/Exp"),
+        Binding("b", "bundle", "Bundle"),
         Binding("e", "edit", "Edit"),
         Binding("n", "new", "New"),
         Binding("m", "move", "Move"),
@@ -411,6 +413,13 @@ class HomeScreen(Screen[None]):
         if doc is not None:
             self.app.push_screen(
                 SupersedeScreen(self._store, self._docs, doc), self._after_edit
+            )
+
+    def action_bundle(self) -> None:
+        doc = self._current_doc()
+        if doc is not None:
+            self.app.push_screen(
+                BundleScreen(self._store, self._docs, doc), self._after_edit
             )
 
     def action_toggle_expiring(self) -> None:
