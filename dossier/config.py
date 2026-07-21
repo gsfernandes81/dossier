@@ -43,12 +43,14 @@ DEFAULT_EXPIRY_THRESHOLD_DAYS = 90
 
 def per_device_config_path() -> Path:
     """This device's config file (holds only ``syncthing_root``)."""
-    return Path(platformdirs.user_config_dir(APP_NAME)) / "config.toml"
+    config_dir = platformdirs.user_config_dir(APP_NAME, appauthor=False)
+    return Path(config_dir) / "config.toml"
 
 
 def default_history_dir() -> Path:
     """Local, non-synced directory for pre-save document backups."""
-    return Path(platformdirs.user_data_dir(APP_NAME)) / "history"
+    data_dir = platformdirs.user_data_dir(APP_NAME, appauthor=False)
+    return Path(data_dir) / "history"
 
 
 @dataclass

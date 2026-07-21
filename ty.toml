@@ -8,5 +8,11 @@
 #   include = ["dossier/some_module.py"]
 #   [overrides.rules]
 #   unresolved-attribute = "ignore"  # <reason ty can't see it>
-#
-# No overrides are needed yet.
+
+[[overrides]]
+include = ["dossier/platform_open.py"]
+
+[overrides.rules]
+# os.startfile exists only on Windows; typeshed hides it on the Linux CI runner,
+# so ty can't resolve it there. The call is guarded by a sys.platform check.
+unresolved-attribute = "ignore"
