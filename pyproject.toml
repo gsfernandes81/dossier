@@ -1,0 +1,62 @@
+[project]
+name = "dossier"
+version = "0.1.0"
+description = "Cross-platform TUI for tracking personal documents (physical + digital) on Windows and Termux"
+authors = [{ name = "geolocatingshark", email = "geolocatingshark@gmail.com" }]
+# Relaxed from destiny-director's `~=3.13.0` pin: dossier must also run under Termux,
+# whose Python may trail the latest. 3.11+ is required for stdlib `tomllib`.
+requires-python = ">=3.11"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+dependencies = [
+    "textual>=1.0.0",
+    "platformdirs>=4.3",
+    "python-dateutil>=2.9.0",
+    "ruamel.yaml>=0.18.6",
+    "tomli-w>=1.1.0",
+]
+
+[project.scripts]
+dossier = "dossier.__main__:main"
+ds = "dossier.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.20",
+    "ty>=0.0.56",
+    "pre-commit>=4.6.0",
+    "rope>=1.14.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.hatch.build.targets.sdist]
+include = ["dossier"]
+
+[tool.hatch.build.targets.wheel]
+include = ["dossier"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-wrap-aliases = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["dossier"]
+
+[tool.coverage.run]
+source = ["dossier"]

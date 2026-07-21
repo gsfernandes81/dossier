@@ -1,32 +1,87 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.egg-info/
-.eggs/
+*$py.class
+*.so
+
+# Distribution / packaging
 build/
 dist/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+
+# PyInstaller
+*.manifest
 *.spec
 
-# Virtual environments
+# Test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.cache
+.pytest_cache/
+.hypothesis/
+
+# Type-checker / linter caches
+.mypy_cache/
+.dmypy.json
+.pyre/
+.ruff_cache/
+
+# Environments (uv.lock IS committed — do not ignore it)
 .venv/
 venv/
 env/
+ENV/
+env.bak/
+venv.bak/
+*.env
 
-# Tooling caches
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
-.tox/
-.coverage
-htmlcov/
+# pyenv
+.python-version
 
-# OS / editor
+# Rope
+.ropeproject/
+
+# Editors / OS
+.idea/
+.vscode/settings.json
+*.swp
 .DS_Store
 Thumbs.db
 desktop.ini
-.idea/
-.vscode/
 
-# Local, non-synced runtime data (never commit real documents/config)
+# Syncthing
+.stfolder/
+.stignore
+.trash/
+
+# Ad-hoc scratch — not for commit
+scratch/
+
+# Local, non-synced data — NEVER commit real documents, the .dossier data folder,
+# or per-device config (they contain personal information).
+.dossier/
 *.local.toml
-/scratch/
+config.local.toml
+
+# Core dumps
+core
+core.[0-9]*
+
+# Claude Code sandbox (bubblewrap) phantom mount-points — these don't exist on disk;
+# ignored so `git add -A` can't re-stage them as empty blobs.
+.bash_profile
+.bashrc
+.profile
+.zshrc
+.zprofile
+.gitconfig
+.gitmodules
+.ripgreprc

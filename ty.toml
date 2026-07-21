@@ -1,0 +1,12 @@
+# ty type-checker configuration.
+#
+# Prefer fixing types over suppressing them. When ty genuinely cannot model a pattern,
+# add a per-file `[[overrides]]` block here with an explanatory comment and the specific
+# rule set to "ignore" — never a bare inline `# type: ignore`. Example:
+#
+#   [[overrides]]
+#   include = ["dossier/some_module.py"]
+#   [overrides.rules]
+#   unresolved-attribute = "ignore"  # <reason ty can't see it>
+#
+# No overrides are needed yet.
