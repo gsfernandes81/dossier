@@ -15,10 +15,12 @@
 
 """Console entry point for the ``dossier`` / ``ds`` commands."""
 
+from dossier.cli import main as cli_main
+
 
 def main() -> None:
-    """Launch the dossier TUI. Not yet implemented — see DESIGN.md."""
-    print("dossier: not yet implemented - see DESIGN.md")
+    """Entry point wired to ``[project.scripts]`` (``dossier`` and ``ds``)."""
+    raise SystemExit(cli_main())
 
 
 if __name__ == "__main__":

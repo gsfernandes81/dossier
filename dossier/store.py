@@ -53,6 +53,17 @@ from dossier.model import Bundle, Document, Location, Rendition
 CONFLICT_MARKER = ".sync-conflict-"
 TEMP_PREFIX = ".dossier-tmp-"
 
+_DEFAULT_SYNCED_CONFIG = b"""\
+# dossier synced settings - shared across devices via Syncthing.
+
+# Days before expiry at which a document is flagged "expiring".
+expiry_threshold_days = 90
+
+# Globs (relative to the Syncthing root) scoping reconcile / orphan detection.
+include = []
+ignore = []
+"""
+
 
 def _represent_none(representer, data):  # ruamel None -> empty scalar callback
     # Emit ``key:`` (empty) for None instead of ``key: null`` — cleaner and it
@@ -81,11 +92,13 @@ class Store:
     # -- layout --------------------------------------------------------------
 
     def ensure_layout(self) -> None:
-        """Create ``.dossier/documents`` and empty TOML files if absent."""
+        """Create ``.dossier/documents`` and the TOML files if absent."""
         self.config.documents_dir.mkdir(parents=True, exist_ok=True)
         for path in (self.config.locations_path, self.config.bundles_path):
             if not path.exists():
-                _atomic_write_bytes(path, b"")
+                atomic_write_bytes(path, b"")
+        if not self.config.synced_config_path.exists():
+            atomic_write_bytes(self.config.synced_config_path, _DEFAULT_SYNCED_CONFIG)
 
     # -- documents -----------------------------------------------------------
 
@@ -157,7 +170,7 @@ class Store:
             raise StaleWriteError(doc.id)
 
         payload = self._serialize(doc).encode("utf-8")
-        _atomic_write_bytes(target, payload)
+        atomic_write_bytes(target, payload)
         doc.source_hash = _hash(payload)
         return doc
 
@@ -202,7 +215,7 @@ class Store:
             if loc.notes:
                 entry["notes"] = loc.notes
             data[slug] = entry
-        _atomic_write_bytes(
+        atomic_write_bytes(
             self.config.locations_path, tomli_w.dumps(data).encode("utf-8")
         )
 
@@ -229,7 +242,7 @@ class Store:
             if bundle.notes:
                 entry["notes"] = bundle.notes
             data[slug] = entry
-        _atomic_write_bytes(
+        atomic_write_bytes(
             self.config.bundles_path, tomli_w.dumps(data).encode("utf-8")
         )
 
@@ -373,7 +386,7 @@ def _as_renditions(value: object) -> list[Rendition]:
 # -- filesystem helpers ------------------------------------------------------
 
 
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
+def atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write ``data`` to ``path`` via a same-directory temp file + ``os.replace``."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=TEMP_PREFIX, dir=str(path.parent))
