@@ -398,12 +398,19 @@ Renewals *replace* rather than accumulate — a new passport / MOT / cert supers
   documents pane renders *rich tree rows* (colour, issue/exp date, icons, permanent ⚠) and selecting
   a doc opens the detail pane. On a phone it is one pane at a time (multi-line rich rows), `→` opens
   detail, `←` goes back. Search always starts at the **root**, not the current pane.
-- **Touch / Termux:** mouse works on desktop; on Termux the same events arrive from taps. Navigation
-  must be fully tap-driven (tap a row to select/open; an on-screen action bar with Open / Bundle /
-  New / ⌨ buttons) so the Android soft-keyboard is only needed for text entry (search, edit). The
-  IME belongs to Termux — the app can't force it — so the design minimises text entry and surfaces a
-  tappable keyboard affordance. **Verify on-device** whether taps raise the IME and whether it can be
-  kept down during navigation.
+- **Touch / Termux (researched, 2026).** Textual enables SGR mouse reporting, and Termux's
+  `onSingleTapUp` only raises the soft-keyboard when mouse tracking is *off* — so with mouse mode on,
+  **taps arrive as clicks and the keyboard stays down automatically**, no config needed. That makes
+  the app tap-navigable out of the box (tap a row to select/open; on-screen action bar Open / Bundle
+  / New / ⌨). The app **cannot itself summon the IME** — no `termux-api` command, escape sequence, or
+  property exists (termux-app #27 / #3135 / #3733 are open feature requests). The workable "show
+  keyboard" affordance: the `⌨` / search control **momentarily disables mouse mode** so the next tap
+  on the input raises the keyboard, then re-enables it on submit/blur. Belt-and-braces: ship a
+  `~/.termux/termux.properties` with `hide-soft-keyboard-on-startup=true` (optionally
+  `soft-keyboard-toggle-behaviour=enable/disable`). Design around three known Termux quirks: mouse
+  mode **blocks terminal scrollback** (#4302 — so the TUI must own scrolling), OSC-8 link clicks
+  don't work, and Termux may present a numeric keyboard variant (#1255). Termux:GUI is the only route
+  to real programmatic IME control, but it means abandoning the TUI — not worth it.
 
 ### Reset / teardown (`ds reset`)
 A safe way to undo a setup, complementing `ds init`. Two independent scopes:
