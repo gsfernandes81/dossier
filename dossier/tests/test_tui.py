@@ -28,7 +28,7 @@ from dossier.tui import (
     DossierApp,
     app as tui_app,
 )
-from dossier.tui.screens import DetailScreen, DoctorScreen
+from dossier.tui.screens import DetailScreen, DoctorScreen, MoveScreen
 
 TODAY = date(2026, 7, 21)
 
@@ -126,3 +126,39 @@ async def test_doctor_screen_lists_findings(tmp_path: Path):
         app.push_screen(DoctorScreen(store, config))
         await pilot.pause()
         assert app.screen.query_one("#findings", OptionList).option_count > 0
+
+
+@pytest.mark.asyncio
+async def test_new_document_creates(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.push_screen(DetailScreen(store, Document(), is_new=True))
+        await pilot.pause()
+        app.screen.query_one("#name", Input).value = "New Passport 2026"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    assert "new-passport-2026" in {d.id for d in store.load_all()}
+
+
+@pytest.mark.asyncio
+async def test_move_shifts_neighbours(tmp_path: Path):
+    store, config = _setup(tmp_path)  # passport@file/1, coc@file/2
+    store.save(Document(id="z", name="Z", perm_location="pouch", perm_slot=1))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        z = app._doc_by_id("z")
+        assert z is not None
+        app.push_screen(MoveScreen(store, app._docs, z))
+        await pilot.pause()
+        app.screen.query_one("#mloc", Input).value = "file"
+        app.screen.query_one("#mslot", Input).value = "1"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    assert (store.load("z").perm_location, store.load("z").perm_slot) == ("file", 1)
+    assert store.load("passport").perm_slot == 2  # shifted 1 -> 2
+    assert store.load("coc").perm_slot == 3  # shifted 2 -> 3

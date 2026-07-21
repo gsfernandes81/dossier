@@ -34,7 +34,7 @@ from dossier.config import Config
 from dossier.model import Document, ExpiryStatus, FileStatus
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
-from dossier.tui.screens import DetailScreen, DoctorScreen
+from dossier.tui.screens import DetailScreen, DoctorScreen, MoveScreen
 
 _EXPIRY_GLYPH = {ExpiryStatus.EXPIRED: "!", ExpiryStatus.EXPIRING: "~"}
 _EXPIRY_STYLE = {ExpiryStatus.EXPIRED: "bold red", ExpiryStatus.EXPIRING: "yellow"}
@@ -52,6 +52,8 @@ class DossierApp(App[None]):
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "clear_search", "Clear"),
         Binding("e", "edit_selected", "Edit"),
+        Binding("n", "new_document", "New"),
+        Binding("m", "move_selected", "Move"),
         Binding("d", "doctor", "Doctor"),
         Binding("x", "toggle_expiring", "Expiring"),
         Binding("q", "quit", "Quit"),
@@ -167,6 +169,16 @@ class DossierApp(App[None]):
         doc = self._highlighted_doc()
         if doc is not None:
             self.push_screen(DetailScreen(self._store, doc), self._after_edit)
+
+    def action_new_document(self) -> None:
+        screen = DetailScreen(self._store, Document(), is_new=True)
+        self.push_screen(screen, self._after_edit)
+
+    def action_move_selected(self) -> None:
+        doc = self._highlighted_doc()
+        if doc is not None:
+            screen = MoveScreen(self._store, self._docs, doc)
+            self.push_screen(screen, self._after_edit)
 
     def action_doctor(self) -> None:
         self.push_screen(DoctorScreen(self._store, self._config), self._after_doctor)
