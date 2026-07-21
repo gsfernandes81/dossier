@@ -29,6 +29,7 @@ from pathlib import Path
 import tomli_w
 
 from dossier.config import Config, per_device_config_path
+from dossier.errors import ConfigError
 from dossier.platform_open import is_termux, termux_preconditions
 from dossier.store import Store, atomic_write_bytes
 
@@ -82,9 +83,16 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_tui(_args: argparse.Namespace) -> int:
-    """Default action: launch the TUI (placeholder until it is built)."""
-    print("dossier: the TUI is not implemented yet — see DESIGN.md.")
-    print("Available now: `ds init`. Run `ds --help` for options.")
+    """Default action: launch the TUI."""
+    try:
+        config = Config.load()
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    from dossier.tui import DossierApp
+
+    DossierApp(Store(config), config).run()
     return 0
 
 
