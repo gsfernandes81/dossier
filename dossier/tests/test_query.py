@@ -118,6 +118,23 @@ def test_expiry_filter_and_expiring_ordering():
     assert [d.id for d in ordered] == ["expired", "soon"]  # soonest date first
 
 
+def test_plan_move_inserts_and_shifts():
+    docs = [
+        _doc("a", perm_location="file", perm_slot=1),
+        _doc("b", perm_location="file", perm_slot=2),
+        _doc("c", perm_location="file", perm_slot=3),
+        _doc("x", perm_location="pouch", perm_slot=1),
+    ]
+    changed = query.plan_move(docs, docs[3], "file", 2)  # x -> file slot 2
+
+    slots = {d.id: (d.perm_location, d.perm_slot) for d in docs}
+    assert slots["a"] == ("file", 1)  # before the gap, untouched
+    assert slots["b"] == ("file", 3)  # shifted 2 -> 3
+    assert slots["c"] == ("file", 4)  # shifted 3 -> 4
+    assert slots["x"] == ("file", 2)  # inserted
+    assert {d.id for d in changed} == {"b", "c", "x"}
+
+
 def test_sort_and_group_by_effective_location():
     docs = [
         _doc("z", perm_location="file", perm_slot=2),

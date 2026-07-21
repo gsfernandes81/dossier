@@ -156,6 +156,37 @@ def expiring(
     )
 
 
+# -- moves -------------------------------------------------------------------
+
+
+def plan_move(
+    docs: list[Document], moving: Document, location: str | None, slot: int | None
+) -> list[Document]:
+    """Move ``moving`` to ``location``/``slot``, shifting neighbours to insert.
+
+    Mutates the affected documents in place and returns them (the shifted
+    neighbours plus ``moving``) so the caller can persist each. When ``slot`` is
+    given, every other doc already at that permanent slot or later in the same
+    location is bumped by one to open the gap.
+    """
+    changed: list[Document] = []
+    if slot is not None:
+        for doc in docs:
+            if (
+                doc.id != moving.id
+                and doc.perm_location == location
+                and doc.perm_slot is not None
+                and doc.perm_slot >= slot
+            ):
+                doc.perm_slot += 1
+                changed.append(doc)
+    moving.perm_location = location
+    moving.perm_slot = slot
+    moving.perm_subslot = None
+    changed.append(moving)
+    return changed
+
+
 # -- display views -----------------------------------------------------------
 
 

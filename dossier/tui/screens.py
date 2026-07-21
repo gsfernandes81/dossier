@@ -27,9 +27,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, OptionList, TextArea
 from textual.widgets.option_list import Option
 
-from dossier import doctor
+from dossier import doctor, query
 from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
+from dossier.migrate import slugify
 from dossier.model import Document
 from dossier.store import Store
 
@@ -54,15 +55,16 @@ class DetailScreen(ModalScreen[bool]):
         Binding("ctrl+s", "save", "Save"),
     ]
 
-    def __init__(self, store: Store, doc: Document) -> None:
+    def __init__(self, store: Store, doc: Document, *, is_new: bool = False) -> None:
         super().__init__()
         self._store = store
         self._doc = doc
+        self._is_new = is_new
 
     def compose(self) -> ComposeResult:
         doc = self._doc
         with VerticalScroll(id="panel"):
-            yield Label(f"Editing: {doc.id}")
+            yield Label("New document" if self._is_new else f"Editing: {doc.id}")
             yield Label("Name")
             yield Input(value=doc.name, id="name")
             for token, readings in doctor.candidate_readings(doc.name):
@@ -105,6 +107,11 @@ class DetailScreen(ModalScreen[bool]):
             return
 
         doc.name = self.query_one("#name", Input).value.strip()
+        if self._is_new:
+            if not doc.name:
+                self.notify("a new document needs a name", severity="error")
+                return
+            doc.id = _unique_id(self._store, slugify(doc.name))
         doc.issue_date = issue
         doc.expiry_date = expiry
         doc.perm_location = _slug(self.query_one("#perm", Input).value)
@@ -176,8 +183,87 @@ class DoctorScreen(ModalScreen[str | None]):
             self.dismiss(event.option_id)
 
 
+class MoveScreen(ModalScreen[bool]):
+    """Move a document to a location + slot, shifting neighbours to insert."""
+
+    CSS = """
+    MoveScreen { align: center middle; }
+    #mpanel {
+        width: 70%; max-width: 80; height: auto;
+        padding: 1 2; background: $panel; border: round $primary;
+    }
+    #mpanel Input { margin-bottom: 1; }
+    #mbuttons { height: auto; align: right middle; }
+    #mbuttons Button { margin-left: 2; }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+s", "save", "Move"),
+    ]
+
+    def __init__(self, store: Store, docs: list[Document], doc: Document) -> None:
+        super().__init__()
+        self._store = store
+        self._docs = docs
+        self._doc = doc
+
+    def compose(self) -> ComposeResult:
+        doc = self._doc
+        with VerticalScroll(id="mpanel"):
+            yield Label(f"Move: {doc.name}")
+            yield Label("Permanent location (slug, blank to clear)")
+            yield Input(value=doc.perm_location or "", id="mloc")
+            yield Label("Slot (blank for none; inserting shifts neighbours)")
+            yield Input(value=_int(doc.perm_slot), id="mslot")
+            with Horizontal(id="mbuttons"):
+                yield Button("Cancel", id="mcancel")
+                yield Button("Move", id="mmove", variant="primary")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#mcancel")
+    def _on_cancel(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#mmove")
+    def _on_move(self) -> None:
+        self.action_save()
+
+    def action_save(self) -> None:
+        location = _slug(self.query_one("#mloc", Input).value)
+        try:
+            slot = _parse_int(self.query_one("#mslot", Input).value)
+        except ValueError:
+            self.notify("slot must be a whole number", severity="error")
+            return
+        try:
+            for doc in query.plan_move(self._docs, self._doc, location, slot):
+                self._store.save(doc)
+        except StoreError as exc:
+            self.notify(str(exc), severity="error")
+            return
+        self.dismiss(True)
+
+
 def _iso(value: date | None) -> str:
     return value.isoformat() if value else ""
+
+
+def _int(value: int | None) -> str:
+    return "" if value is None else str(value)
+
+
+def _parse_int(text: str) -> int | None:
+    text = text.strip()
+    return int(text) if text else None
+
+
+def _unique_id(store: Store, base: str) -> str:
+    slug, n = base, 2
+    while store.document_path(slug).exists():
+        slug, n = f"{base}-{n}", n + 1
+    return slug
 
 
 def _parse_iso(text: str) -> date | None:
