@@ -29,7 +29,7 @@ from pathlib import Path
 
 import tomli_w
 
-from dossier import migrate
+from dossier import doctor, migrate
 from dossier.config import Config, per_device_config_path
 from dossier.errors import ConfigError
 from dossier.platform_open import is_termux, termux_preconditions
@@ -149,6 +149,30 @@ def _print_migration_report(plan: migrate.MigrationPlan, *, verbose: bool) -> No
             print(f"  [{issue.kind}] {issue.doc}: {issue.detail}")
 
 
+def cmd_doctor(_args: argparse.Namespace) -> int:
+    """Check the store for problems (conflicts, refs, dates, files)."""
+    try:
+        config = Config.load()
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    report = doctor.run(Store(config), config)
+    if not report.findings:
+        print("doctor: all clear.")
+        return 0
+
+    grouped = report.by_check()
+    print(f"doctor: {len(report.findings)} finding(s)\n")
+    for check in sorted(grouped):
+        items = grouped[check]
+        print(f"{check} ({len(items)}):")
+        for finding in items:
+            print(f"  {finding.subject}: {finding.detail}")
+        print()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dossier",
@@ -195,6 +219,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="list every issue in the report",
     )
     migrate_p.set_defaults(func=cmd_migrate)
+
+    doctor_p = sub.add_parser(
+        "doctor",
+        help="check the store for problems (conflicts, refs, dates, files)",
+    )
+    doctor_p.set_defaults(func=cmd_doctor)
 
     return parser
 

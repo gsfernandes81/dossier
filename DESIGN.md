@@ -362,6 +362,22 @@ indexing (CRDT-flavored overkill for a physical folder).
   files), reserved-name guard.
 - Define the two-digit-year century pivot.
 
+### Date disambiguation (partly built in `ds doctor`)
+- **Done:** `doctor` flags numeric 2-digit-year dates ambiguous on either axis — day/month order
+  (`DD-MM-YY` vs `MM-DD-YY`) **and** year position (`DD-MM-YY` vs `YY-MM-DD`, e.g. `21-08-23` →
+  2023-08-21 or 2021-08-23). Resolved when a component > 12 pins one axis, or an `issue < expiry`
+  span is self-consistent. On the real 137-doc data this leaves ~33 to review by hand.
+- **Year-plausibility vs Notion `createdTime`:** thread the record's creation timestamp through the
+  migration and use it to rule out implausible readings (a doc created in 2024 can't have been
+  *issued* in 2015) — would auto-resolve most of the ~33.
+- **"issued X expires Y"** (no `to`) range parsing: currently only the expiry is captured.
+- **Vision-model date extraction (nice-to-have):** interface with a local `llama.cpp` image model to
+  read issue/expiry dates directly off the scanned document, instead of inferring from the name.
+
+### TUI direction
+- Do all operations in the TUI: a doctor/review screen with **inline date-editing** (pick the
+  correct reading in place), plus add/edit/move for documents.
+
 ---
 
 ## 15. Changelog — v1 → v2 (from the adversarial review)

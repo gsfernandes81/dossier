@@ -169,7 +169,7 @@ class Store:
             # Loaded earlier, but gone now — deleted underneath us.
             raise StaleWriteError(doc.id)
 
-        payload = self._serialize(doc).encode("utf-8")
+        payload = self.serialize(doc).encode("utf-8")
         atomic_write_bytes(target, payload)
         doc.source_hash = _hash(payload)
         return doc
@@ -185,7 +185,7 @@ class Store:
         (dest_dir / f"{stamp}.md").write_bytes(data)
         _prune_history(dest_dir, keep=10)
 
-    def _serialize(self, doc: Document) -> str:
+    def serialize(self, doc: Document) -> str:
         buf = io.StringIO()
         self._dump_yaml.dump(_frontmatter_from_document(doc), buf)
         front = buf.getvalue()
