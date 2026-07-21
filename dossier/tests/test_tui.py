@@ -26,7 +26,7 @@ from dossier.model import Document, Rendition
 from dossier.store import Store
 from dossier.tui import (
     DossierApp,
-    app as tui_app,
+    home as tui_home,
 )
 from dossier.tui.screens import DetailScreen, DoctorScreen, MoveScreen
 
@@ -68,10 +68,66 @@ async def test_app_loads_and_search_filters(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        assert {d.id for d in app.visible_docs()} == {"passport", "coc"}
+        assert {d.id for d in app.home.visible_docs()} == {"passport", "coc"}
         app.query_one("#search", Input).value = "passport"
         await pilot.pause()
-        assert [d.id for d in app.visible_docs()] == ["passport"]
+        assert [d.id for d in app.home.visible_docs()] == ["passport"]
+
+
+@pytest.mark.asyncio
+async def test_locations_and_documents_populate(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test():
+        home = app.home
+        # "All" + the one real location.
+        assert home.query_one("#locations", OptionList).option_count == 2
+        assert [d.id for d in home.documents_in_view()] == ["passport", "coc"]
+
+
+@pytest.mark.asyncio
+async def test_selecting_location_scopes_documents(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    store.save(Document(id="loose", name="Loose", perm_location=None))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.select_location("file")
+        await pilot.pause()
+        assert [d.id for d in home.documents_in_view()] == ["passport", "coc"]
+        assert "loose" not in {d.id for d in home.documents_in_view()}
+
+
+@pytest.mark.asyncio
+async def test_search_shows_flat_results_and_hides_locations(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#search", Input).value = "passport"
+        await pilot.pause()
+        await pilot.pause()  # let the searching class re-apply the stylesheet
+        assert home.has_class("searching")
+        assert not home.query_one("#locations", OptionList).display
+        assert [d.id for d in home.documents_in_view()] == ["passport"]
+
+
+@pytest.mark.asyncio
+async def test_narrow_collapses_panes_and_drills(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(50, 40)) as pilot:
+        home = app.home
+        assert home.has_class("-narrow")
+        documents = home.query_one("#documents", OptionList)
+        assert not documents.display  # locations pane only, until we drill in
+        home.action_drill_in()
+        await pilot.pause()
+        assert home.has_class("show-documents")
+        assert documents.display
+        home.action_drill_out()
+        await pilot.pause()
+        assert not home.has_class("show-documents")
 
 
 @pytest.mark.asyncio
@@ -79,8 +135,8 @@ async def test_expiring_toggle(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test():
-        app.action_toggle_expiring()
-        assert [d.id for d in app.visible_docs()] == ["coc"]
+        app.home.action_toggle_expiring()
+        assert [d.id for d in app.home.visible_docs()] == ["coc"]
 
 
 @pytest.mark.asyncio
@@ -89,10 +145,10 @@ async def test_open_document_invokes_opener(
 ):
     store, config = _setup(tmp_path)
     opened: list[Path] = []
-    monkeypatch.setattr(tui_app, "open_file", lambda p: opened.append(p))
+    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test():
-        app.open_document("passport")
+        app.home.open_document("passport")
     assert opened == [tmp_path / "passport.pdf"]
 
 
@@ -149,9 +205,9 @@ async def test_move_shifts_neighbours(tmp_path: Path):
     store.save(Document(id="z", name="Z", perm_location="pouch", perm_slot=1))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        z = app._doc_by_id("z")
+        z = app.home._doc_by_id("z")
         assert z is not None
-        app.push_screen(MoveScreen(store, app._docs, z))
+        app.push_screen(MoveScreen(store, app.home._docs, z))
         await pilot.pause()
         app.screen.query_one("#mloc", Input).value = "file"
         app.screen.query_one("#mslot", Input).value = "1"
