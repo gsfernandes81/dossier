@@ -54,7 +54,7 @@ from dossier.config import Config
 from dossier.model import Document, ExpiryStatus, Location
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
-from dossier.tui import detail, rows
+from dossier.tui import detail, glyphs, rows
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundleScreen,
@@ -145,6 +145,7 @@ class HomeScreen(Screen[None]):
         self._config = config
         self._today = today
         self._touch = touch
+        self._glyphs = glyphs.resolve(config.glyphs)
         self._docs: list[Document] = []
         self._locations: dict[str, Location] = {}
         self._by_location: dict[str | None, list[Document]] = {}
@@ -261,6 +262,7 @@ class HomeScreen(Screen[None]):
                         mode=mode,
                         superseded=doc.id in superseded,
                         show_issue=self._show_issue,
+                        glyphs=self._glyphs,
                     ),
                     id=doc.id,
                 )
@@ -282,6 +284,7 @@ class HomeScreen(Screen[None]):
                 location_label=self._location_label(doc),
                 chain=query.supersession_chain(self._docs, doc),
                 superseded_by=self._superseded_by(doc),
+                glyphs=self._glyphs,
             )
         )
 

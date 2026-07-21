@@ -31,6 +31,7 @@ from rich.text import Text
 
 from dossier.model import Document, ExpiryStatus, FileStatus
 from dossier.query import DocumentView
+from dossier.tui.glyphs import ASCII, GlyphSet
 
 _EXPIRY_STYLE = {
     ExpiryStatus.EXPIRED: "bold red",
@@ -46,7 +47,7 @@ def render_detail(
     location_label: str | None,
     chain: list[Document],
     superseded_by: Document | None,
-    ascii_only: bool = True,
+    glyphs: GlyphSet = ASCII,
 ) -> RenderableType:
     """Render the full detail of one document.
 
@@ -72,7 +73,7 @@ def render_detail(
 
     parts: list[RenderableType] = [header, Rule(style="dim"), facts]
 
-    files = _files(view, ascii_only)
+    files = _files(view, glyphs)
     if files is not None:
         parts.append(files)
     if chain:
@@ -104,15 +105,14 @@ def _copies(doc: Document) -> str:
     return " + ".join(marks) or "—"
 
 
-def _files(view: DocumentView, ascii_only: bool) -> RenderableType | None:
+def _files(view: DocumentView, glyphs: GlyphSet) -> RenderableType | None:
     doc = view.document
     if not doc.files:
         return Text("No digital file linked", style="dim")
     body = Text()
     body.append("Files\n", style="bold")
-    star = "*" if ascii_only else "★"
     for rendition in doc.files:
-        mark = star if rendition.primary else " "
+        mark = glyphs.primary if rendition.primary else " "
         body.append(f" {mark} ")
         body.append(rendition.label or "file")
         body.append(f"  {rendition.path}\n", style="dim")

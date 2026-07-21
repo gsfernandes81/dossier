@@ -39,6 +39,9 @@ from dossier.errors import ConfigError
 APP_NAME = "dossier"
 META_DIRNAME = ".dossier"
 DEFAULT_EXPIRY_THRESHOLD_DAYS = 90
+# Icon style for the TUI; per-device since a terminal may lack a Nerd Font.
+# Interpreted by dossier.tui.glyphs ("nerd" | "ascii").
+DEFAULT_GLYPHS = "nerd"
 
 
 def per_device_config_path() -> Path:
@@ -62,6 +65,7 @@ class Config:
     include: list[str] = field(default_factory=list)
     ignore: list[str] = field(default_factory=list)
     history_dir: Path = field(default_factory=default_history_dir)
+    glyphs: str = DEFAULT_GLYPHS
 
     @property
     def meta_dir(self) -> Path:
@@ -115,6 +119,9 @@ class Config:
                 f"{device_path} is missing the required 'syncthing_root' key."
             )
         cfg = cls(syncthing_root=Path(str(root_raw)).expanduser())
+        glyphs = device.get("glyphs")
+        if isinstance(glyphs, str) and glyphs:
+            cfg.glyphs = glyphs
         cfg.validate()
         cfg.merge_synced()
         return cfg

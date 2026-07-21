@@ -30,7 +30,7 @@ from pathlib import Path
 import tomli_w
 
 from dossier import doctor, migrate
-from dossier.config import Config, per_device_config_path
+from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError
 from dossier.platform_open import is_termux, termux_preconditions
 from dossier.store import Store, atomic_write_bytes
@@ -67,13 +67,13 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     config = Config(syncthing_root=root)
     Store(config).ensure_layout()
-    atomic_write_bytes(
-        device_path, tomli_w.dumps({"syncthing_root": str(root)}).encode("utf-8")
-    )
+    device_settings = {"syncthing_root": str(root), "glyphs": DEFAULT_GLYPHS}
+    atomic_write_bytes(device_path, tomli_w.dumps(device_settings).encode("utf-8"))
 
     print("dossier initialised.")
     print(f"  device config : {device_path}")
     print(f"  data folder   : {config.meta_dir}")
+    print(f"  icons         : {DEFAULT_GLYPHS} (needs a Nerd Font; set glyphs=ascii)")
     if is_termux():
         problems = termux_preconditions()
         if problems:
@@ -163,19 +163,26 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
         return 1
 
     report = doctor.run(Store(config), config)
-    if not report.findings:
+    if report.findings:
+        grouped = report.by_check()
+        print(f"doctor: {len(report.findings)} finding(s)\n")
+        for check in sorted(grouped):
+            items = grouped[check]
+            print(f"{check} ({len(items)}):")
+            for finding in items:
+                print(f"  {finding.subject}: {finding.detail}")
+            print()
+    else:
         print("doctor: all clear.")
-        return 0
-
-    grouped = report.by_check()
-    print(f"doctor: {len(report.findings)} finding(s)\n")
-    for check in sorted(grouped):
-        items = grouped[check]
-        print(f"{check} ({len(items)}):")
-        for finding in items:
-            print(f"  {finding.subject}: {finding.detail}")
-        print()
+    _print_icon_note(config)
     return 0
+
+
+def _print_icon_note(config: Config) -> None:
+    print(
+        f"icons: {config.glyphs} style — 'nerd' needs a Nerd Font installed; set "
+        f'glyphs = "ascii" in {per_device_config_path()} if icons show as boxes.'
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
