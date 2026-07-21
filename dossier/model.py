@@ -156,7 +156,5 @@ class Document:
         (some other document's ``supersedes`` points at this one).
         """
         return (
-            self.expiry_date is not None
-            and not self.ignore_expiry
-            and not superseded
+            self.expiry_date is not None and not self.ignore_expiry and not superseded
         )
