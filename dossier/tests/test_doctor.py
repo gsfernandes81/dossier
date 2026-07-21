@@ -100,6 +100,15 @@ def test_ambiguous_dates(store: Store):
     assert flagged == {"single", "yearpos"}
 
 
+def test_candidate_readings():
+    tokens = doctor.candidate_readings("Cert 21-08-23")
+    assert len(tokens) == 1
+    token, readings = tokens[0]
+    assert token == "21-08-23"
+    assert date(2023, 8, 21) in readings  # DD-MM-YY
+    assert date(2021, 8, 23) in readings  # YY-MM-DD
+
+
 def test_date_order_violation(store: Store):
     store.save(
         Document(

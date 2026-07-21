@@ -34,6 +34,7 @@ from dossier.config import Config
 from dossier.model import Document, ExpiryStatus, FileStatus
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
+from dossier.tui.screens import DetailScreen, DoctorScreen
 
 _EXPIRY_GLYPH = {ExpiryStatus.EXPIRED: "!", ExpiryStatus.EXPIRING: "~"}
 _EXPIRY_STYLE = {ExpiryStatus.EXPIRED: "bold red", ExpiryStatus.EXPIRING: "yellow"}
@@ -50,6 +51,8 @@ class DossierApp(App[None]):
     BINDINGS = [
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "clear_search", "Clear"),
+        Binding("e", "edit_selected", "Edit"),
+        Binding("d", "doctor", "Doctor"),
         Binding("x", "toggle_expiring", "Expiring"),
         Binding("q", "quit", "Quit"),
     ]
@@ -159,6 +162,39 @@ class DossierApp(App[None]):
     def action_toggle_expiring(self) -> None:
         self._expiring_only = not self._expiring_only
         self._refresh_list()
+
+    def action_edit_selected(self) -> None:
+        doc = self._highlighted_doc()
+        if doc is not None:
+            self.push_screen(DetailScreen(self._store, doc), self._after_edit)
+
+    def action_doctor(self) -> None:
+        self.push_screen(DoctorScreen(self._store, self._config), self._after_doctor)
+
+    def _highlighted_doc(self) -> Document | None:
+        option_list = self.query_one("#list", OptionList)
+        index = option_list.highlighted
+        if index is None:
+            return None
+        option = option_list.get_option_at_index(index)
+        if option.id is None:
+            return None
+        return self._doc_by_id(option.id)
+
+    def _doc_by_id(self, doc_id: str) -> Document | None:
+        return next((d for d in self._docs if d.id == doc_id), None)
+
+    def _after_edit(self, saved: bool | None) -> None:
+        if saved:
+            self._docs = self._store.load_all()
+            self._refresh_list()
+
+    def _after_doctor(self, doc_id: str | None) -> None:
+        if doc_id is None:
+            return
+        doc = self._doc_by_id(doc_id)
+        if doc is not None:
+            self.push_screen(DetailScreen(self._store, doc), self._after_edit)
 
     # -- events --------------------------------------------------------------
 
