@@ -374,9 +374,36 @@ indexing (CRDT-flavored overkill for a physical folder).
 - **Vision-model date extraction (nice-to-have):** interface with a local `llama.cpp` image model to
   read issue/expiry dates directly off the scanned document, instead of inferring from the name.
 
-### TUI direction
-- Do all operations in the TUI: a doctor/review screen with **inline date-editing** (pick the
-  correct reading in place), plus add/edit/move for documents.
+### Supersession & the expiry watch
+Renewals *replace* rather than accumulate — a new passport / MOT / cert supersedes the old.
+- **Model:** a `supersedes` link on a document (the id of the doc it replaces), set explicitly via
+  the TUI `s` action when filing a renewal. The superseded doc is **kept but marked**, and is
+  excluded from every expiry calculation and from the watch.
+- **Expiry watch — opt-out, not opt-in.** Most documents have no expiry at all; of those that do,
+  the ones that actually matter are **marine certs + motorcycle docs**, and supersession already
+  removes the renewed-and-replaced noise. So expiry tracking is **on by default** for any document
+  that has an `expiry_date` and is neither superseded nor explicitly ignored. An **`ignore_expiry`**
+  flag opts a document out (the residual noise is old CDCs no longer in use). A tracked doc turns
+  **red only within 9 months** of expiry — no per-day countdown. *(This replaces an earlier opt-in
+  "star" idea: with an opt-out default a renewal is tracked automatically, no re-starring.)*
+- The watch surface lists tracked docs sorted by soonest expiry; ignored + superseded are hidden.
+
+### TUI direction (from the mockup review)
+- **Home = indented tree** (closest to today): location groups, docs indented under a slot gutter,
+  emoji flags, tag, and a date column that toggles issue⇄expiry on `i`. Selection highlights the row
+  (background only — it must **never shift the indent**). Expired-and-not-superseded rows carry a
+  **permanent** ⚠ on the (red) date, not a selection-only hint. Sort-by-next-expiry is a mode (`s`).
+- **Actions, in priority order:** `⏎` open (most common) · `b` add-to-bundle · `n` new / `s` supersede.
+- **Browse = a Miller × tree hybrid:** ranger-style panes (location → documents → detail) where the
+  documents pane renders *rich tree rows* (colour, issue/exp date, icons, permanent ⚠) and selecting
+  a doc opens the detail pane. On a phone it is one pane at a time (multi-line rich rows), `→` opens
+  detail, `←` goes back. Search always starts at the **root**, not the current pane.
+- **Touch / Termux:** mouse works on desktop; on Termux the same events arrive from taps. Navigation
+  must be fully tap-driven (tap a row to select/open; an on-screen action bar with Open / Bundle /
+  New / ⌨ buttons) so the Android soft-keyboard is only needed for text entry (search, edit). The
+  IME belongs to Termux — the app can't force it — so the design minimises text entry and surfaces a
+  tappable keyboard affordance. **Verify on-device** whether taps raise the IME and whether it can be
+  kept down during navigation.
 
 ### Reset / teardown (`ds reset`)
 A safe way to undo a setup, complementing `ds init`. Two independent scopes:
