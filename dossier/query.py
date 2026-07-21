@@ -156,6 +156,60 @@ def expiring(
     )
 
 
+# -- supersession & the expiry watch -----------------------------------------
+
+
+def superseded_ids(docs: list[Document]) -> set[str]:
+    """Ids of documents that some *other* document supersedes (renewed away).
+
+    A document is superseded iff another document's ``supersedes`` points at it.
+    Membership does not require the target to exist, so a dangling ``supersedes``
+    marks nothing here (``doctor`` reports that separately).
+    """
+    out: set[str] = set()
+    for doc in docs:
+        if doc.supersedes:
+            out.add(doc.supersedes)
+    return out
+
+
+def tracked(docs: list[Document], *, today: date) -> list[Document]:
+    """The expiry-watch list — tracked documents, soonest expiry first.
+
+    Opt-out watch (see :meth:`Document.is_expiry_tracked`): a document is
+    included iff it has an expiry date and is neither explicitly ignored nor
+    superseded by a newer document. Ignored and superseded documents are hidden.
+    Callers colour a row red only within the warn window; membership here is not
+    gated on it.
+    """
+    superseded = superseded_ids(docs)
+    watched = [
+        doc for doc in docs if doc.is_expiry_tracked(superseded=doc.id in superseded)
+    ]
+    return sorted(
+        watched, key=lambda d: (d.expiry_date is None, d.expiry_date or today)
+    )
+
+
+def supersession_chain(docs: list[Document], doc: Document) -> list[Document]:
+    """The documents ``doc`` supersedes, transitively — newest replaced first.
+
+    Follows ``supersedes`` links (``doc`` -> the doc it replaced -> the one that
+    replaced, ...), excluding ``doc`` itself. Cycle-safe (stops on a revisit) and
+    stops at the first dangling link.
+    """
+    by_id = {d.id: d for d in docs}
+    chain: list[Document] = []
+    seen: set[str] = {doc.id}
+    current = doc.supersedes
+    while current is not None and current not in seen and current in by_id:
+        seen.add(current)
+        nxt = by_id[current]
+        chain.append(nxt)
+        current = nxt.supersedes
+    return chain
+
+
 # -- moves -------------------------------------------------------------------
 
 
