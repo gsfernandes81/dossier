@@ -1,0 +1,383 @@
+# dossier — Design (v2)
+
+**Status:** Design settled, pre-implementation
+**Date:** 2026-07-21
+**Revision:** v2 — revised after an independent adversarial design review (see §15 changelog).
+**Author:** gsfernandes81 (with Claude)
+
+A cross-platform TUI for tracking personal documents — physical and digital — replacing an
+elaborate Notion setup. Runs on Windows and Android (Termux). Finds documents by name/tags,
+tracks physical storage location, links to the Syncthing-synced soft copies, and opens them
+with the platform's native opener.
+
+---
+
+## 1. Goals & non-goals
+
+### Goals
+- Replace the Notion "Documents" system entirely; local files become the source of truth.
+- Fast search by **name** and **tags**; sort/group by **physical location**.
+- Preserve Notion's key behavior — the **permanent/temporary location override** (a doc has a
+  permanent home but may currently be elsewhere).
+- **Direct links to soft copies** in a Syncthing folder, openable from the TUI.
+- New capabilities Notion lacked: **issue/expiry dates** with an expiring-soon view,
+  **hierarchical tags**, **bundles** (application/trip sets that replace file duplication),
+  and **file⇄record reconciliation**.
+- **Durability**: survive the three real ways this data gets damaged — sync conflicts, stale
+  writes, and accidental deletion (§6).
+- One pure-Python codebase on Windows and Termux.
+
+### Non-goals
+- No bidirectional Notion sync; migration is a one-time cutover.
+- No cloud service or server. Sync is delegated entirely to Syncthing.
+- No GUI (Obsidian may optionally open `.dossier/` as a vault, but is not required).
+
+---
+
+## 2. Background — the current Notion system
+
+Two related databases: **📁 Documents** (137 rows) and **🗄️ Document Storage** (9 locations).
+
+Documents schema migrated from: `Name` (title, ≈ filename), `Permanent/Temp Storage` (relation),
+`Permanent/Temp Slot` (number, e.g. `1.3`), `Storage`/`Slot` (formulas = effective location/slot,
+temp overriding permanent), `Carried to India` (checkbox), `Notes`.
+
+Locations: `Backpack (Carlton)`, `Blue Pouch`, `Cert File #2048`, `Destroyed`,
+`File #4096 @ Home`, `KTM RC125 File`, `Leather #1024`, `Ship's Folder`, `Softcopy Only`.
+
+**Preserve:** the effective-location override, and grouped/sorted-by-location tables.
+**Fix:** locations overloaded as state (`Softcopy Only`, `Destroyed`); dates trapped in names
+(`ENG-1 Med Cert Expires 10-07-26`); no tags; no link to the actual soft-copy files.
+
+### The soft-copy tree (`Official Documents/`, ~900 files, nesting up to 8 deep)
+```
+Marine/ (573)            → Applications, Joining Documents, Sea Service Testimonials,
+                           Safety Course Certs, Medicals, CDC Scans, Certificate of Competency…
+Identity Documents/ (198)→ Passports, Driving Licenses, BRPs, Passport Photos
+Travel Documents/ (69)   → "2026-04-18 London, Goa, Mumbai, Singapore trip", …
+Visas/ (48)              → "US Visa Application", "2026-04-12 Indian Visa Application", …
+```
+Folders do two jobs: **category folders** (`Marine`, `Passports`) say *what a doc is* → **tags**;
+**bundle folders** (`US Visa Application`, trips) say *what a doc was gathered for* and are the
+source of file duplication → **bundles**. These become two distinct concepts (§5).
+
+---
+
+## 3. Data model
+
+### Document
+Stored as one Markdown file per doc. **The filename (minus `.md`) is the `id`** — the single
+source of truth; there is no `id` frontmatter field.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | str | title; need not equal the filename |
+| `tags` | list[str] | hierarchical, e.g. `marine`, `marine/coc`; a parent filter includes children |
+| `bundles` | list[slug] | bundle membership (see §5) |
+| `issue_date` | date? | ISO 8601 |
+| `expiry_date` | date? | ISO 8601 |
+| `has_physical` | bool | whether a physical copy exists |
+| `has_digital` | bool | whether a soft copy exists |
+| `files` | list[Rendition] | digital renditions of this one logical doc |
+| `perm_location` | slug? | references a Location **by slug** |
+| `perm_slot` / `perm_subslot` | int? | subslot optional |
+| `temp_location` | slug? | override |
+| `temp_slot` / `temp_subslot` | int? | override |
+| `notes` | markdown | free body text |
+
+Derived at runtime (never stored):
+- `effective_location` / `effective_slot` = temp if `temp_location` set, else permanent.
+- `expiry_status` ∈ {`expired`, `expiring` (≤ synced threshold, default 90d), `ok`, `none`}.
+- `file_status` ∈ {`ok`, `missing`, `none`}.
+
+### Rendition
+```
+label:   str        # "complete", "front-and-back", "default"
+path:    str        # POSIX, relative to the device's syncthing_root
+primary: bool       # opened/exported by default; no per-bundle pinning
+```
+Handles passport-complete vs passport-front-and-back: **one document, multiple renditions.**
+
+### Location — in `locations.toml`, keyed by slug
+```toml
+[cert-file-2048]
+title = "Cert File #2048"
+notes = ""
+```
+No `kind`/state field — `Destroyed`/`Softcopy Only` are represented by the `has_physical` /
+`has_digital` flags, not by pseudo-locations.
+
+### Bundle — in `bundles.toml`, keyed by slug (all fields optional)
+```toml
+[us-visa]
+title = "US Visa Application"
+export_dir = "~/Desktop/US Visa Submission"
+```
+Membership lives in each Document's `bundles:` list. A slug that appears only in doc frontmatter
+is a **valid bundle with a default title** — so a missing `bundles.toml` entry degrades to
+"missing metadata," never an orphaned reference.
+
+---
+
+## 4. Storage format & layout
+
+Flat files, **one Markdown file per document** with YAML frontmatter. Chosen because Syncthing
+does file-level sync (no merge): per-file edits only ever conflict on the *same* doc, never the
+whole DB. Human-readable and greppable without the tool.
+
+```
+<syncthing_root>/                 ← differs per device; NOT itself synced
+├─ .dossier/
+│  ├─ documents/*.md              ← one per doc (id = filename)
+│  ├─ locations.toml
+│  ├─ bundles.toml
+│  ├─ config.toml                 ← SYNCED shared settings
+│  └─ migration/                  ← raw Notion export archived at cutover
+└─ … the actual PDFs / scans …
+```
+
+`.dossier/` is dot-prefixed (idiomatic beside the existing `.stfolder`/`.stignore`, hidden from
+Android browsers, keeps the root tidy). Obsidian can open `.dossier/` **directly** as a vault
+*(still to be confirmed — §14)*.
+
+### Serialization rules (mandatory — see §6)
+- **Always quote string scalars.** (`perm_location: cert-file-2048` is safe as a slug, but
+  values like `Cert File #2048` as a *title* MUST be quoted — an unquoted ` #` starts a YAML
+  comment and silently truncates the value.)
+- **Byte-stable output**: fixed key order, stable quoting, trailing newline — so an edit
+  produces a minimal diff and conflict resolution/history stay legible.
+- **Atomic writes**: temp file **in the same directory** as the target (not `$TMPDIR` — a
+  different filesystem on Termux, which makes `os.replace` fail with `EXDEV`), then `os.replace`.
+- **POSIX path separators** stored always; resolve via `PurePosixPath` against the local root.
+
+### Example document (`documents/coc-card-2025.md`)
+```markdown
+---
+name: "Certificate of Competency (CoC) Card 10-02-25 to 28-09-26"
+tags: [marine, marine/coc]
+bundles: [us-visa, india-trip-2026]
+issue_date: 2025-02-10
+expiry_date: 2026-09-28
+has_physical: true
+has_digital: true
+files:
+  - {label: "default", path: "Official Documents/Marine/Certificate of Competency/CoC Card.pdf", primary: true}
+perm_location: cert-file-2048
+perm_slot: 8
+temp_location:
+temp_slot:
+---
+Free-form notes in Markdown.
+```
+
+### Config
+- **Synced** — `.dossier/config.toml`:
+  ```toml
+  expiry_threshold_days = 90            # single shared value; no per-device override
+  include = ["Official Documents/**"]   # scope for reconcile/orphan detection
+  ignore  = ["desktop.ini", "**/.ipynb_checkpoints/**", "$Temp/**", "**/Exclude - *"]
+  ```
+- **Per-device** (via `platformdirs`; `%APPDATA%\dossier\config.toml` / `~/.config/dossier/config.toml`):
+  ```toml
+  syncthing_root = "…"   # the ONLY device-specific setting
+  ```
+
+---
+
+## 5. Tags vs Bundles
+
+- **Tags** — *what a document is*. Hierarchical (`marine/coc`), multi-valued, auto-derived from
+  category-folder paths at migration. Filtering a parent includes children. ~15 tags total, so
+  the `marine/coc` syntax is a one-line `startswith` filter — **no tag-tree UI**.
+- **Bundles** — *what a document is gathered for*. A named set assembled for an application or
+  trip. **Adding a doc to a bundle copies nothing** — it is a membership label. The bundle
+  becomes real files only on export. Generalizes the old "Carried to India" flag (→ a trip
+  bundle). A doc sits in many bundles with zero duplication.
+
+### Day-to-day flow (e.g. a US visa)
+1. Gather: in the TUI, select each needed doc → add to bundle `us-visa` (created on first use).
+   No file copying, no folder navigation.
+2. Check: filter to bundle `us-visa` → the checklist of what's gathered, with expiry warnings
+   surfaced from the real date fields.
+3. Submit: `ds export us-visa "<dest>"` → a folder of the **current** PDFs + a `manifest.txt`
+   (bundle, date, source paths + hashes). Zip/upload that.
+4. Update a doc → re-export → always current. No stale duplicates.
+5. After: the bundle + its export manifest remain as a record of exactly what was submitted, when.
+
+### Export
+- **Copy-based by default** — the only cross-platform-reliable option (symlinks fail on Android
+  `sdcardfs`; need Developer Mode/admin on Windows) and what you actually upload/zip.
+- Each export writes a **manifest** so exports are never flagged as orphans by reconcile, and
+  drift (source changed since export) can be reported. Two intents are recognized: **archival**
+  (drift expected — a submitted record) vs **working** (drift = re-export). No sync-back.
+- Uses each member's `primary` rendition (prompts if multiple and none marked primary).
+- Referential integrity is enforced by `ds doctor`; `ds bundle rename` rewrites all members atomically.
+
+---
+
+## 6. Data integrity & durability
+
+The metadata is curated and effectively irreplaceable once Notion is gone. Three damage vectors,
+each explicitly handled:
+
+1. **Sync conflicts.** Syncthing produces `.sync-conflict-*` files (this folder already contains
+   real ones from Obsidian). The loader **excludes `.sync-conflict-*`** (`.md` and `.toml`); the
+   TUI shows a conflict-count banner; `ds doctor` lists them and offers a frontmatter field-diff
+   to resolve.
+2. **Stale writes** (the likeliest loss): a long-open TUI overwrites a file that Syncthing updated
+   underneath it, leaving *no* conflict file. Mitigation: **optimistic concurrency** — record each
+   file's mtime+hash at load, re-check immediately before `os.replace`, and on mismatch reload &
+   prompt instead of clobbering.
+3. **Accidental deletion / bad bulk edit** propagating to both devices. Mitigation: (a) enable
+   **Syncthing staggered file versioning** on this folder; (b) dossier writes the **prior version
+   to a local, non-synced history dir** (platformdirs data dir) on every save.
+
+Supporting measures: `ds doctor` round-trip-lints every file (serialize→parse→diff) to catch the
+YAML-quoting truncation class; validates referential integrity (location/bundle/tag slugs exist,
+rendition paths exist with **exact case** — NTFS and Android FUSE are case-insensitive and will
+hide wrong-case rot); checks id/filename consistency, slug collisions, and Windows reserved names
+(`aux`/`con`/`nul`/`prn`…). `.stignore` covers the atomic-write temp pattern and `.dossier/.obsidian/`
+(whose `workspace.json` churns and would generate conflicts). A **loud root-sanity check** on
+startup (is `<root>/.dossier` present?) prevents rendering all docs as "missing" on a misconfigured root.
+
+---
+
+## 7. Platform integration
+
+- **Open a file:** Windows → `os.startfile`; Termux → `termux-open`. If a doc has >1 rendition,
+  prompt which to open. **Verify the opener exists and surface failures** — don't trust exit codes
+  (a Play-Store/F-Droid install mismatch makes `termux-open` a silent no-op that exits 0).
+- **Termux preconditions** (documented, checked by `ds init`/`ds doctor`): `termux-setup-storage`
+  (without it Termux cannot see `/storage/emulated/0` at all); `pkg install termux-api` **and** the
+  Termux:API app from the **same source** as Termux.
+- **Platform detection:** `$PREFIX`/`com.termux` in env or `shutil.which("termux-open")` → Termux;
+  else desktop/Windows.
+- Relative paths + per-device `syncthing_root` resolve the differing absolute roots correctly.
+
+---
+
+## 8. TUI (Textual) — designed for narrow screens
+
+Must fit portrait Termux (~40–60 cols), not just a desktop terminal.
+
+- **Main list**: **two-line rows** (not a 6-wide table). Line 1: name + expiry/phys/digital status;
+  line 2: location · slot · tags. Columns collapse by priority as width shrinks. **ASCII status
+  fallbacks** (`!`/`~` for expired/expiring) alongside optional emoji — emoji cell widths misalign
+  in many terminals.
+- Grouped by effective location; sort key **location → slot → subslot → name** (explicit
+  tiebreakers; slotless/locationless docs sort last) so order never jitters between renders.
+- `/` live search across name + tags + notes; hotkeys filter by tag / bundle / location / expiry.
+- `Enter` opens the file (rendition picker if >1).
+- **Views:** Expiring (certs first) · Reconcile (missing files ⇄ in-scope orphans) · Bundles
+  (browse members + export) · Detail modal (all fields + notes + file/conflict status; add/edit).
+- **Slot op:** "insert at slot N and shift" is first-class (renumbering neighbors is the correct
+  physical semantics; ~15 docs/location so the write fan-out is trivial).
+- **Startup:** parsing 137 frontmatter files on a phone is acceptable now; add a per-device
+  mtime-keyed cache before growing toward ~900. Document the Termux extra-keys row (Esc/arrows).
+
+---
+
+## 9. CLI surface
+
+Two console-script entry points (`dossier` and `ds`) installed identically on both platforms via
+`[project.scripts]` — no per-shell alias setup.
+
+| Command | Action |
+|---|---|
+| `dossier` / `ds` | launch the TUI (default) |
+| `ds init` | create per-device config, set `syncthing_root`, scaffold `.dossier/`, check Termux preconditions |
+| `ds open <query>` | resolve + open a file from the shell (picker on multiple matches) |
+| `ds export <bundle> <dest>` | materialize a bundle to a folder (copies + manifest) |
+| `ds bundle rename <old> <new>` | rename a bundle, rewriting all members atomically |
+| `ds add` | add a document |
+| `ds migrate` | Notion → local migration (dry-run + review report first) |
+| `ds doctor` | conflicts, referential integrity, round-trip lint, case/id/reserved-name checks, orphans |
+
+`ds import <folder>` (bulk folder ingest) is **deferred post-v1** — the schema stays import-ready,
+but it is not built for v1. Duplicate detection (by hash) is deferred with it.
+
+---
+
+## 10. Migration (one-time, dry-run first)
+
+Sources merged: **Notion** (137 docs + 9 locations; authoritative for physical slots/locations/
+notes) and **the file tree** (what digital files exist; folder→tag mapping).
+
+1. **Archive the raw Notion export** (per-row JSON) into `.dossier/migration/` before anything —
+   the only insurance for fields that lived nowhere but Notion.
+2. Pull docs + locations via the Notion connector.
+3. **Match** each doc to a file by name (fuzzy, tolerant of Windows-illegal characters). **Rank
+   category-folder paths above application/trip-folder copies** so a doc never binds to a
+   duplicate it's meant to obsolete. Any multi-match → review report, never auto-resolved.
+4. **Parse issue/expiry from names** with **`dayfirst=True`** as the house rule (ranges self-prove
+   it: `28-09-26`). Auto-accept only unambiguous parses (named month, or day > 12); **flag every
+   two-digit-year all-numeric date** and define the century pivot explicitly.
+5. **Map state locations to flags**: `Softcopy Only` → `has_physical:false`; `Destroyed` →
+   `has_physical:false, location:null`; "no soft copy" note → `has_digital:false`.
+6. **Auto-derive tags** from category-folder paths (flagged for review). **Bundles are NOT
+   auto-created** — the migration only **suggests** candidate bundles from application/trip folders
+   in the review report; the user opts in. Historical `Attempt 2/`, `Uploaded documents/` folders
+   are archives, not bundles, and are ignored.
+7. Emit a **review report**: uncertain dates, unmatched docs, in-scope orphan files, name/slug
+   collisions, suggested bundles. **Nothing is written until approved.**
+
+Scope: curated ~137 docs for v1.
+
+---
+
+## 11. Dependencies
+
+Pure-Python / Termux-friendly: `textual`, a YAML lib with quote control (`ruamel.yaml` or
+`python-frontmatter` + explicit dumper), `platformdirs`, `python-dateutil`, `tomllib` (stdlib).
+Termux also needs `termux-api` + the Termux:API app for `termux-open`.
+
+---
+
+## 12. Module layout
+```
+dossier/
+├─ model.py          # Document, Rendition, Location, Bundle
+├─ config.py         # per-device + synced config; syncthing_root resolution & sanity check
+├─ store.py          # load/save (quote-safe, byte-stable, atomic same-dir); conflict exclusion; history
+├─ query.py          # search/filter/sort; effective location; expiry & file status
+├─ platform_open.py  # cross-platform open + detection + opener verification
+├─ export.py         # bundle → folder (copies + manifest)
+├─ migrate.py        # Notion + tree → .md files + review report + raw archive
+├─ doctor.py         # integrity/durability checks
+└─ tui/              # Textual app: narrow-first list, detail modal, expiring/reconcile/bundle views
+```
+
+---
+
+## 13. Slots
+Two ints (`slot`, `subslot`), sorted `(slot, subslot)` — mirror physical positions. Inserting
+physically shifts neighbors, so **"insert at N and shift"** is a first-class op (§8). No fractional
+indexing (CRDT-flavored overkill for a physical folder).
+
+---
+
+## 14. Open items
+- Confirm Obsidian opens a dot-prefixed folder as a vault root (blocks any Obsidian reliance).
+- Finalize the slug algorithm: transliteration, year-suffix disambiguation (four `BRP Expires …`
+  files), reserved-name guard.
+- Define the two-digit-year century pivot.
+
+---
+
+## 15. Changelog — v1 → v2 (from the adversarial review)
+- **Slug-based references** for locations & bundles (was display-name); **always-quote + byte-stable
+  serializer** — fixes the ` #`-in-YAML silent-truncation bug (`Cert File #2048` → `Cert File`).
+- **New durability layer** (§6): exclude/ surface `.sync-conflict-*`; optimistic-concurrency stale-write
+  guard; Syncthing versioning + local history backups; `ds doctor` integrity checks; loud root-sanity check.
+- **`id` = filename**, single source of truth (dropped the frontmatter `id`); slug-collision & reserved-name rules.
+- **Dropped state pseudo-locations** (`kind`) — folded into `has_physical`/`has_digital`.
+- **TUI redesigned narrow-first** (two-line rows, ASCII fallbacks, explicit sort tiebreakers, startup cache).
+- **Migration hardened**: raw Notion archive first; `dayfirst=True`; flag all 2-digit numeric dates;
+  category-folder match ranking; **bundles suggested, not auto-created**.
+- **Export writes a manifest**; archival-vs-working drift distinction named.
+- **Config split**: synced `.dossier/config.toml` (shared `expiry_threshold_days`, scope globs) vs
+  per-device `syncthing_root` only.
+- **Added** `ds init`, `ds bundle rename`, Termux preconditions & opener verification.
+- **Cut/deferred**: per-bundle rendition pinning, Windows hardlink export, building `ds import` in v1,
+  hash dedup, tag-tree UI, fractional slot indexing.
+- **`.stignore`** the atomic temp pattern and `.dossier/.obsidian/`.
