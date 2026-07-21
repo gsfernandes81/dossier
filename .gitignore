@@ -66,10 +66,11 @@ desktop.ini
 scratch/
 
 # Local, non-synced data — NEVER commit real documents, the .dossier data folder,
-# or per-device config (they contain personal information).
+# per-device config, or a real Notion export (they contain personal information).
 .dossier/
 *.local.toml
 config.local.toml
+notion-export*.json
 
 # Core dumps
 core
