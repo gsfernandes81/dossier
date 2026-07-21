@@ -71,6 +71,13 @@ def test_init_is_idempotent_without_force(
     assert device.read_bytes() == first  # unchanged
 
 
-def test_default_command_is_tui_placeholder(capsys: pytest.CaptureFixture[str]):
-    assert cli.main([]) == 0
-    assert "TUI" in capsys.readouterr().out
+def test_default_command_without_config_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    # Bare `ds` launches the TUI, which needs a configured device first.
+    missing = tmp_path / "cfg" / "config.toml"
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: missing)
+    assert cli.main([]) == 1
+    assert "init" in capsys.readouterr().err.lower()
