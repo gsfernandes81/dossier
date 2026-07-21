@@ -90,6 +90,13 @@ class Document:
     bundles: list[str] = field(default_factory=list)
     issue_date: date | None = None
     expiry_date: date | None = None
+    # Opt out of the expiry watch (residual noise: old CDCs no longer in use).
+    ignore_expiry: bool = False
+    # Id of the document this one replaces, set when filing a renewal. The
+    # superseded document is kept but excluded from the expiry watch. Whether
+    # *this* document is itself superseded is a collection-level fact (some
+    # other document's ``supersedes`` points here), not stored here.
+    supersedes: str | None = None
     has_physical: bool = False
     has_digital: bool = False
     files: list[Rendition] = field(default_factory=list)
@@ -139,3 +146,17 @@ class Document:
         if (self.expiry_date - today).days <= threshold_days:
             return ExpiryStatus.EXPIRING
         return ExpiryStatus.OK
+
+    def is_expiry_tracked(self, *, superseded: bool) -> bool:
+        """Whether this document takes part in the expiry watch.
+
+        Tracking is *opt-out*: on by default for any document that has an
+        expiry date and is neither explicitly ignored nor superseded by a newer
+        document. ``superseded`` is a collection-level fact the caller supplies
+        (some other document's ``supersedes`` points at this one).
+        """
+        return (
+            self.expiry_date is not None
+            and not self.ignore_expiry
+            and not superseded
+        )
