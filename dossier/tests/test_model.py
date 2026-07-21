@@ -58,3 +58,18 @@ def test_expiry_status_boundaries():
 
     beyond = Document(expiry_date=date(2027, 1, 1))
     assert beyond.expiry_status(today, 90) is ExpiryStatus.OK
+
+
+def test_is_expiry_tracked_is_opt_out():
+    expiring = Document(expiry_date=date(2026, 9, 28))
+    assert expiring.is_expiry_tracked(superseded=False)
+
+    # No expiry date -> nothing to watch.
+    assert not Document().is_expiry_tracked(superseded=False)
+
+    # Superseded by a newer document -> dropped from the watch.
+    assert not expiring.is_expiry_tracked(superseded=True)
+
+    # Explicitly opted out.
+    ignored = Document(expiry_date=date(2026, 9, 28), ignore_expiry=True)
+    assert not ignored.is_expiry_tracked(superseded=False)

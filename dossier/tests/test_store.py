@@ -69,6 +69,26 @@ def test_round_trip(store: Store):
     assert loaded.perm_subslot is None
     assert loaded.temp_location is None
     assert loaded.notes == "Some notes\nwith two lines."
+    assert loaded.ignore_expiry is False  # default when absent
+    assert loaded.supersedes is None
+
+
+def test_supersedes_and_ignore_expiry_round_trip(store: Store):
+    store.save(
+        Document(
+            id="passport-2026",
+            name="Passport #2048",
+            ignore_expiry=True,
+            supersedes="passport-2016",
+        )
+    )
+    text = store.document_path("passport-2026").read_text(encoding="utf-8")
+    assert "ignore_expiry: true" in text
+    assert '"passport-2016"' in text  # slug quoted like every other scalar
+
+    loaded = store.load("passport-2026")
+    assert loaded.ignore_expiry is True
+    assert loaded.supersedes == "passport-2016"
 
 
 def test_name_with_hash_is_quoted_and_survives(store: Store):
