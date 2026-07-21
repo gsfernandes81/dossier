@@ -56,7 +56,12 @@ from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import detail, rows
 from dossier.tui.rows import RowMode
-from dossier.tui.screens import DetailScreen, DoctorScreen, MoveScreen
+from dossier.tui.screens import (
+    DetailScreen,
+    DoctorScreen,
+    MoveScreen,
+    SupersedeScreen,
+)
 
 # Sentinel option ids for the two synthetic locations-pane rows (real location
 # slugs are kebab-case, so a NUL prefix can never collide with one).
@@ -115,9 +120,11 @@ class HomeScreen(Screen[None]):
         Binding("right", "drill_in", "Detail", show=False),
         Binding("left", "drill_out", "Back", show=False),
         Binding("o", "open_file", "Open"),
+        Binding("i", "toggle_dates", "Iss/Exp"),
         Binding("e", "edit", "Edit"),
         Binding("n", "new", "New"),
         Binding("m", "move", "Move"),
+        Binding("s", "supersede", "Supersede"),
         Binding("d", "doctor", "Doctor"),
         Binding("x", "toggle_expiring", "Expiring"),
     ]
@@ -134,6 +141,7 @@ class HomeScreen(Screen[None]):
         self._filter_text = ""
         self._expiring_only = False
         self._show_detail = False
+        self._show_issue = False
         self._detail_id: str | None = None
         self._narrow = False
         self._portrait = False
@@ -231,7 +239,12 @@ class HomeScreen(Screen[None]):
             view = self._view(doc)
             options.add_option(
                 Option(
-                    rows.doc_row(view, mode=mode, superseded=doc.id in superseded),
+                    rows.doc_row(
+                        view,
+                        mode=mode,
+                        superseded=doc.id in superseded,
+                        show_issue=self._show_issue,
+                    ),
                     id=doc.id,
                 )
             )
@@ -387,6 +400,18 @@ class HomeScreen(Screen[None]):
         doc = self._current_doc()
         if doc is not None:
             self.open_document(doc.id)
+
+    def action_toggle_dates(self) -> None:
+        self._show_issue = not self._show_issue
+        self._refresh_documents()
+        self.notify(f"showing {'issue' if self._show_issue else 'expiry'} dates")
+
+    def action_supersede(self) -> None:
+        doc = self._current_doc()
+        if doc is not None:
+            self.app.push_screen(
+                SupersedeScreen(self._store, self._docs, doc), self._after_edit
+            )
 
     def action_toggle_expiring(self) -> None:
         self._expiring_only = not self._expiring_only
