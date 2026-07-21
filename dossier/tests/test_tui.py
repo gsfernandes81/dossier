@@ -28,6 +28,7 @@ from dossier.tui import (
     DossierApp,
     home as tui_home,
 )
+from dossier.tui.rows import RowMode
 from dossier.tui.screens import DetailScreen, DoctorScreen, MoveScreen
 
 TODAY = date(2026, 7, 21)
@@ -128,6 +129,54 @@ async def test_narrow_collapses_panes_and_drills(tmp_path: Path):
         home.action_drill_out()
         await pilot.pause()
         assert not home.has_class("show-documents")
+
+
+@pytest.mark.asyncio
+async def test_enter_opens_detail_and_collapses_rows(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("coc")
+        await pilot.pause()
+        assert home.has_class("show-detail")
+        assert home._detail_id == "coc"
+        assert home._row_mode() is RowMode.COMPACT  # documents column collapses
+
+        home.close_detail()
+        await pilot.pause()
+        assert not home.has_class("show-detail")
+
+
+@pytest.mark.asyncio
+async def test_open_file_action_uses_detailed_doc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store, config = _setup(tmp_path)
+    opened: list[Path] = []
+    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        home.action_open_file()
+    assert opened == [tmp_path / "passport.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_medium_width_detail_drops_locations(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(80, 30)) as pilot:  # medium band
+        home = app.home
+        assert home.has_class("-medium")
+        assert home.query_one("#locations", OptionList).display
+        home.open_detail("coc")
+        await pilot.pause()
+        await pilot.pause()
+        assert home.query_one("#detail").display  # detail shown
+        assert not home.query_one("#locations", OptionList).display  # locations drop
 
 
 @pytest.mark.asyncio
