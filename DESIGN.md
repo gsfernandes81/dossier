@@ -389,15 +389,28 @@ Renewals *replace* rather than accumulate — a new passport / MOT / cert supers
 - The watch surface lists tracked docs sorted by soonest expiry; ignored + superseded are hidden.
 
 ### TUI direction (from the mockup review)
-- **Home = indented tree** (closest to today): location groups, docs indented under a slot gutter,
-  emoji flags, tag, and a date column that toggles issue⇄expiry on `i`. Selection highlights the row
-  (background only — it must **never shift the indent**). Expired-and-not-superseded rows carry a
-  **permanent** ⚠ on the (red) date, not a selection-only hint. Sort-by-next-expiry is a mode (`s`).
+- **Home = Miller × tree hybrid + a bottom command bar** (the standalone indented-tree option is
+  **dropped** — the hybrid's rich rows already *are* the tree row). Panes drill *location → documents
+  → detail*; the documents pane renders *rich rows* (colour, issue/exp date via an `i` issue⇄expiry
+  toggle, tag, emoji, and a **permanent** ⚠ on expired-and-not-superseded rows). Selecting a doc /
+  `⏎` opens the detail pane. Selection is a background highlight — it **never shifts the indent**.
+- **Responsive collapse** — the focused (rightmost) pane always gets room; panes drop by terminal
+  width: **wide (≥ ~100 cols)** shows all three; **medium (~60–100)** shows two, and opening detail
+  swaps to `documents │ detail` (locations drops off — this is "move col 2 over col 1 when space is
+  low"); **portrait (< ~60)** is one pane, `⏎` → detail full-screen, `→`/`←` drill. *(Optional,
+  low-prio: gradual horizontal scroll instead of snapping — desktop-only, since Termux maps touch
+  drags to vertical wheel, so there is no horizontal touch scroll.)*
+- **Documents rows:** single-line when the pane is wide (name left, exp + emoji **right-aligned**,
+  name truncated with `…`). When detail opens, the date/tags move to the detail pane but each row
+  **keeps a one-char ⚠ / expiry-colour cue** so expired items still stand out while scanning. Rows go
+  multi-line in narrow panes and portrait.
+- **Command bar docked at the bottom** (thumb-reachable): `/` or typing runs a **root-wide** search
+  that collapses the panes to a flat rich results list; `Esc` returns to the Miller view where you
+  were. The bottom bar **doubles as the keyboard affordance** — tapping it focuses search and raises
+  the IME via the mouse-mode-drop trick, restoring mouse mode on submit/`Esc` (so no separate ⌨
+  button is needed on this surface).
 - **Actions, in priority order:** `⏎` open (most common) · `b` add-to-bundle · `n` new / `s` supersede.
-- **Browse = a Miller × tree hybrid:** ranger-style panes (location → documents → detail) where the
-  documents pane renders *rich tree rows* (colour, issue/exp date, icons, permanent ⚠) and selecting
-  a doc opens the detail pane. On a phone it is one pane at a time (multi-line rich rows), `→` opens
-  detail, `←` goes back. Search always starts at the **root**, not the current pane.
+  Keys are consistent across widths: `←`/`→` move panes, `Esc` closes detail / clears search.
 - **Touch / Termux (researched, 2026).** Textual enables SGR mouse reporting, and Termux's
   `onSingleTapUp` only raises the soft-keyboard when mouse tracking is *off* — so with mouse mode on,
   **taps arrive as clicks and the keyboard stays down automatically**, no config needed. That makes
