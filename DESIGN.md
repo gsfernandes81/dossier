@@ -378,6 +378,19 @@ indexing (CRDT-flavored overkill for a physical folder).
 - Do all operations in the TUI: a doctor/review screen with **inline date-editing** (pick the
   correct reading in place), plus add/edit/move for documents.
 
+### Reset / teardown (`ds reset`)
+A safe way to undo a setup, complementing `ds init`. Two independent scopes:
+- **`ds reset` (folder data)** — clears a root's `.dossier/` metadata (document records, locations,
+  bundles, synced `config.toml`) so the folder can be re-`init`ed or re-`migrate`d from clean.
+  **Hard guarantee: it never deletes anything outside `.dossier/` — the real soft-copy files in the
+  Syncthing tree are NEVER touched.** Confirm before acting; back the `.dossier/` up to the local
+  history dir first (recoverable). Default target is the configured `syncthing_root`; `--root <path>`
+  targets a specific folder.
+- **`ds reset --global`** (a.k.a. `--config`) — removes only this device's per-device config
+  (`syncthing_root` etc.), un-configuring the device. Touches no `.dossier/` data and no documents.
+- Guardrails: refuse without an explicit confirmation (or `--yes`); print exactly what will be
+  removed first; never follow the config into the file tree to delete documents.
+
 ---
 
 ## 15. Changelog — v1 → v2 (from the adversarial review)
