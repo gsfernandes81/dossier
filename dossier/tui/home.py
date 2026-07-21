@@ -31,8 +31,9 @@ screen (DESIGN §14):
   pane and shows a flat, root-wide result list.
 
 ``Enter`` opens the detail pane for a document; ``o`` opens its file from
-anywhere. The bottom command bar and touch action bar arrive in later slices;
-search stays docked top for now.
+anywhere. The search box is docked at the bottom as a thumb-reachable command
+bar (``/`` focuses it); typing collapses the panes to a flat root-wide result
+list. The touch action bar arrives in a later slice.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ from datetime import date
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Resize
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, OptionList, Static
@@ -80,7 +81,8 @@ class HomeScreen(Screen[None]):
     SCOPED_CSS = False
 
     DEFAULT_CSS = """
-    #search { dock: top; margin: 0 1; }
+    #bottombar { dock: bottom; height: 2; }
+    #search { height: 1; border: none; padding: 0 1; background: $panel; }
     #panes { height: 1fr; }
     #locations { width: 30; border-right: solid $panel; }
     #documents { width: 1fr; }
@@ -100,9 +102,10 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.show-detail #documents { display: none; }
     HomeScreen.-narrow.show-detail #detail { width: 1fr; border-left: none; }
 
-    /* Searching: flat root-wide results, no location scoping. Ordered last so it
-       wins over the narrow rule and keeps the results visible. */
+    /* Searching: flat root-wide results, no location scoping or detail. Ordered
+       last so it wins over the narrow/detail rules and keeps results visible. */
     HomeScreen.searching #locations { display: none; }
+    HomeScreen.searching #detail { display: none; }
     HomeScreen.searching #documents { display: block; width: 1fr; }
     """
 
@@ -138,13 +141,17 @@ class HomeScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Input(placeholder="Search name / tags / notes…", id="search")
         with Horizontal(id="panes"):
             yield OptionList(id="locations")
             yield OptionList(id="documents")
             with VerticalScroll(id="detail"):
                 yield Static(id="detail-body")
-        yield Footer()
+        # A fixed-height bottom bar reserves the space for the command line +
+        # footer so they stack cleanly (docking both directly onto the screen
+        # lets the footer overlap the taller Input).
+        with Vertical(id="bottombar"):
+            yield Input(placeholder="Search name / tags / notes…", id="search")
+            yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#detail", VerticalScroll).can_focus = True
@@ -189,10 +196,12 @@ class HomeScreen(Screen[None]):
         return bool(self._filter_text) or self._expiring_only
 
     def _row_mode(self) -> RowMode:
-        if self._show_detail and not self._narrow:
-            return RowMode.COMPACT  # collapsed to names beside the detail pane
         if self._narrow or self._portrait:
             return RowMode.MULTILINE
+        # Search shows a flat root-wide list, so use full rows even with the
+        # detail pane still nominally open (it is hidden while searching).
+        if self._show_detail and not self._is_searching():
+            return RowMode.COMPACT  # collapsed to names beside the detail pane
         return RowMode.DENSE
 
     # -- rendering -----------------------------------------------------------

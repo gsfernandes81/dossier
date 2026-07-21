@@ -180,6 +180,23 @@ async def test_medium_width_detail_drops_locations(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_search_overrides_open_detail_with_flat_results(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        home.query_one("#search", Input).value = "card"
+        await pilot.pause()
+        await pilot.pause()  # let the searching class re-apply the stylesheet
+        assert home.has_class("searching")
+        assert not home.query_one("#detail").display  # detail hidden while searching
+        assert home._row_mode() is RowMode.DENSE  # full rows, not the collapsed cue
+        assert [d.id for d in home.documents_in_view()] == ["coc"]
+
+
+@pytest.mark.asyncio
 async def test_expiring_toggle(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
