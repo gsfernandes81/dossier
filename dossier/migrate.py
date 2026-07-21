@@ -194,15 +194,34 @@ def _rank(path: str) -> tuple[bool, int, str]:
     return (in_bundle, path.count("/"), path)
 
 
+_FUZZY_FLOOR = 0.5  # min share of a file's tokens present in the doc name
+_FUZZY_AUTO = 0.8  # min score to auto-link (below this it's only a suggestion)
+_MIN_SHARED_TOKENS = 2
+
+
+def _tokens(text: str) -> frozenset[str]:
+    ascii_text = (
+        unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    )
+    return frozenset(
+        tok for tok in re.split(r"[^a-z0-9]+", ascii_text.lower()) if len(tok) >= 2
+    )
+
+
 class FileIndex:
-    """Index of relative POSIX file paths, keyed by a normalised basename."""
+    """Index of relative POSIX file paths for exact and fuzzy name matching."""
 
     def __init__(self, relative_paths: list[str]) -> None:
         self._by_key: dict[str, list[str]] = {}
+        self._tokens_by_path: dict[str, frozenset[str]] = {}
         for path in relative_paths:
-            key = _norm_key(PurePosixPath(path).stem)
+            stem = PurePosixPath(path).stem
+            key = _norm_key(stem)
             if key:
                 self._by_key.setdefault(key, []).append(path)
+            tokens = _tokens(stem)
+            if tokens:
+                self._tokens_by_path[path] = tokens
 
     def match(self, name: str) -> MatchResult:
         candidates = self._by_key.get(_norm_key(name), [])
@@ -212,6 +231,33 @@ class FileIndex:
             return MatchResult(candidates[0], tuple(candidates), "unique")
         best = min(candidates, key=_rank)  # category folders beat bundle copies
         return MatchResult(best, tuple(candidates), "ambiguous")
+
+    def fuzzy_best(self, name: str, exclude: set[str]) -> tuple[str, float] | None:
+        """Best fuzzy candidate ``(path, score)`` for ``name``, or None.
+
+        Score is the fraction of the *file's* tokens present in the document
+        name, so a file named as a short version of the doc scores near 1.0.
+        Ties break toward category folders over bundle-folder copies.
+        """
+        target = _tokens(name)
+        if not target:
+            return None
+        best: tuple[str, float] | None = None
+        best_key: tuple[float, bool, int, str] | None = None
+        for path, file_tokens in self._tokens_by_path.items():
+            if path in exclude:
+                continue
+            shared = target & file_tokens
+            if len(shared) < _MIN_SHARED_TOKENS:
+                continue
+            score = len(shared) / len(file_tokens)
+            if score < _FUZZY_FLOOR:
+                continue
+            in_bundle, depth, _ = _rank(path)
+            key = (-score, in_bundle, depth, path)
+            if best_key is None or key < best_key:
+                best, best_key = (path, score), key
+        return best
 
 
 def build_file_index(config: Config) -> FileIndex:
@@ -248,6 +294,8 @@ def build_plan(export: Mapping[str, object], index: FileIndex) -> MigrationPlan:
     plan = MigrationPlan()
     name_to_slug = _build_locations(export, plan)
     used: set[str] = set()
+    claimed: set[str] = set()
+    unmatched: list[Document] = []
 
     for entry in _as_list(export.get("documents")):
         name = _as_str(_get(entry, "name"))
@@ -268,33 +316,47 @@ def build_plan(export: Mapping[str, object], index: FileIndex) -> MigrationPlan:
         perm_slot, perm_sub = decode_slot(_as_opt_float(_get(entry, "permanent_slot")))
         temp_slot, temp_sub = decode_slot(_as_opt_float(_get(entry, "temp_slot")))
         dates = parse_dates(name)
-
-        match = index.match(name)
-        files, has_digital = _resolve_files(match, flags, slug, plan)
         if dates.note:
             plan.issues.append(MigrationIssue(slug, "uncertain-date", dates.note))
 
-        plan.documents.append(
-            Document(
-                id=slug,
-                name=name,
-                issue_date=dates.issue,
-                expiry_date=dates.expiry,
-                has_physical=flags.has_physical,
-                has_digital=has_digital,
-                files=files,
-                perm_location=name_to_slug.get(flags.location or ""),
-                perm_slot=perm_slot,
-                perm_subslot=perm_sub,
-                temp_location=name_to_slug.get(temp_flags.location or ""),
-                temp_slot=temp_slot,
-                temp_subslot=temp_sub,
-                notes=_as_str(_get(entry, "notes")),
-            )
+        doc = Document(
+            id=slug,
+            name=name,
+            issue_date=dates.issue,
+            expiry_date=dates.expiry,
+            has_physical=flags.has_physical,
+            has_digital=flags.has_digital,
+            files=[],
+            perm_location=name_to_slug.get(flags.location or ""),
+            perm_slot=perm_slot,
+            perm_subslot=perm_sub,
+            temp_location=name_to_slug.get(temp_flags.location or ""),
+            temp_slot=temp_slot,
+            temp_subslot=temp_sub,
+            notes=_as_str(_get(entry, "notes")),
         )
+        plan.documents.append(doc)
+
+        match = index.match(name)
+        if match.path is not None:
+            doc.files = [Rendition(label="default", path=match.path, primary=True)]
+            doc.has_digital = True
+            claimed.add(match.path)
+            if match.status == "ambiguous":
+                plan.issues.append(
+                    MigrationIssue(
+                        slug,
+                        "multi-file-match",
+                        f"{len(match.candidates)} candidates; picked {match.path}",
+                    )
+                )
+        elif doc.has_digital:
+            unmatched.append(doc)
+
         if _as_bool(_get(entry, "carried_to_india")):
             plan.bundle_suggestions.setdefault("carried-to-india", []).append(slug)
 
+    _resolve_fuzzy(index, unmatched, claimed, plan)
     return plan
 
 
@@ -312,24 +374,46 @@ def _build_locations(
     return name_to_slug
 
 
-def _resolve_files(
-    match: MatchResult, flags: DerivedFlags, slug: str, plan: MigrationPlan
-) -> tuple[list[Rendition], bool]:
-    if match.path is not None:
-        if match.status == "ambiguous":
+def _resolve_fuzzy(
+    index: FileIndex,
+    unmatched: list[Document],
+    claimed: set[str],
+    plan: MigrationPlan,
+) -> None:
+    """Fuzzy-link docs the exact pass missed; auto-link only unambiguous best."""
+    by_id = {doc.id: doc for doc in unmatched}
+    proposals: dict[str, tuple[str, float]] = {}
+    for doc in unmatched:
+        best = index.fuzzy_best(doc.name, claimed)
+        if best is not None:
+            proposals[doc.id] = best
+
+    contenders: dict[str, list[tuple[str, float]]] = {}
+    for doc_id, (path, score) in proposals.items():
+        contenders.setdefault(path, []).append((doc_id, score))
+
+    for path, group in contenders.items():
+        if len(group) == 1 and group[0][1] >= _FUZZY_AUTO:
+            doc_id, score = group[0]
+            by_id[doc_id].files = [Rendition(label="default", path=path, primary=True)]
             plan.issues.append(
                 MigrationIssue(
-                    slug,
-                    "multi-file-match",
-                    f"{len(match.candidates)} candidates; picked {match.path}",
+                    doc_id, "fuzzy-match", f"auto-linked {path} ({score:.2f})"
                 )
             )
-        return [Rendition(label="default", path=match.path, primary=True)], True
-    if flags.has_digital:
-        plan.issues.append(
-            MigrationIssue(slug, "no-file-match", "no soft copy matched; link manually")
-        )
-    return [], flags.has_digital
+        else:
+            for doc_id, score in group:
+                plan.issues.append(
+                    MigrationIssue(
+                        doc_id, "suggested-match", f"maybe {path} ({score:.2f})"
+                    )
+                )
+
+    for doc in unmatched:
+        if doc.id not in proposals:
+            plan.issues.append(
+                MigrationIssue(doc.id, "no-file-match", "no soft copy matched")
+            )
 
 
 # -- apply -------------------------------------------------------------------

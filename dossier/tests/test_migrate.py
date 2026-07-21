@@ -142,6 +142,45 @@ def test_build_plan():
     assert any(issue.kind == "no-file-match" for issue in plan.issues)
 
 
+def test_fuzzy_auto_links_distinguishing_file():
+    index = migrate.FileIndex(
+        [
+            "Official Documents/Marine/CoC Card 06-08-24.pdf",
+            "Official Documents/Marine/Unrelated Thing.pdf",
+        ]
+    )
+    export = {
+        "locations": [{"name": "Leather #1024"}],
+        "documents": [
+            {
+                "name": "Certificate of Competency (CoC) Card 06-08-24 to 28-09-26",
+                "permanent_storage": "Leather #1024",
+                "permanent_slot": 1,
+            }
+        ],
+    }
+    plan = migrate.build_plan(export, index)
+    doc = plan.documents[0]
+    assert doc.files and doc.files[0].path.endswith("CoC Card 06-08-24.pdf")
+    assert any(i.kind == "fuzzy-match" for i in plan.issues)
+
+
+def test_fuzzy_contention_becomes_suggestions():
+    # One generic file that fits many docs equally must NOT be auto-linked.
+    index = migrate.FileIndex(["Official Documents/Marine/CoC Card.pdf"])
+    export = {
+        "locations": [],
+        "documents": [
+            {"name": "CoC Card 06-08-24 to 28-09-26"},
+            {"name": "CoC Card 10-02-25 to 28-09-26"},
+        ],
+    }
+    plan = migrate.build_plan(export, index)
+    assert all(not d.files for d in plan.documents)
+    assert any(i.kind == "suggested-match" for i in plan.issues)
+    assert not any(i.kind == "fuzzy-match" for i in plan.issues)
+
+
 def test_apply_plan_writes_and_is_reentrant(tmp_path: Path):
     config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_history")
     store = Store(config)
