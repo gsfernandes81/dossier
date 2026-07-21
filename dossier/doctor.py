@@ -143,11 +143,20 @@ def _readings(a: int, b: int, c: int) -> set[date]:
 
 def _ambiguous_tokens(name: str) -> list[str]:
     """Numeric 2-digit-year tokens with more than one plausible reading."""
-    out: list[str] = []
+    return [token for token, _ in candidate_readings(name)]
+
+
+def candidate_readings(name: str) -> list[tuple[str, list[date]]]:
+    """Ambiguous numeric date tokens in ``name`` with their sorted readings.
+
+    Used by the TUI to offer the candidate dates when resolving an ambiguity.
+    """
+    out: list[tuple[str, list[date]]] = []
     for match in _NUMERIC_DATE.finditer(name):
         a, b, c = int(match.group(1)), int(match.group(2)), int(match.group(3))
-        if len(_readings(a, b, c)) >= 2:
-            out.append(match.group(0))
+        readings = sorted(_readings(a, b, c))
+        if len(readings) >= 2:
+            out.append((match.group(0), readings))
     return out
 
 

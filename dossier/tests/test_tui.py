@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from textual.widgets import Input
+from textual.widgets import Input, OptionList, TextArea
 
 from dossier.config import Config
 from dossier.model import Document, Rendition
@@ -28,6 +28,7 @@ from dossier.tui import (
     DossierApp,
     app as tui_app,
 )
+from dossier.tui.screens import DetailScreen, DoctorScreen
 
 TODAY = date(2026, 7, 21)
 
@@ -93,3 +94,35 @@ async def test_open_document_invokes_opener(
     async with app.run_test():
         app.open_document("passport")
     assert opened == [tmp_path / "passport.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_detail_screen_edits_and_saves(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    doc = next(d for d in store.load_all() if d.id == "coc")
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.push_screen(DetailScreen(store, doc))
+        await pilot.pause()
+        app.screen.query_one("#issue", Input).value = "2020-01-15"
+        app.screen.query_one("#expiry", Input).value = "2026-09-01"
+        app.screen.query_one("#notes", TextArea).text = "renewed early"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    reloaded = store.load("coc")
+    assert reloaded.issue_date == date(2020, 1, 15)
+    assert reloaded.expiry_date == date(2026, 9, 1)
+    assert reloaded.notes == "renewed early"
+
+
+@pytest.mark.asyncio
+async def test_doctor_screen_lists_findings(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    store.save(Document(id="amb", name="Cert 21-08-23", expiry_date=date(2023, 8, 21)))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.push_screen(DoctorScreen(store, config))
+        await pilot.pause()
+        assert app.screen.query_one("#findings", OptionList).option_count > 0
