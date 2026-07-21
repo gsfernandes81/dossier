@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from dossier import query
@@ -116,20 +117,36 @@ def _check_files(docs: list[Document], root: Path) -> list[Finding]:
 
 # -- ambiguous dates ---------------------------------------------------------
 
-# A numeric date with a 2-digit year: DD-MM-YY (order not fixed by the format).
-_YY_NUMERIC = re.compile(r"\b(\d{1,2})[-/](\d{1,2})[-/]\d{2}\b")
+# An all-numeric 3-part date with a 2-digit year at the end position.
+_NUMERIC_DATE = re.compile(r"\b(\d{1,2})[-/](\d{1,2})[-/](\d{2})\b")
+
+
+def _readings(a: int, b: int, c: int) -> set[date]:
+    """Distinct valid dates for a numeric token across plausible orderings.
+
+    Guards both axes: day/month order (``DD-MM-YY`` vs ``MM-DD-YY``) AND year
+    position (``21-08-23`` is 2023-08-21 as ``DD-MM-YY`` but 2021-08-23 as
+    ``YY-MM-DD``). More than one distinct valid reading ⇒ ambiguous.
+    """
+    out: set[date] = set()
+    for year, month, day in (
+        (2000 + c, b, a),  # DD-MM-YY
+        (2000 + c, a, b),  # MM-DD-YY
+        (2000 + a, b, c),  # YY-MM-DD
+    ):
+        try:
+            out.add(date(year, month, day))
+        except ValueError:
+            continue
+    return out
 
 
 def _ambiguous_tokens(name: str) -> list[str]:
-    """2-digit-year tokens where both leading components could be day OR month.
-
-    ``first == second`` (e.g. ``07-07``) is the same date either way, so not
-    ambiguous; a component > 12 fixes the order, so also not ambiguous.
-    """
+    """Numeric 2-digit-year tokens with more than one plausible reading."""
     out: list[str] = []
-    for match in _YY_NUMERIC.finditer(name):
-        first, second = int(match.group(1)), int(match.group(2))
-        if first <= 12 and second <= 12 and first != second:
+    for match in _NUMERIC_DATE.finditer(name):
+        a, b, c = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        if len(_readings(a, b, c)) >= 2:
             out.append(match.group(0))
     return out
 

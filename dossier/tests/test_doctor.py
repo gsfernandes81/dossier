@@ -87,12 +87,17 @@ def test_ambiguous_dates(store: Store):
     store.save(
         Document(id="iso", name="Issued 24-06-2024", issue_date=date(2024, 6, 24))
     )
+    # day > 12 fixes day/month order, but DD-MM-YY (2023-08-21) vs YY-MM-DD
+    # (2021-08-23) is still ambiguous -> flagged
+    store.save(
+        Document(id="yearpos", name="Cert 21-08-23", expiry_date=date(2023, 8, 21))
+    )
 
     flagged = {
         f.subject
         for f in doctor.run(store, store.config).by_check().get("ambiguous-date", [])
     }
-    assert flagged == {"single"}
+    assert flagged == {"single", "yearpos"}
 
 
 def test_date_order_violation(store: Store):
