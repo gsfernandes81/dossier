@@ -30,6 +30,7 @@ from dossier.tui import (
 )
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
+    BundleScreen,
     DetailScreen,
     DoctorScreen,
     MoveScreen,
@@ -328,3 +329,25 @@ async def test_supersede_screen_sets_link(tmp_path: Path):
         await pilot.pause()
 
     assert store.load("passport-2026").supersedes == "passport-2016"
+
+
+@pytest.mark.asyncio
+async def test_bundle_screen_creates_and_assigns(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        coc = app.home._doc_by_id("coc")
+        assert coc is not None
+        app.push_screen(BundleScreen(store, app.home._docs, coc))
+        await pilot.pause()
+        new = app.screen.query_one("#bnew", Input)
+        new.focus()
+        new.value = "US Visa"
+        await pilot.pause()
+        await pilot.press("enter")  # add + select the new bundle
+        await pilot.pause()
+        await pilot.press("ctrl+s")  # save
+        await pilot.pause()
+
+    assert "us-visa" in store.load("coc").bundles
+    assert "us-visa" in store.load_bundles()
