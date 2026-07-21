@@ -80,6 +80,11 @@ def cmd_init(args: argparse.Namespace) -> int:
             print("\nTermux setup still needed:")
             for problem in problems:
                 print(f"  - {problem}")
+        print(
+            "\nTip: add `hide-soft-keyboard-on-startup=true` to "
+            "~/.termux/termux.properties so the keyboard stays down; tap the "
+            "on-screen ⌨ button in the TUI to bring it up when you need to type."
+        )
     print("\nNext: add documents, then run `ds` to open the TUI (coming soon).")
     return 0
 
@@ -94,7 +99,7 @@ def cmd_tui(_args: argparse.Namespace) -> int:
 
     from dossier.tui import DossierApp
 
-    DossierApp(Store(config), config).run()
+    DossierApp(Store(config), config, touch=is_termux()).run()
     return 0
 
 

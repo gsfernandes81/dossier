@@ -46,7 +46,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Resize
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Input, OptionList, Static
+from textual.widgets import Button, Footer, Header, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from dossier import query
@@ -88,8 +88,14 @@ class HomeScreen(Screen[None]):
 
     DEFAULT_CSS = """
     #bottombar { dock: bottom; height: 2; }
+    #actionbar { display: none; height: 3; width: 1fr; }
+    #actionbar Button { width: 1fr; min-width: 4; margin: 0; border: none; height: 3; }
     #search { height: 1; border: none; padding: 0 1; background: $panel; }
     #panes { height: 1fr; }
+
+    /* Touch (Termux): a tap action row above the command bar. */
+    HomeScreen.touch #bottombar { height: 5; }
+    HomeScreen.touch #actionbar { display: block; }
     #locations { width: 30; border-right: solid $panel; }
     #documents { width: 1fr; }
     #detail { display: none; width: 2fr; padding: 0 1; border-left: solid $panel; }
@@ -131,11 +137,14 @@ class HomeScreen(Screen[None]):
         Binding("x", "toggle_expiring", "Expiring"),
     ]
 
-    def __init__(self, store: Store, config: Config, *, today: date) -> None:
+    def __init__(
+        self, store: Store, config: Config, *, today: date, touch: bool = False
+    ) -> None:
         super().__init__()
         self._store = store
         self._config = config
         self._today = today
+        self._touch = touch
         self._docs: list[Document] = []
         self._locations: dict[str, Location] = {}
         self._by_location: dict[str | None, list[Document]] = {}
@@ -156,15 +165,21 @@ class HomeScreen(Screen[None]):
             yield OptionList(id="documents")
             with VerticalScroll(id="detail"):
                 yield Static(id="detail-body")
-        # A fixed-height bottom bar reserves the space for the command line +
-        # footer so they stack cleanly (docking both directly onto the screen
-        # lets the footer overlap the taller Input).
+        # A fixed-height bottom bar reserves the space for the (touch-only)
+        # action row, the command line, and the footer so they stack cleanly
+        # (docking them directly onto the screen lets the footer overlap).
         with Vertical(id="bottombar"):
+            with Horizontal(id="actionbar"):
+                yield Button("Open", id="act-open")
+                yield Button("Bundle", id="act-bundle")
+                yield Button("New", id="act-new")
+                yield Button("⌨", id="act-kbd")
             yield Input(placeholder="Search name / tags / notes…", id="search")
             yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#detail", VerticalScroll).can_focus = True
+        self.set_class(self._touch, "touch")
         self._reload()
         self._focus_default()
 
@@ -344,6 +359,7 @@ class HomeScreen(Screen[None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "search":
+            self._set_mouse_reporting(True)
             self._focus_documents()
 
     def on_option_list_option_highlighted(
@@ -362,6 +378,16 @@ class HomeScreen(Screen[None]):
         elif event.option_list.id == "locations":
             self.action_drill_in()
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "act-open":
+            self.action_open_file()
+        elif event.button.id == "act-bundle":
+            self.action_bundle()
+        elif event.button.id == "act-new":
+            self.action_new()
+        elif event.button.id == "act-kbd":
+            self._raise_keyboard()
+
     # -- actions -------------------------------------------------------------
 
     def action_focus_search(self) -> None:
@@ -369,7 +395,8 @@ class HomeScreen(Screen[None]):
 
     def action_escape(self) -> None:
         search = self.query_one("#search", Input)
-        if search.value or self.has_class("searching"):
+        if search.value or self.has_class("searching") or self.app.focused is search:
+            self._set_mouse_reporting(True)
             search.value = ""
             self._filter_text = ""
             self._update_searching()
@@ -452,6 +479,18 @@ class HomeScreen(Screen[None]):
 
     def _update_searching(self) -> None:
         self.set_class(self._is_searching(), "searching")
+
+    def _raise_keyboard(self) -> None:
+        # Termux only raises the soft keyboard while mouse tracking is off, and
+        # the app can't summon the IME itself — so drop mouse reporting and focus
+        # the command bar; the user's next tap on it brings the keyboard up.
+        self.query_one("#search", Input).focus()
+        self._set_mouse_reporting(False)
+
+    def _set_mouse_reporting(self, enabled: bool) -> None:
+        setter = getattr(self.app, "set_mouse_reporting", None)
+        if callable(setter):
+            setter(enabled)
 
     def _focus_documents(self) -> None:
         self.query_one("#documents", OptionList).focus()

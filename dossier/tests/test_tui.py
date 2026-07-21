@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from textual.widgets import Input, OptionList, TextArea
+from textual.widgets import Button, Input, OptionList, TextArea
 
 from dossier.config import Config
 from dossier.model import Document, Rendition
@@ -351,3 +351,37 @@ async def test_bundle_screen_creates_and_assigns(tmp_path: Path):
 
     assert "us-visa" in store.load("coc").bundles
     assert "us-visa" in store.load_bundles()
+
+
+@pytest.mark.asyncio
+async def test_touch_shows_action_bar_and_keyboard_button(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY, touch=True)
+    async with app.run_test(size=(50, 80)) as pilot:  # portrait phone
+        home = app.home
+        assert home.has_class("touch")
+        assert home.query_one("#actionbar").display
+        # The ⌨ button focuses the command bar (raising the IME on Termux); the
+        # mouse-reporting drop is a no-op on the headless driver.
+        home.query_one("#act-kbd", Button).press()
+        await pilot.pause()
+        assert app.focused is home.query_one("#search", Input)
+
+
+@pytest.mark.asyncio
+async def test_action_bar_hidden_without_touch(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test():
+        assert not app.home.query_one("#actionbar").display
+
+
+def test_linux_driver_exposes_mouse_toggle():
+    # Pin the private methods the keyboard trick relies on, so a Textual rename
+    # fails here loudly instead of silently breaking the Termux keyboard. The
+    # Linux driver is Unix-only (imports termios), so skip off Unix.
+    pytest.importorskip("termios")
+    from textual.drivers.linux_driver import LinuxDriver
+
+    assert hasattr(LinuxDriver, "_enable_mouse_support")
+    assert hasattr(LinuxDriver, "_disable_mouse_support")
