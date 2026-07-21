@@ -15,8 +15,8 @@
 
 """Narrow-first Textual app: a location-grouped, searchable document list.
 
-Two-line rows (name + a dim meta line) so it fits a portrait phone terminal.
-ASCII status glyphs (``!`` expired, ``~`` expiring) avoid emoji width issues.
+Rows come from :mod:`dossier.tui.rows` (two-line ``MULTILINE`` shape here, so it
+fits a portrait phone terminal). ASCII status glyphs avoid emoji width issues.
 """
 
 from __future__ import annotations
@@ -31,13 +31,11 @@ from textual.widgets.option_list import Option
 
 from dossier import query
 from dossier.config import Config
-from dossier.model import Document, ExpiryStatus, FileStatus
+from dossier.model import Document, ExpiryStatus
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
+from dossier.tui import rows
 from dossier.tui.screens import DetailScreen, DoctorScreen, MoveScreen
-
-_EXPIRY_GLYPH = {ExpiryStatus.EXPIRED: "!", ExpiryStatus.EXPIRING: "~"}
-_EXPIRY_STYLE = {ExpiryStatus.EXPIRED: "bold red", ExpiryStatus.EXPIRING: "yellow"}
 
 
 class DossierApp(App[None]):
@@ -121,34 +119,21 @@ class DossierApp(App[None]):
         option_list = self.query_one("#list", OptionList)
         option_list.clear_options()
         docs = self.visible_docs()
+        superseded = query.superseded_ids(self._docs)
         for location, group in query.group_by_location(docs):
             option_list.add_option(Option(_header(location), id=None))
             for doc in group:
-                option_list.add_option(Option(self._render_row(doc), id=doc.id))
+                view = query.view(
+                    doc,
+                    root=self._config.syncthing_root,
+                    today=self._today,
+                    threshold_days=self._config.expiry_threshold_days,
+                )
+                row = rows.doc_row(
+                    view, mode=rows.RowMode.MULTILINE, superseded=doc.id in superseded
+                )
+                option_list.add_option(Option(row, id=doc.id))
         self.sub_title = f"{len(docs)} / {len(self._docs)} documents"
-
-    def _render_row(self, doc: Document) -> Text:
-        status = doc.expiry_status(self._today, self._config.expiry_threshold_days)
-        row = Text()
-        glyph = _EXPIRY_GLYPH.get(status, "")
-        if glyph:
-            row.append(f"{glyph} ", style=_EXPIRY_STYLE.get(status, ""))
-        row.append(doc.name or doc.id)
-
-        meta: list[str] = []
-        slot = _slot_str(doc)
-        if slot:
-            meta.append(f"slot {slot}")
-        if doc.tags:
-            meta.append(" ".join(doc.tags))
-        flags = ("P" if doc.has_physical else "") + ("D" if doc.has_digital else "")
-        if flags:
-            meta.append(flags)
-        if query.file_status(doc, self._config.syncthing_root) is FileStatus.MISSING:
-            meta.append("file missing")
-        if meta:
-            row.append("\n  " + "  ·  ".join(meta), style="dim")
-        return row
 
     # -- actions -------------------------------------------------------------
 
@@ -222,11 +207,3 @@ class DossierApp(App[None]):
 
 def _header(location: str | None) -> Text:
     return Text(location or "— no location —", style="bold underline")
-
-
-def _slot_str(doc: Document) -> str:
-    slot = doc.effective_slot
-    if slot is None:
-        return ""
-    sub = doc.effective_subslot
-    return f"{slot}.{sub}" if sub is not None else str(slot)
