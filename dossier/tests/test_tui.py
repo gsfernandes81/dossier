@@ -29,7 +29,12 @@ from dossier.tui import (
     home as tui_home,
 )
 from dossier.tui.rows import RowMode
-from dossier.tui.screens import DetailScreen, DoctorScreen, MoveScreen
+from dossier.tui.screens import (
+    DetailScreen,
+    DoctorScreen,
+    MoveScreen,
+    SupersedeScreen,
+)
 
 TODAY = date(2026, 7, 21)
 
@@ -284,3 +289,42 @@ async def test_move_shifts_neighbours(tmp_path: Path):
     assert (store.load("z").perm_location, store.load("z").perm_slot) == ("file", 1)
     assert store.load("passport").perm_slot == 2  # shifted 1 -> 2
     assert store.load("coc").perm_slot == 3  # shifted 2 -> 3
+
+
+@pytest.mark.asyncio
+async def test_issue_expiry_toggle_flips(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test():
+        home = app.home
+        assert home._show_issue is False
+        home.action_toggle_dates()
+        assert home._show_issue is True
+        home.action_toggle_dates()
+        assert home._show_issue is False
+
+
+@pytest.mark.asyncio
+async def test_supersede_screen_sets_link(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    store.save(Document(id="passport-2026", name="Passport 2026"))
+    store.save(Document(id="passport-2016", name="Passport 2016"))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        renewal = app.home._doc_by_id("passport-2026")
+        assert renewal is not None
+        app.push_screen(SupersedeScreen(store, app.home._docs, renewal))
+        await pilot.pause()
+        options = app.screen.query_one("#scandidates", OptionList)
+        options.focus()
+        index = next(
+            i
+            for i in range(options.option_count)
+            if options.get_option_at_index(i).id == "passport-2016"
+        )
+        options.highlighted = index
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert store.load("passport-2026").supersedes == "passport-2016"

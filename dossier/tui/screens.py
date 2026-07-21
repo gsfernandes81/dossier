@@ -246,6 +246,78 @@ class MoveScreen(ModalScreen[bool]):
         self.dismiss(True)
 
 
+class SupersedeScreen(ModalScreen[bool]):
+    """Pick the document a renewal replaces, setting its ``supersedes`` link."""
+
+    CSS = """
+    SupersedeScreen { align: center middle; }
+    #spanel {
+        width: 80%; max-width: 90; height: 80%;
+        padding: 1 2; background: $panel; border: round $primary;
+    }
+    #sfilter { margin-bottom: 1; }
+    #scandidates { height: 1fr; }
+    """
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    _CLEAR = "\x00clear"
+
+    def __init__(self, store: Store, docs: list[Document], doc: Document) -> None:
+        super().__init__()
+        self._store = store
+        self._docs = docs
+        self._doc = doc
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="spanel"):
+            yield Label(
+                f'Which document does "{self._doc.name or self._doc.id}" replace?'
+            )
+            yield Input(placeholder="filter…", id="sfilter")
+            yield OptionList(id="scandidates")
+
+    def on_mount(self) -> None:
+        self._populate("")
+        self.query_one("#sfilter", Input).focus()
+
+    def _populate(self, needle: str) -> None:
+        options = self.query_one("#scandidates", OptionList)
+        options.clear_options()
+        if self._doc.supersedes:
+            options.add_option(Option("— clear supersession —", id=self._CLEAR))
+        needle = needle.casefold()
+        for doc in self._docs:
+            if doc.id == self._doc.id:
+                continue
+            if needle and needle not in f"{doc.name} {doc.id}".casefold():
+                continue
+            options.add_option(Option(doc.name or doc.id, id=doc.id))
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "sfilter":
+            self._populate(event.value)
+
+    @on(OptionList.OptionSelected, "#scandidates")
+    def _pick(self, event: OptionList.OptionSelected) -> None:
+        self._doc.supersedes = (
+            None if event.option_id == self._CLEAR else event.option_id
+        )
+        try:
+            self._store.save(self._doc)
+        except StaleWriteError:
+            self.notify(
+                "changed on disk since load; reopen and retry", severity="error"
+            )
+            return
+        except StoreError as exc:
+            self.notify(str(exc), severity="error")
+            return
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
 def _iso(value: date | None) -> str:
     return value.isoformat() if value else ""
 
