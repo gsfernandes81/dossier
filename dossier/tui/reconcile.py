@@ -22,8 +22,9 @@ is blocking), reusing the per-device page-hash cache so a warm cache is ~instant
 
 ``x`` records a *decision* in the ``.dossier/reconcile.toml`` sidecar — dismiss an
 orphan (it's not a document) or acknowledge a missing file — so it stays gone on
-re-run. Decisions only ever write the sidecar; no real file is touched. Link /
-adopt / fold land next.
+re-run. ``l`` links an orphan to an existing document, ``a`` adopts it as a new
+document, and ``u`` unlinks a dead rendition. Those edit the ``.dossier`` store
+(metadata); no real file is ever moved or deleted. Fold / ignore-glob land next.
 """
 
 from __future__ import annotations
@@ -41,8 +42,10 @@ from textual.widgets.option_list import Option
 
 from dossier import dedup, dedup_cache, dedup_hash, reconcile
 from dossier.config import Config
-from dossier.model import ReconcileState
+from dossier.errors import StaleWriteError, StoreError
+from dossier.model import Document, ReconcileState, Rendition
 from dossier.store import Store
+from dossier.tui.screens import DetailScreen, DocPickerScreen
 
 if TYPE_CHECKING:
     from textual.widgets.tree import TreeNode
@@ -76,6 +79,9 @@ class ReconcileScreen(ModalScreen[str | None]):
         Binding("escape", "close", "Close"),
         Binding("d", "scan_dups", "Find duplicates"),
         Binding("x", "reject", "Dismiss"),
+        Binding("l", "link", "Link"),
+        Binding("a", "adopt", "Adopt"),
+        Binding("u", "unlink", "Unlink"),
     ]
 
     def __init__(self, store: Store, config: Config) -> None:
@@ -201,6 +207,10 @@ class ReconcileScreen(ModalScreen[str | None]):
             return True if active == "tab-dups" else None
         if action == "reject":
             return True if active in ("tab-orphans", "tab-missing") else None
+        if action in ("link", "adopt"):
+            return True if active == "tab-orphans" else None
+        if action == "unlink":
+            return True if active == "tab-missing" else None
         return True
 
     @on(Tree.NodeExpanded, "#orphans")
@@ -247,25 +257,106 @@ class ReconcileScreen(ModalScreen[str | None]):
             self._ack_missing()
 
     def _dismiss_orphan(self) -> None:
-        node = self.query_one("#orphans", Tree).cursor_node
-        if node is None or not isinstance(node.data, _Leaf):
+        leaf = self._cursor_leaf()
+        if leaf is None:
             return
-        self._state.dismissed.add(node.data.path)
+        self._state.dismissed.add(leaf.path)
         self._save_and_refresh()
 
     def _ack_missing(self) -> None:
+        picked = self._highlighted_missing()
+        if picked is None:
+            return
+        doc_id, path = picked
+        self._state.missing_ok.setdefault(path, set()).add(doc_id)
+        self._save_and_refresh()
+
+    def action_link(self) -> None:
+        leaf = self._cursor_leaf()
+        if leaf is None:
+            return
+        path = leaf.path
+        docs = self._store.load_all()
+        initial = ""
+        if leaf.suggestion is not None:
+            match = next((d for d in docs if d.id == leaf.suggestion), None)
+            if match is not None:
+                initial = match.name
+        picker = DocPickerScreen(
+            docs, prompt=f"Link  {path}  to which document?", initial=initial
+        )
+        self.app.push_screen(picker, lambda doc_id: self._do_link(path, doc_id))
+
+    def _do_link(self, path: str, doc_id: str | None) -> None:
+        if doc_id is None:
+            return
+        doc = self._store.load(doc_id)  # fresh, to shrink the stale-write window
+        if any(rendition.path == path for rendition in doc.files):
+            self.notify(f"{doc_id} already links that file")
+            return
+        doc.files.append(Rendition(label=_stem(path), path=path, primary=not doc.files))
+        doc.has_digital = True
+        if self._save_doc(doc):
+            self.notify(f"linked to {doc.name or doc.id}")
+            self._refresh()
+
+    def action_adopt(self) -> None:
+        leaf = self._cursor_leaf()
+        if leaf is None:
+            return
+        doc = Document(
+            name=_pretty_name(leaf.path),
+            has_digital=True,
+            files=[Rendition(label="default", path=leaf.path, primary=True)],
+        )
+        self.app.push_screen(DetailScreen(self._store, doc, is_new=True), self._adopted)
+
+    def _adopted(self, saved: bool | None) -> None:
+        if saved:
+            self._refresh()
+
+    def action_unlink(self) -> None:
+        picked = self._highlighted_missing()
+        if picked is None:
+            return
+        doc_id, path = picked
+        doc = self._store.load(doc_id)
+        kept = [rendition for rendition in doc.files if rendition.path != path]
+        if len(kept) == len(doc.files):
+            self.notify("nothing to unlink")
+            return
+        doc.files = kept
+        doc.has_digital = bool(kept)
+        if self._save_doc(doc):
+            self.notify(f"unlinked {path}")
+            self._refresh()
+
+    def _cursor_leaf(self) -> _Leaf | None:
+        node = self.query_one("#orphans", Tree).cursor_node
+        data = node.data if node is not None else None
+        return data if isinstance(data, _Leaf) else None
+
+    def _highlighted_missing(self) -> tuple[str, str] | None:
         options = self.query_one("#missing", OptionList)
         index = options.highlighted
         if index is None:
-            return
+            return None
         option = options.get_option_at_index(index)
         if option.id is None:
-            return
+            return None
         doc_id, _, path = option.id.partition(_MISSING_SEP)
-        if not path:
-            return
-        self._state.missing_ok.setdefault(path, set()).add(doc_id)
-        self._save_and_refresh()
+        return (doc_id, path) if path else None
+
+    def _save_doc(self, doc: Document) -> bool:
+        try:
+            self._store.save(doc)
+        except StaleWriteError:
+            self.notify("changed on disk; reopen reconcile", severity="error")
+            return False
+        except StoreError as exc:
+            self.notify(str(exc), severity="error")
+            return False
+        return True
 
     def _save_and_refresh(self) -> None:
         try:
@@ -341,6 +432,15 @@ class ReconcileScreen(ModalScreen[str | None]):
 
 def _folder_of(rel: str) -> str:
     return rel.rsplit("/", 1)[0] if "/" in rel else "."
+
+
+def _stem(rel: str) -> str:
+    name = rel.rsplit("/", 1)[-1]
+    return name.rsplit(".", 1)[0] if "." in name else name
+
+
+def _pretty_name(rel: str) -> str:
+    return _stem(rel).replace("_", " ").strip() or _stem(rel)
 
 
 def _is_page_file(rel: str) -> bool:
