@@ -55,18 +55,20 @@ Per-item rationale lives in `DESIGN.md` §14.
   preview follows the highlighted top hit. `x` (expiring) rides the same path (#52).
   *Deferred polish:* per-location match counts + disabling zero-match rows.
 
-## Phase 5 — Dismissable suggestions  (replaces the name-based date system)
-- [ ] **Suggestions framework** (M) — per-document suggestions for fields (esp.
-  issue/expiry): accept, or **dismiss individually**; dismissals persist; never
-  auto-write. (Accepted in the editable pane from Phase 4.)
-- [ ] **Demote name parsing → suggestions** (M) — the current name-based date parsing
-  stops being an authority and feeds the suggestions layer instead. We don't rely on
-  filenames to decide whether a doc even has an expiry. Period-docs (sea-service
-  testimonials, voyage records): `expiry = None`, span → `notes`, and **do not** take
-  the issue date from the range's start.
-  - *Motorcycle expiries* (CBT, etc.) aren't in the Marine table — they arrive here as
-    name suggestions to accept, or via manual entry, until/unless a structured source
-    exists.
+## Phase 5 — Dismissable suggestions  ✅  (replaced the name-based date system)
+- [x] **Suggestions framework** — `dossier/suggest.py` pure engine (`for_document` /
+  `live`) + `Suggestion`/`SuggestionState` model + a `.dossier/suggestions.toml`
+  sidecar. Per-document field suggestions (issue/expiry/notes); accept pre-fills the
+  field in the detail pane (then ctrl+s), dismiss persists forever and never writes.
+  Ambiguous numeric dates offer every reading as a picker (#53, #55).
+- [x] **Demote name parsing → suggestions** — `migrate.build_plan` no longer writes
+  issue dates or the "guessed expiry" from names; that intelligence now lives only in
+  `suggest`. A date **range** becomes a *notes* period suggestion (never issue/expiry)
+  unless the authoritative expiry confirms it as a validity window — so sea-service
+  testimonials get their span in notes, no issue/expiry. CBT-type expiries arrive as
+  keyword-driven suggestions to accept (#54).
+  - *Verified on the real store:* 56/137 docs surface suggestions (23 period, 19 issue,
+    14 expiry).
 
 ## Phase 6 — Bundles & export
 - [ ] **Bundle grouping** (M) — several joining-docs / travel-docs bundles want
