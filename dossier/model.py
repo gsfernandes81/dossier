@@ -118,6 +118,56 @@ class ReconcileState:
         return recorded is not None and set(subsets) <= recorded
 
 
+class SuggestedField(StrEnum):
+    """A document field a suggestion can propose a value for."""
+
+    ISSUE = "issue_date"
+    EXPIRY = "expiry_date"
+    NOTES = "notes"
+
+
+@dataclass(frozen=True)
+class Suggestion:
+    """A proposed value for a document field, to accept or dismiss (never auto-written).
+
+    ``values`` are canonical ISO date strings; more than one means the source read
+    an ambiguous token (e.g. ``21-08-23``) and the user picks which. ``source``
+    labels where it came from (name parsing now; vision / folders later). The
+    ``key`` identifies the suggestion for dismissal — it includes the values, so a
+    later re-parse yielding *different* values reopens the question.
+    """
+
+    doc_id: str
+    field: SuggestedField
+    values: tuple[str, ...]
+    source: str = "name"
+    rationale: str = ""  # display-only; never part of the key
+
+    @property
+    def key(self) -> str:
+        return f"{self.doc_id}:{self.field.value}:{self.source}:{'|'.join(self.values)}"
+
+
+@dataclass
+class SuggestionState:
+    """Persisted suggestion dismissals — the ``.dossier/suggestions.toml`` sidecar.
+
+    Machine-owned and synced. Everything here is a *suppression*: a dismissed key
+    hides a suggestion forever, but nothing here ever writes a document. Acceptance
+    needs no record — a suggestion whose field is already filled simply drops out.
+    A Syncthing conflict is self-healing: a lost dismissal only resurfaces a
+    suggestion, never changes a document.
+    """
+
+    dismissed: set[str] = field(default_factory=set)
+
+    def is_dismissed(self, suggestion: Suggestion) -> bool:
+        return suggestion.key in self.dismissed
+
+    def dismiss(self, suggestion: Suggestion) -> None:
+        self.dismissed.add(suggestion.key)
+
+
 @dataclass
 class Document:
     """A tracked document — one logical thing, with 0+ digital renditions.

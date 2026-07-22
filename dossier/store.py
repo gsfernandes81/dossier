@@ -48,7 +48,14 @@ from ruamel.yaml.scalarstring import DoubleQuotedScalarString as DQ
 
 from dossier.config import Config
 from dossier.errors import DocumentExistsError, StaleWriteError, StoreError
-from dossier.model import Bundle, Document, Location, ReconcileState, Rendition
+from dossier.model import (
+    Bundle,
+    Document,
+    Location,
+    ReconcileState,
+    Rendition,
+    SuggestionState,
+)
 
 CONFLICT_MARKER = ".sync-conflict-"
 TEMP_PREFIX = ".dossier-tmp-"
@@ -275,6 +282,22 @@ class Store:
             data["folded"] = {k: folded[k] for k in sorted(folded)}
         atomic_write_bytes(
             self.config.reconcile_path, tomli_w.dumps(data).encode("utf-8")
+        )
+
+    # -- suggestions sidecar -------------------------------------------------
+
+    def load_suggestions(self) -> SuggestionState:
+        """Load the dismissed-suggestions sidecar (absent → an empty state)."""
+        raw = _read_toml_or_empty(self.config.suggestions_path)
+        return SuggestionState(dismissed=set(_as_str_list(raw.get("dismissed"))))
+
+    def save_suggestions(self, state: SuggestionState) -> None:
+        """Persist the suggestions sidecar deterministically (sorted keys)."""
+        data: dict[str, object] = {}
+        if state.dismissed:
+            data["dismissed"] = sorted(state.dismissed)
+        atomic_write_bytes(
+            self.config.suggestions_path, tomli_w.dumps(data).encode("utf-8")
         )
 
 
