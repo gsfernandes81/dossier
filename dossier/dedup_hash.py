@@ -39,7 +39,9 @@ _MISSING = (
 
 _PDF_SUFFIXES = {".pdf"}
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
+PAGE_SUFFIXES = _PDF_SUFFIXES | _IMAGE_SUFFIXES  # files worth hashing for dedup
 _W, _H = 9, 8  # a 9x8 grey grid → 8x8 left>right comparisons → 64 bits
+_MAX_PAGES = 24  # certs/scans are short; a prefix still catches subset-of-a-bundle
 
 
 class DedupError(DossierError):
@@ -100,9 +102,8 @@ def _pdf_hashes(path: Path) -> list[int]:
     pdfium = _load_pdfium()
     pdf = pdfium.PdfDocument(str(path))
     try:
-        return [
-            _dhash_image(pdf[i].render(scale=1.0).to_pil()) for i in range(len(pdf))
-        ]
+        count = min(len(pdf), _MAX_PAGES)
+        return [_dhash_image(pdf[i].render(scale=1.0).to_pil()) for i in range(count)]
     finally:
         pdf.close()
 

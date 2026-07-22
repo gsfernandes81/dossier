@@ -29,7 +29,14 @@ from pathlib import Path
 
 import tomli_w
 
-from dossier import doctor, migrate, reconcile, reset
+from dossier import (
+    dedup_cache,
+    dedup_hash,
+    doctor,
+    migrate,
+    reconcile,
+    reset,
+)
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError
 from dossier.platform_open import is_termux, termux_preconditions
@@ -241,13 +248,36 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    report = reconcile.run(Store(config), config)
+    pages = None
+    if args.dedup:
+        root = config.syncthing_root
+        candidates = [
+            root / rel
+            for rel in reconcile.scan_files(config)
+            if Path(rel).suffix.lower() in dedup_hash.PAGE_SUFFIXES
+        ]
+        print(f"hashing {len(candidates)} page-bearing files (first run may be slow)…")
+        try:
+            pages = dedup_cache.cached_page_hashes(candidates, root)
+        except dedup_hash.DedupError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+    report = reconcile.run(Store(config), config, pages_by_file=pages)
     print(
         f"reconcile: {len(report.orphans)} orphan · {len(report.linked)} linked · "
         f"{len(report.missing)} missing"
     )
     if config.include or config.ignore:
         print(f"  scope: include={config.include or ['*']}  ignore={config.ignore}")
+
+    if report.groups is not None:
+        print(f"\nduplicate clusters ({len(report.groups)}):")
+        for group in report.groups[:40]:
+            tag = " [ambiguous — review]" if group.ambiguous else ""
+            print(f"  keep {group.keep}{tag}")
+            for subset in group.subsets:
+                print(f"       {subset}")
 
     suggested = sorted(
         (o for o in report.orphans if o.suggestion), key=lambda o: -o.score
@@ -357,6 +387,11 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_p = sub.add_parser(
         "reconcile",
         help="find orphan files and missing files (duplicates soon)",
+    )
+    reconcile_p.add_argument(
+        "--dedup",
+        action="store_true",
+        help="also find duplicate/superset clusters (needs the [dedup] extra)",
     )
     reconcile_p.add_argument(
         "--verbose",
