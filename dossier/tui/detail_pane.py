@@ -32,6 +32,7 @@ bindings from firing mid-edit.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from copy import deepcopy
 
 from textual import on
 from textual.app import ComposeResult
@@ -288,9 +289,14 @@ class DetailPane(VerticalScroll):
         self.post_message(self.EditingChanged(editing))
         if editing:
             self.query_one(f"#{self._focus_target}").focus()
+        else:
+            self.focus()  # leaving the (now hidden) form — don't strand focus on it
 
     def action_save(self) -> None:
-        doc = self._doc
+        # Build on a copy so a failed save (StaleWrite / a partial plan_move batch)
+        # never leaves the in-memory Document — shared with the home list — holding
+        # submitted-but-unpersisted values. On success the home reloads from disk.
+        doc = deepcopy(self._doc)
         try:
             issue = forms.parse_iso(self.query_one(f"#{_ISSUE}", Input).value)
             expiry = forms.parse_iso(self.query_one(f"#{_EXPIRY}", Input).value)
@@ -331,7 +337,10 @@ class DetailPane(VerticalScroll):
         perm_loc = forms.slug(self.query_one(f"#{_PERM}", Input).value)
         to_save = [doc]
         if perm_loc != doc.perm_location or perm_slot != doc.perm_slot:
-            to_save = plan_move(self._docs, doc, perm_loc, perm_slot)
+            # Shift neighbours to insert — on *copies* so a mid-batch failure
+            # can't half-shift the in-memory list.
+            neighbours = [deepcopy(d) for d in self._docs if d.id != doc.id]
+            to_save = plan_move(neighbours, doc, perm_loc, perm_slot)
         doc.perm_subslot = perm_sub  # plan_move nulls it; the form is authoritative
 
         try:
@@ -366,6 +375,7 @@ class DetailPane(VerticalScroll):
             self.notify(str(exc), severity="error")
             return
         self._doc = fresh
+        self._docs = self._store.load_all()  # refresh neighbours for a re-save
         self._discard_armed = False
         self._populate_form(fresh)  # dynamic rows + snapshot happen in the worker
         self.notify("reloaded from disk")

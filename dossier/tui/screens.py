@@ -48,6 +48,8 @@ from dossier.tui import (
 class DoctorScreen(ModalScreen[str | None]):
     """List doctor findings. Dismisses with a document id to open its editor."""
 
+    _SEP = "\x00"  # composite option id: f"{doc_id}{sep}{index}" (ids must be unique)
+
     CSS = """
     DoctorScreen { align: center middle; }
     #dpanel {
@@ -79,13 +81,21 @@ class DoctorScreen(ModalScreen[str | None]):
             f"doctor: {len(report.findings)} finding(s). "
             "Enter a document to edit it; Esc closes."
         )
+        index = 0
         for check, items in sorted(report.by_check().items()):
             options.add_option(Option(f"— {check} ({len(items)}) —", id=None))
             for finding in items:
-                doc_id = None if finding.check == "sync-conflict" else finding.subject
-                options.add_option(
-                    Option(f"  {finding.subject}: {finding.detail}", id=doc_id)
+                # A doc can appear in several findings; a composite id keeps them
+                # unique (else OptionList raises DuplicateID). Conflicts aren't docs.
+                oid = (
+                    None
+                    if finding.check == "sync-conflict"
+                    else f"{finding.subject}{self._SEP}{index}"
                 )
+                options.add_option(
+                    Option(f"  {finding.subject}: {finding.detail}", id=oid)
+                )
+                index += 1
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -93,7 +103,7 @@ class DoctorScreen(ModalScreen[str | None]):
     @on(OptionList.OptionSelected)
     def _open(self, event: OptionList.OptionSelected) -> None:
         if event.option_id is not None:
-            self.dismiss(event.option_id)
+            self.dismiss(event.option_id.split(self._SEP, 1)[0])  # back to the doc id
 
 
 class SupersedeScreen(ModalScreen[bool]):

@@ -119,7 +119,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    export_path: Path = args.notion_export
+    export_path: Path = args.notion_export.expanduser()
     try:
         export_data = json.loads(export_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -177,7 +177,11 @@ def cmd_reset(args: argparse.Namespace) -> int:
         return 0
 
     if args.root is not None:
-        config = Config(syncthing_root=args.root.expanduser().resolve())
+        root = args.root.expanduser().resolve()
+        if not root.is_dir():
+            print(f"error: not a directory: {root}", file=sys.stderr)
+            return 1
+        config = Config(syncthing_root=root)
     else:
         try:
             config = Config.load()
@@ -351,7 +355,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         print(f"  skip  {item.name}  ({item.problem})")
     if args.dry_run:
         print(f"\n{len(plan.ready)} file(s) would be exported (dry run).")
-        return 0
+        return 1 if plan.problems else 0  # match the real run's exit code
 
     exported, errors = export.apply_export_plan(plan, symlink=args.symlink)
     for message in errors:

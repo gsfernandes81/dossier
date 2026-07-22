@@ -27,7 +27,7 @@ pypdfium2 adapters are thin and desktop-only.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -56,25 +56,6 @@ def page_hashes(path: Path) -> list[int]:
     if suffix in _IMAGE_SUFFIXES:
         return [_image_hash(path)]
     return []
-
-
-def hashes_for_files(paths: Iterable[Path]) -> dict[str, list[int]]:
-    """Map each readable page-bearing file to its per-page hashes.
-
-    Unreadable / corrupt files are skipped so one bad file can't abort a batch;
-    a missing ``[dedup]`` extra raises :class:`DedupError` (it's not per-file).
-    """
-    out: dict[str, list[int]] = {}
-    for path in paths:
-        try:
-            hashes = page_hashes(path)
-        except DedupError:
-            raise
-        except Exception:
-            continue
-        if hashes:
-            out[path.as_posix()] = hashes
-    return out
 
 
 def dhash_from_grey(pixels: Sequence[int]) -> int:
