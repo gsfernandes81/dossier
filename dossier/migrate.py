@@ -27,9 +27,9 @@ auto-created.
 **Expiries** are taken from the Notion *Marine Documents* table (`export`'s
 ``expiries`` list) — the authoritative source; they are **not** inferred from
 document names (that was too aggressive — e.g. sea-service testimonials that
-record a date range don't expire). Issue dates are still parsed from names for
-now; that name parsing is slated to become dismissable *suggestions* (see
-ROADMAP.md), not an authority.
+record a date range don't expire). **Issue dates are no longer parsed from names
+here either**: name-based dates now surface as dismissable *suggestions*
+(:mod:`dossier.suggest`), reviewed in the detail pane, never written by migration.
 """
 
 from __future__ import annotations
@@ -41,8 +41,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import PurePosixPath
 from typing import Any
-
-from dateutil import parser as du_parser
 
 from dossier.config import Config
 from dossier.errors import DocumentExistsError
@@ -99,40 +97,10 @@ def decode_slot(value: float | None) -> tuple[int | None, int | None]:
 
 
 # -- dates -------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class DateParse:
-    issue: date | None = None
-    expiry: date | None = None
-    note: str = ""  # non-empty means "review this"
-
-
-_DATE_TOKEN = re.compile(
-    r"("
-    r"\d{1,2}[-/][A-Za-z]{3,9}[-/]\d{2,4}"  # 07-Jan-2026
-    r"|\d{4}[-/][A-Za-z]{3,9}[-/]\d{1,2}"  # 2020-dec-11
-    r"|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}"  # 10-07-26
-    r"|\d{4}[-/]\d{1,2}[-/]\d{1,2}"  # 2019-05-19
-    r")"
-)
-
-
-def _parse_token(token: str) -> date | None:
-    # ISO-style tokens lead with a 4-digit year (YYYY-MM-DD) and must NOT be read
-    # dayfirst, or "2022-01-06" flips to 2022-06-01. Only DD-first numeric tokens
-    # (10-07-26) are dayfirst.
-    iso_like = bool(re.match(r"\d{4}[-/]", token))
-    try:
-        parsed = du_parser.parse(token, dayfirst=not iso_like, yearfirst=iso_like)
-    except (ValueError, OverflowError, TypeError):
-        return None
-    return parsed.date()
-
-
-def _token_unambiguous(token: str) -> bool:
-    # A spelled-out month or a 4-digit year fixes the day/month order.
-    return bool(re.search(r"[A-Za-z]", token)) or bool(re.search(r"\d{4}", token))
+#
+# Expiries come from the Notion Marine table (below). Issue dates are no longer
+# parsed from names here — that lives in dossier.suggest as dismissable
+# suggestions.
 
 
 def _parse_expiries(value: object) -> dict[str, date]:
@@ -153,27 +121,6 @@ def _parse_expiries(value: object) -> dict[str, date]:
         except ValueError:
             continue
     return out
-
-
-def parse_dates(name: str) -> DateParse:
-    """Pull issue/expiry dates out of a document name (dayfirst)."""
-    pairs = [(tok, _parse_token(tok)) for tok in _DATE_TOKEN.findall(name)]
-    valid = [(tok, dt) for tok, dt in pairs if dt is not None]
-    if not valid:
-        return DateParse()
-    lower = name.lower()
-    unambiguous = all(_token_unambiguous(tok) for tok, _ in valid)
-    flag = "" if unambiguous else "two-digit numeric date; verify day/month order"
-
-    if len(valid) >= 2 and " to " in f" {lower} ":
-        return DateParse(issue=valid[0][1], expiry=valid[1][1], note=flag)
-    if "expir" in lower or "exp " in lower:
-        return DateParse(expiry=valid[-1][1], note=flag)
-    if "issue" in lower:
-        return DateParse(issue=valid[0][1], note=flag)
-    return DateParse(
-        expiry=valid[0][1], note="date with no issue/expiry keyword; guessed expiry"
-    )
 
 
 # -- physical/digital flags --------------------------------------------------
@@ -343,16 +290,12 @@ def build_plan(export: Mapping[str, object], index: FileIndex) -> MigrationPlan:
         temp_flags = derive_flags(_as_opt_str(_get(entry, "temp_storage")), None)
         perm_slot, perm_sub = decode_slot(_as_opt_float(_get(entry, "permanent_slot")))
         temp_slot, temp_sub = decode_slot(_as_opt_float(_get(entry, "temp_slot")))
-        dates = parse_dates(name)
-        # Only the issue date is taken from the name now; flag it when the token
-        # was an ambiguous two-digit date. Expiry comes from the Marine table.
-        if dates.issue is not None and dates.note:
-            plan.issues.append(MigrationIssue(slug, "uncertain-date", dates.note))
-
+        # Issue dates are no longer taken from the name — they surface as
+        # dismissable suggestions (dossier.suggest). Expiry comes from the Marine
+        # table only.
         doc = Document(
             id=slug,
             name=name,
-            issue_date=dates.issue,
             expiry_date=expiries.get(name),
             has_physical=flags.has_physical,
             has_digital=flags.has_digital,
