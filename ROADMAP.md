@@ -1,84 +1,75 @@
 # dossier roadmap
 
-**Where we are (2026-07-22).** The Miller-columns home shipped across PRs #15–#30:
-browse · detail pane · bottom-bar search · the full action set (`⏎ o i b e n m s
-d x`) · touch/Termux · Nerd-Font icons. The durable flat-file store, the Notion
-migration engine, and `ds doctor` predate that. 91 tests, CI green.
+**Where we are (2026-07-22).** The Miller-columns home shipped (PRs #15–#31):
+browse · detail pane · bottom-bar search · the full action set · touch/Termux ·
+Nerd-Font icons · spacing/gutter polish. **Expiries now come from the Notion
+_Marine Documents_ table** (#32) — the authoritative source, not document names.
+92 tests, CI green.
 
-What's left is below, in the order that gets the most value soonest. Effort:
-**S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices. Per-item
-rationale lives in `DESIGN.md` §14; this file is the ordering.
-
----
+Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
+Per-item rationale lives in `DESIGN.md` §14.
 
 ## Phase 1 — Live on your real data
-*Goal: stop building against fixtures — get the 137 documents in and use it daily.*
-This is the biggest unlock; everything after is easier to judge once you're dogfooding.
+- [x] **Expiries from the Notion Marine Documents table** (authoritative) — #32
+- [ ] **`ds reset`** (S) — folder-data reset (clears `.dossier/` only, never the real
+  files) + `--global` config reset. The safety net that makes re-importing painless.
+- [ ] **Apply the migration** *(milestone)* — `ds init` on the real Syncthing folder,
+  `ds migrate --apply`, review. The 5 marine expiries + the file links land.
+- [ ] **Fuzzy file-suggestion review flow** (M) — a TUI screen to accept/reject the
+  ~47 suggested file matches the migration couldn't auto-link.
 
-1. **`ds reset`** (S) — folder-data reset (clears `.dossier/` only; **never** the
-   real soft-copy files) + `--global` config reset. Do this **first**: it's the
-   safety net that makes re-importing painless while you tune the migration.
-2. *(optional, before the import — for a cleaner first pass)* **Migration date +
-   slug wins** (S–M): thread Notion `createdTime` to rule out implausible year
-   readings (auto-resolves most of the ~33 ambiguous dates); parse "issued X
-   expires Y" ranges; finalize the slug algorithm (transliteration, year-suffix
-   disambiguation for the four `BRP Expires …` files, reserved-name guard) and the
-   2-digit-year century pivot. Skippable — `ds doctor` + edit already fix these
-   in-app afterwards.
-3. **Apply the migration** *(milestone)* — `ds init` on the real Syncthing folder,
-   `ds migrate --apply`, review. 51/137 files auto-link on the dry run.
-4. **Fuzzy-suggestion review flow** (M) — a TUI screen to accept/reject the ~47
-   suggested file matches the migration wouldn't auto-link. The suggestions
-   already come out of `migrate.build_plan`; this surfaces them for one-key triage.
+## Phase 2 — Expiry watch (now backed by real data)
+- [ ] **`ignore_expiry` toggle** (S) — a keypress to drop residual old CDCs from the watch.
+- [ ] **Expiry-watch surface** (M) — the mockup's 5th screen: tracked docs
+  soonest-first, an "N tracked · M red (≤ threshold)" header, open / ignore from the
+  list. (`query.tracked` logic is already done.)
 
-## Phase 2 — Finish the expiry watch
-*Goal: the marquee thing Notion did poorly — "which marine / motorcycle doc needs renewing?"*
-The logic (`query.tracked`, opt-out; supersession) is already done — this is surfacing it.
+## Phase 3 — Dedup by visual similarity  *(sooner rather than later, not first)*
+- [ ] **Near-duplicate detection** (M–L) — the same document scanned more than once
+  from different sources at different times. Compare renditions by perceptual hash
+  and/or image embeddings, and **propose merges** (keep one, fold the rest). Review
+  only, never automatic. Desktop pass over the linked files.
 
-5. **`ignore_expiry` toggle** (S) — a keypress (on the watch list and/or detail)
-   that drops residual old CDCs from tracking. Minimal home now; Phase 3 makes it a
-   proper field.
-6. **Expiry-watch surface** (M) — the mockup's 5th screen: tracked docs
-   soonest-expiry-first, an "N tracked · M red (≤ threshold)" header, open / ignore
-   from the list.
+## Phase 4 — Dismissable suggestions  (replaces the name-based date system)
+- [ ] **Suggestions framework** (M) — per-document suggestions for fields (esp.
+  issue/expiry): accept, or **dismiss individually**; dismissals persist; never
+  auto-write.
+- [ ] **Demote name parsing → suggestions** (M) — the current name-based date parsing
+  stops being an authority and feeds the suggestions layer instead. We don't rely on
+  filenames to decide whether a doc even has an expiry. Period-docs (sea-service
+  testimonials, voyage records): `expiry = None`, span → `notes`, and **do not** take
+  the issue date from the range's start.
+  - *Motorcycle expiries* (CBT, etc.) aren't in the Marine table — they arrive here as
+    name suggestions to accept, or via manual entry, until/unless a structured source
+    exists.
 
-## Phase 3 — Editing & search ergonomics
-*Goal: make everyday editing and searching frictionless.*
+## Phase 5 — Editing & search ergonomics
+- [ ] **Editable detail pane (col 3)** (L) — edit every parameter inline; the natural
+  home for **accepting suggestions** and toggling `ignore_expiry`. Absorbs the `e`
+  edit modal and folds `b`/`s`/`m` into inline fields, freeing column 2 for navigation.
+- [ ] **Search as an in-place Miller filter** (M) — keep the three columns during
+  search; filter the documents pane in place (root-wide), detail preview following the
+  highlight.
 
-7. **Editable detail pane (col 3)** (L) — edit *every* parameter inline in the
-   third column (name, dates, location/slot, tags, bundles, flags, renditions,
-   `ignore_expiry`, supersession). Absorbs the `e` edit modal and folds
-   `b`/`s`/`m`/ignore into inline fields, freeing column 2 for navigation. Drill
-   `→` to edit, `Esc`/`←` back; keyboard-first.
-8. **Search as an in-place Miller filter** (M) — keep the three columns during
-   search (don't hide the detail); filter the documents pane in place (root-wide),
-   detail preview following the highlight. Decide how location scoping reads while
-   filtering (only-matching-locations vs. a forced "All").
+## Phase 6 — Bundles & export
+- [ ] **`ds export`** (M) — export a bundle's files to an external folder (copy or
+  symlink), the original "gather the files for this application" goal.
 
-## Phase 4 — Bundles & export
-*Goal: gather a set of documents for an application (US visa, OCI, …).*
+## Phase 7 — Vision suggestions  *(deferred)*
+- [ ] **`ds scan`** (L) — a local VLM (llama.cpp) reads linked scans and **suggests**
+  issue/expiry dates + an expires-vs-period classification into the suggestions layer,
+  with grounding + validation (quote the source text, cross-check, low temperature).
+  Review only, never auto-apply.
+- [ ] **Model selection in settings** (S) — pull the available models from your
+  llama.cpp **router** (`/v1/models`) and choose per run.
+  - *Researched stack:* Qwen3-VL-8B-Instruct Q4 (or Qwen2.5-VL-7B fallback) served by
+    `llama-server --mmproj` behind the OpenAI `/v1/chat/completions` endpoint with a
+    JSON grammar; PyMuPDF @ ~250 DPI; desktop-only (an 8B VLM isn't viable on the phone).
 
-9. **`ds export`** (M) — export a bundle's files to an external folder (copy or
-   symlink), the original "export all the files for this application" goal. Bundles
-   themselves already exist (model + the `b` action).
-
-## Phase 5 — Nice-to-have / research
-10. **Vision date extraction** (L) — a local `llama.cpp` image model to read
-    issue/expiry dates straight off the scans instead of inferring from filenames.
-    A research spike; lowest priority.
-11. **Obsidian vault confirmation** (S, research) — verify Obsidian opens a
-    dot-prefixed folder as a vault root. Only matters if you ever want to lean on
-    Obsidian over the `.dossier/` store; otherwise drop it.
-
----
-
-## Reading the order
-- **Quick wins, pull forward anytime:** `ds reset` (S), the `ignore_expiry` toggle
-  (S), and the range-parsing date win (S).
-- **Why data-first:** the app is feature-complete enough that the highest-value
-  next step is putting *your* documents in it — real data will tell you which of
-  Phases 2–4 actually matters most day to day, and may reshuffle the rest.
-- **The one real dependency:** the editable detail pane (Phase 3) re-homes the
-  `ignore_expiry` toggle and the edit modal — so Phase 2 gives `ignore_expiry` a
-  minimal keypress home, and Phase 3 turns it into a proper field. Nothing else is
-  blocked; phases can be reordered to taste.
+## Notes
+- **Quick wins:** `ds reset` (S), the `ignore_expiry` toggle (S).
+- **Dependencies:** the editable detail pane (Phase 5) re-homes `ignore_expiry` and
+  accept-suggestion — Phase 2 gives `ignore_expiry` a minimal key first; Phase 7
+  (vision) needs Phase 4 (suggestions) to land its proposals into.
+- **Someday:** `createdTime` year-plausibility + "issued X expires Y" range parsing
+  (fold into suggestions quality), slug finalization, Obsidian-vault confirmation.

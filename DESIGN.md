@@ -461,6 +461,26 @@ shipped in PRs #15–#25. **See `ROADMAP.md` for the phased ordering of everythi
   edit modal folds into col 3, and `b` bundle / `s` supersede / `m` move / the `ignore_expiry` toggle
   can become inline fields there — leaving col 2 for navigation. Drill `→` into the detail to edit,
   `Esc`/`←` back; keep it keyboard-first.
+- **Expiries come from the Notion import, not names (done — #32).** Expiries are read from the
+  structured `Expiry` field on the Notion *Marine Documents* sister table (the only table with
+  expiries), exported as an `expiries` list and applied by `build_plan` matched by document name.
+  Name-based expiry inference is dropped — it was too aggressive (a sea-service testimonial that
+  records a date range does not *expire*). Motorcycle expiries aren't in that table; they'll arrive
+  via suggestions or manual entry.
+- **Dismissable suggestions framework** — name-based date parsing (issue dates, "X→Y" ranges) is
+  demoted from an authority to a *suggestion* layer: per-document suggestions the user accepts or
+  **dismisses individually** (dismissals persist; never auto-write). Period-docs: `expiry=None`, span
+  → `notes`, and don't take the issue date from the range start. Feeds from name parsing now and,
+  later, the vision pass.
+- **Dedup by visual similarity** (sooner rather than later) — the same document may be scanned more
+  than once from different sources at different times; compare renditions by perceptual hash and/or
+  image embeddings and propose merges (keep one, fold the rest). Review only.
+- **Vision suggestions** (deferred) — a `ds scan` pass where a local VLM reads linked scans and
+  *suggests* issue/expiry + expires-vs-period classification into the suggestions layer, with
+  grounding + validation, never auto-applied. **Model chosen in settings from a llama.cpp router-mode
+  `/v1/models` list.** Researched stack: Qwen3-VL-8B-Instruct Q4 (or Qwen2.5-VL-7B) via
+  `llama-server --mmproj` + OpenAI `/v1/chat/completions` with a JSON grammar; PyMuPDF @ ~250 DPI;
+  desktop-only.
 
 ---
 
