@@ -61,6 +61,7 @@ from dossier.tui.detail_pane import DetailPane
 from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
+    BundlesScreen,
     DoctorScreen,
     SupersedeScreen,
     WatchScreen,
@@ -90,6 +91,7 @@ _EDIT_LOCKED = frozenset(
         "watch",
         "reconcile",
         "doctor",
+        "bundles",
         "toggle_expiring",
         "focus_search",
         "drill_in",
@@ -166,6 +168,7 @@ class HomeScreen(Screen[None]):
         Binding("w", "watch", "Watch"),
         Binding("r", "reconcile", "Reconcile"),
         Binding("d", "doctor", "Doctor"),
+        Binding("B", "bundles", "Bundles"),
         Binding("x", "toggle_expiring", "Expiring"),
     ]
 
@@ -189,6 +192,7 @@ class HomeScreen(Screen[None]):
         self._selection: str = _ALL
         self._filter_text = ""
         self._expiring_only = False
+        self._bundle_filter: str | None = None  # scope to one bundle's docs
         self._show_detail = False
         self._show_issue = False
         self._detail_id: str | None = None
@@ -242,7 +246,8 @@ class HomeScreen(Screen[None]):
         expiry = (
             (ExpiryStatus.EXPIRED, ExpiryStatus.EXPIRING) if self._expiring_only else ()
         )
-        flt = query.Filter(text=self._filter_text, expiry=expiry)
+        bundles = (self._bundle_filter,) if self._bundle_filter else ()
+        flt = query.Filter(text=self._filter_text, expiry=expiry, bundles=bundles)
         return query.search(
             self._docs,
             flt,
@@ -261,7 +266,11 @@ class HomeScreen(Screen[None]):
         return self._by_location.get(self._selection, [])
 
     def _is_searching(self) -> bool:
-        return bool(self._filter_text) or self._expiring_only
+        return (
+            bool(self._filter_text)
+            or self._expiring_only
+            or self._bundle_filter is not None
+        )
 
     def _row_mode(self) -> RowMode:
         if self._narrow or self._portrait:
@@ -455,6 +464,7 @@ class HomeScreen(Screen[None]):
             self._set_mouse_reporting(True)
             search.value = ""
             self._filter_text = ""
+            self._bundle_filter = None  # clearing search also drops a bundle scope
             self._update_searching()
             self._refresh_documents()
             self._focus_documents()
@@ -551,6 +561,12 @@ class HomeScreen(Screen[None]):
             ReconcileScreen(self._store, self._config), self._after_watch
         )
 
+    def action_bundles(self) -> None:
+        self.app.push_screen(
+            BundlesScreen(self._store, self._config, today=self._today),
+            self._after_bundles,
+        )
+
     def action_doctor(self) -> None:
         self.app.push_screen(
             DoctorScreen(self._store, self._config), self._after_doctor
@@ -643,6 +659,14 @@ class HomeScreen(Screen[None]):
             doc = self._doc_by_id(doc_id)
             if doc is not None:
                 self.open_detail(doc.id)
+
+    def _after_bundles(self, slug: str | None) -> None:
+        self._reload()  # a bundle date edit may have landed
+        if slug is not None:
+            self._bundle_filter = slug  # scope the documents pane to this bundle
+            self._update_searching()
+            self._refresh_documents()
+            self.notify(f"showing bundle {slug} — Esc clears")
 
     # -- detail-pane edit messages -------------------------------------------
 
