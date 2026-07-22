@@ -71,6 +71,7 @@ class GlyphSet:
     note: str = ""  # notes
     open: str = ""  # the open-file action
     new: str = ""  # the new-document action
+    edit: str = ""  # the edit action
     keyboard: str = ""  # the raise-keyboard action
 
 
@@ -103,6 +104,7 @@ NERD = GlyphSet(
     note="",  # nf-fa-sticky_note
     open="",  # nf-fa-external_link
     new="",  # nf-fa-plus
+    edit="",  # nf-fa-edit (pencil-square)
     keyboard="",  # nf-fa-keyboard_o
 )
 

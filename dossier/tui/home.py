@@ -44,7 +44,7 @@ from datetime import date
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Grid, Horizontal, Vertical
 from textual.events import Resize
 from textual.reactive import reactive
 from textual.screen import Screen
@@ -114,14 +114,26 @@ class HomeScreen(Screen[None]):
 
     DEFAULT_CSS = """
     #bottombar { dock: bottom; height: 2; }
-    #actionbar { display: none; height: 3; width: 1fr; }
-    #actionbar Button { width: 1fr; min-width: 4; margin: 0; border: none; height: 3; }
+    #actionbar {
+        display: none; layout: grid; grid-rows: 5; grid-gutter: 0 1;
+        height: auto; width: 1fr;
+    }
+    #actionbar Button {
+        width: 1fr; min-width: 6; height: 5; content-align: center middle;
+    }
     #search { height: 1; border: none; padding: 0 1; background: $panel; }
     #panes { height: 1fr; }
 
-    /* Touch (Termux): a tap action row above the command bar. */
-    HomeScreen.touch #bottombar { height: 5; }
-    HomeScreen.touch #actionbar { display: block; }
+    /* Touch (Termux): a tap-action grid above the command bar — big thumb
+       targets. Landscape lays the six actions 3-wide (2 rows); a tall portrait
+       phone gets them 2-wide (3 rows). */
+    HomeScreen.touch #bottombar { height: 12; }
+    HomeScreen.touch.-portrait #bottombar { height: 17; }
+    HomeScreen.touch #actionbar { display: block; grid-size: 3; }
+    HomeScreen.touch.-portrait #actionbar { grid-size: 2; }
+    /* Two-line location rows on touch: a bigger tap target per category and a
+       far better fit for a tall phone screen than thin single lines. */
+    HomeScreen.touch #locations { height: 1fr; }
     #locations { width: 30; border-right: solid $panel; }
     #documents { width: 1fr; }  /* scrollbar gap comes from the row's spacer column */
     /* max-width caps the detail column on wide terminals so it stops hogging
@@ -211,10 +223,12 @@ class HomeScreen(Screen[None]):
         # (docking them directly onto the screen lets the footer overlap).
         g = self._glyphs
         with Vertical(id="bottombar"):
-            with Horizontal(id="actionbar"):
+            with Grid(id="actionbar"):
                 yield Button(_btn_label(g.open, "Open"), id="act-open")
-                yield Button(_btn_label(g.bundle, "Bundle"), id="act-bundle")
+                yield Button(_btn_label(g.edit, "Edit"), id="act-edit")
                 yield Button(_btn_label(g.new, "New"), id="act-new")
+                yield Button(_btn_label(g.bundle, "Bundle"), id="act-bundle")
+                yield Button(_btn_label(g.calendar, "Watch"), id="act-watch")
                 yield Button(g.keyboard or "Key", id="act-kbd")
             yield Input(placeholder="Search name / tags / notes…", id="search")
             yield Footer()
@@ -285,16 +299,21 @@ class HomeScreen(Screen[None]):
         options = self.query_one("#locations", OptionList)
         options.clear_options()
         g = self._glyphs
-        options.add_option(Option(_loc_label(g.inbox, "All", len(self._docs)), id=_ALL))
+        # On touch (Termux) each category is a two-line row — a bigger tap target.
+        wide = self._touch
+        options.add_option(
+            Option(_loc_label(g.inbox, "All", len(self._docs), two_line=wide), id=_ALL)
+        )
         for loc, group in self._by_location.items():
             if loc is None:
-                label = _loc_label(g.unlocated, "— no location —", len(group))
+                label = _loc_label(
+                    g.unlocated, "— no location —", len(group), two_line=wide
+                )
                 options.add_option(Option(label, id=_UNLOCATED))
             else:
                 title = self._locations[loc].title if loc in self._locations else loc
-                options.add_option(
-                    Option(_loc_label(g.folder, title, len(group)), id=loc)
-                )
+                label = _loc_label(g.folder, title, len(group), two_line=wide)
+                options.add_option(Option(label, id=loc))
 
     def _refresh_documents(self) -> None:
         options = self.query_one("#documents", OptionList)
@@ -324,7 +343,10 @@ class HomeScreen(Screen[None]):
             options.highlighted = ids.index(previous)
         elif self._is_searching() and ids:
             options.highlighted = 0  # the preview follows the top hit
-        self.app.sub_title = f"{len(docs)} / {len(self._docs)} documents"
+        # Drop the noun when narrow (so the header truncates the word cleanly, not
+        # mid-word), and use the short "docs" otherwise.
+        noun = "" if self._narrow else " docs"
+        self.app.sub_title = f"{len(docs)} / {len(self._docs)}{noun}"
 
     def _update_detail(self) -> None:
         pane = self.query_one("#detail", DetailPane)
@@ -442,10 +464,14 @@ class HomeScreen(Screen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "act-open":
             self.action_open_file()
-        elif event.button.id == "act-bundle":
-            self.action_bundle()
+        elif event.button.id == "act-edit":
+            self.action_edit()
         elif event.button.id == "act-new":
             self.action_new()
+        elif event.button.id == "act-bundle":
+            self.action_bundle()
+        elif event.button.id == "act-watch":
+            self.action_watch()
         elif event.button.id == "act-kbd":
             self._raise_keyboard()
 
@@ -694,10 +720,14 @@ def _highlighted_id(options: OptionList) -> str | None:
     return options.get_option_at_index(index).id
 
 
-def _loc_label(icon: str, title: str, count: int) -> Text:
+def _loc_label(icon: str, title: str, count: int, *, two_line: bool = False) -> Text:
     prefix = f"{icon}  " if icon else ""
     label = Text(f"{prefix}{title}", no_wrap=True, overflow="ellipsis")
-    label.append(f"  {count}", style="dim")
+    if two_line:
+        indent = "    " if icon else ""
+        label.append(f"\n{indent}{count} document{'' if count == 1 else 's'}", "dim")
+    else:
+        label.append(f"  {count}", style="dim")
     return label
 
 

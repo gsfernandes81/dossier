@@ -29,7 +29,8 @@ Three shapes, one status vocabulary (see :data:`_STATUS_STYLE`):
   detail pane opens; each row keeps a one-char expiry cue so expired items still
   stand out while scanning.
 * :attr:`RowMode.MULTILINE` — narrow panes / portrait: name (+ marker) on line
-  one, a dim meta line (date · slot · tags · flags) below.
+  one, then always a dim meta line (date · slot · tags · flags, or ``—`` when
+  empty) so every row keeps a steady two-line rhythm.
 
 Icons come from a :class:`~dossier.tui.glyphs.GlyphSet` (Nerd Font or ASCII),
 chosen per device — see :mod:`dossier.tui.glyphs`.
@@ -167,13 +168,13 @@ def _compact(view: DocumentView, *, superseded: bool, glyphs: GlyphSet) -> Table
     dim = _dim(superseded)
     glyph, style = _gutter(view.expiry, glyphs)
     gutter = Text(glyph or " ", style=_join(dim, style))
-    name = Text(doc.name or doc.id, style=dim)
-    # Every row carries a status glyph in a fixed gutter column, so items are
-    # anchored at the left edge and a wrapped name hangs under itself (indented
-    # past the glyph) instead of wrapping back to the pane's left edge.
+    name = Text(doc.name or doc.id, no_wrap=True, overflow="ellipsis", style=dim)
+    # A status glyph in a fixed gutter column anchors every item at the left; the
+    # name is ellipsized to one line so the collapsed list stays a tidy single
+    # row per document (no wrapping when the detail pane is open).
     grid = Table.grid(expand=True)
     grid.add_column(width=2)
-    grid.add_column(ratio=1)
+    grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
     grid.add_row(gutter, name)
     return grid
 
@@ -189,9 +190,12 @@ def _multiline(
         row.append(f"{marker} ", style=_join(dim, _STATUS_STYLE[view.expiry]))
     row.append(doc.name or doc.id, style=dim)
 
+    # Always emit the second line — a dim "—" when there's nothing to show — so
+    # every row is at least two lines and the list keeps a steady rhythm (a name
+    # that overflows the pane still wraps to more).
     meta = _meta_parts(view, show_issue=show_issue, glyphs=glyphs)
-    if meta:
-        row.append("\n  " + "  ·  ".join(meta), style=_join(dim, "dim"))
+    line2 = "  ·  ".join(meta) if meta else "—"
+    row.append(f"\n  {line2}", style=_join(dim, "dim"))
     return row
 
 

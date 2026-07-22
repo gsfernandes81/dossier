@@ -95,10 +95,14 @@ class DetailPane(VerticalScroll):
     """Detail of the selected document, read-only or inline-editable."""
 
     DEFAULT_CSS = """
-    DetailPane #detail-form Input, DetailPane #detail-form TextArea {
-        margin-bottom: 1;
+    /* Flat, single-line fields (no heavy per-field border box) so the edit form
+       stays close to the read view in density — a visual middle ground. */
+    DetailPane #detail-form Input {
+        height: 1; border: none; background: $boost; padding: 0 1; margin-bottom: 1;
     }
-    DetailPane #detail-form TextArea { height: 5; }
+    DetailPane #detail-form TextArea {
+        height: 4; border: none; background: $boost; padding: 0 1; margin-bottom: 1;
+    }
     DetailPane .df-slotrow { height: auto; }
     DetailPane .df-loc { width: 1fr; }
     DetailPane .df-slot { width: 10; margin-left: 1; }
@@ -107,7 +111,10 @@ class DetailPane(VerticalScroll):
     DetailPane .sg-label { width: 1fr; color: $text-muted; }
     DetailPane .sg-accept { width: auto; margin-left: 1; }
     DetailPane .sg-dismiss { width: 5; min-width: 3; margin-left: 1; }
-    DetailPane #f-bundles { height: auto; max-height: 8; margin-bottom: 1; }
+    DetailPane #f-bundles {
+        height: auto; max-height: 8; margin-bottom: 1;
+        border: none; background: $boost;  /* flat, like the other fields */
+    }
     DetailPane #f-renditions { height: auto; }
     DetailPane .df-rend-row { height: auto; }
     DetailPane .df-rlabel { width: 1fr; }
