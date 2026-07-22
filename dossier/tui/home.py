@@ -165,23 +165,30 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.show-detail #detail { width: 1fr; border-left: none; }
     """
 
+    # The Footer advertises only the high-frequency actions so it never overflows
+    # (and silently clips keys) at medium width. The rest stay one keystroke away
+    # and remain fully discoverable: `?` opens Textual's HelpPanel, which lists
+    # `show=False` bindings too. Edit-mode gating (check_action) carries over to
+    # both the footer and the panel automatically.
     BINDINGS = [
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "escape", "Back"),
         Binding("right", "drill_in", "Detail", show=False),
         Binding("left", "drill_out", "Back", show=False),
         Binding("o", "open_file", "Open"),
-        Binding("i", "toggle_dates", "Iss/Exp"),
-        Binding("b", "bundle", "Bundle"),
         Binding("e", "edit", "Edit"),
         Binding("n", "new", "New"),
-        Binding("m", "move", "Move"),
-        Binding("s", "supersede", "Supersede"),
-        Binding("w", "watch", "Watch"),
-        Binding("r", "reconcile", "Reconcile"),
-        Binding("d", "doctor", "Doctor"),
-        Binding("B", "bundles", "Bundles"),
-        Binding("x", "toggle_expiring", "Expiring"),
+        Binding("b", "bundle", "Bundle"),
+        Binding("question_mark", "app.show_help_panel", "Help"),
+        # Kept working, but off the footer — surfaced in the help panel (`?`):
+        Binding("i", "toggle_dates", "Iss/Exp", show=False),
+        Binding("m", "move", "Move", show=False),
+        Binding("s", "supersede", "Supersede", show=False),
+        Binding("w", "watch", "Watch", show=False),
+        Binding("r", "reconcile", "Reconcile", show=False),
+        Binding("d", "doctor", "Doctor", show=False),
+        Binding("B", "bundles", "Bundles", show=False),
+        Binding("x", "toggle_expiring", "Expiring", show=False),
     ]
 
     # True while the detail pane is editing; drives check_action (and, via
@@ -231,7 +238,7 @@ class HomeScreen(Screen[None]):
                 yield Button(_btn_label(g.calendar, "Watch"), id="act-watch")
                 yield Button(g.keyboard or "Key", id="act-kbd")
             yield Input(placeholder="Search name / tags / notes…", id="search")
-            yield Footer()
+            yield Footer(compact=True)
 
     def on_mount(self) -> None:
         # Composed once in compose() and never remounted, so cache it instead of
