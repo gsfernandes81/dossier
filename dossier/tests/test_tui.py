@@ -41,7 +41,6 @@ from dossier.tui.detail_pane import DetailPane
 from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
-    BundleScreen,
     DetailScreen,
     DocPickerScreen,
     DoctorScreen,
@@ -347,15 +346,17 @@ async def test_supersede_screen_sets_link(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_bundle_screen_creates_and_assigns(tmp_path: Path):
+async def test_inline_bundle_creates_and_assigns(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        coc = app.home._doc_by_id("coc")
-        assert coc is not None
-        app.push_screen(BundleScreen(store, app.home._docs, coc))
+        home = app.home
+        home.open_detail("coc")
         await pilot.pause()
-        new = app.screen.query_one("#bnew", Input)
+        home.action_bundle()  # inline: start_edit focused on the bundles field
+        await pilot.pause()
+        pane = home.query_one("#detail", DetailPane)
+        new = pane.query_one("#f-new-bundle", Input)
         new.focus()
         new.value = "US Visa"
         await pilot.pause()

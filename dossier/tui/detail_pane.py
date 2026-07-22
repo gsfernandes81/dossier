@@ -36,11 +36,20 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets import Checkbox, ContentSwitcher, Input, Label, Static, TextArea
+from textual.widgets import (
+    Checkbox,
+    ContentSwitcher,
+    Input,
+    Label,
+    SelectionList,
+    Static,
+    TextArea,
+)
+from textual.widgets.selection_list import Selection
 
 from dossier.errors import StaleWriteError, StoreError
 from dossier.migrate import slugify
-from dossier.model import Document
+from dossier.model import Bundle, Document
 from dossier.query import DocumentView, plan_move
 from dossier.store import Store
 from dossier.tui import detail, forms
@@ -60,6 +69,8 @@ _TEMP = "f-temp"
 _TEMP_SLOT = "f-temp-slot"
 _TEMP_SUB = "f-temp-sub"
 _TAGS = "f-tags"
+_BUNDLES = "f-bundles"
+_NEW_BUNDLE = "f-new-bundle"
 _PHYSICAL = "f-physical"
 _DIGITAL = "f-digital"
 _IGNORE = "f-ignore"
@@ -83,6 +94,7 @@ class DetailPane(VerticalScroll):
     DetailPane .df-slotrow { height: auto; }
     DetailPane .df-loc { width: 1fr; }
     DetailPane .df-slot { width: 10; margin-left: 1; }
+    DetailPane #f-bundles { height: auto; max-height: 8; margin-bottom: 1; }
     DetailPane #f-flags { height: auto; margin-bottom: 1; }
     DetailPane #f-flags Checkbox { width: auto; margin-right: 2; border: none; }
     DetailPane .df-label { color: $text-muted; }
@@ -128,6 +140,8 @@ class DetailPane(VerticalScroll):
         self._focus_target = _NAME
         self._snapshot: tuple[object, ...] = ()
         self._discard_armed = False
+        self._bundle_slugs: set[str] = set()  # slugs currently offered in the list
+        self._new_bundle_titles: dict[str, str] = {}  # slug → title for new bundles
 
     def compose(self) -> ComposeResult:
         with ContentSwitcher(initial=_READ):
@@ -163,6 +177,13 @@ class DetailPane(VerticalScroll):
                     )
                 yield Label("Tags (space-separated)", classes="df-label")
                 yield Input(id=_TAGS, classes="df-field")
+                yield Label("Bundles", classes="df-label")
+                yield SelectionList[str](id=_BUNDLES, classes="df-field")
+                yield Input(
+                    id=_NEW_BUNDLE,
+                    placeholder="new bundle name (Enter adds)",
+                    classes="df-field",
+                )
                 with Horizontal(id="f-flags"):
                     yield Checkbox("Physical", id=_PHYSICAL, classes="df-field")
                     yield Checkbox("Digital", id=_DIGITAL, classes="df-field")
@@ -264,6 +285,7 @@ class DetailPane(VerticalScroll):
         doc.temp_location = forms.slug(self.query_one(f"#{_TEMP}", Input).value)
         doc.temp_slot = temp_slot
         doc.temp_subslot = temp_sub
+        self._apply_bundles(doc)  # sets doc.bundles + persists any new bundle
 
         # Permanent location: a changed location/slot shifts neighbours to insert
         # (plan_move), so save every doc it touches — the moving one last.
@@ -327,8 +349,56 @@ class DetailPane(VerticalScroll):
     @on(Input.Changed)
     @on(Checkbox.Changed)
     @on(TextArea.Changed)
+    @on(SelectionList.SelectedChanged)
     def _field_changed(self) -> None:
         self._discard_armed = False  # any edit disarms a pending discard
+
+    @on(Input.Submitted, f"#{_NEW_BUNDLE}")
+    def _add_bundle(self, event: Input.Submitted) -> None:
+        event.stop()
+        name = event.value.strip()
+        event.input.value = ""
+        if not name:
+            return
+        slug = slugify(name)
+        if slug in self._bundle_slugs:
+            self.notify(f"{slug} is already listed")
+            return
+        self._bundle_slugs.add(slug)
+        self._new_bundle_titles[slug] = name
+        self.query_one(f"#{_BUNDLES}", SelectionList).add_option(
+            Selection(name, slug, True)
+        )
+
+    def _populate_bundles(self, doc: Document) -> None:
+        selection = self.query_one(f"#{_BUNDLES}", SelectionList)
+        selection.clear_options()
+        self._bundle_slugs = set()
+        self._new_bundle_titles = {}
+        current = set(doc.bundles)
+        for slug, title in self._known_bundles():
+            self._bundle_slugs.add(slug)
+            selection.add_option(Selection(title, slug, slug in current))
+
+    def _known_bundles(self) -> list[tuple[str, str]]:
+        titles = {
+            slug: bundle.title for slug, bundle in self._store.load_bundles().items()
+        }
+        for doc in self._docs:
+            for slug in doc.bundles:
+                titles.setdefault(slug, slug)
+        return sorted(titles.items())
+
+    def _apply_bundles(self, doc: Document) -> None:
+        selected = sorted(self.query_one(f"#{_BUNDLES}", SelectionList).selected)
+        doc.bundles = selected
+        bundles = self._store.load_bundles()
+        new = [slug for slug in selected if slug not in bundles]
+        if new:
+            for slug in new:
+                title = self._new_bundle_titles.get(slug, slug.replace("-", " "))
+                bundles[slug] = Bundle(slug=slug, title=title)
+            self._store.save_bundles(bundles)
 
     def _populate_form(self, doc: Document) -> None:
         self.query_one(f"#{_NAME}", Input).value = doc.name
@@ -345,6 +415,8 @@ class DetailPane(VerticalScroll):
         self.query_one(f"#{_DIGITAL}", Checkbox).value = doc.has_digital
         self.query_one(f"#{_IGNORE}", Checkbox).value = doc.ignore_expiry
         self.query_one(f"#{_NOTES}", TextArea).text = doc.notes
+        self.query_one(f"#{_NEW_BUNDLE}", Input).value = ""
+        self._populate_bundles(doc)
 
     def _form_values(self) -> tuple[object, ...]:
         return (
@@ -362,6 +434,7 @@ class DetailPane(VerticalScroll):
             self.query_one(f"#{_DIGITAL}", Checkbox).value,
             self.query_one(f"#{_IGNORE}", Checkbox).value,
             self.query_one(f"#{_NOTES}", TextArea).text,
+            tuple(sorted(self.query_one(f"#{_BUNDLES}", SelectionList).selected)),
         )
 
     def _dirty(self) -> bool:

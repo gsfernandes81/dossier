@@ -60,7 +60,6 @@ from dossier.tui.detail_pane import DetailPane
 from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
-    BundleScreen,
     DetailScreen,
     DoctorScreen,
     SupersedeScreen,
@@ -497,10 +496,13 @@ class HomeScreen(Screen[None]):
 
     def action_bundle(self) -> None:
         doc = self._current_doc()
-        if doc is not None:
-            self.app.push_screen(
-                BundleScreen(self._store, self._docs, doc), self._after_edit
-            )
+        if doc is None:
+            return
+        if not self._show_detail:
+            self.open_detail(doc.id)
+        self.query_one("#detail", DetailPane).start_edit(
+            doc, self._docs, focus="f-bundles"
+        )
 
     def action_toggle_expiring(self) -> None:
         self._expiring_only = not self._expiring_only
