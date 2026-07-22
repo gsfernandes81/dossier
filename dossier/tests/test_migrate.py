@@ -40,33 +40,6 @@ def test_decode_slot():
     assert migrate.decode_slot(None) == (None, None)
 
 
-def test_parse_dates_range_keywords_and_flags():
-    rng = migrate.parse_dates("CoC Card 10-02-25 to 28-09-26")
-    assert rng.issue == date(2025, 2, 10)
-    assert rng.expiry == date(2026, 9, 28)
-    assert rng.note  # two-digit numeric -> flagged for review
-
-    exp = migrate.parse_dates("ENG-1 Med Cert Expires 10-07-26")
-    assert exp.expiry == date(2026, 7, 10)
-    assert exp.issue is None
-
-    iss = migrate.parse_dates("LGTF Basic Gas Issued 24-06-2024")
-    assert iss.issue == date(2024, 6, 24)
-    assert iss.note == ""  # 4-digit year + keyword -> confident
-
-    named = migrate.parse_dates("Motorcycle CBT expires 07-Jan-2026")
-    assert named.expiry == date(2026, 1, 7)
-    assert named.note == ""
-
-    # ISO (YYYY-MM-DD) dates must NOT be read dayfirst.
-    iso = migrate.parse_dates("03 - 2022-01-06 to 2022-03-27 Sea Service Testimonial")
-    assert iso.issue == date(2022, 1, 6)
-    assert iso.expiry == date(2022, 3, 27)
-    assert iso.note == ""  # 4-digit year -> confident
-
-    assert migrate.parse_dates("Home office BRP Letter") == migrate.DateParse()
-
-
 def test_derive_flags():
     physical = migrate.derive_flags("Cert File #2048", None)
     assert physical.has_physical and physical.has_digital
@@ -155,12 +128,14 @@ def test_expiry_comes_only_from_the_marine_table_not_the_name():
             {"name": "Old Cert Expires 10-07-26"},  # name says expiry, but not tracked
         ],
     }
-    docs = {
-        d.id: d for d in migrate.build_plan(export, migrate.FileIndex([])).documents
-    }
+    plan = migrate.build_plan(export, migrate.FileIndex([]))
+    docs = {d.id: d for d in plan.documents}
     assert docs["coc-card"].expiry_date == date(2026, 9, 28)
     # Name-based expiry is dropped: an untracked doc gets no expiry from its name.
     assert docs["old-cert-expires-10-07-26"].expiry_date is None
+    # Nor any issue date from a name — that's a suggestion now, not a migration.
+    assert docs["old-cert-expires-10-07-26"].issue_date is None
+    assert not any(issue.kind == "uncertain-date" for issue in plan.issues)
 
 
 def test_fuzzy_auto_links_distinguishing_file():

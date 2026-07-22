@@ -22,8 +22,8 @@ a *suggestion* here: it never decides whether a document has an expiry, and a
 date **range** in a name is treated as a period (its span goes to notes) unless
 the authoritative expiry confirms it as a validity window.
 
-The date-token primitives are duplicated from :mod:`dossier.migrate` for now; the
-migration's copy retires when its name-based issue-date writing is demoted.
+This module owns all name-date intelligence: the migration stopped parsing dates
+from names once its issue-date writing was demoted.
 """
 
 from __future__ import annotations
