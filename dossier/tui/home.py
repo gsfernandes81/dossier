@@ -97,7 +97,7 @@ class HomeScreen(Screen[None]):
     HomeScreen.touch #bottombar { height: 5; }
     HomeScreen.touch #actionbar { display: block; }
     #locations { width: 30; border-right: solid $panel; }
-    #documents { width: 1fr; padding: 0 2 0 0; }  /* right gap before scrollbar */
+    #documents { width: 1fr; }  /* scrollbar gap comes from the row's spacer column */
     /* max-width caps the detail column on wide terminals so it stops hogging
        the (often sparse) right third; the surplus goes to the documents pane. */
     #detail {

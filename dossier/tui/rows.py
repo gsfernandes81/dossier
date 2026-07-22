@@ -66,6 +66,11 @@ _STATUS_STYLE = {
     ExpiryStatus.NONE: "",
 }
 
+# Dense-row gap columns (cells): between the name and the right-aligned status,
+# and between the status and the pane's scrollbar.
+_NAME_STATUS_GAP = 2
+_SCROLLBAR_GAP = 2
+
 
 def doc_row(
     view: DocumentView,
@@ -109,10 +114,15 @@ def _dense(
             right.append("  ")
         right.append(files, style=dim)
 
-    grid = Table.grid(expand=True, padding=(0, 1))
-    grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
-    grid.add_column(justify="right", no_wrap=True)
-    grid.add_row(name, right)
+    # Explicit gap columns rather than pane padding: a Textual scroll container
+    # draws its scrollbar *outside* its padding, so padding never separates the
+    # content from the scrollbar — a trailing spacer column does.
+    grid = Table.grid(expand=True)
+    grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")  # name
+    grid.add_column(width=_NAME_STATUS_GAP)  # gap
+    grid.add_column(justify="right", no_wrap=True)  # status + files
+    grid.add_column(width=_SCROLLBAR_GAP)  # gap before the scrollbar
+    grid.add_row(name, "", right, "")
     return grid
 
 

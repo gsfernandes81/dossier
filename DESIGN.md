@@ -455,6 +455,12 @@ shipped in PRs #15–#25. Still open:
 - **A way to set `ignore_expiry`** — the model flag exists and drops a doc from the watch, but nothing
   toggles it from the UI. Intended for the detail / edit flow (e.g. an `x`/checkbox in the edit modal,
   or a key on the detail pane).
+- **Editable detail pane (col 3).** Let the third column edit *all* of a document's parameters inline
+  (name, dates, location/slot, tags, bundles, flags, renditions, `ignore_expiry`, supersession),
+  rather than only previewing. This can **absorb several of the documents-pane keybinds** — the `e`
+  edit modal folds into col 3, and `b` bundle / `s` supersede / `m` move / the `ignore_expiry` toggle
+  can become inline fields there — leaving col 2 for navigation. Drill `→` into the detail to edit,
+  `Esc`/`←` back; keep it keyboard-first.
 
 ---
 
