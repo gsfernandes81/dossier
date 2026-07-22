@@ -19,6 +19,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from textual.containers import Horizontal
 from textual.widgets import (
     Button,
     Checkbox,
@@ -733,6 +734,41 @@ async def test_edit_stale_write_refused_then_reloaded(tmp_path: Path):
         await pilot.pause()
         assert pane.query_one("#f-name", Input).value == "Theirs"  # form reloaded
         assert pane.editing
+
+
+@pytest.mark.asyncio
+async def test_inline_rendition_add_and_set_primary(tmp_path: Path):
+    store, config = _setup(tmp_path)  # passport: 1 rendition (passport.pdf, primary)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "passport")
+        pane.query_one("#rend-add", Button).press()  # append a blank file row
+        await pilot.pause()
+        rows = list(pane.query(".df-rend-row").results(Horizontal))
+        assert len(rows) == 2
+        rows[1].query_one(".df-rlabel", Input).value = "back"
+        rows[1].query_one(".df-rpath", Input).value = "passport-back.pdf"
+        rows[1].query_one(".df-rprimary", Checkbox).value = True  # radio clears row 0
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+    files = {(r.path, r.primary) for r in store.load("passport").files}
+    assert files == {("passport.pdf", False), ("passport-back.pdf", True)}
+
+
+@pytest.mark.asyncio
+async def test_inline_rendition_remove(tmp_path: Path):
+    store, config = _setup(tmp_path)  # passport: 1 rendition
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "passport")
+        pane.query_one(".df-rremove", Button).press()  # drop the only file row
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+    assert store.load("passport").files == []
 
 
 def test_linux_driver_exposes_mouse_toggle():

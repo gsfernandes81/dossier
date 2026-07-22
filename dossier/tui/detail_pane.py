@@ -37,6 +37,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import (
+    Button,
     Checkbox,
     ContentSwitcher,
     Input,
@@ -49,7 +50,7 @@ from textual.widgets.selection_list import Selection
 
 from dossier.errors import StaleWriteError, StoreError
 from dossier.migrate import slugify
-from dossier.model import Bundle, Document
+from dossier.model import Bundle, Document, Rendition
 from dossier.query import DocumentView, plan_move
 from dossier.store import Store
 from dossier.tui import detail, forms
@@ -71,6 +72,8 @@ _TEMP_SUB = "f-temp-sub"
 _TAGS = "f-tags"
 _BUNDLES = "f-bundles"
 _NEW_BUNDLE = "f-new-bundle"
+_RENDITIONS = "f-renditions"
+_REND_ADD = "rend-add"
 _PHYSICAL = "f-physical"
 _DIGITAL = "f-digital"
 _IGNORE = "f-ignore"
@@ -95,6 +98,13 @@ class DetailPane(VerticalScroll):
     DetailPane .df-loc { width: 1fr; }
     DetailPane .df-slot { width: 10; margin-left: 1; }
     DetailPane #f-bundles { height: auto; max-height: 8; margin-bottom: 1; }
+    DetailPane #f-renditions { height: auto; }
+    DetailPane .df-rend-row { height: auto; }
+    DetailPane .df-rlabel { width: 1fr; }
+    DetailPane .df-rpath { width: 2fr; }
+    DetailPane .df-rprimary { width: auto; border: none; margin-right: 1; }
+    DetailPane .df-rremove { width: 5; min-width: 3; }
+    DetailPane #rend-add { width: auto; margin-bottom: 1; }
     DetailPane #f-flags { height: auto; margin-bottom: 1; }
     DetailPane #f-flags Checkbox { width: auto; margin-right: 2; border: none; }
     DetailPane .df-label { color: $text-muted; }
@@ -142,6 +152,7 @@ class DetailPane(VerticalScroll):
         self._discard_armed = False
         self._bundle_slugs: set[str] = set()  # slugs currently offered in the list
         self._new_bundle_titles: dict[str, str] = {}  # slug → title for new bundles
+        self._rend_seq = 0  # monotonic id source for dynamically mounted file rows
 
     def compose(self) -> ComposeResult:
         with ContentSwitcher(initial=_READ):
@@ -188,6 +199,9 @@ class DetailPane(VerticalScroll):
                     yield Checkbox("Physical", id=_PHYSICAL, classes="df-field")
                     yield Checkbox("Digital", id=_DIGITAL, classes="df-field")
                     yield Checkbox("Ignore expiry", id=_IGNORE, classes="df-field")
+                yield Label("Files (label · path · ★ primary)", classes="df-label")
+                yield Vertical(id=_RENDITIONS)
+                yield Button("+ add file", id=_REND_ADD)
                 yield Label("Notes", classes="df-label")
                 yield TextArea(id=_NOTES, classes="df-field")
                 yield Label(
@@ -240,9 +254,13 @@ class DetailPane(VerticalScroll):
         self._is_new = is_new
         self._focus_target = focus
         self._populate_form(doc)
-        self._snapshot = self._form_values()
         self._discard_armed = False
         self.editing = True
+        # File rows mount asynchronously, so snapshot once the DOM has settled.
+        self.call_after_refresh(self._snapshot_now)
+
+    def _snapshot_now(self) -> None:
+        self._snapshot = self._form_values()
 
     def watch_editing(self, editing: bool) -> None:
         self.query_one(ContentSwitcher).current = _FORM if editing else _READ
@@ -286,6 +304,7 @@ class DetailPane(VerticalScroll):
         doc.temp_slot = temp_slot
         doc.temp_subslot = temp_sub
         self._apply_bundles(doc)  # sets doc.bundles + persists any new bundle
+        self._apply_renditions(doc)  # rebuilds doc.files from the file rows
 
         # Permanent location: a changed location/slot shifts neighbours to insert
         # (plan_move), so save every doc it touches — the moving one last.
@@ -328,8 +347,8 @@ class DetailPane(VerticalScroll):
             return
         self._doc = fresh
         self._populate_form(fresh)
-        self._snapshot = self._form_values()
         self._discard_armed = False
+        self.call_after_refresh(self._snapshot_now)
         self.notify("reloaded from disk")
         self.post_message(self.ReloadRequested())
 
@@ -400,6 +419,68 @@ class DetailPane(VerticalScroll):
                 bundles[slug] = Bundle(slug=slug, title=title)
             self._store.save_bundles(bundles)
 
+    # -- renditions (dynamically mounted rows) -------------------------------
+
+    def _populate_renditions(self, doc: Document) -> None:
+        container = self.query_one(f"#{_RENDITIONS}", Vertical)
+        container.remove_children()
+        self._rend_seq = 0
+        container.mount(*(self._rend_row(r) for r in doc.files))
+
+    def _rend_row(self, rendition: Rendition) -> Horizontal:
+        self._rend_seq += 1
+        return Horizontal(
+            Input(
+                value=rendition.label, placeholder="label", classes="df-field df-rlabel"
+            ),
+            Input(
+                value=rendition.path, placeholder="path", classes="df-field df-rpath"
+            ),
+            Checkbox("★", value=rendition.primary, classes="df-field df-rprimary"),
+            Button("✕", classes="df-rremove"),
+            classes="df-rend-row",
+            id=f"rend-row-{self._rend_seq}",
+        )
+
+    @on(Button.Pressed, f"#{_REND_ADD}")
+    def _add_rendition(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.query_one(f"#{_RENDITIONS}", Vertical).mount(
+            self._rend_row(Rendition(label="", path=""))
+        )
+        self._discard_armed = False
+
+    @on(Button.Pressed, ".df-rremove")
+    def _remove_rendition(self, event: Button.Pressed) -> None:
+        event.stop()
+        row = event.button.parent
+        if isinstance(row, Horizontal):
+            row.remove()
+        self._discard_armed = False
+
+    @on(Checkbox.Changed, ".df-rprimary")
+    def _primary_toggled(self, event: Checkbox.Changed) -> None:
+        if not event.value:
+            return  # only a *newly primary* row clears the others (radio behaviour)
+        for checkbox in self.query(".df-rprimary").results(Checkbox):
+            if checkbox is not event.checkbox:
+                checkbox.value = False
+
+    def _apply_renditions(self, doc: Document) -> None:
+        rends: list[Rendition] = []
+        primary_taken = False
+        for row in self.query(".df-rend-row").results(Horizontal):
+            path = row.query_one(".df-rpath", Input).value.strip()
+            if not path:
+                continue  # drop blank rows
+            label = row.query_one(".df-rlabel", Input).value.strip() or "file"
+            primary = (
+                row.query_one(".df-rprimary", Checkbox).value and not primary_taken
+            )
+            primary_taken = primary_taken or primary
+            rends.append(Rendition(label=label, path=path, primary=primary))
+        doc.files = rends
+
     def _populate_form(self, doc: Document) -> None:
         self.query_one(f"#{_NAME}", Input).value = doc.name
         self.query_one(f"#{_ISSUE}", Input).value = forms.iso(doc.issue_date)
@@ -417,6 +498,7 @@ class DetailPane(VerticalScroll):
         self.query_one(f"#{_NOTES}", TextArea).text = doc.notes
         self.query_one(f"#{_NEW_BUNDLE}", Input).value = ""
         self._populate_bundles(doc)
+        self._populate_renditions(doc)
 
     def _form_values(self) -> tuple[object, ...]:
         return (
@@ -435,6 +517,17 @@ class DetailPane(VerticalScroll):
             self.query_one(f"#{_IGNORE}", Checkbox).value,
             self.query_one(f"#{_NOTES}", TextArea).text,
             tuple(sorted(self.query_one(f"#{_BUNDLES}", SelectionList).selected)),
+            self._rendition_values(),
+        )
+
+    def _rendition_values(self) -> tuple[tuple[str, str, bool], ...]:
+        return tuple(
+            (
+                row.query_one(".df-rlabel", Input).value,
+                row.query_one(".df-rpath", Input).value,
+                row.query_one(".df-rprimary", Checkbox).value,
+            )
+            for row in self.query(".df-rend-row").results(Horizontal)
         )
 
     def _dirty(self) -> bool:
