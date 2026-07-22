@@ -23,15 +23,22 @@ and returns a Rich renderable the pane drops into a ``Static``.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 
 from rich.console import Group, RenderableType
 from rich.rule import Rule
 from rich.text import Text
 
-from dossier.model import Document, ExpiryStatus, FileStatus
+from dossier.model import Document, ExpiryStatus, FileStatus, SuggestedField, Suggestion
 from dossier.query import DocumentView
 from dossier.tui.glyphs import ASCII, GlyphSet
+
+_FIELD_LABEL = {
+    SuggestedField.ISSUE: "issue date",
+    SuggestedField.EXPIRY: "expiry date",
+    SuggestedField.NOTES: "period",
+}
 
 _EXPIRY_STYLE = {
     ExpiryStatus.EXPIRED: "bold red",
@@ -47,13 +54,15 @@ def render_detail(
     location_label: str | None,
     chain: list[Document],
     superseded_by: Document | None,
+    suggestions: Sequence[Suggestion] = (),
     glyphs: GlyphSet = ASCII,
 ) -> RenderableType:
     """Render the full detail of one document.
 
     ``location_label`` is the effective location already resolved to a title +
     slot; ``chain`` is the documents this one supersedes (newest replaced first);
-    ``superseded_by`` is the newer document that replaced this one, if any.
+    ``superseded_by`` is the newer document that replaced this one, if any;
+    ``suggestions`` are the live field suggestions (a dim "press e to review" hint).
     """
     doc = view.document
     header = Text(doc.name or doc.id, style="bold", overflow="fold")
@@ -79,6 +88,8 @@ def render_detail(
         parts.append(files)
     if chain:
         parts.append(_chain(chain, glyphs))
+    if suggestions:
+        parts.append(_suggestions(suggestions, glyphs))
     if doc.notes:
         parts.append(Rule(style="dim"))
         notes = Text()
@@ -130,6 +141,19 @@ def _files(view: DocumentView, glyphs: GlyphSet) -> RenderableType | None:
         body.append(f"  {rendition.path}\n", style="dim")
     if view.file is FileStatus.MISSING:
         body.append("a linked file is missing on disk\n", style="bold red")
+    return body
+
+
+def _suggestions(suggestions: Sequence[Suggestion], glyphs: GlyphSet) -> RenderableType:
+    body = Text()
+    _icon(body, glyphs.note)
+    body.append(f"Suggestions ({len(suggestions)})", style="bold")
+    body.append("  press e to review\n", style="dim")
+    for suggestion in suggestions:
+        label = _FIELD_LABEL[suggestion.field]
+        body.append(f"  {label}: ", style="dim")
+        body.append(" / ".join(suggestion.values), style="yellow")
+        body.append(f"  · from {suggestion.source}\n", style="dim")
     return body
 
 

@@ -31,6 +31,8 @@ bindings from firing mid-edit.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -48,9 +50,10 @@ from textual.widgets import (
 )
 from textual.widgets.selection_list import Selection
 
+from dossier import suggest
 from dossier.errors import StaleWriteError, StoreError
 from dossier.migrate import slugify
-from dossier.model import Bundle, Document, Rendition
+from dossier.model import Bundle, Document, Rendition, SuggestedField, Suggestion
 from dossier.query import DocumentView, plan_move
 from dossier.store import Store
 from dossier.tui import detail, forms
@@ -63,6 +66,8 @@ _FORM = "detail-form"
 _NAME = "f-name"
 _ISSUE = "f-issue"
 _EXPIRY = "f-expiry"
+_SUGGESTIONS = "f-suggestions"
+_SG_HEADER = "sg-header"
 _PERM = "f-perm"
 _PERM_SLOT = "f-perm-slot"
 _PERM_SUB = "f-perm-sub"
@@ -97,6 +102,11 @@ class DetailPane(VerticalScroll):
     DetailPane .df-slotrow { height: auto; }
     DetailPane .df-loc { width: 1fr; }
     DetailPane .df-slot { width: 10; margin-left: 1; }
+    DetailPane #f-suggestions { height: auto; }
+    DetailPane .sg-row { height: auto; }
+    DetailPane .sg-label { width: 1fr; color: $text-muted; }
+    DetailPane .sg-accept { width: auto; margin-left: 1; }
+    DetailPane .sg-dismiss { width: 5; min-width: 3; margin-left: 1; }
     DetailPane #f-bundles { height: auto; max-height: 8; margin-bottom: 1; }
     DetailPane #f-renditions { height: auto; }
     DetailPane .df-rend-row { height: auto; }
@@ -153,6 +163,7 @@ class DetailPane(VerticalScroll):
         self._bundle_slugs: set[str] = set()  # slugs currently offered in the list
         self._new_bundle_titles: dict[str, str] = {}  # slug → title for new bundles
         self._rend_seq = 0  # monotonic id source for dynamically mounted file rows
+        self._suggestions: list[Suggestion] = []  # live suggestions for this doc
 
     def compose(self) -> ComposeResult:
         with ContentSwitcher(initial=_READ):
@@ -164,6 +175,8 @@ class DetailPane(VerticalScroll):
                 yield Input(id=_ISSUE, placeholder="YYYY-MM-DD", classes="df-field")
                 yield Label("Expiry date (YYYY-MM-DD)", classes="df-label")
                 yield Input(id=_EXPIRY, placeholder="YYYY-MM-DD", classes="df-field")
+                yield Label("Suggestions", id=_SG_HEADER, classes="df-label")
+                yield Vertical(id=_SUGGESTIONS)
                 yield Label(
                     "Permanent location (slug · slot · sub)", classes="df-label"
                 )
@@ -218,6 +231,7 @@ class DetailPane(VerticalScroll):
         location_label: str | None,
         chain: list[Document],
         superseded_by: Document | None,
+        suggestions: Sequence[Suggestion] = (),
     ) -> None:
         """Render one document into the read view (a no-op while editing)."""
         if self.editing:
@@ -228,6 +242,7 @@ class DetailPane(VerticalScroll):
                 location_label=location_label,
                 chain=chain,
                 superseded_by=superseded_by,
+                suggestions=suggestions,
                 glyphs=self._glyphs,
             )
         )
@@ -466,6 +481,65 @@ class DetailPane(VerticalScroll):
             if checkbox is not event.checkbox:
                 checkbox.value = False
 
+    # -- suggestions (accept pre-fills a field; dismiss persists) -------------
+
+    def _populate_suggestions(self, doc: Document) -> None:
+        container = self.query_one(f"#{_SUGGESTIONS}", Vertical)
+        container.remove_children()
+        self._suggestions = suggest.live(doc, self._store.load_suggestions())
+        self.query_one(f"#{_SG_HEADER}").display = bool(self._suggestions)
+        container.mount(
+            *(self._suggestion_row(i, s) for i, s in enumerate(self._suggestions))
+        )
+
+    def _suggestion_row(self, index: int, suggestion: Suggestion) -> Horizontal:
+        label = f"{_field_label(suggestion.field)}: {suggestion.rationale}"
+        children: list[Label | Button] = [Label(label, classes="sg-label")]
+        for j, value in enumerate(suggestion.values):
+            children.append(
+                Button(
+                    f"✓ {value}",
+                    id=f"sg-accept-{index}-{j}",
+                    classes="df-field sg-accept",
+                )
+            )
+        children.append(
+            Button("✕", id=f"sg-dismiss-{index}", classes="df-field sg-dismiss")
+        )
+        return Horizontal(*children, id=f"sg-row-{index}", classes="sg-row")
+
+    @on(Button.Pressed, ".sg-accept")
+    def _accept_suggestion(self, event: Button.Pressed) -> None:
+        event.stop()
+        assert event.button.id is not None
+        _, _, index, value_index = event.button.id.split("-")
+        suggestion = self._suggestions[int(index)]
+        self._apply_suggestion(suggestion, suggestion.values[int(value_index)])
+        self.query_one(f"#sg-row-{index}", Horizontal).remove()
+        self.query_one(f"#{_ISSUE}", Input).focus()
+
+    @on(Button.Pressed, ".sg-dismiss")
+    def _dismiss_suggestion(self, event: Button.Pressed) -> None:
+        event.stop()
+        assert event.button.id is not None
+        index = event.button.id.rsplit("-", 1)[1]
+        state = self._store.load_suggestions()
+        state.dismiss(self._suggestions[int(index)])
+        self._store.save_suggestions(state)
+        self.query_one(f"#sg-row-{index}", Horizontal).remove()
+        self.query_one(f"#{_ISSUE}", Input).focus()
+        self.post_message(self.ReloadRequested())  # home's cached state is stale
+
+    def _apply_suggestion(self, suggestion: Suggestion, value: str) -> None:
+        if suggestion.field is SuggestedField.ISSUE:
+            self.query_one(f"#{_ISSUE}", Input).value = value
+        elif suggestion.field is SuggestedField.EXPIRY:
+            self.query_one(f"#{_EXPIRY}", Input).value = value
+        else:  # a NOTES period span (values are start, end)
+            span = f"Period: {suggestion.values[0]} to {suggestion.values[1]}"
+            notes = self.query_one(f"#{_NOTES}", TextArea)
+            notes.text = f"{notes.text}\n{span}" if notes.text else span
+
     def _apply_renditions(self, doc: Document) -> None:
         rends: list[Rendition] = []
         primary_taken = False
@@ -499,6 +573,7 @@ class DetailPane(VerticalScroll):
         self.query_one(f"#{_NEW_BUNDLE}", Input).value = ""
         self._populate_bundles(doc)
         self._populate_renditions(doc)
+        self._populate_suggestions(doc)
 
     def _form_values(self) -> tuple[object, ...]:
         return (
@@ -532,3 +607,11 @@ class DetailPane(VerticalScroll):
 
     def _dirty(self) -> bool:
         return self._form_values() != self._snapshot
+
+
+def _field_label(field: SuggestedField) -> str:
+    return {
+        SuggestedField.ISSUE: "issue date",
+        SuggestedField.EXPIRY: "expiry date",
+        SuggestedField.NOTES: "period",
+    }[field]

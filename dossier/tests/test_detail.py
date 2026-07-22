@@ -20,7 +20,14 @@ from datetime import date
 from rich.console import Console, RenderableType
 
 from dossier import query
-from dossier.model import Document, ExpiryStatus, FileStatus, Rendition
+from dossier.model import (
+    Document,
+    ExpiryStatus,
+    FileStatus,
+    Rendition,
+    SuggestedField,
+    Suggestion,
+)
 from dossier.tui import detail, glyphs
 
 
@@ -38,6 +45,28 @@ def _text(renderable: RenderableType, width: int = 60) -> str:
     with console.capture() as capture:
         console.print(renderable)
     return capture.get()
+
+
+def test_render_detail_shows_suggestions_hint():
+    doc = Document(id="d", name="Some Doc 2023-08-15")
+    s = Suggestion(
+        doc_id="d",
+        field=SuggestedField.ISSUE,
+        values=("2023-08-15",),
+        rationale="from the name",
+    )
+    out = _text(
+        detail.render_detail(
+            _view(doc),
+            location_label=None,
+            chain=[],
+            superseded_by=None,
+            suggestions=[s],
+        )
+    )
+    assert "Suggestions (1)" in out
+    assert "2023-08-15" in out
+    assert "press e to review" in out
 
 
 def test_render_detail_core_fields():
