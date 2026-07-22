@@ -18,7 +18,8 @@ slugs, dates + chronological surface, folder→bundle suggestions, `ds export`).
 Phase 7 (vision) is **done** — `ds scan` reads linked scans with a local VLM into
 grounded readings that drive content-based succession (a reconcile tab), expiry/issue
 suggestions (the detail pane), and per-run model selection; all verified on the real
-store. **Phase 8 (organize, #4) is next.**
+store. **Phase 8 (organize, #4) is next.** Phases 9–11 sketch the **long horizon** —
+intake, preparedness, answers — turning the catalogue into a living system.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -127,6 +128,48 @@ Per-item rationale lives in `DESIGN.md` §14.
   actually tidies a messy `Official Documents/` tree. Formalizes the old "Organize mode"
   note. (Subset-elimination, idea #1, is already **Phase 3 dedup** — install
   `dossier[dedup]`, `ds reconcile` → Duplicates → `d` scan → `f` fold.)
+
+## Phase 9 — Intake: zero-friction capture  *(long horizon)*
+The highest-friction moment today is the most common future event: a new document
+arrives, and filing it means scan → drop the file → reconcile → adopt → hand-fill
+every field. Every piece needed to automate that already exists — this phase composes
+them, and changes the app's economics: near-zero marginal cost per document is what
+keeps the catalogue accurate in three years, and what makes owning the *whole* tree
+(not just the curated 137) affordable.
+- [ ] **Inbox flow** (L) — a configured inbox (a watched folder glob; on the phone,
+  Termux share-to drops into it). A new file triggers the scan engine, which proposes
+  the **entire record** on one review card: name, tags, issue/expiry (via `suggest`),
+  succession link (via `succession`), and — once Phase 8 lands — the canonical
+  filename + destination folder (via `organize`). One accept keystroke files it;
+  reuses adopt / suggest / succession / organize as-is, never auto-applies.
+- [ ] **Scale to the full tree** (M) — with per-doc cost near zero, revive `ds import`
+  (bulk folder ingest, deferred since v1) and grow from the curated 137 docs to the
+  ~900-file `Official Documents/` tree, riding the same propose-review-accept card.
+
+## Phase 10 — Preparedness: checklists, event-aware validity, reminders  *(long horizon)*
+Bundles are the app's real job (gather → check → submit, DESIGN §5) but today they are
+passive labels. This phase makes dossier answer "am I ready?" — and warn *before* it
+matters, against the date you need the document, not just today.
+- [ ] **Bundle templates** (M) — a template lists required document *types*
+  (`schengen-visa`: passport, photo, CoC, ENG-1…). A bundle opened against a template
+  shows gathered / missing / problematic instead of a bare member list.
+- [ ] **Event-aware validity** (M) — bundles already carry a `date`; cross-check
+  members against it with real-world rules — "passport expires < 6 months after the
+  trip date", "ENG-1 lapses before the joining date". Surfaced in the bundles screen
+  and the expiry watch.
+- [ ] **Proactive reminders** (S) — `ds expiring --days N` with plain-text output and
+  clean exit codes, so a scheduled task (Task Scheduler / Termux cron) can nag by
+  notification without the TUI ever being opened.
+
+## Phase 11 — Answers: content search & ask  *(long horizon)*
+`.dossier/scans.toml` already holds structured, grounded readings of every linked scan
+— currently used only for date suggestions and succession. Make the corpus queryable:
+find documents by *what they say*, not what they were named.
+- [ ] **Content search** (M) — `/` (and `ds open`) also matches scan-reading text, so
+  "the doc with my INDoS number" is findable when name/tags don't mention it.
+- [ ] **`ds ask`** (L) — a small retrieval layer over readings + the same local VLM
+  stack to answer field questions offline: "what's my CDC number?", "which visa did I
+  use for the 2024 India trip?".
 
 ## Notes
 - **Quick wins:** `ds reset` (S), the `ignore_expiry` toggle (S).
