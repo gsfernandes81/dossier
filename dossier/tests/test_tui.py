@@ -1201,3 +1201,23 @@ async def test_settings_screen_saves_and_persists(
     saved = tomllib.loads(device.read_text())
     assert saved["scan_base_url"] == "http://box:9000/v1"  # persisted per-device
     assert saved["syncthing_root"] == tmp_path.as_posix()  # preserved
+
+
+@pytest.mark.asyncio
+async def test_command_palette_routes_to_home_actions(tmp_path: Path):
+    from dossier.tui.app import DossierCommands
+
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test():
+        provider = DossierCommands(app.screen)
+        # Every advertised command names an existing home action, and its runner
+        # is that bound method — guards against an action-name typo drifting from
+        # the HomeScreen binding it delegates to.
+        for _title, action, _help in provider._commands:
+            assert provider._runner(action) == getattr(app.home, f"action_{action}")
+        # A fuzzy query surfaces the matching commands as palette hits.
+        hits = [hit async for hit in provider.search("scan")]
+        titles = {hit.text for hit in hits}
+    assert "Scan current document (vision)" in titles
+    assert "Settings" not in titles  # unrelated command doesn't match "scan"
