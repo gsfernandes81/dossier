@@ -44,6 +44,15 @@ from dossier.platform_open import is_termux, termux_preconditions
 from dossier.store import Store, atomic_write_bytes
 
 
+def _load_config() -> Config | None:
+    """Load the device config, printing a clean error (and returning None) if unset."""
+    try:
+        return Config.load()
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """Bootstrap this device: per-device config + the ``.dossier`` layout."""
     root: Path | None = args.root
@@ -99,10 +108,8 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_tui(_args: argparse.Namespace) -> int:
     """Default action: launch the TUI."""
-    try:
-        config = Config.load()
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    config = _load_config()
+    if config is None:
         return 1
 
     from dossier.tui import DossierApp
@@ -113,10 +120,8 @@ def cmd_tui(_args: argparse.Namespace) -> int:
 
 def cmd_migrate(args: argparse.Namespace) -> int:
     """Transform a Notion export into the store (dry-run unless ``--apply``)."""
-    try:
-        config = Config.load()
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    config = _load_config()
+    if config is None:
         return 1
 
     export_path: Path = args.notion_export.expanduser()
@@ -183,10 +188,8 @@ def cmd_reset(args: argparse.Namespace) -> int:
             return 1
         config = Config(syncthing_root=root)
     else:
-        try:
-            config = Config.load()
-        except ConfigError as exc:
-            print(f"error: {exc}", file=sys.stderr)
+        config = _load_config()
+        if config is None:
             return 1
 
     entries = reset.folder_reset_entries(config)
@@ -216,10 +219,8 @@ def _confirm(prompt: str, assume_yes: bool) -> bool:
 
 def cmd_doctor(_args: argparse.Namespace) -> int:
     """Check the store for problems (conflicts, refs, dates, files)."""
-    try:
-        config = Config.load()
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    config = _load_config()
+    if config is None:
         return 1
 
     report = doctor.run(Store(config), config)
@@ -247,10 +248,8 @@ def _print_icon_note(config: Config) -> None:
 
 def cmd_reconcile(args: argparse.Namespace) -> int:
     """List orphan files, missing files (and, later, duplicates) in the folder."""
-    try:
-        config = Config.load()
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    config = _load_config()
+    if config is None:
         return 1
 
     store = Store(config)
@@ -318,10 +317,8 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
 
 def cmd_export(args: argparse.Namespace) -> int:
     """Copy (or symlink) a bundle's files into an external folder."""
-    try:
-        config = Config.load()
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    config = _load_config()
+    if config is None:
         return 1
 
     store = Store(config)

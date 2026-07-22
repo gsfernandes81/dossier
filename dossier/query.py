@@ -189,9 +189,12 @@ def expiring(
         if doc.expiry_status(today, threshold_days)
         in (ExpiryStatus.EXPIRED, ExpiryStatus.EXPIRING)
     ]
-    return sorted(
-        flagged, key=lambda d: (d.expiry_date is None, d.expiry_date or today)
-    )
+    return sorted(flagged, key=lambda d: _expiry_order(d, today))
+
+
+def _expiry_order(doc: Document, today: date) -> tuple[bool, date]:
+    """Sort key for the expiry lists: soonest date first, undated last."""
+    return (doc.expiry_date is None, doc.expiry_date or today)
 
 
 # -- supersession & the expiry watch -----------------------------------------
@@ -224,9 +227,7 @@ def tracked(docs: list[Document], *, today: date) -> list[Document]:
     watched = [
         doc for doc in docs if doc.is_expiry_tracked(superseded=doc.id in superseded)
     ]
-    return sorted(
-        watched, key=lambda d: (d.expiry_date is None, d.expiry_date or today)
-    )
+    return sorted(watched, key=lambda d: _expiry_order(d, today))
 
 
 def supersession_chain(docs: list[Document], doc: Document) -> list[Document]:

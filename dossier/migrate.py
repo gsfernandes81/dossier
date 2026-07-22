@@ -64,11 +64,13 @@ _BUNDLE_PATH_HINTS = (
 # -- slugs -------------------------------------------------------------------
 
 
+def _to_ascii(text: str) -> str:
+    """NFKD-fold to plain ASCII, dropping accents / non-Latin (callers lowercase)."""
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+
+
 def slugify(name: str) -> str:
-    ascii_name = (
-        unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
-    )
-    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
+    slug = re.sub(r"[^a-z0-9]+", "-", _to_ascii(name).lower()).strip("-")
     if not slug:
         slug = "document"
     if slug in _WINDOWS_RESERVED:
@@ -167,10 +169,7 @@ class MatchResult:
 
 
 def _norm_key(text: str) -> str:
-    ascii_text = (
-        unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
-    )
-    return re.sub(r"[^a-z0-9]+", "", ascii_text.lower())
+    return re.sub(r"[^a-z0-9]+", "", _to_ascii(text).lower())
 
 
 def _rank(path: str) -> tuple[bool, int, str]:
@@ -185,11 +184,8 @@ _MIN_SHARED_TOKENS = 2
 
 
 def _tokens(text: str) -> frozenset[str]:
-    ascii_text = (
-        unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
-    )
     return frozenset(
-        tok for tok in re.split(r"[^a-z0-9]+", ascii_text.lower()) if len(tok) >= 2
+        tok for tok in re.split(r"[^a-z0-9]+", _to_ascii(text).lower()) if len(tok) >= 2
     )
 
 

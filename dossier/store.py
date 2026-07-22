@@ -39,7 +39,7 @@ import io
 import os
 import tempfile
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -171,12 +171,12 @@ class Store:
         target = self.document_path(doc.id)
 
         if target.exists():
-            current = _hash(target.read_bytes())
+            prior = target.read_bytes()
             if doc.source_hash is None:
                 raise DocumentExistsError(doc.id)
-            if current != doc.source_hash:
+            if _hash(prior) != doc.source_hash:
                 raise StaleWriteError(doc.id)
-            self._backup(target)
+            self._backup(target, prior)
         elif doc.source_hash is not None:
             # Loaded earlier, but gone now — deleted underneath us.
             raise StaleWriteError(doc.id)
@@ -186,12 +186,11 @@ class Store:
         doc.source_hash = _hash(payload)
         return doc
 
-    def _backup(self, target: Path) -> None:
-        # A pre-overwrite history backup is best-effort: write it atomically (same
-        # durability as every other write here) and never let a failure block the
-        # actual save — the user's edit still lands even if the backup can't.
+    def _backup(self, target: Path, data: bytes) -> None:
+        # A pre-overwrite history backup is best-effort: write ``data`` (the prior
+        # content, already read by save) atomically and never let a failure block
+        # the actual save — the user's edit still lands even if the backup can't.
         try:
-            data = target.read_bytes()
             stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
             dest_dir = self.config.history_dir / target.stem
             atomic_write_bytes(dest_dir / f"{stamp}.md", data)
@@ -229,9 +228,7 @@ class Store:
             if loc.notes:
                 entry["notes"] = loc.notes
             data[slug] = entry
-        atomic_write_bytes(
-            self.config.locations_path, tomli_w.dumps(data).encode("utf-8")
-        )
+        self._write_toml(self.config.locations_path, data)
 
     def load_bundles(self) -> dict[str, Bundle]:
         out: dict[str, Bundle] = {}
@@ -264,9 +261,7 @@ class Store:
             if bundle.notes:
                 entry["notes"] = bundle.notes
             data[slug] = entry
-        atomic_write_bytes(
-            self.config.bundles_path, tomli_w.dumps(data).encode("utf-8")
-        )
+        self._write_toml(self.config.bundles_path, data)
 
     # -- reconcile sidecar ---------------------------------------------------
 
@@ -295,9 +290,7 @@ class Store:
         folded = {keep: sorted(subs) for keep, subs in state.folded.items() if subs}
         if folded:
             data["folded"] = {k: folded[k] for k in sorted(folded)}
-        atomic_write_bytes(
-            self.config.reconcile_path, tomli_w.dumps(data).encode("utf-8")
-        )
+        self._write_toml(self.config.reconcile_path, data)
 
     # -- suggestions sidecar -------------------------------------------------
 
@@ -311,9 +304,12 @@ class Store:
         data: dict[str, object] = {}
         if state.dismissed:
             data["dismissed"] = sorted(state.dismissed)
-        atomic_write_bytes(
-            self.config.suggestions_path, tomli_w.dumps(data).encode("utf-8")
-        )
+        self._write_toml(self.config.suggestions_path, data)
+
+    @staticmethod
+    def _write_toml(path: Path, data: Mapping[str, object]) -> None:
+        """Atomically serialize ``data`` to a TOML sidecar (the one write path)."""
+        atomic_write_bytes(path, tomli_w.dumps(data).encode("utf-8"))
 
 
 # -- frontmatter (de)serialization ------------------------------------------

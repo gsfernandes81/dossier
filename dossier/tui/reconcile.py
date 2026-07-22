@@ -360,10 +360,7 @@ class ReconcileScreen(ModalScreen[str | None]):
             return  # cursor on a placeholder / "no duplicates" row
         group = self._groups[gi]
         self._state.folded.setdefault(group.keep, set()).update(group.subsets)
-        try:
-            self._store.save_reconcile(self._state)
-        except OSError as exc:
-            self.notify(f"could not save decisions: {exc}", severity="error")
+        if not self._persist_state():
             return
         self.notify(f"folded {len(group.subsets)} copy(ies) under {_stem(group.keep)}")
         self._refresh(refilter_dups=True)
@@ -396,10 +393,7 @@ class ReconcileScreen(ModalScreen[str | None]):
         if not glob or glob in self._state.ignore:
             return
         self._state.ignore.append(glob)
-        try:
-            self._store.save_reconcile(self._state)
-        except OSError as exc:
-            self.notify(f"could not save decisions: {exc}", severity="error")
+        if not self._persist_state():
             return
         self.notify(f"ignoring {glob}")
         self._refresh()
@@ -431,13 +425,17 @@ class ReconcileScreen(ModalScreen[str | None]):
             return False
         return True
 
-    def _save_and_refresh(self) -> None:
+    def _persist_state(self) -> bool:
         try:
             self._store.save_reconcile(self._state)
         except OSError as exc:
             self.notify(f"could not save decisions: {exc}", severity="error")
-            return
-        self._refresh()
+            return False
+        return True
+
+    def _save_and_refresh(self) -> None:
+        if self._persist_state():
+            self._refresh()
 
     def _refresh(self, *, refilter_dups: bool = False) -> None:
         """Re-run the (cheap) engine and rebuild the orphan tree + missing list.
@@ -523,7 +521,8 @@ def _stem(rel: str) -> str:
 
 
 def _pretty_name(rel: str) -> str:
-    return _stem(rel).replace("_", " ").strip() or _stem(rel)
+    stem = _stem(rel)
+    return stem.replace("_", " ").strip() or stem
 
 
 def _is_page_file(rel: str) -> bool:
