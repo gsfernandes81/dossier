@@ -825,6 +825,39 @@ async def test_inline_rendition_remove(tmp_path: Path):
     assert store.load("passport").files == []
 
 
+@pytest.mark.asyncio
+async def test_suggestion_accept_prefills_and_saves(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    store.save(Document(id="dated", name="Some Doc 2023-08-15"))  # bare date → issue
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "dated")
+        assert len(pane._suggestions) == 1  # one issue-date suggestion
+        pane.query_one("#sg-accept-0-0", Button).press()  # accept the reading
+        await pilot.pause()
+        assert pane.query_one("#f-issue", Input).value == "2023-08-15"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+    assert store.load("dated").issue_date == date(2023, 8, 15)
+
+
+@pytest.mark.asyncio
+async def test_suggestion_dismiss_persists_without_writing_the_doc(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    store.save(Document(id="dated", name="Some Doc 2023-08-15"))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "dated")
+        dismissed = pane._suggestions[0]
+        pane.query_one("#sg-dismiss-0", Button).press()
+        await pilot.pause()
+        assert not list(pane.query(".sg-row").results(Horizontal))  # row gone
+    assert dismissed.key in store.load_suggestions().dismissed
+    assert store.load("dated").issue_date is None  # dismiss never wrote the doc
+
+
 def test_linux_driver_exposes_mouse_toggle():
     # Pin the private methods the keyboard trick relies on, so a Textual rename
     # fails here loudly instead of silently breaking the Termux keyboard. The
