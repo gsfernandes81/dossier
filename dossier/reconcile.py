@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 
 from dossier import dedup, migrate, query
 from dossier.config import Config
-from dossier.model import Document
+from dossier.model import Document, ReconcileState
 from dossier.store import CONFLICT_MARKER, Store
 
 if TYPE_CHECKING:
@@ -72,17 +72,19 @@ class ReconcileReport:
     linked: dict[str, list[str]] = field(default_factory=dict)  # path -> doc ids
 
 
-def scan_files(config: Config) -> list[str]:
+def scan_files(config: Config, extra_ignore: Sequence[str] = ()) -> list[str]:
     """Every file under the root (POSIX-relative), scoped by include/ignore globs.
 
     Always excludes ``.dossier/``, Syncthing dirs, and ``*.sync-conflict-*``. An
-    empty ``include`` means the whole root; ``ignore`` globs then drop matches.
-    ``fnmatch`` ``*`` crosses ``/`` here, so ``"Wallpapers/*"`` scopes a subtree.
+    empty ``include`` means the whole root; the ``ignore`` globs (the synced
+    config's, plus any ``extra_ignore`` from the reconcile sidecar) then drop
+    matches. ``fnmatch`` ``*`` crosses ``/`` here, so ``"Wallpapers/*"`` scopes a
+    whole subtree.
     """
     root = config.syncthing_root
     meta = config.meta_dir
     include = config.include
-    ignore = config.ignore
+    ignore = [*config.ignore, *extra_ignore]
     out: list[str] = []
     for path in root.rglob("*"):
         if not path.is_file() or meta in path.parents:
@@ -102,15 +104,28 @@ def run(
     store: Store,
     config: Config,
     pages_by_file: Mapping[str, Sequence[int]] | None = None,
+    state: ReconcileState | None = None,
 ) -> ReconcileReport:
-    """Build the reconcile report. ``pages_by_file`` (if given) adds dup clusters."""
+    """Build the reconcile report, filtered by the sidecar ``state`` if given.
+
+    Stays pure — no new I/O. The caller loads ``state`` once (from
+    :meth:`Store.load_reconcile`) so dismissed orphans, acknowledged-missing
+    renditions, folded clusters, and sidecar ignore-globs drop out at the source.
+    ``pages_by_file`` (if given) adds dup clusters.
+    """
+    state = state or ReconcileState()
     docs = store.load_all()
     linked: dict[str, list[str]] = {}
     for doc in docs:
         for rendition in doc.files:
             linked.setdefault(rendition.path, []).append(doc.id)
 
-    orphan_paths = [path for path in scan_files(config) if path not in linked]
+    suppressed = state.suppressed_orphans()
+    orphan_paths = [
+        path
+        for path in scan_files(config, state.ignore)
+        if path not in linked and path not in suppressed
+    ]
     orphans = _with_suggestions(orphan_paths, docs)
 
     missing = [
@@ -118,9 +133,16 @@ def run(
         for doc in docs
         for rendition in doc.files
         if not query.resolve_path(config.syncthing_root, rendition.path).exists()
+        and not state.is_acked(doc.id, rendition.path)
     ]
 
-    groups = dedup.group_files(pages_by_file) if pages_by_file is not None else None
+    groups = None
+    if pages_by_file is not None:
+        groups = [
+            group
+            for group in dedup.group_files(pages_by_file)
+            if not state.covers(group.keep, group.subsets)
+        ]
     return ReconcileReport(
         orphans=orphans, missing=missing, groups=groups, linked=linked
     )

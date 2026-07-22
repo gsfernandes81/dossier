@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, Input, OptionList, TextArea, Tree
+from textual.widgets import Button, Input, OptionList, TabbedContent, TextArea, Tree
 
 from dossier.config import Config
 from dossier.model import Document, Rendition
@@ -421,7 +421,63 @@ async def test_reconcile_screen_shows_orphans_and_missing(tmp_path: Path):
         ]
         assert any("Marine" in label for label in folders)  # orphan grouped by folder
         missing = screen.query_one("#missing", OptionList)
-        assert missing.get_option_at_index(0).id == "d"  # the missing-file doc
+        # composite id: doc id + NUL + path (so two dead renditions can't collide)
+        assert missing.get_option_at_index(0).id == "d\x00Marine/gone.pdf"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_dismiss_orphan_persists_and_hides(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "Wallpapers").mkdir()
+    (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")  # a non-document orphan
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        tree = screen.query_one("#orphans", Tree)
+        assert screen._report is not None
+        assert any(o.path == "Wallpapers/bg.jpg" for o in screen._report.orphans)
+        # Switch to the Orphans tab (x is scoped to the active tab), expand the
+        # folder, land the cursor on the leaf, then dismiss it.
+        screen.query_one(TabbedContent).active = "tab-orphans"
+        folder = next(n for n in tree.root.children if n.data == "Wallpapers")
+        folder.expand()
+        await pilot.pause()
+        leaf = folder.children[0]
+        tree.move_cursor(leaf)
+        assert tree.cursor_node is leaf
+        screen.action_reject()
+        await pilot.pause()
+        # Gone from the live report, and recorded in the sidecar for next time.
+        assert screen._report is not None
+        assert not screen._report.orphans
+        assert store.load_reconcile().dismissed == {"Wallpapers/bg.jpg"}
+
+
+@pytest.mark.asyncio
+async def test_reconcile_ack_missing_persists(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    store.save(
+        Document(id="d", name="Doc", files=[Rendition("x", "gone.pdf", primary=True)])
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        screen.query_one(TabbedContent).active = "tab-missing"
+        screen.query_one("#missing", OptionList).highlighted = 0
+        await pilot.pause()
+        screen.action_reject()
+        await pilot.pause()
+        assert screen._report is not None
+        assert not screen._report.missing
+        assert store.load_reconcile().missing_ok == {"gone.pdf": {"d"}}
 
 
 def test_linux_driver_exposes_mouse_toggle():

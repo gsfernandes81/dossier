@@ -84,6 +84,11 @@ class Config:
         return self.meta_dir / "bundles.toml"
 
     @property
+    def reconcile_path(self) -> Path:
+        """Machine-owned sidecar of reconcile decisions (dismiss / fold / ...)."""
+        return self.meta_dir / "reconcile.toml"
+
+    @property
     def synced_config_path(self) -> Path:
         return self.meta_dir / "config.toml"
 
