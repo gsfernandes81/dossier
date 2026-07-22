@@ -118,6 +118,13 @@ Per-item rationale lives in `DESIGN.md` §14.
   - *Stack in use:* Qwen3-VL-8B-Instruct (Q4) via a llama.cpp router behind the OpenAI
     `/v1/chat/completions` endpoint with a JSON schema; pypdfium2 @ ~170 DPI;
     desktop-only (an 8B VLM isn't viable on the phone).
+- [x] **In-TUI scan + settings** (M) — scanning is no longer CLI-only: `v` scans the
+  current document, a cancellable background worker (progress in the sub-title,
+  save-after-each) scans all linked docs, and a `SettingsScreen` (`,`) edits icons +
+  the scan endpoint/model/temp/DPI (model via a live `/v1/models` `Select`) + the synced
+  expiry threshold, written back read-modify-write so unknown keys survive. All reachable
+  from the `ctrl+p` command palette (`DossierCommands` provider). Verified live in a real
+  terminal via the PTY driver.
 
 ## Phase 8 — Organize: metadata-driven filenames  *(planned; #4, no vision)*
 - [ ] **`ds organize`** (M) — propose a canonical filename (and optional category folder)
