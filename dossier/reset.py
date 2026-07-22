@@ -53,9 +53,13 @@ def reset_folder_data(config: Config) -> Path | None:
     meta = config.meta_dir
     if not meta.is_dir():
         return None
-    # Defence in depth for a destructive op: only ever a folder's own .dossier.
-    if meta.name != META_DIRNAME or meta.parent != config.syncthing_root:
-        raise ResetError(f"refusing to reset an unexpected path: {meta}")
+    # Defence in depth for a destructive op: resolve symlinks and refuse unless the
+    # real target is a ".dossier" directory (so a .dossier symlinked at real data
+    # is never rmtree'd). meta is config.meta_dir, so the unresolved name always
+    # matches — resolving is what makes this a genuine guard.
+    resolved = meta.resolve()
+    if resolved.name != META_DIRNAME:
+        raise ResetError(f"refusing to reset an unexpected path: {meta} -> {resolved}")
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     backup = config.history_dir / f"reset-{stamp}"

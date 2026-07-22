@@ -327,6 +327,29 @@ async def test_doctor_screen_lists_findings(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_doctor_screen_handles_a_doc_with_two_findings(tmp_path: Path):
+    # A doc appearing in >1 finding must not crash on_mount with DuplicateID.
+    store, config = _setup(tmp_path)
+    store.save(
+        Document(
+            id="multi",
+            name="Multi",
+            has_digital=True,
+            files=[
+                Rendition("a", "gone-1.pdf", primary=True),  # two missing renditions
+                Rendition("b", "gone-2.pdf"),
+            ],
+        )
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.push_screen(DoctorScreen(store, config))
+        await pilot.pause()
+        options = app.screen.query_one("#findings", OptionList)
+        assert options.option_count > 0  # rendered without a DuplicateID crash
+
+
+@pytest.mark.asyncio
 async def test_new_document_creates(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
@@ -811,6 +834,28 @@ async def test_edit_stale_write_refused_then_reloaded(tmp_path: Path):
         await pilot.pause()
         assert pane.query_one("#f-name", Input).value == "Theirs"  # form reloaded
         assert pane.editing
+
+
+@pytest.mark.asyncio
+async def test_failed_save_leaves_in_memory_doc_untouched(tmp_path: Path):
+    # A refused save must not mutate the Document shared with the home list —
+    # otherwise a later discard would show the unsaved edit as if it were saved.
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "coc")
+        pane.query_one("#f-name", Input).value = "Mine"
+        await pilot.pause()
+        other = store.load("coc")  # out-of-band change → next save is stale
+        other.name = "Theirs"
+        store.save(other)
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert pane.editing  # refused
+        doc = home._doc_by_id("coc")
+        assert doc is not None
+        assert doc.name == "CoC Card"  # in-memory list still the original, not "Mine"
 
 
 @pytest.mark.asyncio

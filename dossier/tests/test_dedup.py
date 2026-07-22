@@ -88,3 +88,12 @@ def test_ambiguous_when_no_single_superset():
     assert set(group.files) == {"A", "B", "C", "D"}
     assert group.ambiguous  # neither B nor D contains the other
     assert group.keep in {"B", "D"}  # a most-complete (3-page) copy
+
+
+def test_contained_uses_augmenting_paths_not_greedy():
+    # small=[0,2] ⊆ large=[0,1] at distance 1: page 0 must take large[1]=1 so
+    # page 2 (which only matches large[0]=0) can be placed. Greedy first-fit would
+    # grab large[0] for page 0 and strand page 2.
+    assert dedup.contained([0, 2], [0, 1], max_distance=1)
+    # genuine non-containment still returns False
+    assert not dedup.contained([0, 15], [0, 1], max_distance=1)

@@ -55,20 +55,25 @@ def hamming(a: int, b: int) -> int:
 def contained(small: Sequence[int], large: Sequence[int], max_distance: int) -> bool:
     """Whether every page in ``small`` matches a *distinct* page in ``large``.
 
-    Greedy per-page matching within ``max_distance`` — cheap and good enough for
-    document pages (exact-ish, low-multiplicity). ``small ⊆ large``.
+    Maximum bipartite matching (Kuhn's augmenting paths): a plain greedy first-fit
+    can false-negatively reject a valid assignment when two pages hash ambiguously
+    close to the same candidate (e.g. blank dividers / identical footers), so it
+    would miss a real subset cluster. ``small ⊆ large``.
     """
     if len(small) > len(large):
         return False
-    used = [False] * len(large)
-    for page in small:
-        for j, other in enumerate(large):
-            if not used[j] and hamming(page, other) <= max_distance:
-                used[j] = True
-                break
-        else:
-            return False
-    return True
+    match = [-1] * len(large)  # large index → the small index assigned to it
+
+    def augment(i: int, seen: list[bool]) -> bool:
+        for j in range(len(large)):
+            if not seen[j] and hamming(small[i], large[j]) <= max_distance:
+                seen[j] = True
+                if match[j] == -1 or augment(match[j], seen):
+                    match[j] = i
+                    return True
+        return False
+
+    return all(augment(i, [False] * len(large)) for i in range(len(small)))
 
 
 @dataclass(frozen=True)

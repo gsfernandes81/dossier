@@ -456,7 +456,9 @@ class HomeScreen(Screen[None]):
                 self._update_detail()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option_list.id == "documents" and event.option_id is not None:
+        if event.option_list.id == "documents":
+            if self.editing or event.option_id is None:
+                return  # a click mid-edit must not swap the doc being edited
             self.open_detail(event.option_id)
         elif event.option_list.id == "locations":
             self.action_drill_in()
@@ -491,6 +493,7 @@ class HomeScreen(Screen[None]):
             search.value = ""
             self._filter_text = ""
             self._bundle_filter = None  # clearing search also drops a bundle scope
+            self._expiring_only = False  # …and the expiring filter, or Esc gets stuck
             self._update_searching()
             self._refresh_documents()
             self._focus_documents()

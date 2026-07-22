@@ -44,15 +44,19 @@ def is_termux() -> bool:
 def open_file(path: Path) -> None:
     """Open ``path`` with the platform's default application.
 
-    Raises :class:`OpenError` with actionable guidance rather than trusting exit
-    codes blindly (a mismatched Termux:API install exits 0 while doing nothing).
+    Raises :class:`OpenError` (with actionable guidance) on a missing opener, a
+    non-zero exit, or a Windows open error — so the caller shows a clean message
+    instead of an unhandled traceback.
     """
     target = str(path)
     if is_termux():
         _run_opener("termux-open", target, missing_hint=TERMUX_API_HINT)
         return
     if sys.platform.startswith("win"):
-        os.startfile(target)  # Windows-only; see ty.toml override
+        try:
+            os.startfile(target)  # Windows-only; see ty.toml override
+        except OSError as exc:
+            raise OpenError(f"could not open {target}: {exc}") from exc
         return
     opener = "open" if sys.platform == "darwin" else "xdg-open"
     _run_opener(opener, target, missing_hint=f"no '{opener}' on PATH")

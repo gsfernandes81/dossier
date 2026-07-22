@@ -45,13 +45,15 @@ from dossier.model import (
     SuggestionState,
 )
 
+# \b anchors keep a long digit run (a reference/serial number like "1234-07-2026")
+# from matching a truncated fragment as if it were a date.
 _DATE_TOKEN = re.compile(
-    r"("
+    r"\b("
     r"\d{1,2}[-/][A-Za-z]{3,9}[-/]\d{2,4}"  # 07-Jan-2026
     r"|\d{4}[-/][A-Za-z]{3,9}[-/]\d{1,2}"  # 2020-dec-11
     r"|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}"  # 10-07-26
     r"|\d{4}[-/]\d{1,2}[-/]\d{1,2}"  # 2019-05-19
-    r")"
+    r")\b"
 )
 
 

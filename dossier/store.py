@@ -187,15 +187,17 @@ class Store:
         return doc
 
     def _backup(self, target: Path) -> None:
+        # A pre-overwrite history backup is best-effort: write it atomically (same
+        # durability as every other write here) and never let a failure block the
+        # actual save — the user's edit still lands even if the backup can't.
         try:
             data = target.read_bytes()
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+            dest_dir = self.config.history_dir / target.stem
+            atomic_write_bytes(dest_dir / f"{stamp}.md", data)
+            _prune_history(dest_dir, keep=10)
         except OSError:
             return
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        dest_dir = self.config.history_dir / target.stem
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        (dest_dir / f"{stamp}.md").write_bytes(data)
-        _prune_history(dest_dir, keep=10)
 
     def serialize(self, doc: Document) -> str:
         buf = io.StringIO()
@@ -401,6 +403,10 @@ def _as_opt_str(value: object) -> str | None:
 
 
 def _as_bool(value: object) -> bool:
+    # A hand-edited *quoted* flag (`ignore_expiry: "false"`) is a truthy string to
+    # bare bool(); read common false-y words as False so hand-edits behave.
+    if isinstance(value, str):
+        return value.strip().lower() not in ("", "false", "0", "no", "off")
     return bool(value)
 
 
@@ -409,6 +415,8 @@ def _as_opt_int(value: object) -> int | None:
         return None
     if isinstance(value, int):
         return value
+    if isinstance(value, float):
+        return int(value)  # a hand-edited `perm_slot: 8.0` still loads as 8
     try:
         return int(str(value))
     except ValueError:
@@ -471,7 +479,7 @@ def _as_renditions(value: object) -> list[Rendition]:
             Rendition(
                 label=str(item.get("label", "")),
                 path=str(path),
-                primary=bool(item.get("primary", False)),
+                primary=_as_bool(item.get("primary", False)),
             )
         )
     return out
