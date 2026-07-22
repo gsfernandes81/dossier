@@ -72,9 +72,10 @@ class DossierApp(App[None]):
         """Toggle SGR mouse reporting via the driver.
 
         On Termux, tapping only raises the soft keyboard while mouse tracking is
-        *off*, so the ``⌨`` control disables reporting to summon the IME and
-        re-enables it on submit. The driver methods are private and absent on the
-        headless test driver, so this is a guarded no-op there.
+        *off*, so focusing a text field disables reporting to summon the IME and
+        focusing anything else re-enables it (see ``HomeScreen.on_descendant_focus``).
+        The driver methods are private and absent on the headless test driver, so
+        this is a guarded no-op there.
         """
         driver = getattr(self, "_driver", None)
         if driver is None:

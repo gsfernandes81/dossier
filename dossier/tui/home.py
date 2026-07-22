@@ -45,10 +45,10 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
-from textual.events import Resize
+from textual.events import DescendantFocus, Resize
 from textual.reactive import reactive
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, OptionList
+from textual.widgets import Button, Footer, Header, Input, OptionList, TextArea
 from textual.widgets.option_list import Option
 
 from dossier import query, suggest
@@ -113,7 +113,7 @@ class HomeScreen(Screen[None]):
     SCOPED_CSS = False
 
     DEFAULT_CSS = """
-    #bottombar { dock: bottom; height: 2; }
+    #bottombar { dock: bottom; height: 4; }
     #actionbar {
         display: none; layout: grid; grid-rows: 5; grid-gutter: 0 1;
         height: auto; width: 1fr;
@@ -121,14 +121,20 @@ class HomeScreen(Screen[None]):
     #actionbar Button {
         width: 1fr; min-width: 6; height: 5; content-align: center middle;
     }
-    #search { height: 1; border: none; padding: 0 1; background: $panel; }
+    /* The search box reads as its own little command panel: a soft rounded
+       edge at rest that brightens distinctly when focused (so it's obvious
+       where typed text goes, on desktop and touch alike). */
+    #search {
+        height: 3; border: round $primary 40%; background: $panel; padding: 0 1;
+    }
+    #search:focus { border: round $accent; background: $boost; }
     #panes { height: 1fr; }
 
     /* Touch (Termux): a tap-action grid above the command bar — big thumb
        targets. Landscape lays the six actions 3-wide (2 rows); a tall portrait
        phone gets them 2-wide (3 rows). */
-    HomeScreen.touch #bottombar { height: 12; }
-    HomeScreen.touch.-portrait #bottombar { height: 17; }
+    HomeScreen.touch #bottombar { height: 14; }
+    HomeScreen.touch.-portrait #bottombar { height: 19; }
     HomeScreen.touch #actionbar { display: block; grid-size: 3; }
     HomeScreen.touch.-portrait #actionbar { grid-size: 2; }
     /* Two-line location rows on touch: a bigger tap target per category and a
@@ -236,7 +242,6 @@ class HomeScreen(Screen[None]):
                 yield Button(_btn_label(g.new, "New"), id="act-new")
                 yield Button(_btn_label(g.bundle, "Bundle"), id="act-bundle")
                 yield Button(_btn_label(g.calendar, "Watch"), id="act-watch")
-                yield Button(g.keyboard or "Key", id="act-kbd")
             yield Input(placeholder="Search name / tags / notes…", id="search")
             yield Footer(compact=True)
 
@@ -453,6 +458,18 @@ class HomeScreen(Screen[None]):
             self._set_mouse_reporting(True)
             self._focus_documents()
 
+    def on_descendant_focus(self, event: DescendantFocus) -> None:
+        # Termux keyboard model: a tap only raises the soft keyboard while mouse
+        # reporting is OFF, but the app only receives taps while it's ON. So make
+        # *focus* the switch — focusing a text field (search or an edit-form
+        # Input/TextArea) drops reporting so the IME can appear; focusing anything
+        # else (a list, a button) restores it so taps land again. Keys still
+        # arrive either way, so Tab/Enter hop fields and Esc returns to tap mode.
+        if not self._touch:
+            return
+        typing = isinstance(event.widget, (Input, TextArea))
+        self._set_mouse_reporting(not typing)
+
     def on_option_list_option_highlighted(
         self, event: OptionList.OptionHighlighted
     ) -> None:
@@ -484,8 +501,6 @@ class HomeScreen(Screen[None]):
             self.action_bundle()
         elif event.button.id == "act-watch":
             self.action_watch()
-        elif event.button.id == "act-kbd":
-            self._raise_keyboard()
 
     # -- actions -------------------------------------------------------------
 
@@ -531,9 +546,22 @@ class HomeScreen(Screen[None]):
             self.query_one("#locations", OptionList).focus()
 
     def action_open_file(self) -> None:
+        # Progressive "Open": drill locations → documents → detail, then (once
+        # the detail pane already shows the current doc) open its physical file.
+        # Each step changes the screen visibly, so the drilling is self-evident.
+        # Desktop-wide keeps the pane open and following the highlight, so after
+        # the first drill this collapses to one-press file-open; touch-narrow
+        # closes the pane on Back, so it genuinely re-drills each time.
+        if self.app.focused is self.query_one("#locations", OptionList):
+            self.action_drill_in()  # locations → documents
+            return
         doc = self._current_doc()
-        if doc is not None:
-            self.open_document(doc.id)
+        if doc is None:
+            return
+        if not (self._show_detail and self._detail_id == doc.id):
+            self.open_detail(doc.id)  # documents → detail (third column)
+            return
+        self.open_document(doc.id)  # detail already up → open the file
 
     def action_toggle_dates(self) -> None:
         self._show_issue = not self._show_issue
@@ -611,13 +639,6 @@ class HomeScreen(Screen[None]):
             # the highlight — an unchanged highlight wouldn't fire select_location).
             self._selection = _ALL
             self.query_one("#locations", OptionList).highlighted = 0
-
-    def _raise_keyboard(self) -> None:
-        # Termux only raises the soft keyboard while mouse tracking is off, and
-        # the app can't summon the IME itself — so drop mouse reporting and focus
-        # the command bar; the user's next tap on it brings the keyboard up.
-        self.query_one("#search", Input).focus()
-        self._set_mouse_reporting(False)
 
     def _set_mouse_reporting(self, enabled: bool) -> None:
         setter = getattr(self.app, "set_mouse_reporting", None)
