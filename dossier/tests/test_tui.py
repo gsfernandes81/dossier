@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, Input, OptionList, TextArea
+from textual.widgets import Button, Input, OptionList, TextArea, Tree
 
 from dossier.config import Config
 from dossier.model import Document, Rendition
@@ -28,6 +28,7 @@ from dossier.tui import (
     DossierApp,
     home as tui_home,
 )
+from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundleScreen,
@@ -396,6 +397,31 @@ async def test_watch_screen_lists_tracked_and_ignores(tmp_path: Path):
         assert watch.option_count == 0
 
     assert store.load("coc").ignore_expiry is True
+
+
+@pytest.mark.asyncio
+async def test_reconcile_screen_shows_orphans_and_missing(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "Marine").mkdir()
+    (tmp_path / "Marine" / "loose scan.pdf").write_bytes(b"x")  # orphan
+    store.save(
+        Document(
+            id="d", name="Doc", files=[Rendition("x", "Marine/gone.pdf", primary=True)]
+        )
+    )  # links a missing file
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        folders = [
+            str(node.label) for node in screen.query_one("#orphans", Tree).root.children
+        ]
+        assert any("Marine" in label for label in folders)  # orphan grouped by folder
+        missing = screen.query_one("#missing", OptionList)
+        assert missing.get_option_at_index(0).id == "d"  # the missing-file doc
 
 
 def test_linux_driver_exposes_mouse_toggle():
