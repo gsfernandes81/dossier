@@ -78,8 +78,7 @@ def test_extract_posts_configured_model_and_low_temperature(
         seen["model"] = body["model"]
         seen["temperature"] = body["temperature"]
         seen["has_image"] = any(
-            part.get("type") == "image_url"
-            for part in body["messages"][-1]["content"]
+            part.get("type") == "image_url" for part in body["messages"][-1]["content"]
         )
         return _PAYLOAD
 
@@ -114,3 +113,37 @@ def test_scans_sidecar_round_trips(tmp_path: Path):
     assert back["coc"].expiry_date_text == "28/09/2026"  # verbatim survives the trip
     assert back["coc"].is_validity_period is True
     assert back["coc"].fingerprint == "99:123"  # so a re-scan can skip it
+
+
+def test_list_models_flags_vision_and_sorts_them_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def fake_get(url, timeout):
+        assert url.endswith("/models")
+        return {
+            "data": [
+                {"id": "coder", "architecture": {"input_modalities": ["text"]}},
+                {
+                    "id": "qwen3vl",
+                    "architecture": {"input_modalities": ["text", "image"]},
+                },
+                {"id": "novision"},  # no architecture → treated as text-only
+                {"id": ""},  # blank id dropped
+            ]
+        }
+
+    monkeypatch.setattr(scan, "_get", fake_get)
+    models = scan.list_models(_cfg(tmp_path))
+    assert [m.id for m in models] == ["qwen3vl", "coder", "novision"]  # vision first
+    assert models[0].vision is True and models[1].vision is False
+
+
+def test_list_models_wraps_unreachable_router(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def boom(url, timeout):
+        raise ScanError("router unreachable")
+
+    monkeypatch.setattr(scan, "_get", boom)
+    with pytest.raises(ScanError):
+        scan.list_models(_cfg(tmp_path))

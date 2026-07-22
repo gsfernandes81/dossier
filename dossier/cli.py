@@ -378,6 +378,24 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 1 if errors or plan.problems else 0
 
 
+def _print_models(config: Config) -> int:
+    """List the router's models (``ds scan --list-models``), vision ones flagged."""
+    try:
+        models = scan.list_models(config)
+    except ScanError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if not models:
+        print("no models reported by the router.")
+        return 0
+    print(f"models at {config.scan_base_url}  (scan uses: {config.scan_model})")
+    for model in models:
+        kind = "vision" if model.vision else "text  "
+        current = "  <- current" if model.id == config.scan_model else ""
+        print(f"  [{kind}] {model.id}{current}")
+    return 0
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     """Read linked scans with the vision model into the readings sidecar.
 
@@ -387,6 +405,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
     config = _load_config()
     if config is None:
         return 1
+    if args.list_models:
+        return _print_models(config)
+    if args.model:
+        config.scan_model = args.model  # override for this run
     store = Store(config)
     existing = store.load_scans()
     readings = dict(existing)
@@ -569,6 +591,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan_p.add_argument(
         "--limit", type=int, default=0, help="scan at most N new files (0 = all)"
+    )
+    scan_p.add_argument(
+        "--model", metavar="NAME", help="override the scan model for this run"
+    )
+    scan_p.add_argument(
+        "--list-models",
+        action="store_true",
+        help="list the router's models (vision-capable flagged) and exit",
     )
     scan_p.set_defaults(func=cmd_scan)
 

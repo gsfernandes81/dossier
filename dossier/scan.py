@@ -199,6 +199,42 @@ def extract(path: Path, config: Config, *, timeout: float = 300.0) -> ScanReadin
     return ScanReading.from_payload(payload, config.scan_model)
 
 
+@dataclass(frozen=True)
+class ModelInfo:
+    """A model the router offers; ``vision`` gates which can back ``ds scan``."""
+
+    id: str
+    vision: bool
+
+
+def list_models(config: Config, *, timeout: float = 15.0) -> list[ModelInfo]:
+    """The router's models (``/v1/models``), vision-capable ones first.
+
+    Vision models (image input) are the ones ``ds scan`` can use; a text-only
+    model would ignore the page image. Raises :class:`ScanError` if unreachable.
+    """
+    data = _get(config.scan_base_url.rstrip("/") + "/models", timeout)
+    out: list[ModelInfo] = []
+    for entry in data.get("data", []) if isinstance(data, dict) else []:
+        model_id = str(entry.get("id") or "").strip()
+        if not model_id:
+            continue
+        architecture = entry.get("architecture") or {}
+        modalities = architecture.get("input_modalities") or []
+        out.append(ModelInfo(id=model_id, vision="image" in modalities))
+    return sorted(out, key=lambda m: (not m.vision, m.id.lower()))
+
+
+def _get(url: str, timeout: float) -> dict:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return json.loads(response.read())
+    except urllib.error.URLError as exc:
+        raise ScanError(f"VLM router unreachable at {url}: {exc.reason}") from exc
+    except (TimeoutError, OSError, json.JSONDecodeError) as exc:
+        raise ScanError(f"could not list models from {url}: {exc}") from exc
+
+
 def _post(base_url: str, body: dict, timeout: float) -> dict:
     url = base_url.rstrip("/") + "/chat/completions"
     request = urllib.request.Request(

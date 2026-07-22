@@ -15,9 +15,10 @@ inline; the DetailScreen/Move/Bundle modals retired) + **search as an in-place
 Miller filter**; the **dismissable suggestions** layer (name-dates demoted to
 accept/dismiss suggestions in the pane); and **bundles & export** (hierarchical
 slugs, dates + chronological surface, folder→bundle suggestions, `ds export`).
-Phase 7 (vision) is **in progress** — the `ds scan` extraction engine, CLI, and
-content-based succession have landed and are verified on the real store; expiry/issue
-suggestions from readings are the remaining piece. Phase 8 (organize, #4) is planned.
+Phase 7 (vision) is **done** — `ds scan` reads linked scans with a local VLM into
+grounded readings that drive content-based succession (a reconcile tab), expiry/issue
+suggestions (the detail pane), and per-run model selection; all verified on the real
+store. **Phase 8 (organize, #4) is next.**
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -91,7 +92,7 @@ Per-item rationale lives in `DESIGN.md` §14.
   bundle's member files into a folder, named by doc id, with problem flags
   (no-file/missing/exists) and `--dry-run`/`--force` (#59).
 
-## Phase 7 — Vision & content suggestions  *(in progress)*
+## Phase 7 — Vision & content suggestions  ✅
 - [x] **`ds scan` extraction engine + CLI** — rasterize the first page (pypdfium2) and
   read a **structured, grounded** `ScanReading` from a local VLM over an
   OpenAI-compatible endpoint (a llama.cpp router; model + URL per-device config).
@@ -111,8 +112,9 @@ Per-item rationale lives in `DESIGN.md` §14.
   VLM-confirmed validity *window* gives issue+expiry; a non-window date pair (a
   sea-service period) becomes a notes span, not a spurious expiry. Verified on the real
   store: 11 expiry + 19 issue + 4 period suggestions surfaced.
-- [ ] **Model selection in settings** (S) — list the router's `/v1/models` and choose
-  per run (URL/model are already per-device config).
+- [x] **Model selection** (S) — `ds scan --list-models` lists the router's `/v1/models`
+  (vision-capable ones flagged + sorted first, current one marked); `ds scan --model NAME`
+  overrides the model for a run (URL/model are already per-device config).
   - *Stack in use:* Qwen3-VL-8B-Instruct (Q4) via a llama.cpp router behind the OpenAI
     `/v1/chat/completions` endpoint with a JSON schema; pypdfium2 @ ~170 DPI;
     desktop-only (an 8B VLM isn't viable on the phone).
