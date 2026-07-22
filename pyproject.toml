@@ -37,6 +37,13 @@ dev = [
     "ty>=0.0.56",
     "pre-commit>=4.6.0",
 ]
+# Dev-only, opt-in (not in default-groups, so plain `uv sync`/CI skips it): the
+# real-terminal TUI driver in tools/. pyte is a pure-Python VT100 emulator;
+# pywinpty gives a Windows ConPTY (POSIX uses the stdlib `pty`).
+driver = [
+    "pyte>=0.8.2",
+    "pywinpty>=2.0; sys_platform == 'win32'",
+]
 
 [tool.uv]
 default-groups = ["dev"]
