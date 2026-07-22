@@ -581,6 +581,45 @@ async def test_reconcile_screen_shows_orphans_and_missing(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_reconcile_opens_on_orphans_and_cycles_tabs(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "loose.pdf").write_bytes(b"x")  # an orphan on disk
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        # Opens on Orphans (actionable) — not the empty, scan-only Duplicates tab.
+        assert screen.query_one(TabbedContent).active == "tab-orphans"
+        screen.action_next_tab()
+        await pilot.pause()
+        assert screen.query_one(TabbedContent).active == "tab-missing"
+        screen.action_prev_tab()
+        await pilot.pause()
+        assert screen.query_one(TabbedContent).active == "tab-orphans"
+
+
+@pytest.mark.asyncio
+async def test_quick_accept_applies_and_saves_top_suggestion(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    store.save(Document(id="visa", name="US Visa 12-Jan-2026", perm_location="wallet"))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("visa")
+        await pilot.pause()
+        await pilot.pause()  # let show_document populate the read-view suggestions
+        assert home._detail_pane.has_pending_suggestion()
+        home.action_accept_suggestion()  # the `a` binding, from the documents pane
+        await pilot.pause()
+        await pilot.pause()
+        assert store.load("visa").issue_date == date(2026, 1, 12)
+        assert not home._detail_pane.has_pending_suggestion()  # satisfied → gone
+
+
+@pytest.mark.asyncio
 async def test_reconcile_dismiss_orphan_persists_and_hides(tmp_path: Path):
     config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
     store = Store(config)

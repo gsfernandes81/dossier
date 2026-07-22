@@ -66,7 +66,7 @@ def test_render_detail_shows_suggestions_hint():
     )
     assert "Suggestions (1)" in out
     assert "2023-08-15" in out
-    assert "press e to review" in out
+    assert "a accept · e review" in out
 
 
 def test_render_detail_core_fields():

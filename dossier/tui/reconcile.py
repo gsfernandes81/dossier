@@ -81,6 +81,11 @@ class ReconcileScreen(ModalScreen[str | None]):
     """
     BINDINGS = [
         Binding("escape", "close", "Close"),
+        # Textual's Tabs left/right only fire while the tab bar is focused (which
+        # nothing here does), and the orphans Tree needs left/right for its own
+        # expand/collapse — so give tab-switching its own conflict-free keys.
+        Binding("left_square_bracket", "prev_tab", "◂ Tab"),
+        Binding("right_square_bracket", "next_tab", "Tab ▸"),
         Binding("d", "scan_dups", "Find duplicates"),
         Binding("x", "reject", "Dismiss"),
         Binding("l", "link", "Link"),
@@ -89,6 +94,14 @@ class ReconcileScreen(ModalScreen[str | None]):
         Binding("f", "fold", "Fold"),
         Binding("g", "ignore_glob", "Ignore glob"),
     ]
+
+    # Tab order (as composed) and each pane's primary widget, for cycling + focus.
+    _TAB_ORDER = ("tab-dups", "tab-orphans", "tab-missing")
+    _TAB_PANE = {
+        "tab-dups": "#dups",
+        "tab-orphans": "#orphans",
+        "tab-missing": "#missing",
+    }
 
     def __init__(self, store: Store, config: Config) -> None:
         super().__init__()
@@ -122,6 +135,18 @@ class ReconcileScreen(ModalScreen[str | None]):
             Option("press  d  to scan for duplicates (cached after the first run)")
         )
         self._update_summary()
+        # Open on a tab that actually has something to do — orphans/missing are
+        # always-available, no-deps actions; Duplicates (the composed default)
+        # is empty until you scan and needs the optional dedup extras.
+        self.query_one(TabbedContent).active = self._default_tab()
+
+    def _default_tab(self) -> str:
+        report = self._report
+        if report is not None and report.orphans:
+            return "tab-orphans"
+        if report is not None and report.missing:
+            return "tab-missing"
+        return "tab-orphans"  # nothing pending: still avoid leading with the scan tab
 
     # -- population ----------------------------------------------------------
 
@@ -217,6 +242,26 @@ class ReconcileScreen(ModalScreen[str | None]):
     @on(TabbedContent.TabActivated)
     def _tab_changed(self) -> None:
         self.refresh_bindings()  # footer shows only the active tab's actions
+        self._focus_active_pane()  # so its list/tree is immediately navigable
+
+    def _focus_active_pane(self) -> None:
+        pane = self._TAB_PANE.get(self._active_tab())
+        if pane:
+            hits = self.query(pane)
+            if hits:
+                hits.first().focus()
+
+    def action_next_tab(self) -> None:
+        self._cycle_tab(1)
+
+    def action_prev_tab(self) -> None:
+        self._cycle_tab(-1)
+
+    def _cycle_tab(self, delta: int) -> None:
+        order = self._TAB_ORDER
+        current = self._active_tab()
+        index = order.index(current) if current in order else 0
+        self.query_one(TabbedContent).active = order[(index + delta) % len(order)]
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         active = self._active_tab()

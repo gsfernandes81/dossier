@@ -148,7 +148,7 @@ def _suggestions(suggestions: Sequence[Suggestion], glyphs: GlyphSet) -> Rendera
     body = Text()
     _icon(body, glyphs.note)
     body.append(f"Suggestions ({len(suggestions)})", style="bold")
-    body.append("  press e to review\n", style="dim")
+    body.append("  a accept · e review\n", style="dim")
     for suggestion in suggestions:
         label = _FIELD_LABEL[suggestion.field]
         body.append(f"  {label}: ", style="dim")

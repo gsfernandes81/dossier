@@ -172,6 +172,7 @@ class DetailPane(VerticalScroll):
         self._new_bundle_titles: dict[str, str] = {}  # slug → title for new bundles
         self._rend_seq = 0  # monotonic id source for dynamically mounted file rows
         self._suggestions: list[Suggestion] = []  # live suggestions for this doc
+        self._read_suggestions: list[Suggestion] = []  # ditto, for the read view
 
     def compose(self) -> ComposeResult:
         with ContentSwitcher(initial=_READ):
@@ -244,6 +245,10 @@ class DetailPane(VerticalScroll):
         """Render one document into the read view (a no-op while editing)."""
         if self.editing:
             return
+        # Track the shown doc + its suggestions so a read-view quick-accept (the
+        # home screen's `a`) can act without a round-trip through the edit form.
+        self._doc = view.document
+        self._read_suggestions = list(suggestions)
         self.query_one(f"#{_READ}", Static).update(
             detail.render_detail(
                 view,
@@ -391,6 +396,10 @@ class DetailPane(VerticalScroll):
         if action in _EDIT_ACTIONS:
             return True if self.editing else None  # None → bubble to the home screen
         return True
+
+    def has_pending_suggestion(self) -> bool:
+        """Whether the read view is showing a doc with an acceptable suggestion."""
+        return not self.editing and bool(self._read_suggestions)
 
     # -- dirty tracking ------------------------------------------------------
 
@@ -540,6 +549,42 @@ class DetailPane(VerticalScroll):
             span = f"Period: {suggestion.values[0]} to {suggestion.values[1]}"
             notes = self.query_one(f"#{_NOTES}", TextArea)
             notes.text = f"{notes.text}\n{span}" if notes.text else span
+
+    def action_accept_suggestion(self) -> None:
+        """Read-view quick-accept: apply the top suggestion and save straight away.
+
+        Only unambiguous suggestions qualify — an issue/expiry with multiple
+        candidate readings still routes through the edit form (press ``e``), where
+        the user picks which value.
+        """
+        if self.editing or not self._read_suggestions:
+            return
+        suggestion = self._read_suggestions[0]
+        date_field = suggestion.field in (SuggestedField.ISSUE, SuggestedField.EXPIRY)
+        if date_field and len(suggestion.values) > 1:
+            self.notify("several readings — press e to choose", severity="warning")
+            return
+        doc = deepcopy(self._doc)
+        self._apply_suggestion_to_doc(doc, suggestion)
+        try:
+            self._store.save(doc)
+        except StaleWriteError:
+            self.notify("changed on disk — reopen and retry", severity="error")
+            return
+        except StoreError as exc:
+            self.notify(str(exc), severity="error")
+            return
+        self.post_message(self.Saved(doc.id))
+        self.notify(f"accepted {_field_label(suggestion.field)}")
+
+    def _apply_suggestion_to_doc(self, doc: Document, suggestion: Suggestion) -> None:
+        if suggestion.field is SuggestedField.ISSUE:
+            doc.issue_date = forms.parse_iso(suggestion.values[0])
+        elif suggestion.field is SuggestedField.EXPIRY:
+            doc.expiry_date = forms.parse_iso(suggestion.values[0])
+        else:  # a NOTES period span (values are start, end)
+            span = f"Period: {suggestion.values[0]} to {suggestion.values[1]}"
+            doc.notes = f"{doc.notes}\n{span}" if doc.notes else span
 
     def _apply_renditions(self, doc: Document) -> None:
         rends: list[Rendition] = []
