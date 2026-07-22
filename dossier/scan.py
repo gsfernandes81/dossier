@@ -36,6 +36,7 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from dossier.config import Config
 from dossier.errors import ScanError
@@ -134,12 +135,21 @@ def file_fingerprint(path: Path) -> str:
     return f"{stat.st_size}:{int(stat.st_mtime)}"
 
 
+def _load_pdfium() -> Any:
+    try:  # optional (`scan` extra), imported lazily; absent in CI/default installs
+        import pypdfium2  # ty: ignore[unresolved-import]
+    except ImportError as exc:
+        raise ScanError(
+            "ds scan needs the 'scan' extra: pip install 'dossier[scan]'"
+        ) from exc
+    return pypdfium2
+
+
 def render_page(path: Path, dpi: int) -> bytes:
     """PNG bytes of the first page (PDFs rasterized; image files passed through)."""
     if path.suffix.lower() in _IMAGE_SUFFIXES:
         return path.read_bytes()
-    import pypdfium2 as pdfium  # optional (`scan` extra); imported lazily
-
+    pdfium = _load_pdfium()
     pdf = pdfium.PdfDocument(str(path))
     try:
         bitmap = pdf[0].render(scale=dpi / 72)
@@ -158,10 +168,8 @@ def extract(path: Path, config: Config, *, timeout: float = 300.0) -> ScanReadin
     """
     try:
         png = render_page(path, config.scan_dpi)
-    except ImportError as exc:  # pragma: no cover - env-specific
-        raise ScanError(
-            "ds scan needs the 'scan' extra: pip install 'dossier[scan]'"
-        ) from exc
+    except ScanError:
+        raise  # the "install the extra" message — keep it, don't re-wrap
     except Exception as exc:
         raise ScanError(f"could not render {path.name}: {exc}") from exc
 
