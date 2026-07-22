@@ -52,7 +52,7 @@ from textual.widgets.selection_list import Selection
 
 from dossier import suggest
 from dossier.errors import StaleWriteError, StoreError
-from dossier.migrate import slugify
+from dossier.migrate import slugify, slugify_path
 from dossier.model import Bundle, Document, Rendition, SuggestedField, Suggestion
 from dossier.query import DocumentView, plan_move
 from dossier.store import Store
@@ -394,7 +394,9 @@ class DetailPane(VerticalScroll):
         event.input.value = ""
         if not name:
             return
-        slug = slugify(name)
+        slug = slugify_path(
+            name
+        )  # bundle slugs may be hierarchical (travel/india-2024)
         if slug in self._bundle_slugs:
             self.notify(f"{slug} is already listed")
             return

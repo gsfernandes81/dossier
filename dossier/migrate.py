@@ -76,6 +76,17 @@ def slugify(name: str) -> str:
     return slug
 
 
+def slugify_path(name: str) -> str:
+    """Slugify each ``/``-separated segment (bundle slugs may be hierarchical).
+
+    ``"Travel Documents/India 2024"`` → ``"travel-documents/india-2024"`` — each
+    segment gets the full :func:`slugify` treatment (so it stays a safe folder
+    name for ``ds export``), and the ``/`` separators are preserved for grouping.
+    """
+    segments = [slugify(segment) for segment in name.split("/") if segment.strip()]
+    return "/".join(segments) or "document"
+
+
 def _unique_slug(base: str, used: set[str]) -> str:
     slug, n = base, 2
     while slug in used:

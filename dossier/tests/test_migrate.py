@@ -32,6 +32,15 @@ def test_slugify_and_reserved_names():
     assert migrate.slugify("AUX") == "aux-doc"
 
 
+def test_slugify_path_keeps_segments():
+    assert migrate.slugify_path("Travel Documents/India 2024") == (
+        "travel-documents/india-2024"
+    )
+    assert migrate.slugify_path("visa/US 2025") == "visa/us-2025"
+    assert migrate.slugify_path("plain") == "plain"  # no slash → plain slug
+    assert migrate.slugify_path("a//b/") == "a/b"  # blank segments dropped
+
+
 def test_decode_slot():
     assert migrate.decode_slot(1.3) == (1, 3)
     assert migrate.decode_slot(2) == (2, None)
