@@ -735,6 +735,28 @@ async def test_detail_pane_edit_saves_scalars_and_flags(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_edit_close_edit_remounts_without_duplicate_ids(tmp_path: Path):
+    # Regression: re-entering edit re-mounts the rendition/suggestion rows; the
+    # async remove_children must finish before the re-mount or the reused row ids
+    # collide (DuplicateIds). passport has a rendition, so a row is remounted.
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "passport")
+        assert len(list(pane.query(".df-rend-row"))) == 1
+        pane.action_cancel_edit()
+        await pilot.pause()
+        await pilot.pause()
+        assert not pane.editing
+        home.action_edit()  # second edit — must not raise
+        await pilot.pause()
+        await pilot.pause()
+        assert pane.editing
+        assert len(list(pane.query(".df-rend-row"))) == 1  # exactly one, not two
+
+
+@pytest.mark.asyncio
 async def test_edit_mode_suppresses_home_bindings(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
