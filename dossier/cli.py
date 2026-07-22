@@ -36,6 +36,7 @@ from dossier import (
     doctor,
     export,
     migrate,
+    organize,
     query,
     reconcile,
     reset,
@@ -378,6 +379,58 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 1 if errors or plan.problems else 0
 
 
+def cmd_organize(args: argparse.Namespace) -> int:
+    """Rename linked files to canonical names (dry-run unless ``--apply``)."""
+    config = _load_config()
+    if config is None:
+        return 1
+
+    store = Store(config)
+    docs = store.load_all()
+    if args.doc_id:
+        docs = [d for d in docs if d.id == args.doc_id]
+        if not docs:
+            print(f"error: unknown document '{args.doc_id}'", file=sys.stderr)
+            return 1
+    elif args.bundle:
+        docs = [d for d in docs if args.bundle in d.bundles]
+        if not docs:
+            print(f"error: no documents in bundle '{args.bundle}'", file=sys.stderr)
+            return 1
+
+    plan = organize.build_organize_plan(
+        docs,
+        root=config.syncthing_root,
+        to_folders=args.to_folders,
+        folder_map=config.organize_folders,
+    )
+    label = "organize --to-folders" if args.to_folders else "organize"
+    print(
+        f"{label}: {len(plan.ready)} rename(s), "
+        f"{len(plan.problems)} skip(s), {len(plan.already)} already ok"
+    )
+    for item in plan.ready:
+        note = f"  [{item.note}]" if item.note else ""
+        print(f"  rename  {item.src_rel}  ->  {item.dst_rel}{note}")
+    for item in plan.problems:
+        print(f"  skip    {item.name}  ({item.problem})")
+    if args.verbose:
+        for item in plan.already:
+            print(f"  ok      {item.src_rel}")
+
+    if not args.apply:
+        print(f"\n{len(plan.ready)} file(s) would be renamed (dry run; pass --apply).")
+        return 1 if plan.problems else 0
+
+    renamed, errors = organize.apply_organize_plan(
+        plan, store, root=config.syncthing_root
+    )
+    for message in errors:
+        print(f"  error {message}", file=sys.stderr)
+    print(f"\nrenamed {renamed} file(s); {len(plan.problems)} skipped.")
+    return 1 if errors or plan.problems else 0
+
+
 def _print_models(config: Config) -> int:
     """List the router's models (``ds scan --list-models``), vision ones flagged."""
     try:
@@ -581,6 +634,33 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="print the plan without writing"
     )
     export_p.set_defaults(func=cmd_export)
+
+    organize_p = sub.add_parser(
+        "organize",
+        help="rename linked files to canonical names (dry-run unless --apply)",
+    )
+    organize_p.add_argument(
+        "doc_id", nargs="?", help="organize just this document id (else all linked)"
+    )
+    organize_p.add_argument(
+        "--bundle", metavar="SLUG", help="limit to a bundle's documents"
+    )
+    organize_p.add_argument(
+        "--to-folders",
+        action="store_true",
+        dest="to_folders",
+        help="also move each file into the folder its primary tag maps to",
+    )
+    organize_p.add_argument(
+        "--apply", action="store_true", help="perform the renames (default: dry run)"
+    )
+    organize_p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="also list files already at their canonical name",
+    )
+    organize_p.set_defaults(func=cmd_organize)
 
     scan_p = sub.add_parser(
         "scan",

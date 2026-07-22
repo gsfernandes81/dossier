@@ -105,3 +105,37 @@ def test_mobile_and_desktop_flags_override_platform(monkeypatch: pytest.MonkeyPa
 def test_mobile_and_desktop_are_mutually_exclusive():
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["--mobile", "--desktop"])
+
+
+def test_organize_cli_dry_run_then_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from dossier.model import Document, Rendition
+    from dossier.store import Store
+
+    root = tmp_path / "docs"
+    root.mkdir()
+    device = tmp_path / "cfg" / "config.toml"
+    monkeypatch.setattr(cli, "per_device_config_path", lambda: device)
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+    assert cli.main(["init", "--root", str(root)]) == 0
+
+    config = Config.load()
+    (config.syncthing_root / "Marine").mkdir()
+    (config.syncthing_root / "Marine" / "scan.pdf").write_bytes(b"x")
+    Store(config).save(
+        Document(
+            id="coc", name="CoC Card", files=[Rendition("d", "Marine/scan.pdf", True)]
+        )
+    )
+
+    # Dry run: reports the rename, writes nothing.
+    assert cli.main(["organize"]) == 0
+    assert "Marine/scan.pdf  ->  Marine/coc-card.pdf" in capsys.readouterr().out
+    assert (config.syncthing_root / "Marine" / "scan.pdf").exists()
+
+    # Apply: renames on disk and rewrites the rendition path.
+    assert cli.main(["organize", "--apply"]) == 0
+    assert (config.syncthing_root / "Marine" / "coc-card.pdf").exists()
+    assert not (config.syncthing_root / "Marine" / "scan.pdf").exists()
+    assert Store(config).load("coc").files[0].path == "Marine/coc-card.pdf"

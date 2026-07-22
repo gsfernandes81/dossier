@@ -78,6 +78,9 @@ class Config:
     # gives run-to-run variance); DPI is the page raster resolution for the VLM.
     scan_temperature: float = 0.1
     scan_dpi: int = 170
+    # `ds organize --to-folders`: a doc's primary tag → the category folder its file
+    # moves into (longest-prefix match). Synced, from `[organize.folders]`.
+    organize_folders: dict[str, str] = field(default_factory=dict)
 
     @property
     def meta_dir(self) -> Path:
@@ -177,6 +180,11 @@ class Config:
         ignore = synced.get("ignore")
         if isinstance(ignore, list):
             self.ignore = [str(x) for x in ignore]
+        organize = synced.get("organize")
+        if isinstance(organize, dict):
+            folders = organize.get("folders")
+            if isinstance(folders, dict):
+                self.organize_folders = {str(k): str(v) for k, v in folders.items()}
 
 
 def _read_toml(path: Path) -> dict[str, object]:

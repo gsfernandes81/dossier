@@ -89,6 +89,26 @@ def test_glyphs_defaults_to_nerd_and_loads_from_device(
     assert Config.load().glyphs == "ascii"
 
 
+def test_merge_synced_reads_organize_folders(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path)
+    config.meta_dir.mkdir(parents=True)
+    config.synced_config_path.write_text(
+        "[organize.folders]\n"
+        'marine = "Marine"\n'
+        '"marine/safety" = "Marine/Safety Course Certs"\n',
+        encoding="utf-8",
+    )
+    config.merge_synced()
+    assert config.organize_folders == {
+        "marine": "Marine",
+        "marine/safety": "Marine/Safety Course Certs",
+    }
+
+
+def test_organize_folders_defaults_empty(tmp_path: Path):
+    assert Config(syncthing_root=tmp_path).organize_folders == {}
+
+
 def test_update_synced_merges_preserving_other_keys(tmp_path: Path):
     config = Config(syncthing_root=tmp_path)
     config.meta_dir.mkdir(parents=True)
