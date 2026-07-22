@@ -43,10 +43,10 @@ from datetime import date
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical
 from textual.events import Resize
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, OptionList, Static
+from textual.widgets import Button, Footer, Header, Input, OptionList
 from textual.widgets.option_list import Option
 
 from dossier import query
@@ -54,7 +54,8 @@ from dossier.config import Config
 from dossier.model import Document, ExpiryStatus, Location
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
-from dossier.tui import detail, glyphs, rows
+from dossier.tui import glyphs, rows
+from dossier.tui.detail_pane import DetailPane
 from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
@@ -173,8 +174,7 @@ class HomeScreen(Screen[None]):
         with Horizontal(id="panes"):
             yield OptionList(id="locations")
             yield OptionList(id="documents")
-            with VerticalScroll(id="detail"):
-                yield Static(id="detail-body")
+            yield DetailPane(self._store, glyphs=self._glyphs, id="detail")
         # A fixed-height bottom bar reserves the space for the (touch-only)
         # action row, the command line, and the footer so they stack cleanly
         # (docking them directly onto the screen lets the footer overlap).
@@ -189,7 +189,6 @@ class HomeScreen(Screen[None]):
             yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#detail", VerticalScroll).can_focus = True
         self.set_class(self._touch, "touch")
         self._reload()
         self._focus_default()
@@ -286,19 +285,16 @@ class HomeScreen(Screen[None]):
         self.app.sub_title = f"{len(docs)} / {len(self._docs)} documents"
 
     def _update_detail(self) -> None:
-        body = self.query_one("#detail-body", Static)
+        pane = self.query_one("#detail", DetailPane)
         doc = self._doc_by_id(self._detail_id) if self._detail_id else None
         if doc is None:
-            body.update("")
+            pane.clear()
             return
-        body.update(
-            detail.render_detail(
-                self._view(doc),
-                location_label=self._location_label(doc),
-                chain=query.supersession_chain(self._docs, doc),
-                superseded_by=self._superseded_by(doc),
-                glyphs=self._glyphs,
-            )
+        pane.show_document(
+            self._view(doc),
+            location_label=self._location_label(doc),
+            chain=query.supersession_chain(self._docs, doc),
+            superseded_by=self._superseded_by(doc),
         )
 
     def _view(self, doc: Document) -> query.DocumentView:
@@ -326,7 +322,7 @@ class HomeScreen(Screen[None]):
             self._refresh_documents()  # rows collapse to their compact shape
         self._update_detail()
         if self._narrow:
-            self.query_one("#detail", VerticalScroll).focus()
+            self.query_one("#detail", DetailPane).focus()
 
     def close_detail(self) -> None:
         if not self._show_detail:
