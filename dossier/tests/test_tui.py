@@ -1172,3 +1172,32 @@ async def test_scan_doc_reads_and_persists_the_reading(
     assert "passport" in saved  # the reading was persisted
     assert saved["passport"].expiry_date_text == "01 Jan 2030"
     assert saved["passport"].fingerprint  # fingerprinted so a re-scan skips it
+
+
+@pytest.mark.asyncio
+async def test_settings_screen_saves_and_persists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from dossier.tui.screens import SettingsScreen
+
+    store, config = _setup(tmp_path)
+    device = tmp_path / "device.toml"
+    device.write_text(f'syncthing_root = "{tmp_path.as_posix()}"\nglyphs = "nerd"\n')
+    monkeypatch.setattr("dossier.config.per_device_config_path", lambda: device)
+    monkeypatch.setattr("dossier.tui.screens.scan.list_models", lambda cfg: [])
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = SettingsScreen(config)
+        app.push_screen(screen)
+        await pilot.pause()
+        screen.query_one("#set-threshold", Input).value = "45"
+        screen.query_one("#set-url", Input).value = "http://box:9000/v1"
+        screen.action_save()
+        await pilot.pause()
+    assert config.expiry_threshold_days == 45  # live config mutated
+    assert config.scan_base_url == "http://box:9000/v1"
+    import tomllib
+
+    saved = tomllib.loads(device.read_text())
+    assert saved["scan_base_url"] == "http://box:9000/v1"  # persisted per-device
+    assert saved["syncthing_root"] == tmp_path.as_posix()  # preserved

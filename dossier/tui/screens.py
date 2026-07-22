@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import date
 
-from textual import on
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
@@ -30,12 +30,15 @@ from textual.widgets import (
     Input,
     Label,
     OptionList,
+    RadioButton,
+    RadioSet,
+    Select,
 )
 from textual.widgets.option_list import Option
 
-from dossier import doctor, query, suggest
-from dossier.config import Config
-from dossier.errors import StaleWriteError, StoreError
+from dossier import doctor, query, scan, suggest
+from dossier.config import Config, update_per_device, update_synced
+from dossier.errors import ScanError, StaleWriteError, StoreError
 from dossier.model import Bundle, Document, ExpiryStatus, Location
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
@@ -606,3 +609,115 @@ def _loc_label(doc: Document, locations: dict[str, Location]) -> str | None:
         sub = doc.effective_subslot
         title += f" · {slot}.{sub}" if sub is not None else f" · {slot}"
     return title
+
+
+class SettingsScreen(ModalScreen[bool]):
+    """Edit device + synced settings; dismisses True when something changed.
+
+    Device settings (icons, scan endpoint / model / temperature / DPI) write to the
+    per-device config; the expiry threshold is synced. Changes apply on the next
+    home reload — except the icon set, baked into composed widgets, which takes
+    effect on restart.
+    """
+
+    CSS = """
+    SettingsScreen { align: center middle; }
+    #setpanel {
+        width: 80%; max-width: 84; height: 85%;
+        padding: 1 2; background: $panel; border: round $primary;
+    }
+    SettingsScreen .section { color: $accent; margin-top: 1; }
+    SettingsScreen .hint { color: $text-muted; }
+    SettingsScreen Input, SettingsScreen Select { width: 1fr; margin-bottom: 1; }
+    SettingsScreen RadioSet { margin-bottom: 1; }
+    """
+    BINDINGS = [
+        Binding("ctrl+s", "save", "Save"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        self._config = config
+
+    def compose(self) -> ComposeResult:
+        cfg = self._config
+        with VerticalScroll(id="setpanel"):
+            yield Label("Settings   ctrl+s save · esc cancel")
+            yield Label("— This device —", classes="section")
+            yield Label("Icons  (takes effect on restart)", classes="hint")
+            with RadioSet(id="set-glyphs"):
+                yield RadioButton("Nerd Font", value=cfg.glyphs != "ascii")
+                yield RadioButton(
+                    "ASCII", value=cfg.glyphs == "ascii", id="glyph-ascii"
+                )
+            yield Label("Scan endpoint (base URL)")
+            yield Input(value=cfg.scan_base_url, id="set-url")
+            yield Label("Scan model")
+            yield Select(
+                [(cfg.scan_model, cfg.scan_model)],
+                value=cfg.scan_model,
+                allow_blank=False,
+                id="set-model",
+            )
+            yield Label("Scan temperature")
+            yield Input(value=str(cfg.scan_temperature), id="set-temp")
+            yield Label("Scan DPI")
+            yield Input(value=str(cfg.scan_dpi), id="set-dpi")
+            yield Label("— Synced (shared across devices) —", classes="section")
+            yield Label("Expiry threshold (days)")
+            yield Input(value=str(cfg.expiry_threshold_days), id="set-threshold")
+
+    def on_mount(self) -> None:
+        self._load_models()
+
+    @work(thread=True, exclusive=True)
+    def _load_models(self) -> None:
+        try:  # a network call — never block compose
+            models = scan.list_models(self._config)
+        except ScanError:
+            return  # router down: keep the current model as the sole option
+        ids = [m.id for m in models if m.vision]
+        if self._config.scan_model not in ids:
+            ids.insert(0, self._config.scan_model)
+        self.app.call_from_thread(self._set_model_options, ids)
+
+    def _set_model_options(self, ids: list[str]) -> None:
+        select = self.query_one("#set-model", Select)
+        select.set_options((model_id, model_id) for model_id in ids)
+        select.value = self._config.scan_model
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    def action_save(self) -> None:
+        cfg = self._config
+        try:
+            temperature = float(self.query_one("#set-temp", Input).value)
+            dpi = int(self.query_one("#set-dpi", Input).value)
+            threshold = int(self.query_one("#set-threshold", Input).value)
+        except ValueError:
+            self.notify("temperature/DPI/threshold must be numbers", severity="error")
+            return
+        ascii_on = self.query_one("#glyph-ascii", RadioButton).value
+        glyphs = "ascii" if ascii_on else "nerd"
+        url = self.query_one("#set-url", Input).value.strip() or cfg.scan_base_url
+        model = str(self.query_one("#set-model", Select).value or cfg.scan_model)
+        device = {
+            "glyphs": glyphs,
+            "scan_base_url": url,
+            "scan_model": model,
+            "scan_temperature": temperature,
+            "scan_dpi": dpi,
+        }
+        (
+            cfg.glyphs,
+            cfg.scan_base_url,
+            cfg.scan_model,
+            cfg.scan_temperature,
+            cfg.scan_dpi,
+            cfg.expiry_threshold_days,
+        ) = (glyphs, url, model, temperature, dpi, threshold)
+        update_per_device(device)
+        update_synced(cfg, {"expiry_threshold_days": threshold})
+        self.dismiss(True)

@@ -67,6 +67,7 @@ from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
     DoctorScreen,
+    SettingsScreen,
     SupersedeScreen,
     WatchScreen,
 )
@@ -92,6 +93,7 @@ _EDIT_LOCKED = frozenset(
         "new",
         "accept_suggestion",
         "scan_doc",
+        "settings",
         "move",
         "supersede",
         "watch",
@@ -198,6 +200,7 @@ class HomeScreen(Screen[None]):
         # Read the current doc with the vision model (off the footer; in the help
         # panel and the command palette). Bulk scan is palette-only.
         Binding("v", "scan_doc", "Scan (VLM)", show=False),
+        Binding("comma", "settings", "Settings", show=False),
         # Kept working, but off the footer — surfaced in the help panel (`?`):
         Binding("i", "toggle_dates", "Iss/Exp", show=False),
         Binding("m", "move", "Move", show=False),
@@ -649,6 +652,13 @@ class HomeScreen(Screen[None]):
     def action_cancel_scan(self) -> None:
         self.workers.cancel_group(self, "vision")
         self.notify("cancelling vision scan…")
+
+    def action_settings(self) -> None:
+        self.app.push_screen(SettingsScreen(self._config), self._after_settings)
+
+    def _after_settings(self, changed: bool | None) -> None:
+        if changed:
+            self._reload()  # expiry threshold + scan_* apply now; glyphs on restart
 
     def _scan_docs(self, docs: list[Document]) -> None:
         """Worker body: read each doc with the VLM, persisting after each success
