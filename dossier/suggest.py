@@ -61,6 +61,16 @@ _DATE_TOKEN = re.compile(
 )
 
 
+def name_has_date(name: str) -> bool:
+    """Whether ``name`` already embeds a date token (see :data:`_DATE_TOKEN`).
+
+    ``ds organize`` uses this to decide whether to prefix a canonical filename
+    with the issue date: a name that already says ``2019-05-19`` must not be
+    re-prefixed into ``2019-05-19-...-2019-05-19``.
+    """
+    return _DATE_TOKEN.search(name) is not None
+
+
 def _parse_token(token: str) -> date | None:
     # ISO-style tokens lead with a 4-digit year and must NOT be read dayfirst, or
     # "2022-01-06" flips to 2022-06-01. Only DD-first numeric tokens are dayfirst.
