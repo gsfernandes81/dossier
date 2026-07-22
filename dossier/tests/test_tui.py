@@ -215,6 +215,28 @@ async def test_open_file_action_uses_detailed_doc(
 
 
 @pytest.mark.asyncio
+async def test_open_progressively_drills_columns(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(50, 40)) as pilot:  # narrow: one pane at a time
+        home = app.home
+        home.query_one("#locations", OptionList).focus()
+        await pilot.pause()
+        # 1st Open drills locations → documents; no detail yet.
+        home.action_open_file()
+        await pilot.pause()
+        docs = home.query_one("#documents", OptionList)
+        assert app.focused is docs
+        assert not home._show_detail
+        docs.highlighted = 0
+        await pilot.pause()
+        # 2nd Open drills documents → detail (third column).
+        home.action_open_file()
+        await pilot.pause()
+        assert home._show_detail
+
+
+@pytest.mark.asyncio
 async def test_medium_width_detail_drops_locations(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
@@ -480,18 +502,27 @@ async def test_inline_bundle_creates_and_assigns(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_touch_shows_action_bar_and_keyboard_button(tmp_path: Path):
+async def test_touch_focus_drives_soft_keyboard_no_kbd_button(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY, touch=True)
+    reporting: list[bool] = []
     async with app.run_test(size=(50, 80)) as pilot:  # portrait phone
         home = app.home
         assert home.has_class("touch")
         assert home.query_one("#actionbar").display
-        # The ⌨ button focuses the command bar (raising the IME on Termux); the
-        # mouse-reporting drop is a no-op on the headless driver.
-        home.query_one("#act-kbd", Button).press()
+        # No dedicated ⌨ button any more — focus itself drives the keyboard.
+        assert not home.query("#act-kbd")
+        monkeypatch.setattr(app, "set_mouse_reporting", reporting.append)
+        # Focusing the search field drops mouse reporting so the Termux IME can
+        # appear; focusing a non-text pane restores it so taps land again.
+        home.query_one("#search", Input).focus()
         await pilot.pause()
-        assert app.focused is home.query_one("#search", Input)
+        assert reporting[-1] is False
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        assert reporting[-1] is True
 
 
 @pytest.mark.asyncio
