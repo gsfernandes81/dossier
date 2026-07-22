@@ -275,11 +275,9 @@ class DetailPane(VerticalScroll):
         self._docs = docs
         self._is_new = is_new
         self._focus_target = focus
-        self._populate_form(doc)
         self._discard_armed = False
+        self._populate_form(doc)  # scalars sync; dynamic rows + snapshot in a worker
         self.editing = True
-        # File rows mount asynchronously, so snapshot once the DOM has settled.
-        self.call_after_refresh(self._snapshot_now)
 
     def _snapshot_now(self) -> None:
         self._snapshot = self._form_values()
@@ -368,9 +366,8 @@ class DetailPane(VerticalScroll):
             self.notify(str(exc), severity="error")
             return
         self._doc = fresh
-        self._populate_form(fresh)
         self._discard_armed = False
-        self.call_after_refresh(self._snapshot_now)
+        self._populate_form(fresh)  # dynamic rows + snapshot happen in the worker
         self.notify("reloaded from disk")
         self.post_message(self.ReloadRequested())
 
@@ -445,12 +442,6 @@ class DetailPane(VerticalScroll):
 
     # -- renditions (dynamically mounted rows) -------------------------------
 
-    def _populate_renditions(self, doc: Document) -> None:
-        container = self.query_one(f"#{_RENDITIONS}", Vertical)
-        container.remove_children()
-        self._rend_seq = 0
-        container.mount(*(self._rend_row(r) for r in doc.files))
-
     def _rend_row(self, rendition: Rendition) -> Horizontal:
         self._rend_seq += 1
         return Horizontal(
@@ -491,15 +482,6 @@ class DetailPane(VerticalScroll):
                 checkbox.value = False
 
     # -- suggestions (accept pre-fills a field; dismiss persists) -------------
-
-    def _populate_suggestions(self, doc: Document) -> None:
-        container = self.query_one(f"#{_SUGGESTIONS}", Vertical)
-        container.remove_children()
-        self._suggestions = suggest.live(doc, self._store.load_suggestions())
-        self.query_one(f"#{_SG_HEADER}").display = bool(self._suggestions)
-        container.mount(
-            *(self._suggestion_row(i, s) for i, s in enumerate(self._suggestions))
-        )
 
     def _suggestion_row(self, index: int, suggestion: Suggestion) -> Horizontal:
         label = f"{_field_label(suggestion.field)}: {suggestion.rationale}"
@@ -553,7 +535,10 @@ class DetailPane(VerticalScroll):
         rends: list[Rendition] = []
         primary_taken = False
         for row in self.query(".df-rend-row").results(Horizontal):
-            path = row.query_one(".df-rpath", Input).value.strip()
+            paths = list(row.query(".df-rpath").results(Input))
+            if not paths:
+                continue  # a row still mounting — skip it
+            path = paths[0].value.strip()
             if not path:
                 continue  # drop blank rows
             label = row.query_one(".df-rlabel", Input).value.strip() or "file"
@@ -581,8 +566,30 @@ class DetailPane(VerticalScroll):
         self.query_one(f"#{_NOTES}", TextArea).text = doc.notes
         self.query_one(f"#{_NEW_BUNDLE}", Input).value = ""
         self._populate_bundles(doc)
-        self._populate_renditions(doc)
-        self._populate_suggestions(doc)
+        # Rendition + suggestion rows are torn down and rebuilt on every edit; do
+        # it in a worker so the *asynchronous* remove_children finishes before the
+        # re-mount (otherwise the reused row ids collide — DuplicateIds — on the
+        # edit → close → edit path), then snapshot once the DOM has settled.
+        self.run_worker(
+            self._populate_dynamic(doc), exclusive=True, group="detail-populate"
+        )
+
+    async def _populate_dynamic(self, doc: Document) -> None:
+        renditions = self.query_one(f"#{_RENDITIONS}", Vertical)
+        await renditions.remove_children()
+        self._rend_seq = 0
+        if doc.files:
+            await renditions.mount(*(self._rend_row(r) for r in doc.files))
+
+        suggestions = self.query_one(f"#{_SUGGESTIONS}", Vertical)
+        await suggestions.remove_children()
+        self._suggestions = suggest.live(doc, self._store.load_suggestions())
+        self.query_one(f"#{_SG_HEADER}").display = bool(self._suggestions)
+        if self._suggestions:
+            rows = [self._suggestion_row(i, s) for i, s in enumerate(self._suggestions)]
+            await suggestions.mount(*rows)
+
+        self._snapshot_now()
 
     def _form_values(self) -> tuple[object, ...]:
         return (
@@ -605,14 +612,19 @@ class DetailPane(VerticalScroll):
         )
 
     def _rendition_values(self) -> tuple[tuple[str, str, bool], ...]:
-        return tuple(
-            (
-                row.query_one(".df-rlabel", Input).value,
-                row.query_one(".df-rpath", Input).value,
-                row.query_one(".df-rprimary", Checkbox).value,
+        out: list[tuple[str, str, bool]] = []
+        for row in self.query(".df-rend-row").results(Horizontal):
+            labels = list(row.query(".df-rlabel").results(Input))
+            if not labels:
+                continue  # a row still mounting / being removed — skip it
+            out.append(
+                (
+                    labels[0].value,
+                    row.query_one(".df-rpath", Input).value,
+                    row.query_one(".df-rprimary", Checkbox).value,
+                )
             )
-            for row in self.query(".df-rend-row").results(Horizontal)
-        )
+        return tuple(out)
 
     def _dirty(self) -> bool:
         return self._form_values() != self._snapshot
