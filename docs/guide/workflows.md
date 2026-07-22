@@ -56,15 +56,30 @@ Over time the file tree and the document records drift apart. Reconcile (a TUI s
 *(Desktop-only; needs the `scan` extra and a local vision endpoint — see
 [install.md](install.md#optional-extras).)*
 
-`ds scan` rasterizes the first page of each linked scan and asks a local vision model to read a
+A scan rasterizes the first page of a linked document and asks a local vision model to read a
 **grounded** structured record — issue/expiry dates are extracted **verbatim** (never the model's
 own reformatting), at a low temperature for determinism. Readings persist to `.dossier/scans.toml`
 (synced, so a desktop scan benefits the phone), and a size+mtime fingerprint skips unchanged
 files. The dates don't get written to your documents — they arrive as **suggestions** you accept
 or dismiss (next section), cross-checked against the authoritative expiry.
 
-Configure the endpoint per-device: `scan_base_url` and `scan_model` in your device config point
-at an OpenAI-compatible `/v1/chat/completions` server (e.g. a llama.cpp router).
+Run it two ways:
+
+- **From the TUI** — press `v` to scan the highlighted document; the accepted reading's dates then
+  appear as suggestions in its detail pane. A bulk scan of every linked document runs from the
+  command palette and is cancellable mid-run.
+- **From the CLI** — `ds scan` reads all new/changed linked files:
+  ```sh
+  uv run ds scan                    # scan everything not yet read (or changed)
+  uv run ds scan --force            # re-read even unchanged files
+  uv run ds scan --limit 20         # cap this run at N files
+  uv run ds scan --list-models      # list the router's models (vision-capable flagged)
+  uv run ds scan --model NAME       # override the configured model for this run
+  ```
+
+Configure the endpoint in the **Settings screen** (see below) or in your device config:
+`scan_base_url` / `scan_model` point at an OpenAI-compatible `/v1/chat/completions` server (e.g. a
+llama.cpp router), with `scan_temperature` and `scan_dpi` tunable.
 
 ### Succession from content
 
@@ -101,6 +116,20 @@ uv run ds export travel/india-2024 --to ./out --dry-run          # preview the p
 
 Files are named by document id, with problem flags for anything missing or already present;
 `--force` overwrites. The original tree is never touched.
+
+## Settings
+
+Press `,` in the TUI for the **Settings screen** (also reachable from the command palette) — no
+config file editing required:
+
+- **This device** (per-device config): the icon set (Nerd Font vs ASCII — takes effect on
+  restart), and the scan endpoint base URL, model, temperature, and DPI. The model field is a
+  dropdown populated from the router's advertised models.
+- **Synced** (shared across devices): the expiry threshold in days (how far ahead a document
+  turns red).
+
+Changes apply on the next home reload, except the icon set (restart). `ctrl+s` saves, `Esc`
+cancels.
 
 ## Keeping the store healthy
 

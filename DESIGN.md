@@ -344,7 +344,8 @@ As-built map (Phases 1–7). See `ROADMAP.md` for per-module shipping history.
 dossier/
 ├─ model.py          # dataclasses/enums shared everywhere: Document, Rendition, Location,
 │                    #   Bundle, ReconcileState, Suggestion/SuggestionState, ExpiryStatus, FileStatus
-├─ config.py         # per-device config (syncthing_root) + synced config; history/cache dirs
+├─ config.py         # per-device + synced config; history/cache dirs; update_* persist helpers
+│                    #   (read-modify-write, backing the TUI Settings screen)
 ├─ errors.py         # exception hierarchy: DossierError → Config/Store/Scan, Stale/Exists
 ├─ store.py          # the persistence hub: load/save (quote-safe, byte-stable, atomic same-dir);
 │                    #   conflict exclusion; optimistic concurrency + history; owns ALL sidecar

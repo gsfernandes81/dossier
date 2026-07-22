@@ -26,8 +26,9 @@ They are **desktop-only** — the rasterization stack and (for `scan`) an 8B vis
 practical on a phone; run these on your Windows machine and let the results sync to the phone.
 
 `ds scan` additionally needs a local **OpenAI-compatible vision endpoint** (e.g. a llama.cpp
-router serving `/v1/chat/completions`). The base URL and model are per-device config; see
-[workflows.md](workflows.md#reading-dates-off-a-scan-ds-scan).
+router serving `/v1/chat/completions`). Set the base URL and model in the in-app **Settings**
+screen (`,`) or your device config, and discover available models with `ds scan --list-models`.
+See [workflows.md](workflows.md#reading-dates-off-a-scan-ds-scan).
 
 ## Windows notes
 
