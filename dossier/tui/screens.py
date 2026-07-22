@@ -33,7 +33,7 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from dossier import doctor, query
+from dossier import doctor, query, suggest
 from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
 from dossier.model import Bundle, Document, ExpiryStatus, Location
@@ -383,8 +383,12 @@ class BundlesScreen(ModalScreen[str | None]):
     """The bundles surface — grouped by category, sorted chronologically.
 
     Dismisses with a bundle slug (the home filters the documents pane to it) or
-    ``None``. ``Enter`` opens a bundle; ``d`` sets the highlighted bundle's date.
+    ``None``. ``Enter`` opens a bundle; ``d`` sets its date. A "suggested" section
+    lists folder-derived bundle proposals — ``a`` accepts (creates the bundle and
+    assigns its documents), ``i`` dismisses (persists, never reappears).
     """
+
+    _SUGGESTED = "\x00sug:"  # option-id prefix for a folder-bundle suggestion
 
     CSS = """
     BundlesScreen { align: center middle; }
@@ -397,6 +401,8 @@ class BundlesScreen(ModalScreen[str | None]):
     BINDINGS = [
         Binding("escape", "close", "Close"),
         Binding("d", "set_date", "Set date"),
+        Binding("a", "accept", "Accept"),
+        Binding("i", "ignore", "Dismiss"),
     ]
 
     def __init__(self, store: Store, config: Config, *, today: date) -> None:
@@ -405,6 +411,7 @@ class BundlesScreen(ModalScreen[str | None]):
         self._config = config
         self._today = today
         self._glyphs = glyphset.resolve(config.glyphs)
+        self._suggested: list[suggest.BundleSuggestion] = []
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="blpanel"):
@@ -416,15 +423,19 @@ class BundlesScreen(ModalScreen[str | None]):
 
     def _refresh(self) -> None:
         bundles = self._store.load_bundles()
-        counts = Counter(slug for doc in self._store.load_all() for slug in doc.bundles)
+        docs = self._store.load_all()
+        counts = Counter(slug for doc in docs for slug in doc.bundles)
+        state = self._store.load_suggestions()
+        self._suggested = suggest.live_bundles(docs, bundles, state)
         summary = self.query_one("#blsummary", Label)
         options = self.query_one("#bundle-list", OptionList)
         options.clear_options()
-        if not bundles:
+        if not bundles and not self._suggested:
             summary.update("No bundles yet.  (Esc to close)")
             return
         summary.update(
-            f"{len(bundles)} bundles.  Enter filters · d sets date · Esc closes."
+            f"{len(bundles)} bundles · {len(self._suggested)} suggested.  "
+            "Enter opens · d date · a accept · i dismiss · Esc closes."
         )
         for category, group in query.group_bundles(bundles.values()):
             header = f"{category} ▸" if category else "— other —"
@@ -434,14 +445,66 @@ class BundlesScreen(ModalScreen[str | None]):
                     bundle, count=counts.get(bundle.slug, 0), glyphs=self._glyphs
                 )
                 options.add_option(Option(row, id=bundle.slug))
+        if self._suggested:
+            options.add_option(
+                Option("suggested ▸  (a accepts · i dismisses)", id=None)
+            )
+            for index, sug in enumerate(self._suggested):
+                label = f"  {sug.slug}   ({len(sug.doc_ids)} docs · {sug.folder})"
+                options.add_option(Option(label, id=f"{self._SUGGESTED}{index}"))
 
     def action_close(self) -> None:
         self.dismiss(None)
 
     @on(OptionList.OptionSelected, "#bundle-list")
     def _open(self, event: OptionList.OptionSelected) -> None:
-        if event.option_id is not None:
+        if event.option_id is None:
+            return
+        if event.option_id.startswith(self._SUGGESTED):
+            self.action_accept()  # Enter on a suggestion accepts it
+        else:
             self.dismiss(event.option_id)
+
+    def action_accept(self) -> None:
+        sug = self._highlighted_suggestion()
+        if sug is None:
+            return
+        bundles = self._store.load_bundles()
+        bundles.setdefault(sug.slug, Bundle(slug=sug.slug, title=sug.title))
+        self._store.save_bundles(bundles)
+        for doc_id in sug.doc_ids:
+            doc = self._store.load(doc_id)
+            if sug.slug in doc.bundles:
+                continue
+            doc.bundles = sorted({*doc.bundles, sug.slug})
+            try:
+                self._store.save(doc)
+            except StaleWriteError:
+                self.notify(f"{doc_id} changed on disk; skipped", severity="error")
+            except StoreError as exc:
+                self.notify(str(exc), severity="error")
+        self.notify(f"created bundle {sug.slug}")
+        self._refresh()
+
+    def action_ignore(self) -> None:
+        sug = self._highlighted_suggestion()
+        if sug is None:
+            return
+        state = self._store.load_suggestions()
+        state.dismiss_key(sug.key)
+        self._store.save_suggestions(state)
+        self._refresh()
+
+    def _highlighted_suggestion(self) -> suggest.BundleSuggestion | None:
+        options = self.query_one("#bundle-list", OptionList)
+        index = options.highlighted
+        if index is None:
+            return None
+        option_id = options.get_option_at_index(index).id
+        if option_id is None or not option_id.startswith(self._SUGGESTED):
+            return None
+        which = int(option_id[len(self._SUGGESTED) :])
+        return self._suggested[which] if 0 <= which < len(self._suggested) else None
 
     def action_set_date(self) -> None:
         bundle = self._highlighted()

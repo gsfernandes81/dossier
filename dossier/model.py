@@ -175,6 +175,14 @@ class SuggestionState:
     def dismiss(self, suggestion: Suggestion) -> None:
         self.dismissed.add(suggestion.key)
 
+    # Bundle suggestions (a different shape) share this sidecar via namespaced
+    # string keys — see dossier.suggest.BundleSuggestion.key ("bundle:...").
+    def is_dismissed_key(self, key: str) -> bool:
+        return key in self.dismissed
+
+    def dismiss_key(self, key: str) -> None:
+        self.dismissed.add(key)
+
 
 @dataclass
 class Document:

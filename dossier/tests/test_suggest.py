@@ -20,7 +20,7 @@ from pathlib import Path
 
 from dossier import suggest
 from dossier.config import Config
-from dossier.model import Document, SuggestedField, Suggestion, SuggestionState
+from dossier.model import Bundle, Document, SuggestedField, Suggestion, SuggestionState
 from dossier.store import Store
 
 
@@ -110,6 +110,45 @@ def test_dismissal_key_reopens_on_changed_values():
     key_a = _only(a).key
     b = Document(id="misc", name="Some Doc 2024-08-15")  # different parsed value
     assert _only(b).key != key_a  # a new value is a new decision
+
+
+def _folder_doc(doc_id: str, path: str) -> Document:
+    from dossier.model import Rendition
+
+    return Document(id=doc_id, name=doc_id, files=[Rendition("d", path, primary=True)])
+
+
+def test_bundles_from_folders_only_hint_folders_with_enough_docs():
+    docs = [
+        _folder_doc("a", "Travel Documents/India 2024/passport.pdf"),
+        _folder_doc("b", "Travel Documents/India 2024/visa.pdf"),
+        _folder_doc("c", "Certificates/coc.pdf"),  # not a hint folder
+        _folder_doc("d", "Travel Documents/Bali 2025/lonely.pdf"),  # only 1 doc
+    ]
+    out = suggest.bundles_from_folders(docs)
+    assert len(out) == 1
+    s = out[0]
+    assert s.slug == "travel/india-2024"
+    assert s.title == "India 2024"
+    assert s.doc_ids == ("a", "b")
+
+
+def test_live_bundles_drops_existing_and_dismissed():
+    docs = [
+        _folder_doc("a", "Travel Documents/India 2024/p.pdf"),
+        _folder_doc("b", "Travel Documents/India 2024/v.pdf"),
+    ]
+    sug = suggest.bundles_from_folders(docs)[0]
+    existing = {sug.slug: Bundle(slug=sug.slug, title="India")}
+    assert (
+        suggest.live_bundles(docs, existing, SuggestionState()) == []
+    )  # already a bundle
+    # dismissed by key → not suggested
+    state = SuggestionState()
+    state.dismiss_key(sug.key)
+    assert suggest.live_bundles(docs, {}, state) == []
+    # otherwise it is live
+    assert suggest.live_bundles(docs, {}, SuggestionState()) == [sug]
 
 
 def test_suggestions_sidecar_round_trip(tmp_path: Path):
