@@ -20,6 +20,7 @@ These are pure data types — no I/O. Persistence lives in :mod:`dossier.store`.
 
 from __future__ import annotations
 
+import datetime as dt  # `dt.date`/`dt.datetime` — the Bundle.date field shadows `date`
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -66,10 +67,17 @@ class Location:
 
 @dataclass
 class Bundle:
-    """A named set of documents gathered for an application or trip."""
+    """A named set of documents gathered for an application or trip.
+
+    ``date`` is the trip / joining / application date (user-set); ``created`` is
+    stamped by the store on first save. Bundles sort by ``date`` else ``created``,
+    so a bundles surface reads chronologically.
+    """
 
     slug: str
     title: str
+    date: dt.date | None = None
+    created: dt.datetime | None = None
     export_dir: str | None = None
     notes: str = ""
 

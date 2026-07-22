@@ -15,7 +15,7 @@
 
 """Tests for the flat-file store — round-tripping and the durability guards."""
 
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -168,6 +168,24 @@ def test_bundles_round_trip_hierarchical_slug(store: Store):
     loaded = store.load_bundles()
     assert slug in loaded
     assert loaded[slug].title == "India 2024"
+
+
+def test_bundles_persist_date_and_stamp_created(tmp_path: Path):
+    cfg = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    fixed = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    store = Store(cfg, now=lambda: fixed)  # injected clock
+    store.ensure_layout()
+    slug = "travel/india-2024"
+    store.save_bundles({slug: Bundle(slug=slug, title="India", date=date(2024, 3, 11))})
+
+    loaded = store.load_bundles()[slug]
+    assert loaded.date == date(2024, 3, 11)  # native TOML date round-trips
+    assert loaded.created == fixed  # stamped on first save
+
+    # A later save with a different clock must NOT re-stamp an existing created.
+    later = Store(cfg, now=lambda: datetime(2027, 1, 1, tzinfo=UTC))
+    later.save_bundles(later.load_bundles())
+    assert later.load_bundles()[slug].created == fixed
 
 
 def test_reconcile_sidecar_round_trips_paths_with_slashes(store: Store):

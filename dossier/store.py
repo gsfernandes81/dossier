@@ -39,6 +39,7 @@ import io
 import os
 import tempfile
 import tomllib
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -91,10 +92,14 @@ def _make_dumper() -> YAML:
 class Store:
     """Reads and writes the ``.dossier`` data folder for a :class:`Config`."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self, config: Config, *, now: Callable[[], datetime] | None = None
+    ) -> None:
         self.config = config
         self._load_yaml = YAML(typ="safe")
         self._dump_yaml = _make_dumper()
+        # Injectable clock so bundle-creation stamps are deterministic in tests.
+        self._now = now or (lambda: datetime.now(UTC))
 
     # -- layout --------------------------------------------------------------
 
@@ -235,15 +240,23 @@ class Store:
             out[slug] = Bundle(
                 slug=slug,
                 title=str(raw.get("title", slug)),
+                date=_as_date(raw.get("date")),
+                created=_as_datetime(raw.get("created")),
                 export_dir=str(export_dir) if export_dir else None,
                 notes=str(raw.get("notes", "")),
             )
         return out
 
     def save_bundles(self, bundles: dict[str, Bundle]) -> None:
-        data: dict[str, dict[str, str]] = {}
+        """Persist bundles, stamping ``created`` on any that lack it."""
+        data: dict[str, dict[str, object]] = {}
         for slug, bundle in sorted(bundles.items()):
-            entry: dict[str, str] = {"title": bundle.title}
+            if bundle.created is None:
+                bundle.created = self._now().replace(microsecond=0)
+            entry: dict[str, object] = {"title": bundle.title}
+            if bundle.date is not None:
+                entry["date"] = bundle.date  # native TOML date
+            entry["created"] = bundle.created  # native TOML datetime
             if bundle.export_dir:
                 entry["export_dir"] = bundle.export_dir
             if bundle.notes:
@@ -428,6 +441,17 @@ def _as_date(value: object) -> date | None:
     if isinstance(value, str) and value.strip():
         try:
             return date.fromisoformat(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _as_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return datetime.fromisoformat(value.strip())
         except ValueError:
             return None
     return None
