@@ -1141,3 +1141,34 @@ def test_linux_driver_exposes_mouse_toggle():
 
     assert hasattr(LinuxDriver, "_enable_mouse_support")
     assert hasattr(LinuxDriver, "_disable_mouse_support")
+
+
+@pytest.mark.asyncio
+async def test_scan_doc_reads_and_persists_the_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from dossier import scan as scan_mod
+
+    store, config = _setup(tmp_path)  # passport links a real passport.pdf
+    reading = scan_mod.ScanReading.from_payload(
+        {
+            "document_type": "Passport",
+            "expiry_date_text": "01 Jan 2030",
+            "is_validity_period": True,
+            "confidence": 0.9,
+        },
+        model="m",
+    )
+    monkeypatch.setattr(scan_mod, "extract", lambda path, cfg: reading)  # no VLM
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        home.action_scan_doc()  # starts the @work(thread=True) vision worker
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+    saved = store.load_scans()
+    assert "passport" in saved  # the reading was persisted
+    assert saved["passport"].expiry_date_text == "01 Jan 2030"
+    assert saved["passport"].fingerprint  # fingerprinted so a re-scan skips it

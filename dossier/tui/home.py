@@ -39,9 +39,11 @@ keeping the columns. The touch action bar arrives in a later slice.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 from rich.text import Text
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
@@ -50,9 +52,11 @@ from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, OptionList, TextArea
 from textual.widgets.option_list import Option
+from textual.worker import get_current_worker
 
 from dossier import query, scan, suggest
 from dossier.config import Config
+from dossier.errors import ScanError
 from dossier.model import Document, ExpiryStatus, Location, SuggestionState
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
@@ -87,6 +91,7 @@ _EDIT_LOCKED = frozenset(
         "edit",
         "new",
         "accept_suggestion",
+        "scan_doc",
         "move",
         "supersede",
         "watch",
@@ -190,6 +195,9 @@ class HomeScreen(Screen[None]):
         # Quick-accept the shown doc's top suggestion; off the footer (the detail
         # read view already prints "a accept · e review"), so it stays uncrowded.
         Binding("a", "accept_suggestion", "Accept", show=False),
+        # Read the current doc with the vision model (off the footer; in the help
+        # panel and the command palette). Bulk scan is palette-only.
+        Binding("v", "scan_doc", "Scan (VLM)", show=False),
         # Kept working, but off the footer — surfaced in the help panel (`?`):
         Binding("i", "toggle_dates", "Iss/Exp", show=False),
         Binding("m", "move", "Move", show=False),
@@ -618,6 +626,71 @@ class HomeScreen(Screen[None]):
             self.app.action_hide_help_panel()
         else:
             self.app.action_show_help_panel()
+
+    # -- vision scan (ds scan, from the TUI) ---------------------------------
+
+    @work(thread=True, group="vision", exclusive=True)
+    def action_scan_doc(self) -> None:
+        """Read the current document with the VLM (a ~few-second blocking call)."""
+        doc = self._current_doc()
+        if doc is None or doc.primary_rendition() is None:
+            self.app.call_from_thread(
+                self.notify, "no linked file to scan", severity="warning"
+            )
+            return
+        self._scan_docs([doc])
+
+    @work(thread=True, group="vision", exclusive=True)
+    def action_scan_all(self) -> None:
+        """Read every linked document (minutes); cancellable via the palette."""
+        linked = [d for d in self._docs if d.primary_rendition() is not None]
+        self._scan_docs(linked)
+
+    def action_cancel_scan(self) -> None:
+        self.workers.cancel_group(self, "vision")
+        self.notify("cancelling vision scan…")
+
+    def _scan_docs(self, docs: list[Document]) -> None:
+        """Worker body: read each doc with the VLM, persisting after each success
+        (so a cancel keeps progress) and reporting live via the header sub_title."""
+        worker = get_current_worker()
+        readings = self._store.load_scans()
+        total, seen, scanned, failed = len(docs), 0, 0, 0
+        for doc in docs:
+            if worker.is_cancelled:
+                break
+            rendition = doc.primary_rendition()
+            if rendition is None:
+                continue
+            path = query.resolve_path(self._config.syncthing_root, rendition.path)
+            if not path.exists():
+                continue
+            fingerprint = scan.file_fingerprint(path)
+            seen += 1
+            if doc.id in readings and readings[doc.id].fingerprint == fingerprint:
+                continue  # unchanged since the last scan
+            name = doc.name or doc.id
+            self.app.call_from_thread(
+                setattr, self.app, "sub_title", f"scanning {seen}/{total}: {name}"
+            )
+            try:
+                reading = scan.extract(path, self._config)
+            except ScanError as exc:
+                failed += 1
+                self.app.call_from_thread(
+                    self.notify, f"{doc.id}: {exc}", severity="error"
+                )
+                continue
+            readings[doc.id] = replace(reading, fingerprint=fingerprint)
+            self._store.save_scans(readings)  # persist after each (cancel-safe)
+            scanned += 1
+        self.app.call_from_thread(self._scan_done, scanned, failed, worker.is_cancelled)
+
+    def _scan_done(self, scanned: int, failed: int, cancelled: bool) -> None:
+        self._reload()  # re-reads readings + refreshes suggestions + resets sub_title
+        verb = "cancelled" if cancelled else "complete"
+        tail = f", {failed} failed" if failed else ""
+        self.notify(f"vision scan {verb}: {scanned} read{tail}")
 
     def action_new(self) -> None:
         if not self._show_detail:
