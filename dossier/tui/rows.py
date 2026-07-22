@@ -119,11 +119,12 @@ def _dense(
 def _compact(view: DocumentView, *, superseded: bool, glyphs: GlyphSet) -> Table:
     doc = view.document
     dim = _dim(superseded)
-    marker = _marker(view.expiry, glyphs)
-    gutter = Text(marker or " ", style=_join(dim, _STATUS_STYLE[view.expiry]))
+    glyph, style = _gutter(view.expiry, glyphs)
+    gutter = Text(glyph or " ", style=_join(dim, style))
     name = Text(doc.name or doc.id, style=dim)
-    # A fixed marker-gutter column so a wrapped name hangs under itself, indented
-    # past the marker, instead of wrapping back to the pane's left edge.
+    # Every row carries a status glyph in a fixed gutter column, so items are
+    # anchored at the left edge and a wrapped name hangs under itself (indented
+    # past the glyph) instead of wrapping back to the pane's left edge.
     grid = Table.grid(expand=True)
     grid.add_column(width=2)
     grid.add_column(ratio=1)
@@ -203,6 +204,18 @@ def _marker(status: ExpiryStatus, glyphs: GlyphSet) -> str:
         ExpiryStatus.EXPIRED: glyphs.expired,
         ExpiryStatus.EXPIRING: glyphs.expiring,
     }.get(status, "")
+
+
+def _gutter(status: ExpiryStatus, glyphs: GlyphSet) -> tuple[str, str]:
+    """The compact-row gutter glyph + style for a status — one per state, so
+    every item is anchored (⚠ attention, check ok, dim dot no-expiry)."""
+    glyph = {
+        ExpiryStatus.EXPIRED: glyphs.expired,
+        ExpiryStatus.EXPIRING: glyphs.expiring,
+        ExpiryStatus.OK: glyphs.ok,
+        ExpiryStatus.NONE: glyphs.neutral,
+    }[status]
+    return glyph, _STATUS_STYLE[status] or "dim"
 
 
 def _file_glyphs(doc: Document, glyphs: GlyphSet) -> str:
