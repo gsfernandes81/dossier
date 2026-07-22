@@ -169,12 +169,13 @@ class HomeScreen(Screen[None]):
         # A fixed-height bottom bar reserves the space for the (touch-only)
         # action row, the command line, and the footer so they stack cleanly
         # (docking them directly onto the screen lets the footer overlap).
+        g = self._glyphs
         with Vertical(id="bottombar"):
             with Horizontal(id="actionbar"):
-                yield Button("Open", id="act-open")
-                yield Button("Bundle", id="act-bundle")
-                yield Button("New", id="act-new")
-                yield Button("⌨", id="act-kbd")
+                yield Button(_btn_label(g.open, "Open"), id="act-open")
+                yield Button(_btn_label(g.bundle, "Bundle"), id="act-bundle")
+                yield Button(_btn_label(g.new, "New"), id="act-new")
+                yield Button(g.keyboard or "Key", id="act-kbd")
             yield Input(placeholder="Search name / tags / notes…", id="search")
             yield Footer()
 
@@ -235,14 +236,17 @@ class HomeScreen(Screen[None]):
     def _refresh_locations(self) -> None:
         options = self.query_one("#locations", OptionList)
         options.clear_options()
-        options.add_option(Option(_loc_label("All", len(self._docs)), id=_ALL))
+        g = self._glyphs
+        options.add_option(Option(_loc_label(g.inbox, "All", len(self._docs)), id=_ALL))
         for loc, group in self._by_location.items():
             if loc is None:
-                label = _loc_label("— no location —", len(group))
+                label = _loc_label(g.unlocated, "— no location —", len(group))
                 options.add_option(Option(label, id=_UNLOCATED))
             else:
                 title = self._locations[loc].title if loc in self._locations else loc
-                options.add_option(Option(_loc_label(title, len(group)), id=loc))
+                options.add_option(
+                    Option(_loc_label(g.folder, title, len(group)), id=loc)
+                )
 
     def _refresh_documents(self) -> None:
         options = self.query_one("#documents", OptionList)
@@ -558,7 +562,12 @@ def _highlighted_id(options: OptionList) -> str | None:
     return options.get_option_at_index(index).id
 
 
-def _loc_label(title: str, count: int) -> Text:
-    label = Text(title, no_wrap=True, overflow="ellipsis")
+def _loc_label(icon: str, title: str, count: int) -> Text:
+    prefix = f"{icon}  " if icon else ""
+    label = Text(f"{prefix}{title}", no_wrap=True, overflow="ellipsis")
     label.append(f"  {count}", style="dim")
     return label
+
+
+def _btn_label(icon: str, text: str) -> str:
+    return f"{icon}  {text}" if icon else text

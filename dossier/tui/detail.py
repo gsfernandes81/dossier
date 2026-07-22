@@ -60,16 +60,17 @@ def render_detail(
 
     facts = Text()
     if superseded_by is not None:
+        _icon(facts, glyphs.link)
         facts.append("superseded by ", style="dim")
         facts.append(f"{superseded_by.name or superseded_by.id}\n", style="yellow")
-    _field(facts, "Location", location_label or "—")
-    _field(facts, "Issued", _fmt(doc.issue_date))
-    _field(facts, "Expires", _expiry_value(view))
+    _field(facts, glyphs.location, "Location", location_label or "—")
+    _field(facts, glyphs.calendar, "Issued", _fmt(doc.issue_date))
+    _field(facts, glyphs.calendar, "Expires", _expiry_value(view))
     if doc.ignore_expiry:
         facts.append("expiry ignored\n", style="dim")
-    _field(facts, "Tags", " ".join(doc.tags) or "—")
-    _field(facts, "Bundles", " ".join(doc.bundles) or "—")
-    _field(facts, "Copies", _copies(doc))
+    _field(facts, glyphs.tag, "Tags", " ".join(doc.tags) or "—")
+    _field(facts, glyphs.bundle, "Bundles", " ".join(doc.bundles) or "—")
+    _field(facts, glyphs.physical, "Copies", _copies(doc))
 
     parts: list[RenderableType] = [header, Rule(style="dim"), facts]
 
@@ -77,14 +78,24 @@ def render_detail(
     if files is not None:
         parts.append(files)
     if chain:
-        parts.append(_chain(chain))
+        parts.append(_chain(chain, glyphs))
     if doc.notes:
         parts.append(Rule(style="dim"))
-        parts.append(Text(doc.notes))
+        notes = Text()
+        _icon(notes, glyphs.note)
+        notes.append(doc.notes)
+        parts.append(notes)
     return Group(*parts)
 
 
-def _field(text: Text, label: str, value: str) -> None:
+def _icon(text: Text, icon: str) -> None:
+    """Append a leading ``icon`` + space (nothing when the icon is empty/ASCII)."""
+    if icon:
+        text.append(f"{icon} ", style="dim")
+
+
+def _field(text: Text, icon: str, label: str, value: str) -> None:
+    _icon(text, icon)
     text.append(f"{label}: ", style="bold")
     text.append(f"{value}\n")
 
@@ -110,6 +121,7 @@ def _files(view: DocumentView, glyphs: GlyphSet) -> RenderableType | None:
     if not doc.files:
         return Text("No digital file linked", style="dim")
     body = Text()
+    _icon(body, glyphs.digital)
     body.append("Files\n", style="bold")
     for rendition in doc.files:
         mark = glyphs.primary if rendition.primary else " "
@@ -121,8 +133,9 @@ def _files(view: DocumentView, glyphs: GlyphSet) -> RenderableType | None:
     return body
 
 
-def _chain(chain: list[Document]) -> RenderableType:
+def _chain(chain: list[Document], glyphs: GlyphSet) -> RenderableType:
     body = Text()
+    _icon(body, glyphs.link)
     body.append("Supersedes\n", style="bold")
     for doc in chain:
         body.append("  ← ", style="dim")
