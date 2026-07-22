@@ -22,7 +22,7 @@ import pytest
 
 from dossier.config import Config
 from dossier.errors import DocumentExistsError, StaleWriteError
-from dossier.model import Document, Location, ReconcileState, Rendition
+from dossier.model import Bundle, Document, Location, ReconcileState, Rendition
 from dossier.store import TEMP_PREFIX, Store
 
 
@@ -160,6 +160,14 @@ def test_locations_round_trip_with_hash_title(store: Store):
     )
     loaded = store.load_locations()
     assert loaded["cert-file-2048"].title == "Cert File #2048"
+
+
+def test_bundles_round_trip_hierarchical_slug(store: Store):
+    slug = "travel/india-2024"  # a '/' in the TOML key must survive round-trip
+    store.save_bundles({slug: Bundle(slug=slug, title="India 2024")})
+    loaded = store.load_bundles()
+    assert slug in loaded
+    assert loaded[slug].title == "India 2024"
 
 
 def test_reconcile_sidecar_round_trips_paths_with_slashes(store: Store):
