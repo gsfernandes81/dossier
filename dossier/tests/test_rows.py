@@ -136,3 +136,19 @@ def test_show_issue_swaps_the_displayed_date():
     iss = _render(rows.doc_row(_view(doc, expiry=ExpiryStatus.OK), show_issue=True))
     assert "exp 01 Sep 26" in exp and "iss" not in exp
     assert "iss 12 Mar 20" in iss and "exp" not in iss
+
+
+def test_watch_row_is_date_first_with_location_and_tags():
+    doc = Document(
+        id="c", name="ENG-1 Med Cert", tags=["medical"], expiry_date=date(2026, 7, 10)
+    )
+    out = _render(
+        rows.watch_row(
+            _view(doc, expiry=ExpiryStatus.EXPIRED),
+            location_label="Cert File · 2",
+            glyphs=glyphs.ASCII,
+        )
+    )
+    assert out.index("10 Jul 26") < out.index("ENG-1 Med Cert")  # date before name
+    assert out.lstrip().startswith("!")  # expired marker leads
+    assert "Cert File · 2" in out and "medical" in out

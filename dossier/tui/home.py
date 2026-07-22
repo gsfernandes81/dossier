@@ -62,6 +62,7 @@ from dossier.tui.screens import (
     DoctorScreen,
     MoveScreen,
     SupersedeScreen,
+    WatchScreen,
 )
 
 # Sentinel option ids for the two synthetic locations-pane rows (real location
@@ -138,6 +139,7 @@ class HomeScreen(Screen[None]):
         Binding("n", "new", "New"),
         Binding("m", "move", "Move"),
         Binding("s", "supersede", "Supersede"),
+        Binding("w", "watch", "Watch"),
         Binding("d", "doctor", "Doctor"),
         Binding("x", "toggle_expiring", "Expiring"),
     ]
@@ -482,6 +484,11 @@ class HomeScreen(Screen[None]):
                 MoveScreen(self._store, self._docs, doc), self._after_edit
             )
 
+    def action_watch(self) -> None:
+        self.app.push_screen(
+            WatchScreen(self._store, self._config, today=self._today), self._after_watch
+        )
+
     def action_doctor(self) -> None:
         self.app.push_screen(
             DoctorScreen(self._store, self._config), self._after_doctor
@@ -558,6 +565,13 @@ class HomeScreen(Screen[None]):
         doc = self._doc_by_id(doc_id)
         if doc is not None:
             self.app.push_screen(DetailScreen(self._store, doc), self._after_edit)
+
+    def _after_watch(self, doc_id: str | None) -> None:
+        self._reload()  # an ignore-expiry change in the watch may have landed
+        if doc_id is not None:
+            doc = self._doc_by_id(doc_id)
+            if doc is not None:
+                self.open_detail(doc.id)
 
 
 def _highlighted_id(options: OptionList) -> str | None:
