@@ -16,6 +16,14 @@ dependencies = [
     "tomli-w>=1.1.0",
 ]
 
+[project.optional-dependencies]
+# `ds` dedup: rasterize scans and perceptual-hash their pages. Desktop-only;
+# pure wheels, no system deps. `pip install 'dossier[dedup]'`.
+dedup = [
+    "pypdfium2>=4.30",
+    "pillow>=10.0",
+]
+
 [project.scripts]
 dossier = "dossier.__main__:main"
 ds = "dossier.__main__:main"
