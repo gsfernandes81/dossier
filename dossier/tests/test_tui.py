@@ -620,6 +620,49 @@ async def test_quick_accept_applies_and_saves_top_suggestion(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_help_panel_toggles_with_question_mark(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        assert not app.screen.query(HelpPanel)
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert app.screen.query(HelpPanel)  # shown
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert not app.screen.query(HelpPanel)  # same key hides it again
+
+
+@pytest.mark.asyncio
+async def test_reconcile_open_file_opens_orphan_under_cursor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import dossier.tui.reconcile as tui_reconcile
+
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "Wallpapers").mkdir()
+    (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")
+    opened: list[Path] = []
+    monkeypatch.setattr(tui_reconcile, "open_file", opened.append)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        tree = screen.query_one("#orphans", Tree)
+        screen.query_one(TabbedContent).active = "tab-orphans"
+        folder = next(n for n in tree.root.children if n.data == "Wallpapers")
+        folder.expand()
+        await pilot.pause()
+        tree.move_cursor(folder.children[0])
+        screen.action_open_file()
+        await pilot.pause()
+    assert opened == [tmp_path / "Wallpapers" / "bg.jpg"]
+
+
+@pytest.mark.asyncio
 async def test_reconcile_dismiss_orphan_persists_and_hides(tmp_path: Path):
     config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
     store = Store(config)

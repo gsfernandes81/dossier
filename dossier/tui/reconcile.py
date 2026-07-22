@@ -42,11 +42,12 @@ from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList, TabbedContent, TabPane, Tree
 from textual.widgets.option_list import Option
 
-from dossier import dedup, dedup_cache, dedup_hash, reconcile
+from dossier import dedup, dedup_cache, dedup_hash, query, reconcile
 from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
 from dossier.migrate import slugify
 from dossier.model import Document, ReconcileState, Rendition
+from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import forms
 from dossier.tui.screens import DocPickerScreen, TextPromptScreen
@@ -86,6 +87,7 @@ class ReconcileScreen(ModalScreen[str | None]):
         # expand/collapse — so give tab-switching its own conflict-free keys.
         Binding("left_square_bracket", "prev_tab", "◂ Tab"),
         Binding("right_square_bracket", "next_tab", "Tab ▸"),
+        Binding("o", "open_file", "Open"),
         Binding("d", "scan_dups", "Find duplicates"),
         Binding("x", "reject", "Dismiss"),
         Binding("l", "link", "Link"),
@@ -275,6 +277,8 @@ class ReconcileScreen(ModalScreen[str | None]):
             return True if active == "tab-missing" else None
         if action == "fold":
             return True if active == "tab-dups" else None
+        if action == "open_file":  # only where a real file sits under the cursor
+            return True if active in ("tab-orphans", "tab-dups") else None
         return True
 
     @on(Tree.NodeExpanded, "#orphans")
@@ -310,6 +314,39 @@ class ReconcileScreen(ModalScreen[str | None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def action_open_file(self) -> None:
+        """Open the file under the cursor with the platform opener (xdg/termux)."""
+        active = self._active_tab()
+        if active == "tab-orphans":
+            leaf = self._cursor_leaf()
+            rel = leaf.path if leaf is not None else None
+        elif active == "tab-dups":
+            rel = self._cursor_dup_path()
+        else:
+            rel = None
+        if rel is None:
+            self.notify("no file under the cursor")
+            return
+        path = query.resolve_path(self._config.syncthing_root, rel)
+        if not path.exists():
+            self.notify(f"file not found: {path}", severity="error")
+            return
+        try:
+            open_file(path)
+        except OpenError as exc:
+            self.notify(str(exc), severity="error")
+        else:
+            self.notify(f"opened {rel}")
+
+    def _cursor_dup_path(self) -> str | None:
+        options = self.query_one("#dups", OptionList)
+        index = options.highlighted
+        if index is None:
+            return None
+        # dup rows are "  keep  <path>" / "  copy  <path>"; headers have neither.
+        parts = str(options.get_option_at_index(index).prompt).strip().split(None, 1)
+        return parts[1] if len(parts) == 2 and parts[0] in ("keep", "copy") else None
 
     # -- decisions (sidecar only — never touches a real file) ----------------
 

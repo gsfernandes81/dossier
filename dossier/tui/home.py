@@ -186,7 +186,7 @@ class HomeScreen(Screen[None]):
         Binding("e", "edit", "Edit"),
         Binding("n", "new", "New"),
         Binding("b", "bundle", "Bundle"),
-        Binding("question_mark", "app.show_help_panel", "Help"),
+        Binding("question_mark", "toggle_help_panel", "Help"),
         # Quick-accept the shown doc's top suggestion; off the footer (the detail
         # read view already prints "a accept · e review"), so it stays uncrowded.
         Binding("a", "accept_suggestion", "Accept", show=False),
@@ -604,6 +604,16 @@ class HomeScreen(Screen[None]):
         # focused in the wide layout, so the accept lives here and delegates.
         if self._show_detail:
             self._detail_pane.action_accept_suggestion()
+
+    def action_toggle_help_panel(self) -> None:
+        # `?` toggles — Textual only offers separate show/hide actions, so binding
+        # the built-in show action left no way to dismiss it with the same key.
+        from textual.widgets import HelpPanel
+
+        if self.query(HelpPanel):
+            self.app.action_hide_help_panel()
+        else:
+            self.app.action_show_help_panel()
 
     def action_new(self) -> None:
         if not self._show_detail:
