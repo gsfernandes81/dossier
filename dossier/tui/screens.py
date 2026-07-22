@@ -29,118 +29,18 @@ from textual.widgets import (
     Input,
     Label,
     OptionList,
-    TextArea,
 )
 from textual.widgets.option_list import Option
 
 from dossier import doctor, query
 from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
-from dossier.migrate import slugify
 from dossier.model import Document, ExpiryStatus, Location
 from dossier.store import Store
 from dossier.tui import (
-    forms,
     glyphs as glyphset,
     rows,
 )
-
-
-class DetailScreen(ModalScreen[bool]):
-    """View and edit one document. Dismisses ``True`` when saved."""
-
-    CSS = """
-    DetailScreen { align: center middle; }
-    #panel {
-        width: 80%; max-width: 96; height: auto; max-height: 90%;
-        padding: 1 2; background: $panel; border: round $primary;
-    }
-    #panel Input, #panel TextArea { margin-bottom: 1; }
-    #panel TextArea { height: 5; }
-    .hint { color: $text-muted; }
-    #buttons { height: auto; align: right middle; }
-    #buttons Button { margin-left: 2; }
-    """
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("ctrl+s", "save", "Save"),
-    ]
-
-    def __init__(self, store: Store, doc: Document, *, is_new: bool = False) -> None:
-        super().__init__()
-        self._store = store
-        self._doc = doc
-        self._is_new = is_new
-
-    def compose(self) -> ComposeResult:
-        doc = self._doc
-        with VerticalScroll(id="panel"):
-            yield Label("New document" if self._is_new else f"Editing: {doc.id}")
-            yield Label("Name")
-            yield Input(value=doc.name, id="name")
-            for token, readings in doctor.candidate_readings(doc.name):
-                dates = " / ".join(d.isoformat() for d in readings)
-                yield Label(f"ambiguous {token} -> {dates}", classes="hint")
-            yield Label("Issue date (YYYY-MM-DD)")
-            yield Input(value=forms.iso(doc.issue_date), id="issue")
-            yield Label("Expiry date (YYYY-MM-DD)")
-            yield Input(value=forms.iso(doc.expiry_date), id="expiry")
-            yield Label("Permanent location (slug)")
-            yield Input(value=doc.perm_location or "", id="perm")
-            yield Label("Temporary location (slug)")
-            yield Input(value=doc.temp_location or "", id="temp")
-            yield Label("Tags (space-separated)")
-            yield Input(value=" ".join(doc.tags), id="tags")
-            yield Label("Notes")
-            yield TextArea(doc.notes, id="notes")
-            with Horizontal(id="buttons"):
-                yield Button("Cancel", id="cancel")
-                yield Button("Save", id="save", variant="primary")
-
-    def action_cancel(self) -> None:
-        self.dismiss(False)
-
-    @on(Button.Pressed, "#cancel")
-    def _on_cancel(self) -> None:
-        self.dismiss(False)
-
-    @on(Button.Pressed, "#save")
-    def _on_save(self) -> None:
-        self.action_save()
-
-    def action_save(self) -> None:
-        doc = self._doc
-        try:
-            issue = forms.parse_iso(self.query_one("#issue", Input).value)
-            expiry = forms.parse_iso(self.query_one("#expiry", Input).value)
-        except ValueError as exc:
-            self.notify(f"invalid date: {exc}", severity="error")
-            return
-
-        doc.name = self.query_one("#name", Input).value.strip()
-        if self._is_new:
-            if not doc.name:
-                self.notify("a new document needs a name", severity="error")
-                return
-            doc.id = forms.unique_id(self._store, slugify(doc.name))
-        doc.issue_date = issue
-        doc.expiry_date = expiry
-        doc.perm_location = forms.slug(self.query_one("#perm", Input).value)
-        doc.temp_location = forms.slug(self.query_one("#temp", Input).value)
-        doc.tags = self.query_one("#tags", Input).value.split()
-        doc.notes = self.query_one("#notes", TextArea).text.strip()
-
-        try:
-            self._store.save(doc)
-        except StaleWriteError:
-            self.notify(
-                "changed on disk since load; reopen and retry", severity="error"
-            )
-            return
-        except StoreError as exc:
-            self.notify(str(exc), severity="error")
-            return
-        self.dismiss(True)
 
 
 class DoctorScreen(ModalScreen[str | None]):
