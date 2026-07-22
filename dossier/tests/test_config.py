@@ -87,3 +87,33 @@ def test_glyphs_defaults_to_nerd_and_loads_from_device(
     monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
 
     assert Config.load().glyphs == "ascii"
+
+
+def test_update_synced_merges_preserving_other_keys(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path)
+    config.meta_dir.mkdir(parents=True)
+    config.synced_config_path.write_text(
+        'include = ["*.pdf"]\nexpiry_threshold_days = 90\n'
+    )
+    config_mod.update_synced(config, {"expiry_threshold_days": 60})
+    reloaded = Config(syncthing_root=tmp_path)
+    reloaded.merge_synced()
+    assert reloaded.expiry_threshold_days == 60  # updated
+    assert reloaded.include == ["*.pdf"]  # preserved
+
+
+def test_update_per_device_merges_preserving_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    device_path = tmp_path / "config.toml"
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device_path)
+    device_path.write_text(
+        f'syncthing_root = "{tmp_path.as_posix()}"\nglyphs = "nerd"\n'
+    )
+    config_mod.update_per_device({"glyphs": "ascii", "scan_model": "qwen3vl"})
+    import tomllib
+
+    back = tomllib.loads(device_path.read_text())
+    assert back["glyphs"] == "ascii"  # updated
+    assert back["scan_model"] == "qwen3vl"  # added
+    assert back["syncthing_root"] == tmp_path.as_posix()  # preserved
