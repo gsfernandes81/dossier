@@ -22,11 +22,12 @@ root. The TUI drives everything here.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-from dossier.model import Document, ExpiryStatus, FileStatus
+from dossier.model import Bundle, Document, ExpiryStatus, FileStatus
 
 # -- file resolution ---------------------------------------------------------
 
@@ -136,6 +137,43 @@ def group_by_location(
     for doc in sort_documents(docs):
         groups.setdefault(doc.effective_location, []).append(doc)
     return list(groups.items())
+
+
+# -- bundles -----------------------------------------------------------------
+
+
+def bundle_sort_key(bundle: Bundle) -> tuple[bool, date, str, str]:
+    """Sort chronologically: by ``date``, else ``created``, else title; empty last.
+
+    The ``created`` tiebreak is compared as an ISO string to sidestep any
+    aware/naive datetime mismatch from a hand-edited ``created``.
+    """
+    effective = bundle.date or (bundle.created.date() if bundle.created else None)
+    created = bundle.created.isoformat() if bundle.created else ""
+    return (effective is None, effective or date.min, created, bundle.title.casefold())
+
+
+def sort_bundles(bundles: Iterable[Bundle]) -> list[Bundle]:
+    return sorted(bundles, key=bundle_sort_key)
+
+
+def group_bundles(bundles: Iterable[Bundle]) -> list[tuple[str | None, list[Bundle]]]:
+    """Group chronologically-sorted bundles by top slug segment.
+
+    ``travel/india-2024`` and ``travel/bali-2025`` share the ``"travel"`` group;
+    a flat slug (``us-visa``) falls into the ``None`` group, ordered last so
+    legacy flat bundles don't each spawn a one-row header.
+    """
+    groups: dict[str | None, list[Bundle]] = {}
+    for bundle in sort_bundles(bundles):
+        top = bundle.slug.split("/", 1)[0] if "/" in bundle.slug else None
+        groups.setdefault(top, []).append(bundle)
+    named: list[tuple[str | None, list[Bundle]]] = [
+        (key, groups[key]) for key in sorted(k for k in groups if k is not None)
+    ]
+    if None in groups:
+        named.append((None, groups[None]))
+    return named
 
 
 # -- expiry ------------------------------------------------------------------

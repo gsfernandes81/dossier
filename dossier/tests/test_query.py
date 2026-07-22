@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 
 from dossier import query
-from dossier.model import Document, ExpiryStatus, FileStatus, Rendition
+from dossier.model import Bundle, Document, ExpiryStatus, FileStatus, Rendition
 
 TODAY = date(2026, 7, 21)
 
@@ -188,3 +188,18 @@ def test_sort_and_group_by_effective_location():
     grouped = query.group_by_location(docs)
     assert [loc for loc, _ in grouped] == ["file", "pouch", None]
     assert [d.id for d in grouped[0][1]] == ["b", "a", "z"]
+
+
+def test_bundle_sort_and_group():
+    india = Bundle(slug="travel/india-2024", title="India 2024", date=date(2024, 3, 11))
+    bali = Bundle(slug="travel/bali-2025", title="Bali 2025", date=date(2025, 6, 2))
+    ship = Bundle(slug="joining/ship-2024", title="Ship 2024", date=date(2024, 8, 1))
+    visa = Bundle(slug="us-visa", title="US Visa")  # flat, no date
+
+    groups = query.group_bundles([visa, bali, india, ship])
+    assert [key for key, _ in groups] == ["joining", "travel", None]  # flat last
+    travel = dict(groups)["travel"]
+    assert [b.slug for b in travel] == [  # chronological within the group
+        "travel/india-2024",
+        "travel/bali-2025",
+    ]
