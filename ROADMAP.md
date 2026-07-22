@@ -15,7 +15,9 @@ inline; the DetailScreen/Move/Bundle modals retired) + **search as an in-place
 Miller filter**; the **dismissable suggestions** layer (name-dates demoted to
 accept/dismiss suggestions in the pane); and **bundles & export** (hierarchical
 slugs, dates + chronological surface, folder→bundle suggestions, `ds export`).
-163 tests, CI green. Only Phase 7 (vision, deferred) remains.
+Phase 7 (vision) is **in progress** — the `ds scan` extraction engine, CLI, and
+content-based succession have landed and are verified on the real store; expiry/issue
+suggestions from readings are the remaining piece. Phase 8 (organize, #4) is planned.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -89,16 +91,36 @@ Per-item rationale lives in `DESIGN.md` §14.
   bundle's member files into a folder, named by doc id, with problem flags
   (no-file/missing/exists) and `--dry-run`/`--force` (#59).
 
-## Phase 7 — Vision suggestions  *(deferred)*
-- [ ] **`ds scan`** (L) — a local VLM (llama.cpp) reads linked scans and **suggests**
-  issue/expiry dates + an expires-vs-period classification into the suggestions layer,
-  with grounding + validation (quote the source text, cross-check, low temperature).
-  Review only, never auto-apply.
-- [ ] **Model selection in settings** (S) — pull the available models from your
-  llama.cpp **router** (`/v1/models`) and choose per run.
-  - *Researched stack:* Qwen3-VL-8B-Instruct Q4 (or Qwen2.5-VL-7B fallback) served by
-    `llama-server --mmproj` behind the OpenAI `/v1/chat/completions` endpoint with a
-    JSON grammar; PyMuPDF @ ~250 DPI; desktop-only (an 8B VLM isn't viable on the phone).
+## Phase 7 — Vision & content suggestions  *(in progress)*
+- [x] **`ds scan` extraction engine + CLI** — rasterize the first page (pypdfium2) and
+  read a **structured, grounded** `ScanReading` from a local VLM over an
+  OpenAI-compatible endpoint (a llama.cpp router; model + URL per-device config).
+  Dates are extracted **verbatim** (never the model's own reordering); all-required
+  schema + temp 0.1 make reads deterministic. Readings persist to `.dossier/scans.toml`
+  (synced, so a phone benefits from a desktop scan); a size:mtime fingerprint skips
+  unchanged files. Verified on the real store — 57/57 read, 0 low-confidence.
+- [x] **Content-based succession** (#2) — `dossier/succession.py` clusters same-credential
+  documents (shared document number, or type-core + issuer + holder) and proposes
+  renewals; a fourth **reconcile "Succession" tab** accepts (`s`, sets `supersedes`) /
+  dismisses (`x`). Verified on the real store: recovers the CoC-card, ENG-1 medical,
+  and BRP chains, matching a filename-only inference.
+- [ ] **Expiry / issue suggestions from readings** (#3, M) — feed each reading's verbatim
+  dates through the ambiguity-aware `suggest` machinery (source `scan`) into the detail
+  pane's accept/dismiss layer, cross-checked against the authoritative expiry.
+- [ ] **Model selection in settings** (S) — list the router's `/v1/models` and choose
+  per run (URL/model are already per-device config).
+  - *Stack in use:* Qwen3-VL-8B-Instruct (Q4) via a llama.cpp router behind the OpenAI
+    `/v1/chat/completions` endpoint with a JSON schema; pypdfium2 @ ~170 DPI;
+    desktop-only (an 8B VLM isn't viable on the phone).
+
+## Phase 8 — Organize: metadata-driven filenames  *(planned; #4, no vision)*
+- [ ] **`ds organize`** (M) — propose a canonical filename (and optional category folder)
+  for each *linked* file from its document record (category / name / date), as a
+  review → apply plan (like `ds export`: plan, `--dry-run`, apply). On apply, renames /
+  moves the real file and updates the rendition path; never auto-moves. The thing that
+  actually tidies a messy `Official Documents/` tree. Formalizes the old "Organize mode"
+  note. (Subset-elimination, idea #1, is already **Phase 3 dedup** — install
+  `dossier[dedup]`, `ds reconcile` → Duplicates → `d` scan → `f` fold.)
 
 ## Notes
 - **Quick wins:** `ds reset` (S), the `ignore_expiry` toggle (S).
@@ -106,10 +128,6 @@ Per-item rationale lives in `DESIGN.md` §14.
   suggestions — it ships with direct editing first and gains the accept affordance when
   the suggestions framework (Phase 5) lands. Phase 7 (vision) needs Phase 5 to land its
   proposals into.
-- **Organize mode** *(feature creep, opt-in, later)* — propose a canonical folder +
-  filename for each *linked* file from its document record (category / name / date), as
-  a plan you review and apply. Never auto-moves. The thing that would actually *sort* a
-  messy `Official Documents/` tree.
 - **Reconcile follow-ups** *(deferred, low priority)* — doctor checks for a document
   that links a *folded* duplicate copy and for stale sidecar entries (a `dismissed`
   path or `folded` keep that no longer exists on disk); a "show dismissed (N)" toggle
