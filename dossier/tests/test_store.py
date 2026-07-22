@@ -22,7 +22,7 @@ import pytest
 
 from dossier.config import Config
 from dossier.errors import DocumentExistsError, StaleWriteError
-from dossier.model import Document, Location, Rendition
+from dossier.model import Document, Location, ReconcileState, Rendition
 from dossier.store import TEMP_PREFIX, Store
 
 
@@ -160,3 +160,32 @@ def test_locations_round_trip_with_hash_title(store: Store):
     )
     loaded = store.load_locations()
     assert loaded["cert-file-2048"].title == "Cert File #2048"
+
+
+def test_reconcile_sidecar_round_trips_paths_with_slashes(store: Store):
+    state = ReconcileState(
+        dismissed={"Wallpapers/bg.jpg", "a.txt"},
+        ignore=["Wallpapers/*"],
+        missing_ok={"Marine/PSCRB Cert gone.pdf": {"pscrb"}},
+        folded={"Marine/CoC Card.pdf": {"Applications/2024/CoC Card.pdf"}},
+    )
+    store.save_reconcile(state)
+    loaded = store.load_reconcile()
+    assert loaded.dismissed == {"Wallpapers/bg.jpg", "a.txt"}
+    assert loaded.ignore == ["Wallpapers/*"]
+    assert loaded.missing_ok == {"Marine/PSCRB Cert gone.pdf": {"pscrb"}}
+    assert loaded.folded == {"Marine/CoC Card.pdf": {"Applications/2024/CoC Card.pdf"}}
+
+
+def test_reconcile_sidecar_empty_and_absent(store: Store):
+    assert store.load_reconcile() == ReconcileState()  # absent file → empty
+    store.save_reconcile(ReconcileState())
+    assert store.load_reconcile() == ReconcileState()  # empty round-trips
+
+
+def test_reconcile_sidecar_write_is_deterministic(store: Store):
+    state = ReconcileState(dismissed={"b.jpg", "a.jpg"}, ignore=["z/*", "y/*"])
+    store.save_reconcile(state)
+    first = store.config.reconcile_path.read_bytes()
+    store.save_reconcile(store.load_reconcile())
+    assert store.config.reconcile_path.read_bytes() == first  # sorted, stable

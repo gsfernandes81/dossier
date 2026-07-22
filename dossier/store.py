@@ -48,7 +48,7 @@ from ruamel.yaml.scalarstring import DoubleQuotedScalarString as DQ
 
 from dossier.config import Config
 from dossier.errors import DocumentExistsError, StaleWriteError, StoreError
-from dossier.model import Bundle, Document, Location, Rendition
+from dossier.model import Bundle, Document, Location, ReconcileState, Rendition
 
 CONFLICT_MARKER = ".sync-conflict-"
 TEMP_PREFIX = ".dossier-tmp-"
@@ -246,6 +246,37 @@ class Store:
             self.config.bundles_path, tomli_w.dumps(data).encode("utf-8")
         )
 
+    # -- reconcile sidecar ---------------------------------------------------
+
+    def load_reconcile(self) -> ReconcileState:
+        """Load the reconcile-decisions sidecar (absent → an empty state)."""
+        raw = _read_toml_or_empty(self.config.reconcile_path)
+        return ReconcileState(
+            dismissed=set(_as_str_list(raw.get("dismissed"))),
+            ignore=_as_str_list(raw.get("ignore")),
+            missing_ok=_as_str_set_map(raw.get("missing_ok")),
+            folded=_as_str_set_map(raw.get("folded")),
+        )
+
+    def save_reconcile(self, state: ReconcileState) -> None:
+        """Persist the reconcile sidecar deterministically (sorted throughout)."""
+        data: dict[str, object] = {}
+        if state.dismissed:
+            data["dismissed"] = sorted(state.dismissed)
+        if state.ignore:
+            data["ignore"] = sorted(state.ignore)
+        missing_ok = {
+            path: sorted(ids) for path, ids in state.missing_ok.items() if ids
+        }
+        if missing_ok:
+            data["missing_ok"] = {k: missing_ok[k] for k in sorted(missing_ok)}
+        folded = {keep: sorted(subs) for keep, subs in state.folded.items() if subs}
+        if folded:
+            data["folded"] = {k: folded[k] for k in sorted(folded)}
+        atomic_write_bytes(
+            self.config.reconcile_path, tomli_w.dumps(data).encode("utf-8")
+        )
+
 
 # -- frontmatter (de)serialization ------------------------------------------
 
@@ -352,6 +383,18 @@ def _as_str_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value]
+
+
+def _as_str_set_map(value: object) -> dict[str, set[str]]:
+    """A ``{str: [str, ...]}`` TOML table → ``{str: set[str]}`` (tolerant)."""
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, set[str]] = {}
+    for key, raw in value.items():
+        items = set(_as_str_list(raw))
+        if items:
+            out[str(key)] = items
+    return out
 
 
 def _as_date(value: object) -> date | None:

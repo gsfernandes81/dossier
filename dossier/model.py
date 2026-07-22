@@ -20,6 +20,7 @@ These are pure data types — no I/O. Persistence lives in :mod:`dossier.store`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
@@ -71,6 +72,50 @@ class Bundle:
     title: str
     export_dir: str | None = None
     notes: str = ""
+
+
+@dataclass
+class ReconcileState:
+    """Persisted reconcile decisions — the ``.dossier/reconcile.toml`` sidecar.
+
+    Machine-owned (unlike the hand-editable ``config.toml``): the reconcile
+    screen writes it to remember what the user has already judged, so decisions
+    survive re-runs. Every field is a *suppression* — nothing here ever writes a
+    document or touches a real file.
+
+    * ``dismissed`` — orphan relpaths the user rejected as non-documents.
+    * ``ignore`` — extra reconcile-scope globs added from the TUI, unioned with
+      ``config.toml``'s ``ignore`` (kept apart so the human-owned config keeps
+      its comments).
+    * ``missing_ok`` — ``path → {doc ids}`` whose lost rendition is acknowledged.
+    * ``folded`` — ``keep path → {confirmed duplicate/subset paths}``.
+    """
+
+    dismissed: set[str] = field(default_factory=set)
+    ignore: list[str] = field(default_factory=list)
+    missing_ok: dict[str, set[str]] = field(default_factory=dict)
+    folded: dict[str, set[str]] = field(default_factory=dict)
+
+    def suppressed_orphans(self) -> frozenset[str]:
+        """Orphan paths to hide: the dismissed set plus every folded subset."""
+        hidden = set(self.dismissed)
+        for subsets in self.folded.values():
+            hidden |= subsets
+        return frozenset(hidden)
+
+    def is_acked(self, doc_id: str, path: str) -> bool:
+        """Whether this document's missing rendition at ``path`` was acknowledged."""
+        return doc_id in self.missing_ok.get(path, frozenset())
+
+    def covers(self, keep: str, subsets: Sequence[str]) -> bool:
+        """Whether a scanned cluster is fully accounted for by a fold decision.
+
+        Suppress iff the same ``keep`` was folded *and* every current subset was
+        recorded — so a new copy (an unrecorded subset) resurfaces the whole
+        cluster for a fresh decision.
+        """
+        recorded = self.folded.get(keep)
+        return recorded is not None and set(subsets) <= recorded
 
 
 @dataclass

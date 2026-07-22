@@ -3,47 +3,43 @@
 **Where we are (2026-07-22).** The Miller-columns home shipped (PRs #15–#31):
 browse · detail pane · bottom-bar search · the full action set · touch/Termux ·
 Nerd-Font icons · spacing/gutter polish. **Expiries now come from the Notion
-_Marine Documents_ table** (#32) — the authoritative source, not document names.
-92 tests, CI green.
+_Marine Documents_ table** (#32). Since then: `ds reset` (#38), the **real
+migration applied** on `…/Official Documents`, the **expiry-watch surface** (#39),
+the **dedup engine** — perceptual page-hashing + subset/superset clustering with a
+per-device cache (#40–#41), and the **reconcile view** (#42, read-only). 115 tests,
+CI green.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
 
 ## Phase 1 — Live on your real data
 - [x] **Expiries from the Notion Marine Documents table** (authoritative) — #32
-- [ ] **`ds reset`** (S) — folder-data reset (clears `.dossier/` only, never the real
-  files) + `--global` config reset. The safety net that makes re-importing painless.
-- [ ] **Apply the migration** *(milestone)* — the one-time real import: `ds init` on the
-  real Syncthing folder, `ds migrate` (dry-run → review → `--apply`). Writes the 137
-  document records — marine expiries + file links + locations — into `.dossier/`, so
-  the TUI holds your actual documents instead of fixtures. Dogfooding starts here.
+- [x] **`ds reset`** (S) — folder-data reset (clears `.dossier/` only, never the real
+  files) + `--global` config reset. The safety net that makes re-importing painless. #38
 - [x] **Applied** on `…/Official Documents` — 137 docs, 5 marine expiries, 57 files
   auto-linked. Old store backed up by `ds reset`.
-- [ ] **Reconcile / orphan view** (S–M) — a `ds reconcile` (or doctor check) listing
-  files under the root **not linked to any document**, plus docs whose file is
-  missing. Makes an unsorted folder legible. *High value now* (the real import left
-  37 suggested + 42 no-match + 18 multi-match links).
-- [ ] **Fuzzy file-suggestion review flow** (M) — a TUI screen to accept/reject those
-  suggested file matches and manually link the no-matches. Includes *adopt orphan →
-  new document* for files that moved in but aren't in Notion.
+- [x] **Reconcile / orphan view** — `ds reconcile` (CLI, #40) + the TUI reconcile
+  screen (#42): orphan files (per-folder), docs whose file is missing, and duplicate
+  clusters. Read-only so far.
+- [ ] **Reconcile actions** (M) — accept/reject the suggested file matches, manually
+  link no-matches, *adopt orphan → new document*, dismiss, add ignore-glob, and
+  **fold duplicate clusters** (metadata only). Persist decisions in a
+  `.dossier/reconcile.toml` sidecar. Never moves or deletes real files. **← next**
 
-## Phase 2 — Expiry watch (now backed by real data)
-- [ ] **`ignore_expiry` toggle** (S) — a keypress to drop residual old CDCs from the watch.
-- [ ] **Expiry-watch surface** (M) — the mockup's 5th screen: tracked docs
-  soonest-first, an "N tracked · M red (≤ threshold)" header, open / ignore from the
-  list. (`query.tracked` logic is already done.)
+## Phase 2 — Expiry watch  ✅
+- [x] **`ignore_expiry` toggle** (S) — a keypress to drop residual old CDCs from the watch.
+- [x] **Expiry-watch surface** (M) — tracked docs soonest-first, "N tracked · M red"
+  header, open / ignore from the list. #39
 
-## Phase 3 — Dedup by visual similarity  *(sooner rather than later, not first)*
-- [ ] **Near-duplicate detection** (M–L) — the same document scanned more than once
-  from different sources at different times. **Propose merges** (keep one rendition,
-  fold the rest); review only, never automatic.
-  - **No VLM required.** Baseline: **perceptual hashing** (`imagehash` over the
-    rasterized page) — cheap, GPU-free, catches most re-scans. *Benefits from* an image
-    **embedding** model (CLIP/SigLIP/DINOv2, or Qwen3-VL's vision encoder via llama.cpp)
-    for harder near-dupes (different source/crop/quality), and a generative **VLM only as
-    an optional confirmer** on the few borderline candidate pairs (running it on every
-    pair is O(n²), infeasible). Pipeline: pHash → optional embeddings → optional VLM
-    confirm.
+## Phase 3 — Dedup by visual similarity  ✅ *(engine)*
+- [x] **Near-duplicate detection** — perceptual **dHash** per page (`dedup_hash`),
+  fuzzy Hamming **containment** clustering that folds subsets under their superset
+  (`dedup.group_files`), and a per-device page-hash **cache** keyed by size+mtime
+  (`dedup_cache`). Surfaced in the reconcile view; folding is review-only (Phase 1
+  reconcile actions), never automatic. #40–#41
+  - *Deferred enhancers:* image **embeddings** (CLIP/SigLIP/DINOv2 or Qwen3-VL's
+    encoder) for harder near-dupes, and a generative **VLM confirmer** on borderline
+    pairs only. Baseline pHash already catches most re-scans GPU-free.
 
 ## Phase 4 — Editing & search ergonomics  *(pulled up, per priority)*
 - [ ] **Editable detail pane (col 3)** (L) — edit every parameter inline (name, dates,

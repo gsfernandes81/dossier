@@ -19,7 +19,7 @@ from pathlib import Path
 
 from dossier import reconcile
 from dossier.config import Config
-from dossier.model import Document, Rendition
+from dossier.model import Document, ReconcileState, Rendition
 from dossier.store import Store
 
 
@@ -94,5 +94,42 @@ def test_run_with_hashes_adds_duplicate_clusters(tmp_path: Path):
     report = reconcile.run(
         store, config, pages_by_file={"a.pdf": [1, 2], "b.pdf": [1, 2]}
     )
+    assert report.groups is not None
+    assert len(report.groups) == 1
+
+
+def test_state_dismissed_orphan_is_filtered(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    state = ReconcileState(dismissed={"Wallpapers/bg.jpg"})
+    report = reconcile.run(store, config, state=state)
+    paths = {o.path for o in report.orphans}
+    assert "Wallpapers/bg.jpg" not in paths  # dismissed → hidden
+    assert "Marine/PSCRB Cert.pdf" in paths  # others unaffected
+
+
+def test_state_acked_missing_is_filtered(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    state = ReconcileState(missing_ok={"Marine/PSCRB Cert gone.pdf": {"pscrb"}})
+    report = reconcile.run(store, config, state=state)
+    assert not any(m.doc_id == "pscrb" for m in report.missing)
+
+
+def test_state_ignore_glob_scopes_scan(tmp_path: Path):
+    _, config = _setup(tmp_path)
+    files = reconcile.scan_files(config, ["Wallpapers/*"])
+    assert not any(f.startswith("Wallpapers/") for f in files)
+    assert "Marine/PSCRB Cert.pdf" in files
+
+
+def test_state_folded_suppresses_only_recorded_clusters(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    pages = {"keep.pdf": [1, 2, 3], "copy.pdf": [1, 2]}  # copy ⊂ keep
+    state = ReconcileState(folded={"keep.pdf": {"copy.pdf"}})
+    report = reconcile.run(store, config, pages_by_file=pages, state=state)
+    assert report.groups == []  # fully accounted for → suppressed
+
+    # A new, unrecorded copy resurfaces the whole cluster for a fresh decision.
+    pages["copy2.pdf"] = [1, 2]
+    report = reconcile.run(store, config, pages_by_file=pages, state=state)
     assert report.groups is not None
     assert len(report.groups) == 1

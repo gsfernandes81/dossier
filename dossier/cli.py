@@ -248,12 +248,15 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    store = Store(config)
+    state = store.load_reconcile()
+
     pages = None
     if args.dedup:
         root = config.syncthing_root
         candidates = [
             root / rel
-            for rel in reconcile.scan_files(config)
+            for rel in reconcile.scan_files(config, state.ignore)
             if Path(rel).suffix.lower() in dedup_hash.PAGE_SUFFIXES
         ]
         print(f"hashing {len(candidates)} page-bearing files (first run may be slow)…")
@@ -263,13 +266,14 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
 
-    report = reconcile.run(Store(config), config, pages_by_file=pages)
+    report = reconcile.run(store, config, pages_by_file=pages, state=state)
     print(
         f"reconcile: {len(report.orphans)} orphan · {len(report.linked)} linked · "
         f"{len(report.missing)} missing"
     )
-    if config.include or config.ignore:
-        print(f"  scope: include={config.include or ['*']}  ignore={config.ignore}")
+    ignore = [*config.ignore, *state.ignore]
+    if config.include or ignore:
+        print(f"  scope: include={config.include or ['*']}  ignore={ignore}")
 
     if report.groups is not None:
         print(f"\nduplicate clusters ({len(report.groups)}):")
