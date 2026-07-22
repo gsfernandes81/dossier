@@ -892,6 +892,40 @@ async def test_bundles_screen_filters_home_to_a_bundle(tmp_path: Path):
         assert home._bundle_filter is None  # Esc clears the bundle scope
 
 
+@pytest.mark.asyncio
+async def test_bundles_screen_accepts_folder_suggestion(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    # two docs sharing a hint folder → one folder-bundle suggestion
+    for i in (1, 2):
+        store.save(
+            Document(
+                id=f"trip{i}",
+                name=f"Trip Doc {i}",
+                files=[Rendition("d", f"Travel Documents/India 2024/{i}.pdf", True)],
+            )
+        )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.action_bundles()
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BundlesScreen)
+        assert len(screen._suggested) == 1
+        assert screen._suggested[0].slug == "travel/india-2024"
+        # land the cursor on the suggestion row and accept it
+        options = screen.query_one("#bundle-list", OptionList)
+        for i in range(options.option_count):
+            if (options.get_option_at_index(i).id or "").startswith(screen._SUGGESTED):
+                options.highlighted = i
+                break
+        screen.action_accept()
+        await pilot.pause()
+    assert "travel/india-2024" in store.load_bundles()  # bundle created
+    assert "travel/india-2024" in store.load("trip1").bundles  # members assigned
+    assert "travel/india-2024" in store.load("trip2").bundles
+
+
 def test_linux_driver_exposes_mouse_toggle():
     # Pin the private methods the keyboard trick relies on, so a Textual rename
     # fails here loudly instead of silently breaking the Termux keyboard. The

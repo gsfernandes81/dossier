@@ -29,12 +29,21 @@ from names once its issue-date writing was demoted.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date
+from pathlib import PurePosixPath
 
 from dateutil import parser as du_parser
 
 from dossier.doctor import candidate_readings
-from dossier.model import Document, SuggestedField, Suggestion, SuggestionState
+from dossier.migrate import slugify
+from dossier.model import (
+    Bundle,
+    Document,
+    SuggestedField,
+    Suggestion,
+    SuggestionState,
+)
 
 _DATE_TOKEN = re.compile(
     r"("
@@ -175,3 +184,87 @@ def _satisfied(doc: Document, suggestion: Suggestion) -> bool:
     if suggestion.field is SuggestedField.EXPIRY:
         return doc.expiry_date is not None
     return all(value in doc.notes for value in suggestion.values)  # NOTES span
+
+
+# -- folder → bundle suggestions ---------------------------------------------
+
+# A file-path keyword → the bundle category (top slug segment) it implies. Only
+# these folders become bundles; a plain category folder (Certificates/) does not.
+_FOLDER_HINTS: dict[str, str] = {
+    "travel": "travel",
+    "visa": "visa",
+    "joining": "joining",
+    "application": "application",
+    "attempt": "application",
+    "uploaded": "application",
+    "submission": "application",
+}
+
+
+@dataclass(frozen=True)
+class BundleSuggestion:
+    """A proposed bundle over the documents sharing an application/trip folder."""
+
+    slug: str  # hierarchical, e.g. "travel/india-2024"
+    title: str  # the folder's leaf name, for display
+    folder: str  # the shared POSIX relpath (the rationale)
+    doc_ids: tuple[str, ...]  # sorted members, for a deterministic key
+
+    @property
+    def key(self) -> str:
+        return f"bundle:folder:{self.slug}:{'|'.join(self.doc_ids)}"
+
+
+def bundles_from_folders(
+    docs: list[Document], *, min_docs: int = 2
+) -> list[BundleSuggestion]:
+    """Suggest a bundle for each application/trip folder holding ≥ ``min_docs``.
+
+    A document's folder is its primary rendition's parent dir. A folder qualifies
+    only if a path component matches a :data:`_FOLDER_HINTS` keyword — so category
+    folders never become bundles.
+    """
+    by_folder: dict[str, list[str]] = {}
+    for doc in docs:
+        rendition = doc.primary_rendition()
+        if rendition is None:
+            continue
+        folder = PurePosixPath(rendition.path).parent.as_posix()
+        by_folder.setdefault(folder, []).append(doc.id)
+
+    out: list[BundleSuggestion] = []
+    for folder, ids in by_folder.items():
+        if len(ids) < min_docs:
+            continue
+        category = _folder_category(folder)
+        if category is None:
+            continue
+        leaf = folder.rsplit("/", 1)[-1]
+        out.append(
+            BundleSuggestion(
+                slug=f"{category}/{slugify(leaf)}",
+                title=leaf,
+                folder=folder,
+                doc_ids=tuple(sorted(ids)),
+            )
+        )
+    return sorted(out, key=lambda s: s.slug)
+
+
+def live_bundles(
+    docs: list[Document], bundles: dict[str, Bundle], state: SuggestionState
+) -> list[BundleSuggestion]:
+    """Folder-bundle suggestions worth showing: not already a bundle, not dismissed."""
+    return [
+        suggestion
+        for suggestion in bundles_from_folders(docs)
+        if suggestion.slug not in bundles and not state.is_dismissed_key(suggestion.key)
+    ]
+
+
+def _folder_category(folder: str) -> str | None:
+    lower = folder.lower()
+    for keyword, category in _FOLDER_HINTS.items():
+        if keyword in lower:
+            return category
+    return None
