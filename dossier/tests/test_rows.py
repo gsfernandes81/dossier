@@ -77,7 +77,7 @@ def test_marker_switches_ascii_to_nerd():
     assert glyphs.NERD.expired != "!"  # a real Nerd Font codepoint, not ASCII
 
 
-def test_compact_wrapped_name_hangs_under_the_name():
+def test_compact_name_is_one_ellipsized_line():
     long_name = "Certificate of Competency Card renewal 2026"
     doc = Document(id="c", name=long_name, expiry_date=date(2026, 3, 10))
     out = _render(
@@ -85,9 +85,8 @@ def test_compact_wrapped_name_hangs_under_the_name():
         width=20,
     )
     lines = [ln for ln in out.splitlines() if ln.strip()]
-    assert len(lines) >= 2  # the name wrapped
-    # continuation is indented past the marker column (does not start at col 0)
-    assert lines[1].startswith("  ")
+    assert len(lines) == 1  # collapses to a single row, no wrapping
+    assert "…" in lines[0]  # the over-long name is ellipsized to the pane width
 
 
 def test_superseded_dims_the_row():
@@ -123,6 +122,16 @@ def test_multiline_meta_line_carries_slot_tags_and_missing_file():
     assert "slot 2" in meta
     assert "marine marine/coc" in meta
     assert "file missing" in meta
+
+
+def test_multiline_always_has_a_second_line():
+    # A bare document (no dates, location, tags or files) still gets a meta line
+    # so the touch list keeps a steady two-line rhythm.
+    bare = rows.doc_row(_view(Document(id="d", name="Bare")), mode=RowMode.MULTILINE)
+    assert isinstance(bare, Text)
+    first, meta = bare.plain.split("\n", 1)
+    assert first.strip() == "Bare"
+    assert meta.strip() == "—"
 
 
 def test_show_issue_swaps_the_displayed_date():
