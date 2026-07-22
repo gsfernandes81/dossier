@@ -280,7 +280,7 @@ def _print_icon_note(config: Config) -> None:
 
 
 def cmd_reconcile(args: argparse.Namespace) -> int:
-    """List orphan files, missing files (and, later, duplicates) in the folder."""
+    """List orphan files, missing files, and (with --dedup) duplicate clusters."""
     config = _load_config()
     if config is None:
         return 1
@@ -1136,7 +1136,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     reconcile_p = sub.add_parser(
         "reconcile",
-        help="find orphan files and missing files (duplicates soon)",
+        help="find orphan files, missing files, and duplicate clusters (--dedup)",
     )
     reconcile_p.add_argument(
         "--dedup",

@@ -84,6 +84,14 @@ def matches(
     reading: ScanReading | None = None,
     include_content: bool = False,
 ) -> bool:
+    """Whether ``doc`` satisfies every set field of ``flt`` (unset fields don't filter).
+
+    Text matches name/notes/tags/bundles case-insensitively (and, when ``reading`` is
+    given, the doc's scan reading — its full transcript too with ``include_content``);
+    a tag filter matches a segment or its hierarchical children (``id`` matches
+    ``id/passport``); location uses the *effective* (temp-overrides-permanent) location;
+    expiry uses the doc's status against ``threshold_days``.
+    """
     return (
         (not flt.text or _text_matches(doc, flt.text, reading, include_content))
         and all(_has_tag(doc.tags, tag) for tag in flt.tags)
@@ -102,9 +110,10 @@ def search(
     readings: Mapping[str, ScanReading] | None = None,
     include_content: bool = False,
 ) -> list[Document]:
-    """Documents passing ``flt``. With ``readings``, the text filter also matches a
-    doc's scan reading (structured fields); ``include_content`` extends that to the
-    full transcript (opt-in — the noisy body text stays off the default filter)."""
+    """Documents passing ``flt``, order preserved. With ``readings``, the text filter
+    also matches a doc's scan reading (structured fields); ``include_content`` extends
+    that to the full transcript (opt-in — the noisy body text stays off the default
+    filter). See :func:`matches`."""
     return [
         doc
         for doc in docs
@@ -183,6 +192,7 @@ def sort_key(doc: Document) -> tuple[bool, str, bool, int, bool, int, str]:
 
 
 def sort_documents(docs: list[Document]) -> list[Document]:
+    """Documents in shelf order: effective location → slot → subslot → name."""
     return sorted(docs, key=sort_key)
 
 
@@ -211,6 +221,7 @@ def bundle_sort_key(bundle: Bundle) -> tuple[bool, date, str, str]:
 
 
 def sort_bundles(bundles: Iterable[Bundle]) -> list[Bundle]:
+    """Bundles chronologically by effective date. See :func:`bundle_sort_key`."""
     return sorted(bundles, key=bundle_sort_key)
 
 
@@ -352,6 +363,7 @@ class DocumentView:
 def view(
     doc: Document, *, root: Path, today: date, threshold_days: int
 ) -> DocumentView:
+    """Pair a document with its computed expiry status and on-disk file status."""
     return DocumentView(
         document=doc,
         expiry=doc.expiry_status(today, threshold_days),
@@ -362,6 +374,7 @@ def view(
 def views(
     docs: list[Document], *, root: Path, today: date, threshold_days: int
 ) -> list[DocumentView]:
+    """:func:`view` for each document, order preserved."""
     return [
         view(doc, root=root, today=today, threshold_days=threshold_days) for doc in docs
     ]

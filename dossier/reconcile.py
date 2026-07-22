@@ -66,6 +66,13 @@ class MissingFile:
 
 @dataclass
 class ReconcileReport:
+    """The reconcile findings: orphan files, missing renditions, and duplicate clusters.
+
+    ``groups`` is ``None`` when dedup wasn't run (vs an empty list = run, none found).
+    All findings are review-only; acting on them is metadata-only and never moves or
+    deletes a real file.
+    """
+
     orphans: list[Orphan] = field(default_factory=list)
     missing: list[MissingFile] = field(default_factory=list)
     groups: list[dedup.DupGroup] | None = None  # None = dedup not run

@@ -338,18 +338,49 @@ Termux also needs `termux-api` + the Termux:API app for `termux-open`.
 ---
 
 ## 12. Module layout
+
+As-built map (Phases 1–7). See `ROADMAP.md` for per-module shipping history.
 ```
 dossier/
-├─ model.py          # Document, Rendition, Location, Bundle
-├─ config.py         # per-device + synced config; syncthing_root resolution & sanity check
-├─ store.py          # load/save (quote-safe, byte-stable, atomic same-dir); conflict exclusion; history
-├─ query.py          # search/filter/sort; effective location; expiry & file status
-├─ platform_open.py  # cross-platform open + detection + opener verification
-├─ export.py         # bundle → folder (copies + manifest)
-├─ migrate.py        # Notion + tree → .md files + review report + raw archive
-├─ doctor.py         # integrity/durability checks
-└─ tui/              # Textual app: narrow-first list, detail modal, expiring/reconcile/bundle views
+├─ model.py          # dataclasses/enums shared everywhere: Document, Rendition, Location,
+│                    #   Bundle, ReconcileState, Suggestion/SuggestionState, ExpiryStatus, FileStatus
+├─ config.py         # per-device config (syncthing_root) + synced config; history/cache dirs
+├─ errors.py         # exception hierarchy: DossierError → Config/Store/Scan, Stale/Exists
+├─ store.py          # the persistence hub: load/save (quote-safe, byte-stable, atomic same-dir);
+│                    #   conflict exclusion; optimistic concurrency + history; owns ALL sidecar
+│                    #   (de)serialization — locations/bundles/reconcile/suggestions/scans TOML
+├─ query.py          # pure read layer over loaded docs: search/filter/sort; effective location;
+│                    #   expiry & file status; `tracked` (the expiry watch)
+├─ platform_open.py  # cross-platform file open + platform detection + opener verification
+├─ migrate.py        # Notion export + soft-copy tree → .md files + review report + raw archive
+├─ export.py         # bundle → folder (copies/symlinks + manifest)
+├─ reconcile.py      # orphan files / missing renditions / duplicate clusters + reconcile.toml actions
+├─ suggest.py        # dismissable per-field suggestions (issue/expiry/notes, bundles) engine
+├─ succession.py     # content-based renewal-chain clustering → `supersedes` proposals
+├─ scan.py           # `ds scan`: VLM reads a scan into a grounded ScanReading (verbatim dates)
+├─ dedup.py          # near-duplicate clustering (containment fold) over…
+├─ dedup_hash.py     #   …perceptual page dHashes, cached per-device by size+mtime in…
+├─ dedup_cache.py    #   …the platform cache dir (disposable, never synced)
+├─ reset.py          # `ds reset`: folder-data reset (.dossier/ only) + `--global` config reset
+└─ tui/              # Textual app: Miller home, editable detail pane, reconcile/bundles/doctor/
+                     #   expiry-watch screens, touch/Termux action bar
 ```
+
+**Data flow.** `model` is the shared vocabulary; `store` is the only thing that touches disk
+(every sidecar format is (de)serialized there); `query` is a pure read layer over documents
+`store` has loaded. The two front-ends — `cli.py` and `tui/` — read through `store`+`query` and
+write through `store`. Everything else is a **feeder** that produces records or *proposals*:
+`migrate` seeds the store; `scan`/`succession`/`suggest`/`reconcile`/`dedup` propose changes a
+human accepts in the TUI (they never auto-write user data); `doctor`/`reset`/`export` are
+operational commands.
+
+**Extension points.**
+- *New suggestion source* → emit `Suggestion`s from `suggest.py` (or feed verbatim dates through
+  it, as `scan` does); the detail pane's accept/dismiss layer and `suggestions.toml` handle the rest.
+- *New integrity check* → add a `_check_*` to `doctor.py` returning `Finding`s; add a
+  `CHECK_HINTS` entry for recovery guidance. It surfaces in both CLI and TUI automatically.
+- *New sidecar file* → add its load/save to `store.py` (fixed key order, double-quoted scalars,
+  atomic write) so it inherits durability + conflict handling; add a model dataclass in `model.py`.
 
 ---
 
