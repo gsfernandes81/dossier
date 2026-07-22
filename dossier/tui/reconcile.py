@@ -23,8 +23,10 @@ is blocking), reusing the per-device page-hash cache so a warm cache is ~instant
 ``x`` records a *decision* in the ``.dossier/reconcile.toml`` sidecar — dismiss an
 orphan (it's not a document) or acknowledge a missing file — so it stays gone on
 re-run. ``l`` links an orphan to an existing document, ``a`` adopts it as a new
-document, and ``u`` unlinks a dead rendition. Those edit the ``.dossier`` store
-(metadata); no real file is ever moved or deleted. Fold / ignore-glob land next.
+document, and ``u`` unlinks a dead rendition. ``f`` folds a duplicate cluster
+(records the copies as dupes of the keep) and ``g`` adds a reconcile ignore-glob.
+Folds and globs live in the sidecar; link/adopt/unlink edit the ``.dossier``
+store. No real file is ever moved or deleted.
 """
 
 from __future__ import annotations
@@ -45,7 +47,7 @@ from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
 from dossier.model import Document, ReconcileState, Rendition
 from dossier.store import Store
-from dossier.tui.screens import DetailScreen, DocPickerScreen
+from dossier.tui.screens import DetailScreen, DocPickerScreen, TextPromptScreen
 
 if TYPE_CHECKING:
     from textual.widgets.tree import TreeNode
@@ -82,6 +84,8 @@ class ReconcileScreen(ModalScreen[str | None]):
         Binding("l", "link", "Link"),
         Binding("a", "adopt", "Adopt"),
         Binding("u", "unlink", "Unlink"),
+        Binding("f", "fold", "Fold"),
+        Binding("g", "ignore_glob", "Ignore glob"),
     ]
 
     def __init__(self, store: Store, config: Config) -> None:
@@ -92,6 +96,9 @@ class ReconcileScreen(ModalScreen[str | None]):
         self._report: reconcile.ReconcileReport | None = None
         self._filled: set[str] = set()  # folders whose leaves are loaded
         self._dups_count: int | None = None
+        self._pages: dict[str, list[int]] | None = None  # last scan, for re-filter
+        self._groups: list[dedup.DupGroup] = []  # clusters currently listed
+        self._row_group: list[int] = []  # dups option index → group index (−1 = none)
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="rpanel"):
@@ -183,16 +190,24 @@ class ReconcileScreen(ModalScreen[str | None]):
         options = self.query_one("#dups", OptionList)
         options.clear_options()
         self._dups_count = len(groups)
+        self._groups = groups
+        self._row_group = []  # aligned with the option list; f reads the cursor row
         if not groups:
             options.add_option(Option("no duplicate clusters found."))
-        for i, group in enumerate(groups, start=1):
+            self._row_group.append(-1)
+        for i, group in enumerate(groups):
             tag = "  ⚠ partial overlap" if group.ambiguous else ""
             options.add_option(
-                Option(f"— cluster {i} · keep + {len(group.subsets)}{tag} —")
+                Option(
+                    f"— cluster {i + 1} · keep + {len(group.subsets)}{tag}  (f folds) —"
+                )
             )
+            self._row_group.append(i)
             options.add_option(Option(f"  keep  {group.keep}"))
+            self._row_group.append(i)
             for subset in group.subsets:
                 options.add_option(Option(f"  copy  {subset}"))
+                self._row_group.append(i)
         self._update_summary()
 
     # -- events --------------------------------------------------------------
@@ -207,10 +222,12 @@ class ReconcileScreen(ModalScreen[str | None]):
             return True if active == "tab-dups" else None
         if action == "reject":
             return True if active in ("tab-orphans", "tab-missing") else None
-        if action in ("link", "adopt"):
+        if action in ("link", "adopt", "ignore_glob"):
             return True if active == "tab-orphans" else None
         if action == "unlink":
             return True if active == "tab-missing" else None
+        if action == "fold":
+            return True if active == "tab-dups" else None
         return True
 
     @on(Tree.NodeExpanded, "#orphans")
@@ -331,6 +348,60 @@ class ReconcileScreen(ModalScreen[str | None]):
             self.notify(f"unlinked {path}")
             self._refresh()
 
+    def action_fold(self) -> None:
+        options = self.query_one("#dups", OptionList)
+        index = options.highlighted
+        if index is None or index >= len(self._row_group):
+            return
+        gi = self._row_group[index]
+        if not (0 <= gi < len(self._groups)):
+            return  # cursor on a placeholder / "no duplicates" row
+        group = self._groups[gi]
+        self._state.folded.setdefault(group.keep, set()).update(group.subsets)
+        try:
+            self._store.save_reconcile(self._state)
+        except OSError as exc:
+            self.notify(f"could not save decisions: {exc}", severity="error")
+            return
+        self.notify(f"folded {len(group.subsets)} copy(ies) under {_stem(group.keep)}")
+        self._refresh(refilter_dups=True)
+
+    def action_ignore_glob(self) -> None:
+        self.app.push_screen(
+            TextPromptScreen(
+                "Add a reconcile ignore-glob (fnmatch; * crosses /):",
+                initial=self._suggested_glob(),
+                placeholder="Folder/*",
+            ),
+            self._add_glob,
+        )
+
+    def _suggested_glob(self) -> str:
+        node = self.query_one("#orphans", Tree).cursor_node
+        if node is None:
+            return ""
+        data = node.data
+        if isinstance(data, _Leaf):
+            return f"{_folder_of(data.path)}/*"
+        if isinstance(data, str) and data != _SUGGESTED:
+            return f"{data}/*"
+        return ""
+
+    def _add_glob(self, glob: str | None) -> None:
+        if glob is None:
+            return
+        glob = glob.strip()
+        if not glob or glob in self._state.ignore:
+            return
+        self._state.ignore.append(glob)
+        try:
+            self._store.save_reconcile(self._state)
+        except OSError as exc:
+            self.notify(f"could not save decisions: {exc}", severity="error")
+            return
+        self.notify(f"ignoring {glob}")
+        self._refresh()
+
     def _cursor_leaf(self) -> _Leaf | None:
         node = self.query_one("#orphans", Tree).cursor_node
         data = node.data if node is not None else None
@@ -366,21 +437,28 @@ class ReconcileScreen(ModalScreen[str | None]):
             return
         self._refresh()
 
-    def _refresh(self) -> None:
+    def _refresh(self, *, refilter_dups: bool = False) -> None:
         """Re-run the (cheap) engine and rebuild the orphan tree + missing list.
 
         Preserves which folders were expanded and the tree cursor. The duplicate
-        tab is left as-is — dismiss/ack don't affect it, and re-running the scan
-        would re-rasterize.
+        tab is left as-is unless ``refilter_dups`` — dismiss/ack don't affect it,
+        and a fresh scan would re-rasterize. Folding passes ``refilter_dups`` so
+        the folded cluster drops out, reusing the cached hashes (no rasterizing).
         """
         tree = self.query_one("#orphans", Tree)
         expanded = self._expanded_folders(tree)
         cursor = tree.cursor_line
-        self._report = reconcile.run(self._store, self._config, state=self._state)
+        pages = self._pages if refilter_dups else None
+        self._report = reconcile.run(
+            self._store, self._config, pages_by_file=pages, state=self._state
+        )
         self._populate_orphans(expanded=expanded)
         self._populate_missing()
         tree.cursor_line = cursor  # Textual clamps out-of-range lines
-        self._update_summary()
+        if refilter_dups and self._report.groups is not None:
+            self._populate_dups(self._report.groups)  # rebuilds dups + summary
+        else:
+            self._update_summary()
 
     def _expanded_folders(self, tree: Tree) -> set[str]:
         out: set[str] = set()
@@ -409,11 +487,14 @@ class ReconcileScreen(ModalScreen[str | None]):
         except dedup_hash.DedupError as exc:
             self.app.call_from_thread(self._scan_failed, str(exc))
             return
+        self._pages = pages  # keep the raw hashes so folding re-filters cheaply
         groups = dedup.group_files(pages)
         groups = [g for g in groups if not self._state.covers(g.keep, g.subsets)]
         self.app.call_from_thread(self._populate_dups, groups)
 
     def _scanning(self, total: int) -> None:
+        self._groups = []
+        self._row_group = []
         options = self.query_one("#dups", OptionList)
         options.clear_options()
         options.add_option(Option(f"scanning {total} files… (first run is slow)"))

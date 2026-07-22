@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 from textual.widgets import Button, Input, OptionList, TabbedContent, TextArea, Tree
 
+from dossier import dedup
 from dossier.config import Config
 from dossier.model import Document, Rendition
 from dossier.store import Store
@@ -37,6 +38,7 @@ from dossier.tui.screens import (
     DoctorScreen,
     MoveScreen,
     SupersedeScreen,
+    TextPromptScreen,
     WatchScreen,
 )
 
@@ -577,6 +579,65 @@ async def test_reconcile_unlink_dead_rendition(tmp_path: Path):
         assert doc.has_digital is False
         assert screen._report is not None
         assert not screen._report.missing
+
+
+@pytest.mark.asyncio
+async def test_reconcile_fold_cluster_persists_and_suppresses(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        screen.query_one(TabbedContent).active = "tab-dups"
+        # Inject a scanned cluster directly (no rasterizing in the test).
+        screen._pages = {"keep.pdf": [1, 2, 3], "copy.pdf": [1, 2]}
+        screen._populate_dups(
+            [
+                dedup.DupGroup(
+                    files=["copy.pdf", "keep.pdf"],
+                    keep="keep.pdf",
+                    subsets=["copy.pdf"],
+                    ambiguous=False,
+                )
+            ]
+        )
+        await pilot.pause()
+        screen.query_one("#dups", OptionList).highlighted = 0  # the cluster header
+        screen.action_fold()
+        await pilot.pause()
+        assert store.load_reconcile().folded == {"keep.pdf": {"copy.pdf"}}
+        assert screen._dups_count == 0  # cluster suppressed on the re-filter
+
+
+@pytest.mark.asyncio
+async def test_reconcile_ignore_glob_adds_and_hides(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "Wallpapers").mkdir()
+    (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        screen.query_one(TabbedContent).active = "tab-orphans"
+        tree = screen.query_one("#orphans", Tree)
+        folder = next(n for n in tree.root.children if n.data == "Wallpapers")
+        tree.move_cursor(folder)  # prefills the glob from the folder
+        screen.action_ignore_glob()
+        await pilot.pause()
+        prompt = app.screen
+        assert isinstance(prompt, TextPromptScreen)
+        assert prompt.query_one("#tpinput", Input).value == "Wallpapers/*"
+        prompt.dismiss("Wallpapers/*")
+        await pilot.pause()
+        assert store.load_reconcile().ignore == ["Wallpapers/*"]
+        assert screen._report is not None
+        assert not screen._report.orphans  # ignored subtree → no orphans
 
 
 def test_linux_driver_exposes_mouse_toggle():
