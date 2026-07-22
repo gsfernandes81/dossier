@@ -18,9 +18,12 @@ slugs, dates + chronological surface, folder→bundle suggestions, `ds export`).
 Phase 7 (vision) is **done** — `ds scan` reads linked scans with a local VLM into
 grounded readings that drive content-based succession (a reconcile tab), expiry/issue
 suggestions (the detail pane), and per-run model selection; all verified on the real
-store. **Phase 8 (organize, #4) is next.** Phases 9–13 sketch the **long horizon** —
-intake, preparedness, answers, durability, platform hardening — turning the
-catalogue into a living system.
+store. **Phase 8 (organize, #4) is done** — `ds organize` gives every linked file a
+canonical name (plan → `--apply`), the first surface that touches the real files;
+verified read-only on the store (55 in-place renames, 2 shared-file flags, nothing
+applied). **Phase 9 (intake, #5) is next** — it reuses `organize` to file new
+documents. Phases 9–13 sketch the **long horizon** — intake, preparedness, answers,
+durability, platform hardening — turning the catalogue into a living system.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -128,14 +131,26 @@ Per-item rationale lives in `DESIGN.md` §14.
   from the `ctrl+p` command palette (`DossierCommands` provider). Verified live in a real
   terminal via the PTY driver.
 
-## Phase 8 — Organize: metadata-driven filenames  *(planned; #4, no vision)*
-- [ ] **`ds organize`** (M) — propose a canonical filename (and optional category folder)
-  for each *linked* file from its document record (category / name / date), as a
-  review → apply plan (like `ds export`: plan, `--dry-run`, apply). On apply, renames /
-  moves the real file and updates the rendition path; never auto-moves. The thing that
-  actually tidies a messy `Official Documents/` tree. Formalizes the old "Organize mode"
-  note. (Subset-elimination, idea #1, is already **Phase 3 dedup** — install
-  `dossier[dedup]`, `ds reconcile` → Duplicates → `d` scan → `f` fold.)
+## Phase 8 — Organize: metadata-driven filenames  ✅  *(#4, no vision)*
+- [x] **`ds organize`** (M) — `dossier/organize.py` gives every *linked* file a canonical
+  name from its record: `slugify(name)`, ISO `issue_date` prefix **gated** on the name not
+  already embedding a date (`suggest.name_has_date`), lowercase ext. Pure plan (`OrganizeItem`
+  /`OrganizePlan`, problem codes `shared-file`/`missing-file`/`exists`/`no-label`) → `--apply`,
+  like `ds export` but **dry-run by default** since it mutates real files. Apply moves the file
+  (`os.rename`, EXDEV→`shutil.move`) **then** rewrites the rendition path, rolling the move back
+  if the save fails; never overwrites, never deletes, idempotent (`src==dst` → no-op). In place
+  by default; `--to-folders` maps a doc's **primary tag** → a category folder via
+  `[organize.folders]`. `canonical_stem` is the per-doc hook **Phase 9 intake** reuses.
+  - *Verified read-only on the real store:* 57 linked → 55 in-place renames, 0 missing,
+    0 occupied, **2 shared-file flags** (two records point at one PDF — surfaced, not resolved),
+    0 date-prefixes (every dated doc still carries the date in its name — the gate proves
+    itself). The review also surfaced genuine record-vs-file date drift to reconcile by hand.
+    Nothing applied — awaiting the go-ahead to rename real files.
+  - *Not category folders on day one:* tags were never written at migration (DESIGN §10 planned
+    it; only the detail pane writes tags), so all 137 docs are untagged and `--to-folders`
+    degrades to in-place with a `no-folder` note — dormant-but-correct until tags exist.
+  - (Subset-elimination, idea #1, is already **Phase 3 dedup** — install `dossier[dedup]`,
+    `ds reconcile` → Duplicates → `d` scan → `f` fold.)
 
 ## Phase 9 — Intake: zero-friction capture  *(long horizon)*
 The highest-friction moment today is the most common future event: a new document
