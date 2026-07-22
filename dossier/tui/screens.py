@@ -142,16 +142,12 @@ class SupersedeScreen(ModalScreen[bool]):
 
     def _populate(self, needle: str) -> None:
         options = self.query_one("#scandidates", OptionList)
-        options.clear_options()
-        if self._doc.supersedes:
-            options.add_option(Option("— clear supersession —", id=self._CLEAR))
-        needle = needle.casefold()
-        for doc in self._docs:
-            if doc.id == self._doc.id:
-                continue
-            if needle and needle not in f"{doc.name} {doc.id}".casefold():
-                continue
-            options.add_option(Option(doc.name or doc.id, id=doc.id))
+        lead = (
+            Option("— clear supersession —", id=self._CLEAR)
+            if self._doc.supersedes
+            else None
+        )
+        _fill_doc_options(options, self._docs, needle, exclude=self._doc.id, lead=lead)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "sfilter":
@@ -214,12 +210,7 @@ class DocPickerScreen(ModalScreen[str | None]):
 
     def _populate(self, needle: str) -> None:
         options = self.query_one("#pcandidates", OptionList)
-        options.clear_options()
-        needle = needle.casefold()
-        for doc in self._docs:
-            if needle and needle not in f"{doc.name} {doc.id}".casefold():
-                continue
-            options.add_option(Option(doc.name or doc.id, id=doc.id))
+        _fill_doc_options(options, self._docs, needle)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "pfilter":
@@ -374,14 +365,10 @@ class WatchScreen(ModalScreen[str | None]):
         self._refresh()
 
     def _highlighted(self) -> Document | None:
-        options = self.query_one("#watch", OptionList)
-        index = options.highlighted
-        if index is None:
+        option_id = _highlighted_id(self.query_one("#watch", OptionList))
+        if option_id is None:
             return None
-        option = options.get_option_at_index(index)
-        if option.id is None:
-            return None
-        return next((d for d in self._store.load_all() if d.id == option.id), None)
+        return next((d for d in self._store.load_all() if d.id == option_id), None)
 
     @on(OptionList.OptionSelected, "#watch")
     def _open(self, event: OptionList.OptionSelected) -> None:
@@ -506,11 +493,7 @@ class BundlesScreen(ModalScreen[str | None]):
         self._refresh()
 
     def _highlighted_suggestion(self) -> suggest.BundleSuggestion | None:
-        options = self.query_one("#bundle-list", OptionList)
-        index = options.highlighted
-        if index is None:
-            return None
-        option_id = options.get_option_at_index(index).id
+        option_id = _highlighted_id(self.query_one("#bundle-list", OptionList))
         if option_id is None or not option_id.startswith(self._SUGGESTED):
             return None
         which = int(option_id[len(self._SUGGESTED) :])
@@ -520,7 +503,7 @@ class BundlesScreen(ModalScreen[str | None]):
         bundle = self._highlighted()
         if bundle is None:
             return
-        current = bundle.date.isoformat() if bundle.date else ""
+        current = forms.iso(bundle.date)
         self.app.push_screen(
             TextPromptScreen(
                 f"Date for {bundle.title} (YYYY-MM-DD, blank clears):",
@@ -546,14 +529,43 @@ class BundlesScreen(ModalScreen[str | None]):
         self._refresh()
 
     def _highlighted(self) -> Bundle | None:
-        options = self.query_one("#bundle-list", OptionList)
-        index = options.highlighted
-        if index is None:
+        option_id = _highlighted_id(self.query_one("#bundle-list", OptionList))
+        if option_id is None:
             return None
-        option = options.get_option_at_index(index)
-        if option.id is None:
-            return None
-        return self._store.load_bundles().get(option.id)
+        return self._store.load_bundles().get(option_id)
+
+
+def _highlighted_id(options: OptionList) -> str | None:
+    """The id of the currently highlighted option, or ``None`` if none is."""
+    index = options.highlighted
+    if index is None:
+        return None
+    return options.get_option_at_index(index).id
+
+
+def _fill_doc_options(
+    options: OptionList,
+    docs: list[Document],
+    needle: str,
+    *,
+    exclude: str | None = None,
+    lead: Option | None = None,
+) -> None:
+    """Rebuild ``options`` as the docs matching ``needle`` (name/id, casefolded).
+
+    ``exclude`` drops a doc by id; ``lead``, when given, is added first (e.g. a
+    "clear supersession" sentinel) so it always sorts above the matches.
+    """
+    options.clear_options()
+    if lead is not None:
+        options.add_option(lead)
+    needle = needle.casefold()
+    for doc in docs:
+        if doc.id == exclude:
+            continue
+        if needle and needle not in f"{doc.name} {doc.id}".casefold():
+            continue
+        options.add_option(Option(doc.name or doc.id, id=doc.id))
 
 
 def _loc_label(doc: Document, locations: dict[str, Location]) -> str | None:

@@ -234,6 +234,9 @@ class HomeScreen(Screen[None]):
             yield Footer()
 
     def on_mount(self) -> None:
+        # Composed once in compose() and never remounted, so cache it instead of
+        # re-querying the DOM on every arrow-key detail refresh.
+        self._detail_pane = self.query_one("#detail", DetailPane)
         self.set_class(self._touch, "touch")
         self._reload()
         self._focus_default()
@@ -349,7 +352,7 @@ class HomeScreen(Screen[None]):
         self.app.sub_title = f"{len(docs)} / {len(self._docs)}{noun}"
 
     def _update_detail(self) -> None:
-        pane = self.query_one("#detail", DetailPane)
+        pane = self._detail_pane
         if pane.editing:
             return  # never clobber an in-progress edit with a cursor move
         doc = self._doc_by_id(self._detail_id) if self._detail_id else None
@@ -389,12 +392,12 @@ class HomeScreen(Screen[None]):
             self._refresh_documents()  # rows collapse to their compact shape
         self._update_detail()
         if self._narrow:
-            self.query_one("#detail", DetailPane).focus()
+            self._detail_pane.focus()
 
     def close_detail(self) -> None:
         if not self._show_detail:
             return
-        if self.query_one("#detail", DetailPane).editing:
+        if self._detail_pane.editing:
             return  # an edit in progress owns Esc; don't fall through to close
         self._show_detail = False
         self.set_class(False, "show-detail")
@@ -483,7 +486,7 @@ class HomeScreen(Screen[None]):
         self.query_one("#search", Input).focus()
 
     def action_escape(self) -> None:
-        pane = self.query_one("#detail", DetailPane)
+        pane = self._detail_pane
         if pane.editing:
             pane.action_cancel_edit()  # covers focus having left the pane mid-edit
             return
@@ -537,15 +540,17 @@ class HomeScreen(Screen[None]):
                 SupersedeScreen(self._store, self._docs, doc), self._after_edit
             )
 
-    def action_bundle(self) -> None:
+    def _open_and_edit(self, focus: str = "f-name") -> None:
+        """Open the detail pane on the current doc and start editing at ``focus``."""
         doc = self._current_doc()
         if doc is None:
             return
         if not self._show_detail:
             self.open_detail(doc.id)
-        self.query_one("#detail", DetailPane).start_edit(
-            doc, self._docs, focus="f-bundles"
-        )
+        self._detail_pane.start_edit(doc, self._docs, focus=focus)
+
+    def action_bundle(self) -> None:
+        self._open_and_edit(focus="f-bundles")
 
     def action_toggle_expiring(self) -> None:
         self._expiring_only = not self._expiring_only
@@ -553,12 +558,7 @@ class HomeScreen(Screen[None]):
         self._refresh_documents()
 
     def action_edit(self) -> None:
-        doc = self._current_doc()
-        if doc is None:
-            return
-        if not self._show_detail:
-            self.open_detail(doc.id)
-        self.query_one("#detail", DetailPane).start_edit(doc, self._docs)
+        self._open_and_edit()
 
     def action_new(self) -> None:
         if not self._show_detail:
@@ -566,19 +566,10 @@ class HomeScreen(Screen[None]):
             self._show_detail = True
             self.set_class(True, "show-detail")
             self._refresh_documents()  # rows collapse beside the pane
-        self.query_one("#detail", DetailPane).start_edit(
-            Document(), self._docs, is_new=True
-        )
+        self._detail_pane.start_edit(Document(), self._docs, is_new=True)
 
     def action_move(self) -> None:
-        doc = self._current_doc()
-        if doc is None:
-            return
-        if not self._show_detail:
-            self.open_detail(doc.id)
-        self.query_one("#detail", DetailPane).start_edit(
-            doc, self._docs, focus="f-perm"
-        )
+        self._open_and_edit(focus="f-perm")
 
     def action_watch(self) -> None:
         self.app.push_screen(
@@ -680,7 +671,7 @@ class HomeScreen(Screen[None]):
         doc = self._doc_by_id(doc_id)
         if doc is not None:
             self.open_detail(doc.id)
-            self.query_one("#detail", DetailPane).start_edit(doc, self._docs)
+            self._detail_pane.start_edit(doc, self._docs)
 
     def _after_watch(self, doc_id: str | None) -> None:
         self._reload()  # an ignore-expiry change in the watch may have landed
@@ -708,7 +699,7 @@ class HomeScreen(Screen[None]):
     def on_detail_pane_saved(self, event: DetailPane.Saved) -> None:
         self._reload()
         self.open_detail(event.doc_id)
-        self.query_one("#detail", DetailPane).focus()
+        self._detail_pane.focus()
 
     def on_detail_pane_reload_requested(
         self, event: DetailPane.ReloadRequested

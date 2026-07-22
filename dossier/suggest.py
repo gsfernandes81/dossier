@@ -241,7 +241,7 @@ def bundles_from_folders(
         category = _folder_category(folder)
         if category is None:
             continue
-        leaf = folder.rsplit("/", 1)[-1]
+        leaf = PurePosixPath(folder).name
         out.append(
             BundleSuggestion(
                 slug=f"{category}/{slugify(leaf)}",

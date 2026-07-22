@@ -170,10 +170,10 @@ class SuggestionState:
     dismissed: set[str] = field(default_factory=set)
 
     def is_dismissed(self, suggestion: Suggestion) -> bool:
-        return suggestion.key in self.dismissed
+        return self.is_dismissed_key(suggestion.key)
 
     def dismiss(self, suggestion: Suggestion) -> None:
-        self.dismissed.add(suggestion.key)
+        self.dismiss_key(suggestion.key)
 
     # Bundle suggestions (a different shape) share this sidecar via namespaced
     # string keys — see dossier.suggest.BundleSuggestion.key ("bundle:...").

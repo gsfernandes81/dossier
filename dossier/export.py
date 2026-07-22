@@ -108,8 +108,7 @@ def apply_export_plan(
     for item in plan.ready:
         assert item.src is not None and item.dst is not None
         try:
-            if item.dst.exists() or item.dst.is_symlink():
-                item.dst.unlink()
+            item.dst.unlink(missing_ok=True)  # clear a prior file/broken symlink
             if symlink:
                 item.dst.symlink_to(item.src)
             else:
