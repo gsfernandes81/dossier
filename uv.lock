@@ -135,6 +135,10 @@ dedup = [
     { name = "pillow" },
     { name = "pypdfium2" },
 ]
+scan = [
+    { name = "pillow" },
+    { name = "pypdfium2" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -153,14 +157,16 @@ driver = [
 [package.metadata]
 requires-dist = [
     { name = "pillow", marker = "extra == 'dedup'", specifier = ">=10.0" },
+    { name = "pillow", marker = "extra == 'scan'", specifier = ">=10.0" },
     { name = "platformdirs", specifier = ">=4.3" },
     { name = "pypdfium2", marker = "extra == 'dedup'", specifier = ">=4.30" },
+    { name = "pypdfium2", marker = "extra == 'scan'", specifier = ">=4.30" },
     { name = "python-dateutil", specifier = ">=2.9.0" },
     { name = "ruamel-yaml", specifier = ">=0.18.6" },
     { name = "textual", specifier = ">=1.0.0" },
     { name = "tomli-w", specifier = ">=1.1.0" },
 ]
-provides-extras = ["dedup"]
+provides-extras = ["dedup", "scan"]
 
 [package.metadata.requires-dev]
 dev = [

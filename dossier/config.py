@@ -42,6 +42,10 @@ DEFAULT_EXPIRY_THRESHOLD_DAYS = 90
 # Icon style for the TUI; per-device since a terminal may lack a Nerd Font.
 # Interpreted by dossier.tui.glyphs ("nerd" | "ascii").
 DEFAULT_GLYPHS = "nerd"
+# `ds scan` vision backend — per-device (the VLM runs locally, so its URL differs
+# across machines). An OpenAI-compatible endpoint; the model is a router alias.
+DEFAULT_SCAN_BASE_URL = "http://localhost:8080/v1"
+DEFAULT_SCAN_MODEL = "qwen3vl"
 
 
 def per_device_config_path() -> Path:
@@ -66,6 +70,12 @@ class Config:
     ignore: list[str] = field(default_factory=list)
     history_dir: Path = field(default_factory=default_history_dir)
     glyphs: str = DEFAULT_GLYPHS
+    scan_base_url: str = DEFAULT_SCAN_BASE_URL
+    scan_model: str = DEFAULT_SCAN_MODEL
+    # Low temperature keeps extraction deterministic (the router preset's 0.7
+    # gives run-to-run variance); DPI is the page raster resolution for the VLM.
+    scan_temperature: float = 0.1
+    scan_dpi: int = 170
 
     @property
     def meta_dir(self) -> Path:
@@ -132,6 +142,16 @@ class Config:
         glyphs = device.get("glyphs")
         if isinstance(glyphs, str) and glyphs:
             cfg.glyphs = glyphs
+        for key in ("scan_base_url", "scan_model"):
+            value = device.get(key)
+            if isinstance(value, str) and value:
+                setattr(cfg, key, value)
+        temp = device.get("scan_temperature")
+        if isinstance(temp, (int, float)) and not isinstance(temp, bool):
+            cfg.scan_temperature = float(temp)
+        dpi = device.get("scan_dpi")
+        if isinstance(dpi, int) and not isinstance(dpi, bool):
+            cfg.scan_dpi = dpi
         cfg.validate()
         cfg.merge_synced()
         return cfg

@@ -23,6 +23,12 @@ dedup = [
     "pypdfium2>=4.30",
     "pillow>=10.0",
 ]
+# `ds scan` vision extraction: rasterize a scan and read it with a local VLM.
+# Same rasterization stack as dedup; the VLM is reached over stdlib HTTP.
+scan = [
+    "pypdfium2>=4.30",
+    "pillow>=10.0",
+]
 
 [project.scripts]
 dossier = "dossier.__main__:main"
