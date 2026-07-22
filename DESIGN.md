@@ -440,7 +440,7 @@ A safe way to undo a setup, complementing `ds init`. Two independent scopes:
 
 ### Backlog — after the home build
 The Miller home (locations │ documents │ detail), its actions, touch/Termux, and Nerd-Font icons
-shipped in PRs #15–#25. Still open:
+shipped in PRs #15–#25. **See `ROADMAP.md` for the phased ordering of everything below.** Still open:
 - **Keep the detail column while searching.** Search currently switches to a flat, root-wide list
   and hides the locations *and* detail panes (`HomeScreen.searching` in `tui/home.py`). Instead the
   **detail (third) column should stay visible during search** so a highlighted result still previews.
