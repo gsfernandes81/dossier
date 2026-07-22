@@ -29,7 +29,7 @@ from pathlib import Path
 
 import tomli_w
 
-from dossier import doctor, migrate, reset
+from dossier import doctor, migrate, reconcile, reset
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError
 from dossier.platform_open import is_termux, termux_preconditions
@@ -233,6 +233,50 @@ def _print_icon_note(config: Config) -> None:
     )
 
 
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    """List orphan files, missing files (and, later, duplicates) in the folder."""
+    try:
+        config = Config.load()
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    report = reconcile.run(Store(config), config)
+    print(
+        f"reconcile: {len(report.orphans)} orphan · {len(report.linked)} linked · "
+        f"{len(report.missing)} missing"
+    )
+    if config.include or config.ignore:
+        print(f"  scope: include={config.include or ['*']}  ignore={config.ignore}")
+
+    suggested = sorted(
+        (o for o in report.orphans if o.suggestion), key=lambda o: -o.score
+    )
+    if suggested:
+        print(f"\nsuggested matches ({len(suggested)}):")
+        for orphan in suggested[:30]:
+            print(f"  {orphan.path}  ->  {orphan.suggestion} ({orphan.score:.2f})")
+
+    if args.verbose:
+        print(f"\norphans ({len(report.orphans)}):")
+        for orphan in report.orphans:
+            print(f"  {orphan.path}")
+    elif report.orphans:
+        by_folder: dict[str, int] = {}
+        for orphan in report.orphans:
+            folder = orphan.path.rsplit("/", 1)[0] if "/" in orphan.path else "."
+            by_folder[folder] = by_folder.get(folder, 0) + 1
+        print(f"\norphans by folder ({len(report.orphans)} total; -v lists all):")
+        for folder, count in sorted(by_folder.items(), key=lambda item: -item[1])[:25]:
+            print(f"  {count:>5}  {folder}")
+
+    if report.missing:
+        print(f"\nmissing files ({len(report.missing)}):")
+        for missing in report.missing:
+            print(f"  {missing.doc_id}: {missing.path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dossier",
@@ -309,6 +353,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip the confirmation prompt",
     )
     reset_p.set_defaults(func=cmd_reset)
+
+    reconcile_p = sub.add_parser(
+        "reconcile",
+        help="find orphan files and missing files (duplicates soon)",
+    )
+    reconcile_p.add_argument(
+        "--verbose",
+        action="store_true",
+        help="list every orphan instead of per-folder counts",
+    )
+    reconcile_p.set_defaults(func=cmd_reconcile)
 
     return parser
 
