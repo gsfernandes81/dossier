@@ -103,6 +103,10 @@ def _export() -> dict[str, object]:
             {"name": "Cert File #2048"},
             {"name": "Softcopy Only"},  # state pseudo-location -> dropped
         ],
+        # Authoritative expiries (from the Notion Marine Documents table).
+        "expiries": [
+            {"name": "ENG-1 Med Cert Expires 10-07-26", "expiry": "2026-07-10"},
+        ],
         "documents": [
             {
                 "name": "ENG-1 Med Cert Expires 10-07-26",
@@ -129,7 +133,7 @@ def test_build_plan():
 
     docs = {d.id: d for d in plan.documents}
     eng1 = docs["eng-1-med-cert-expires-10-07-26"]
-    assert eng1.expiry_date == date(2026, 7, 10)
+    assert eng1.expiry_date == date(2026, 7, 10)  # from the Marine expiries table
     assert eng1.perm_location == "cert-file-2048"
     assert (eng1.perm_slot, eng1.perm_subslot) == (2, None)
     assert eng1.has_physical and eng1.has_digital
@@ -140,6 +144,23 @@ def test_build_plan():
 
     assert "carried-to-india" in plan.bundle_suggestions
     assert any(issue.kind == "no-file-match" for issue in plan.issues)
+
+
+def test_expiry_comes_only_from_the_marine_table_not_the_name():
+    export = {
+        "locations": [],
+        "expiries": [{"name": "CoC Card", "expiry": "2026-09-28"}],
+        "documents": [
+            {"name": "CoC Card"},  # in the Marine table -> gets the expiry
+            {"name": "Old Cert Expires 10-07-26"},  # name says expiry, but not tracked
+        ],
+    }
+    docs = {
+        d.id: d for d in migrate.build_plan(export, migrate.FileIndex([])).documents
+    }
+    assert docs["coc-card"].expiry_date == date(2026, 9, 28)
+    # Name-based expiry is dropped: an untracked doc gets no expiry from its name.
+    assert docs["old-cert-expires-10-07-26"].expiry_date is None
 
 
 def test_fuzzy_auto_links_distinguishing_file():

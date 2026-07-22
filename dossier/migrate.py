@@ -19,10 +19,17 @@ Consumes a JSON export of the Notion Documents + Document Storage databases and
 the local file tree, and produces a :class:`MigrationPlan` (documents, locations,
 and a list of issues to review). Nothing is written until ``apply_plan`` runs.
 
-Design choices (DESIGN.md §10): slug references, ``dayfirst`` date parsing with
-every two-digit numeric date flagged, state pseudo-locations folded into the
-has_physical/has_digital flags, file matching ranked so category folders beat
-application/trip-folder copies, and bundles only *suggested*, never auto-created.
+Design choices (DESIGN.md §10): slug references, state pseudo-locations folded
+into the has_physical/has_digital flags, file matching ranked so category folders
+beat application/trip-folder copies, and bundles only *suggested*, never
+auto-created.
+
+**Expiries** are taken from the Notion *Marine Documents* table (`export`'s
+``expiries`` list) — the authoritative source; they are **not** inferred from
+document names (that was too aggressive — e.g. sea-service testimonials that
+record a date range don't expire). Issue dates are still parsed from names for
+now; that name parsing is slated to become dismissable *suggestions* (see
+ROADMAP.md), not an authority.
 """
 
 from __future__ import annotations
@@ -126,6 +133,26 @@ def _parse_token(token: str) -> date | None:
 def _token_unambiguous(token: str) -> bool:
     # A spelled-out month or a 4-digit year fixes the day/month order.
     return bool(re.search(r"[A-Za-z]", token)) or bool(re.search(r"\d{4}", token))
+
+
+def _parse_expiries(value: object) -> dict[str, date]:
+    """Map document name -> authoritative expiry date.
+
+    Sourced from the Notion *Marine Documents* table's ``Expiry`` field (the only
+    place structured expiries live), exported as ``[{"name", "expiry": ISO}]``.
+    Keys are the exact document names, matched against the export's documents.
+    """
+    out: dict[str, date] = {}
+    for entry in _as_list(value):
+        name = _as_str(_get(entry, "name"))
+        raw = _as_opt_str(_get(entry, "expiry"))
+        if not name or not raw:
+            continue
+        try:
+            out[name] = date.fromisoformat(raw)
+        except ValueError:
+            continue
+    return out
 
 
 def parse_dates(name: str) -> DateParse:
@@ -293,6 +320,7 @@ class MigrationPlan:
 def build_plan(export: Mapping[str, object], index: FileIndex) -> MigrationPlan:
     plan = MigrationPlan()
     name_to_slug = _build_locations(export, plan)
+    expiries = _parse_expiries(export.get("expiries"))
     used: set[str] = set()
     claimed: set[str] = set()
     unmatched: list[Document] = []
@@ -316,14 +344,16 @@ def build_plan(export: Mapping[str, object], index: FileIndex) -> MigrationPlan:
         perm_slot, perm_sub = decode_slot(_as_opt_float(_get(entry, "permanent_slot")))
         temp_slot, temp_sub = decode_slot(_as_opt_float(_get(entry, "temp_slot")))
         dates = parse_dates(name)
-        if dates.note:
+        # Only the issue date is taken from the name now; flag it when the token
+        # was an ambiguous two-digit date. Expiry comes from the Marine table.
+        if dates.issue is not None and dates.note:
             plan.issues.append(MigrationIssue(slug, "uncertain-date", dates.note))
 
         doc = Document(
             id=slug,
             name=name,
             issue_date=dates.issue,
-            expiry_date=dates.expiry,
+            expiry_date=expiries.get(name),
             has_physical=flags.has_physical,
             has_digital=flags.has_digital,
             files=[],
