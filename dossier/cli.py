@@ -109,7 +109,21 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_tui(_args: argparse.Namespace) -> int:
+def _resolve_touch(args: argparse.Namespace) -> bool:
+    """Whether to use the touch/mobile UI.
+
+    ``--mobile``/``--desktop`` force it either way (so the touch UI can be driven
+    on a desktop terminal via the ``tools/`` PTY harness); otherwise it follows
+    the platform, i.e. on by default only under Termux.
+    """
+    if getattr(args, "mobile", False):
+        return True
+    if getattr(args, "desktop", False):
+        return False
+    return is_termux()
+
+
+def cmd_tui(args: argparse.Namespace) -> int:
     """Default action: launch the TUI."""
     config = _load_config()
     if config is None:
@@ -117,7 +131,7 @@ def cmd_tui(_args: argparse.Namespace) -> int:
 
     from dossier.tui import DossierApp
 
-    DossierApp(Store(config), config, touch=is_termux()).run()
+    DossierApp(Store(config), config, touch=_resolve_touch(args)).run()
     return 0
 
 
@@ -420,6 +434,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dossier",
         description="Track personal documents — physical and digital.",
+    )
+    # Bare `ds` launches the TUI; these force its touch vs desktop UI (else the
+    # platform decides). Forcing lets the touch UI be driven on a desktop
+    # terminal via the tools/ PTY harness.
+    view = parser.add_mutually_exclusive_group()
+    view.add_argument(
+        "--mobile",
+        action="store_true",
+        help="force the touch/mobile UI, overriding platform auto-detection",
+    )
+    view.add_argument(
+        "--desktop",
+        action="store_true",
+        help="force the desktop UI, overriding platform auto-detection",
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 

@@ -81,3 +81,27 @@ def test_default_command_without_config_errors(
     monkeypatch.setattr(config_mod, "per_device_config_path", lambda: missing)
     assert cli.main([]) == 1
     assert "init" in capsys.readouterr().err.lower()
+
+
+def _touch_for(argv: list[str], *, termux: bool, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(cli, "is_termux", lambda: termux)
+    args = cli.build_parser().parse_args(argv)
+    return cli._resolve_touch(args)
+
+
+def test_touch_follows_platform_by_default(monkeypatch: pytest.MonkeyPatch):
+    # No flag: the touch UI tracks the platform (on under Termux, off elsewhere).
+    assert _touch_for([], termux=True, monkeypatch=monkeypatch) is True
+    assert _touch_for([], termux=False, monkeypatch=monkeypatch) is False
+
+
+def test_mobile_and_desktop_flags_override_platform(monkeypatch: pytest.MonkeyPatch):
+    # The point of the flags: drive either UI on any platform (e.g. the touch UI
+    # on a desktop terminal, for the tools/ PTY harness).
+    assert _touch_for(["--mobile"], termux=False, monkeypatch=monkeypatch) is True
+    assert _touch_for(["--desktop"], termux=True, monkeypatch=monkeypatch) is False
+
+
+def test_mobile_and_desktop_are_mutually_exclusive():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["--mobile", "--desktop"])
