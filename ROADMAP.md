@@ -50,9 +50,10 @@ Per-item rationale lives in `DESIGN.md` §14.
   only editing surface left is the pane. Supersession stays a picker (`s`). ctrl+s
   save · double-Esc discard · ctrl+r StaleWrite reload; home bindings are gated while
   editing. (#46–#51). Gains an "accept suggestion" affordance once Phase 5 lands.
-- [ ] **Search as an in-place Miller filter** (M) — keep the three columns during
-  search; filter the documents pane in place (root-wide), detail preview following the
-  highlight.
+- [x] **Search as an in-place Miller filter** — the three columns stay put during
+  search; the documents pane filters root-wide (locations snaps to "All"), the detail
+  preview follows the highlighted top hit. `x` (expiring) rides the same path (#52).
+  *Deferred polish:* per-location match counts + disabling zero-match rows.
 
 ## Phase 5 — Dismissable suggestions  (replaces the name-based date system)
 - [ ] **Suggestions framework** (M) — per-document suggestions for fields (esp.
