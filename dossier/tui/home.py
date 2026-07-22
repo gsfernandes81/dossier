@@ -55,6 +55,7 @@ from dossier.model import Document, ExpiryStatus, Location
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import detail, glyphs, rows
+from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundleScreen,
@@ -140,6 +141,7 @@ class HomeScreen(Screen[None]):
         Binding("m", "move", "Move"),
         Binding("s", "supersede", "Supersede"),
         Binding("w", "watch", "Watch"),
+        Binding("r", "reconcile", "Reconcile"),
         Binding("d", "doctor", "Doctor"),
         Binding("x", "toggle_expiring", "Expiring"),
     ]
@@ -487,6 +489,11 @@ class HomeScreen(Screen[None]):
     def action_watch(self) -> None:
         self.app.push_screen(
             WatchScreen(self._store, self._config, today=self._today), self._after_watch
+        )
+
+    def action_reconcile(self) -> None:
+        self.app.push_screen(
+            ReconcileScreen(self._store, self._config), self._after_watch
         )
 
     def action_doctor(self) -> None:
