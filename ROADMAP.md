@@ -8,7 +8,14 @@ migration applied** on `…/Official Documents`, the **expiry-watch surface** (#
 the **dedup engine** — perceptual page-hashing + subset/superset clustering with a
 per-device cache (#40–#41), and the **reconcile view** with its full metadata-only
 action set — dismiss/ack/link/adopt/unlink/fold/ignore-glob backed by a
-`reconcile.toml` sidecar (#42–#45). 129 tests, CI green.
+`reconcile.toml` sidecar (#42–#45).
+
+**Phases 4–6 are done too** (#46–#60): the **editable detail pane** (every field
+inline; the DetailScreen/Move/Bundle modals retired) + **search as an in-place
+Miller filter**; the **dismissable suggestions** layer (name-dates demoted to
+accept/dismiss suggestions in the pane); and **bundles & export** (hierarchical
+slugs, dates + chronological surface, folder→bundle suggestions, `ds export`).
+163 tests, CI green. Only Phase 7 (vision, deferred) remains.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -70,18 +77,17 @@ Per-item rationale lives in `DESIGN.md` §14.
   - *Verified on the real store:* 56/137 docs surface suggestions (23 period, 19 issue,
     14 expiry).
 
-## Phase 6 — Bundles & export
-- [ ] **Bundle grouping** (M) — several joining-docs / travel-docs bundles want
-  structure:
-  - **Hierarchical bundle slugs** like tags (`joining/mv-ship-2024`, `travel/india-2024`,
-    `visa/us-2025`); group by the top segment in a bundles pane (*joining ▸ / travel ▸*).
-  - An optional **`date`** on a bundle (the joining/trip date) + a **`created`** stamp →
-    **sort bundles chronologically** (date, else creation order).
-  - A **bundles surface** grouped by category + sorted by date (sibling of the watch).
-  - **Folder → bundle suggestions** — the `Travel Documents/…` / joining folders become
-    suggested bundles to accept.
-- [ ] **`ds export`** (M) — export a bundle's files to an external folder (copy or
-  symlink), the original "gather the files for this application" goal.
+## Phase 6 — Bundles & export  ✅
+- [x] **Bundle grouping** — **hierarchical slugs** (`travel/india-2024`) via
+  `slugify_path` (#56); bundle **`date` + `created`** stamp with chronological
+  `sort_bundles`/`group_bundles` (#57); a **bundles surface** (`B`) grouped by
+  category, sorted by date, Enter filters the home via `Filter.bundles`, `d` sets a
+  date (#58); **folder → bundle suggestions** — `suggest.bundles_from_folders` +
+  `live_bundles` surfaced in the bundles screen with accept/dismiss, sharing the
+  suggestions sidecar (#60). Verified: 3 sensible folder suggestions on the real store.
+- [x] **`ds export`** — `dossier/export.py` plan/apply; copy (or `--symlink`) a
+  bundle's member files into a folder, named by doc id, with problem flags
+  (no-file/missing/exists) and `--dry-run`/`--force` (#59).
 
 ## Phase 7 — Vision suggestions  *(deferred)*
 - [ ] **`ds scan`** (L) — a local VLM (llama.cpp) reads linked scans and **suggests**
