@@ -54,6 +54,13 @@ class DossierApp(App[None]):
         )
         return self._home
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # A bare `q` from a focused Checkbox/Button in the edit form would quit
+        # mid-edit (an Input swallows it, other widgets don't) — suppress it.
+        if action == "quit" and self._home is not None and self._home.editing:
+            return None
+        return True
+
     @property
     def home(self) -> HomeScreen:
         """The home screen (available once the app has mounted)."""

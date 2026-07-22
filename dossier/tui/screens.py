@@ -42,6 +42,7 @@ from dossier.migrate import slugify
 from dossier.model import Bundle, Document, ExpiryStatus, Location
 from dossier.store import Store
 from dossier.tui import (
+    forms,
     glyphs as glyphset,
     rows,
 )
@@ -83,9 +84,9 @@ class DetailScreen(ModalScreen[bool]):
                 dates = " / ".join(d.isoformat() for d in readings)
                 yield Label(f"ambiguous {token} -> {dates}", classes="hint")
             yield Label("Issue date (YYYY-MM-DD)")
-            yield Input(value=_iso(doc.issue_date), id="issue")
+            yield Input(value=forms.iso(doc.issue_date), id="issue")
             yield Label("Expiry date (YYYY-MM-DD)")
-            yield Input(value=_iso(doc.expiry_date), id="expiry")
+            yield Input(value=forms.iso(doc.expiry_date), id="expiry")
             yield Label("Permanent location (slug)")
             yield Input(value=doc.perm_location or "", id="perm")
             yield Label("Temporary location (slug)")
@@ -112,8 +113,8 @@ class DetailScreen(ModalScreen[bool]):
     def action_save(self) -> None:
         doc = self._doc
         try:
-            issue = _parse_iso(self.query_one("#issue", Input).value)
-            expiry = _parse_iso(self.query_one("#expiry", Input).value)
+            issue = forms.parse_iso(self.query_one("#issue", Input).value)
+            expiry = forms.parse_iso(self.query_one("#expiry", Input).value)
         except ValueError as exc:
             self.notify(f"invalid date: {exc}", severity="error")
             return
@@ -123,11 +124,11 @@ class DetailScreen(ModalScreen[bool]):
             if not doc.name:
                 self.notify("a new document needs a name", severity="error")
                 return
-            doc.id = _unique_id(self._store, slugify(doc.name))
+            doc.id = forms.unique_id(self._store, slugify(doc.name))
         doc.issue_date = issue
         doc.expiry_date = expiry
-        doc.perm_location = _slug(self.query_one("#perm", Input).value)
-        doc.temp_location = _slug(self.query_one("#temp", Input).value)
+        doc.perm_location = forms.slug(self.query_one("#perm", Input).value)
+        doc.temp_location = forms.slug(self.query_one("#temp", Input).value)
         doc.tags = self.query_one("#tags", Input).value.split()
         doc.notes = self.query_one("#notes", TextArea).text.strip()
 
@@ -226,7 +227,7 @@ class MoveScreen(ModalScreen[bool]):
             yield Label("Permanent location (slug, blank to clear)")
             yield Input(value=doc.perm_location or "", id="mloc")
             yield Label("Slot (blank for none; inserting shifts neighbours)")
-            yield Input(value=_int(doc.perm_slot), id="mslot")
+            yield Input(value=forms.int_text(doc.perm_slot), id="mslot")
             with Horizontal(id="mbuttons"):
                 yield Button("Cancel", id="mcancel")
                 yield Button("Move", id="mmove", variant="primary")
@@ -243,9 +244,9 @@ class MoveScreen(ModalScreen[bool]):
         self.action_save()
 
     def action_save(self) -> None:
-        location = _slug(self.query_one("#mloc", Input).value)
+        location = forms.slug(self.query_one("#mloc", Input).value)
         try:
-            slot = _parse_int(self.query_one("#mslot", Input).value)
+            slot = forms.parse_int(self.query_one("#mslot", Input).value)
         except ValueError:
             self.notify("slot must be a whole number", severity="error")
             return
@@ -656,32 +657,3 @@ def _loc_label(doc: Document, locations: dict[str, Location]) -> str | None:
         sub = doc.effective_subslot
         title += f" · {slot}.{sub}" if sub is not None else f" · {slot}"
     return title
-
-
-def _iso(value: date | None) -> str:
-    return value.isoformat() if value else ""
-
-
-def _int(value: int | None) -> str:
-    return "" if value is None else str(value)
-
-
-def _parse_int(text: str) -> int | None:
-    text = text.strip()
-    return int(text) if text else None
-
-
-def _unique_id(store: Store, base: str) -> str:
-    slug, n = base, 2
-    while store.document_path(slug).exists():
-        slug, n = f"{base}-{n}", n + 1
-    return slug
-
-
-def _parse_iso(text: str) -> date | None:
-    text = text.strip()
-    return date.fromisoformat(text) if text else None
-
-
-def _slug(text: str) -> str | None:
-    return text.strip() or None

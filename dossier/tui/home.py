@@ -45,6 +45,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Resize
+from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, OptionList
 from textual.widgets.option_list import Option
@@ -75,6 +76,28 @@ _UNLOCATED = "\x00none"
 # Below this many columns the panes stop sharing the screen; matches the
 # ``-narrow`` breakpoint so pane collapse and row density agree.
 _NARROW_COLS = 60
+
+# Home actions suppressed while the detail pane is in edit mode, so a bare letter
+# typed into a form Checkbox/SelectionList (which don't swallow it like an Input
+# does) can't fire a home binding — and the footer stops advertising them.
+_EDIT_LOCKED = frozenset(
+    {
+        "open_file",
+        "toggle_dates",
+        "bundle",
+        "edit",
+        "new",
+        "move",
+        "supersede",
+        "watch",
+        "reconcile",
+        "doctor",
+        "toggle_expiring",
+        "focus_search",
+        "drill_in",
+        "drill_out",
+    }
+)
 
 
 class HomeScreen(Screen[None]):
@@ -147,6 +170,10 @@ class HomeScreen(Screen[None]):
         Binding("x", "toggle_expiring", "Expiring"),
     ]
 
+    # True while the detail pane is editing; drives check_action (and, via
+    # bindings=True, refreshes the footer to hide the suppressed actions).
+    editing: reactive[bool] = reactive(False, bindings=True)
+
     def __init__(
         self, store: Store, config: Config, *, today: date, touch: bool = False
     ) -> None:
@@ -192,6 +219,11 @@ class HomeScreen(Screen[None]):
         self.set_class(self._touch, "touch")
         self._reload()
         self._focus_default()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if self.editing and action in _EDIT_LOCKED:
+            return None  # suppressed + hidden from the footer while editing
+        return True
 
     # -- data ----------------------------------------------------------------
 
@@ -286,6 +318,8 @@ class HomeScreen(Screen[None]):
 
     def _update_detail(self) -> None:
         pane = self.query_one("#detail", DetailPane)
+        if pane.editing:
+            return  # never clobber an in-progress edit with a cursor move
         doc = self._doc_by_id(self._detail_id) if self._detail_id else None
         if doc is None:
             pane.clear()
@@ -327,6 +361,8 @@ class HomeScreen(Screen[None]):
     def close_detail(self) -> None:
         if not self._show_detail:
             return
+        if self.query_one("#detail", DetailPane).editing:
+            return  # an edit in progress owns Esc; don't fall through to close
         self._show_detail = False
         self.set_class(False, "show-detail")
         self._refresh_documents()
@@ -380,6 +416,8 @@ class HomeScreen(Screen[None]):
         if event.option_list.id == "locations" and event.option_id is not None:
             self.select_location(event.option_id)
         elif event.option_list.id == "documents":
+            if self.editing:
+                return  # a cursor move must not swap the doc being edited
             self._detail_id = event.option_id
             if self._show_detail:
                 self._update_detail()
@@ -406,6 +444,10 @@ class HomeScreen(Screen[None]):
         self.query_one("#search", Input).focus()
 
     def action_escape(self) -> None:
+        pane = self.query_one("#detail", DetailPane)
+        if pane.editing:
+            pane.action_cancel_edit()  # covers focus having left the pane mid-edit
+            return
         search = self.query_one("#search", Input)
         if search.value or self.has_class("searching") or self.app.focused is search:
             self._set_mouse_reporting(True)
@@ -468,8 +510,11 @@ class HomeScreen(Screen[None]):
 
     def action_edit(self) -> None:
         doc = self._current_doc()
-        if doc is not None:
-            self.app.push_screen(DetailScreen(self._store, doc), self._after_edit)
+        if doc is None:
+            return
+        if not self._show_detail:
+            self.open_detail(doc.id)
+        self.query_one("#detail", DetailPane).start_edit(doc, self._docs)
 
     def action_new(self) -> None:
         screen = DetailScreen(self._store, Document(), is_new=True)
@@ -575,6 +620,24 @@ class HomeScreen(Screen[None]):
             doc = self._doc_by_id(doc_id)
             if doc is not None:
                 self.open_detail(doc.id)
+
+    # -- detail-pane edit messages -------------------------------------------
+
+    def on_detail_pane_editing_changed(self, event: DetailPane.EditingChanged) -> None:
+        self.editing = event.editing
+        # The search box hides #detail via the `searching` class — disable it so
+        # neither Tab nor a click can steal focus and vanish the live form.
+        self.query_one("#search", Input).disabled = event.editing
+
+    def on_detail_pane_saved(self, event: DetailPane.Saved) -> None:
+        self._reload()
+        self.open_detail(event.doc_id)
+        self.query_one("#detail", DetailPane).focus()
+
+    def on_detail_pane_reload_requested(
+        self, event: DetailPane.ReloadRequested
+    ) -> None:
+        self._reload()  # resync the list; _update_detail no-ops while editing
 
 
 def _highlighted_id(options: OptionList) -> str | None:

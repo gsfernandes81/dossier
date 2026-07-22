@@ -19,7 +19,15 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, Input, OptionList, TabbedContent, TextArea, Tree
+from textual.widgets import (
+    Button,
+    Checkbox,
+    Input,
+    OptionList,
+    TabbedContent,
+    TextArea,
+    Tree,
+)
 
 from dossier import dedup
 from dossier.config import Config
@@ -29,6 +37,7 @@ from dossier.tui import (
     DossierApp,
     home as tui_home,
 )
+from dossier.tui.detail_pane import DetailPane
 from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
@@ -638,6 +647,90 @@ async def test_reconcile_ignore_glob_adds_and_hides(tmp_path: Path):
         assert store.load_reconcile().ignore == ["Wallpapers/*"]
         assert screen._report is not None
         assert not screen._report.orphans  # ignored subtree → no orphans
+
+
+async def _enter_edit(pilot, home, doc_id: str) -> DetailPane:
+    home.open_detail(doc_id)
+    await pilot.pause()
+    home.action_edit()
+    await pilot.pause()
+    return home.query_one("#detail", DetailPane)
+
+
+@pytest.mark.asyncio
+async def test_detail_pane_edit_saves_scalars_and_flags(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "coc")
+        assert pane.editing and home.editing
+        pane.query_one("#f-name", Input).value = "CoC Card Renewed"
+        pane.query_one("#f-physical", Checkbox).value = True  # new capability
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert not pane.editing and not home.editing
+        saved = store.load("coc")
+        assert saved.name == "CoC Card Renewed"
+        assert saved.has_physical is True
+
+
+@pytest.mark.asyncio
+async def test_edit_mode_suppresses_home_bindings(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "coc")
+        # Focus a Checkbox (unlike an Input, it won't swallow a bare letter/arrow).
+        pane.query_one("#f-physical", Checkbox).focus()
+        await pilot.pause()
+        await pilot.press("b")  # would push BundleScreen if not gated
+        await pilot.press("left")  # would drill_out / close the detail if not gated
+        await pilot.pause()
+        assert len(app.screen_stack) == 1  # no modal pushed
+        assert pane.editing and home.has_class("show-detail")
+
+
+@pytest.mark.asyncio
+async def test_edit_discard_requires_double_escape_when_dirty(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "coc")
+        pane.query_one("#f-name", Input).value = "Changed"
+        await pilot.pause()
+        await pilot.press("escape")  # dirty → arm, stay editing
+        await pilot.pause()
+        assert pane.editing
+        await pilot.press("escape")  # confirm → discard
+        await pilot.pause()
+        assert not pane.editing
+        assert store.load("coc").name == "CoC Card"  # nothing written
+
+
+@pytest.mark.asyncio
+async def test_edit_stale_write_refused_then_reloaded(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_edit(pilot, home, "coc")
+        pane.query_one("#f-name", Input).value = "Mine"
+        await pilot.pause()
+        other = store.load("coc")  # someone edits the file out-of-band
+        other.name = "Theirs"
+        store.save(other)
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert pane.editing  # save refused on the stale hash
+        assert store.load("coc").name == "Theirs"  # our write didn't land
+        await pilot.press("ctrl+r")
+        await pilot.pause()
+        assert pane.query_one("#f-name", Input).value == "Theirs"  # form reloaded
+        assert pane.editing
 
 
 def test_linux_driver_exposes_mouse_toggle():
