@@ -103,6 +103,8 @@ class ReconcileState:
     ignore: list[str] = field(default_factory=list)
     missing_ok: dict[str, set[str]] = field(default_factory=dict)
     folded: dict[str, set[str]] = field(default_factory=dict)
+    # Rejected succession proposals, keyed "newer\x00older" (see dossier.succession).
+    succession_dismissed: set[str] = field(default_factory=set)
 
     def suppressed_orphans(self) -> frozenset[str]:
         """Orphan paths to hide: the dismissed set plus every folded subset."""

@@ -274,6 +274,7 @@ class Store:
             ignore=_as_str_list(raw.get("ignore")),
             missing_ok=_as_str_set_map(raw.get("missing_ok")),
             folded=_as_str_set_map(raw.get("folded")),
+            succession_dismissed=set(_as_str_list(raw.get("succession_dismissed"))),
         )
 
     def save_reconcile(self, state: ReconcileState) -> None:
@@ -291,6 +292,8 @@ class Store:
         folded = {keep: sorted(subs) for keep, subs in state.folded.items() if subs}
         if folded:
             data["folded"] = {k: folded[k] for k in sorted(folded)}
+        if state.succession_dismissed:
+            data["succession_dismissed"] = sorted(state.succession_dismissed)
         self._write_toml(self.config.reconcile_path, data)
 
     # -- suggestions sidecar -------------------------------------------------

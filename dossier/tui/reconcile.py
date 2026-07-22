@@ -13,12 +13,15 @@
 # You should have received a copy of the GNU Affero General Public License along with
 # dossier. If not, see <https://www.gnu.org/licenses/>.
 
-"""The reconcile screen: orphans, missing files, and duplicate/superset clusters.
+"""The reconcile screen: orphans, missing files, duplicates, and successions.
 
-Three tabs. Orphans are a per-folder tree (leaves fill lazily on expand) with a
+Four tabs. Orphans are a per-folder tree (leaves fill lazily on expand) with a
 "suggested matches" node on top; missing is a list where ``Enter`` opens the
 document; the duplicate scan runs in a **thread worker** off ``d`` (rasterizing
 is blocking), reusing the per-device page-hash cache so a warm cache is ~instant.
+Succession lists renewals inferred from ``ds scan`` readings (see
+:mod:`dossier.succession`); ``s`` accepts one (setting the ``supersedes`` link a
+user would otherwise pick by hand), ``x`` dismisses it into the sidecar.
 
 ``x`` records a *decision* in the ``.dossier/reconcile.toml`` sidecar — dismiss an
 orphan (it's not a document) or acknowledge a missing file — so it stays gone on
@@ -42,7 +45,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList, TabbedContent, TabPane, Tree
 from textual.widgets.option_list import Option
 
-from dossier import dedup, dedup_cache, dedup_hash, query, reconcile
+from dossier import dedup, dedup_cache, dedup_hash, query, reconcile, scan, succession
 from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
 from dossier.migrate import slugify
@@ -78,7 +81,7 @@ class ReconcileScreen(ModalScreen[str | None]):
     }
     #rsummary { margin-bottom: 1; }
     TabbedContent { height: 1fr; }
-    #dups, #missing, #orphans { height: 1fr; }
+    #dups, #missing, #orphans, #succession { height: 1fr; }
     """
     BINDINGS = [
         Binding("escape", "close", "Close"),
@@ -92,18 +95,21 @@ class ReconcileScreen(ModalScreen[str | None]):
         Binding("x", "reject", "Dismiss"),
         Binding("l", "link", "Link"),
         Binding("a", "adopt", "Adopt"),
+        Binding("s", "accept_succession", "Supersede"),
         Binding("u", "unlink", "Unlink"),
         Binding("f", "fold", "Fold"),
         Binding("g", "ignore_glob", "Ignore glob"),
     ]
 
     # Tab order (as composed) and each pane's primary widget, for cycling + focus.
-    _TAB_ORDER = ("tab-dups", "tab-orphans", "tab-missing")
+    _TAB_ORDER = ("tab-dups", "tab-orphans", "tab-missing", "tab-succession")
     _TAB_PANE = {
         "tab-dups": "#dups",
         "tab-orphans": "#orphans",
         "tab-missing": "#missing",
+        "tab-succession": "#succession",
     }
+    _SUCC_SEP = "\x00"  # composite succession-row id: f"{newer}{sep}{older}"
 
     def __init__(self, store: Store, config: Config) -> None:
         super().__init__()
@@ -116,6 +122,8 @@ class ReconcileScreen(ModalScreen[str | None]):
         self._pages: dict[str, list[int]] | None = None  # last scan, for re-filter
         self._groups: list[dedup.DupGroup] = []  # clusters currently listed
         self._row_group: list[int] = []  # dups option index → group index (−1 = none)
+        self._readings: dict[str, scan.ScanReading] = {}
+        self._successions: dict[str, succession.Succession] = {}  # row id → proposal
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="rpanel"):
@@ -127,12 +135,16 @@ class ReconcileScreen(ModalScreen[str | None]):
                     yield Tree("orphans", id="orphans")
                 with TabPane("Missing", id="tab-missing"):
                     yield OptionList(id="missing")
+                with TabPane("Succession", id="tab-succession"):
+                    yield OptionList(id="succession")
 
     def on_mount(self) -> None:
         self._state = self._store.load_reconcile()
         self._report = reconcile.run(self._store, self._config, state=self._state)
+        self._readings = self._store.load_scans()
         self._populate_orphans()
         self._populate_missing()
+        self._populate_succession()
         self.query_one("#dups", OptionList).add_option(
             Option("press  d  to scan for duplicates (cached after the first run)")
         )
@@ -148,7 +160,58 @@ class ReconcileScreen(ModalScreen[str | None]):
             return "tab-orphans"
         if report is not None and report.missing:
             return "tab-missing"
+        if self._successions:
+            return "tab-succession"
         return "tab-orphans"  # nothing pending: still avoid leading with the scan tab
+
+    def _populate_succession(self) -> None:
+        options = self.query_one("#succession", OptionList)
+        options.clear_options()
+        self._successions = {}
+        if not self._readings:
+            options.add_option(Option("run  ds scan  first to propose successions"))
+            return
+        docs = self._store.load_all()
+        names = {doc.id: (doc.name or doc.id) for doc in docs}
+        proposals = [
+            s
+            for s in succession.propose(docs, self._readings)
+            if s.key not in self._state.succession_dismissed
+        ]
+        if not proposals:
+            options.add_option(Option("no successions proposed"))
+            return
+        for proposal in proposals:
+            row_id = f"{proposal.newer}{self._SUCC_SEP}{proposal.older}"
+            self._successions[row_id] = proposal
+            label = (
+                f"{names.get(proposal.newer, proposal.newer)}  supersedes  "
+                f"{names.get(proposal.older, proposal.older)}"
+                f"   ({proposal.rationale}, conf {proposal.confidence:.2f})"
+            )
+            options.add_option(Option(label, id=row_id))
+
+    def _highlighted_succession(self) -> succession.Succession | None:
+        options = self.query_one("#succession", OptionList)
+        index = options.highlighted
+        if index is None:
+            return None
+        option_id = options.get_option_at_index(index).id
+        return self._successions.get(option_id) if option_id else None
+
+    def action_accept_succession(self) -> None:
+        """Set the ``supersedes`` link the proposal describes, then re-propose."""
+        proposal = self._highlighted_succession()
+        if proposal is None:
+            return
+        doc = next((d for d in self._store.load_all() if d.id == proposal.newer), None)
+        if doc is None:
+            return
+        doc.supersedes = proposal.older
+        if self._save_doc(doc):
+            self.notify(f"{proposal.newer} now supersedes {proposal.older}")
+            self._populate_succession()
+            self._update_summary()
 
     # -- population ----------------------------------------------------------
 
@@ -157,13 +220,16 @@ class ReconcileScreen(ModalScreen[str | None]):
         assert report is not None
         dups = self._dups_count
         dup_part = f" · {dups} duplicate clusters" if dups is not None else ""
+        succ_part = (
+            f" · {len(self._successions)} successions" if self._successions else ""
+        )
         supp = self._suppressed_count()
         supp_part = f" · {supp} suppressed" if supp else ""
         ignore = [*self._config.ignore, *self._state.ignore]
         scope = f"   scope: {len(ignore)} ignore glob(s)" if ignore else ""
         self.query_one("#rsummary", Label).update(
             f"reconcile: {len(report.orphans)} orphans · {len(report.linked)} linked · "
-            f"{len(report.missing)} missing{dup_part}{supp_part}{scope}"
+            f"{len(report.missing)} missing{dup_part}{succ_part}{supp_part}{scope}"
         )
 
     def _suppressed_count(self) -> int:
@@ -270,15 +336,25 @@ class ReconcileScreen(ModalScreen[str | None]):
         if action == "scan_dups":
             return True if active == "tab-dups" else None
         if action == "reject":
-            return True if active in ("tab-orphans", "tab-missing") else None
+            return (
+                True
+                if active in ("tab-orphans", "tab-missing", "tab-succession")
+                else None
+            )
         if action in ("link", "adopt", "ignore_glob"):
             return True if active == "tab-orphans" else None
         if action == "unlink":
             return True if active == "tab-missing" else None
         if action == "fold":
             return True if active == "tab-dups" else None
+        if action == "accept_succession":
+            return True if active == "tab-succession" else None
         if action == "open_file":  # only where a real file sits under the cursor
-            return True if active in ("tab-orphans", "tab-dups") else None
+            return (
+                True
+                if active in ("tab-orphans", "tab-dups", "tab-succession")
+                else None
+            )
         return True
 
     @on(Tree.NodeExpanded, "#orphans")
@@ -323,6 +399,8 @@ class ReconcileScreen(ModalScreen[str | None]):
             rel = leaf.path if leaf is not None else None
         elif active == "tab-dups":
             rel = self._cursor_dup_path()
+        elif active == "tab-succession":
+            rel = self._succession_rendition_path()
         else:
             rel = None
         if rel is None:
@@ -350,12 +428,31 @@ class ReconcileScreen(ModalScreen[str | None]):
 
     # -- decisions (sidecar only — never touches a real file) ----------------
 
+    def _succession_rendition_path(self) -> str | None:
+        proposal = self._highlighted_succession()
+        if proposal is None:
+            return None
+        doc = next((d for d in self._store.load_all() if d.id == proposal.newer), None)
+        rendition = doc.primary_rendition() if doc is not None else None
+        return rendition.path if rendition is not None else None
+
     def action_reject(self) -> None:
         active = self._active_tab()
         if active == "tab-orphans":
             self._dismiss_orphan()
         elif active == "tab-missing":
             self._ack_missing()
+        elif active == "tab-succession":
+            self._dismiss_succession()
+
+    def _dismiss_succession(self) -> None:
+        proposal = self._highlighted_succession()
+        if proposal is None:
+            return
+        self._state.succession_dismissed.add(proposal.key)
+        if self._persist_state():
+            self._populate_succession()
+            self._update_summary()
 
     def _dismiss_orphan(self) -> None:
         leaf = self._cursor_leaf()
