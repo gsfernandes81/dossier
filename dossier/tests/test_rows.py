@@ -49,34 +49,45 @@ def test_dense_name_left_status_right():
 
     assert "British Passport" in line
     assert "exp 15 Jan 34" in line
-    assert "PD" in line  # ascii file glyphs
+    assert "P D" in line  # ascii file glyphs, now spaced apart
     # status sits to the right of the name
     assert line.index("exp 15 Jan 34") > line.index("British Passport")
 
 
 def test_expired_has_permanent_marker_ok_does_not():
     doc = Document(id="x", name="IDP 1926", expiry_date=date(2026, 3, 10))
-    expired = rows.doc_row(
-        _view(doc, expiry=ExpiryStatus.EXPIRED), mode=RowMode.COMPACT
+    expired = _render(
+        rows.doc_row(_view(doc, expiry=ExpiryStatus.EXPIRED), mode=RowMode.COMPACT)
     )
-    assert isinstance(expired, Text)
-    assert expired.plain.startswith("! ")  # permanent cue, ascii
+    assert expired.startswith("!")  # permanent cue in the marker gutter
+    assert "IDP 1926" in expired
 
-    ok = rows.doc_row(_view(doc, expiry=ExpiryStatus.OK), mode=RowMode.COMPACT)
-    assert isinstance(ok, Text)
-    assert ok.plain.startswith("  ")  # blank placeholder keeps names aligned
-    assert ok.plain.strip() == "IDP 1926"
+    ok = _render(rows.doc_row(_view(doc, expiry=ExpiryStatus.OK), mode=RowMode.COMPACT))
+    assert "!" not in ok  # no marker for an ok document
+    assert "IDP 1926" in ok
 
 
 def test_marker_switches_ascii_to_nerd():
     doc = Document(id="x", name="Cert", expiry_date=date(2026, 3, 10))
     view = _view(doc, expiry=ExpiryStatus.EXPIRED)
-    ascii_row = rows.doc_row(view, mode=RowMode.COMPACT, glyphs=glyphs.ASCII)
-    nerd_row = rows.doc_row(view, mode=RowMode.COMPACT, glyphs=glyphs.NERD)
-    assert isinstance(ascii_row, Text) and isinstance(nerd_row, Text)
-    assert ascii_row.plain.startswith("!")
-    assert nerd_row.plain.startswith(glyphs.NERD.expired)
+    ascii_row = _render(rows.doc_row(view, mode=RowMode.COMPACT, glyphs=glyphs.ASCII))
+    nerd_row = _render(rows.doc_row(view, mode=RowMode.COMPACT, glyphs=glyphs.NERD))
+    assert ascii_row.startswith("!")
+    assert glyphs.NERD.expired in nerd_row
     assert glyphs.NERD.expired != "!"  # a real Nerd Font codepoint, not ASCII
+
+
+def test_compact_wrapped_name_hangs_under_the_name():
+    long_name = "Certificate of Competency Card renewal 2026"
+    doc = Document(id="c", name=long_name, expiry_date=date(2026, 3, 10))
+    out = _render(
+        rows.doc_row(_view(doc, expiry=ExpiryStatus.EXPIRED), mode=RowMode.COMPACT),
+        width=20,
+    )
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert len(lines) >= 2  # the name wrapped
+    # continuation is indented past the marker column (does not start at col 0)
+    assert lines[1].startswith("  ")
 
 
 def test_superseded_dims_the_row():

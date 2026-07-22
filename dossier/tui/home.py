@@ -97,7 +97,7 @@ class HomeScreen(Screen[None]):
     HomeScreen.touch #bottombar { height: 5; }
     HomeScreen.touch #actionbar { display: block; }
     #locations { width: 30; border-right: solid $panel; }
-    #documents { width: 1fr; }
+    #documents { width: 1fr; padding: 0 1 0 0; }  /* right gap before scrollbar */
     #detail { display: none; width: 2fr; padding: 0 1; border-left: solid $panel; }
 
     /* Narrow: one pane at a time, drilled with the arrow keys. */

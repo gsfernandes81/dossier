@@ -116,14 +116,19 @@ def _dense(
     return grid
 
 
-def _compact(view: DocumentView, *, superseded: bool, glyphs: GlyphSet) -> Text:
+def _compact(view: DocumentView, *, superseded: bool, glyphs: GlyphSet) -> Table:
     doc = view.document
     dim = _dim(superseded)
     marker = _marker(view.expiry, glyphs)
-    row = Text(style=dim)
-    row.append(f"{marker or ' '} ", style=_join(dim, _STATUS_STYLE[view.expiry]))
-    row.append(doc.name or doc.id, style=dim)
-    return row
+    gutter = Text(marker or " ", style=_join(dim, _STATUS_STYLE[view.expiry]))
+    name = Text(doc.name or doc.id, style=dim)
+    # A fixed marker-gutter column so a wrapped name hangs under itself, indented
+    # past the marker, instead of wrapping back to the pane's left edge.
+    grid = Table.grid(expand=True)
+    grid.add_column(width=2)
+    grid.add_column(ratio=1)
+    grid.add_row(gutter, name)
+    return grid
 
 
 def _multiline(
@@ -203,7 +208,7 @@ def _marker(status: ExpiryStatus, glyphs: GlyphSet) -> str:
 def _file_glyphs(doc: Document, glyphs: GlyphSet) -> str:
     physical = glyphs.physical if doc.has_physical else ""
     digital = glyphs.digital if doc.has_digital else ""
-    return f"{physical}{digital}"
+    return " ".join(part for part in (physical, digital) if part)
 
 
 def _slot_str(doc: Document) -> str:
