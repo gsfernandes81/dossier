@@ -45,9 +45,11 @@ from textual.widgets.option_list import Option
 from dossier import dedup, dedup_cache, dedup_hash, reconcile
 from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
+from dossier.migrate import slugify
 from dossier.model import Document, ReconcileState, Rendition
 from dossier.store import Store
-from dossier.tui.screens import DetailScreen, DocPickerScreen, TextPromptScreen
+from dossier.tui import forms
+from dossier.tui.screens import DocPickerScreen, TextPromptScreen
 
 if TYPE_CHECKING:
     from textual.widgets.tree import TreeNode
@@ -321,16 +323,16 @@ class ReconcileScreen(ModalScreen[str | None]):
         leaf = self._cursor_leaf()
         if leaf is None:
             return
+        name = _pretty_name(leaf.path)
         doc = Document(
-            name=_pretty_name(leaf.path),
+            name=name,
             has_digital=True,
             files=[Rendition(label="default", path=leaf.path, primary=True)],
         )
-        self.app.push_screen(DetailScreen(self._store, doc, is_new=True), self._adopted)
-
-    def _adopted(self, saved: bool | None) -> None:
-        if saved:
-            self._refresh()
+        doc.id = forms.unique_id(self._store, slugify(name) or "document")
+        if self._save_doc(doc):
+            self.notify(f"adopted {doc.id} — open it to edit the details")
+            self.dismiss(doc.id)  # the home screen opens it for inline editing
 
     def action_unlink(self) -> None:
         picked = self._highlighted_missing()

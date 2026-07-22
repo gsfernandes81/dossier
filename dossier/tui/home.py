@@ -60,7 +60,6 @@ from dossier.tui.detail_pane import DetailPane
 from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
-    DetailScreen,
     DoctorScreen,
     SupersedeScreen,
     WatchScreen,
@@ -518,8 +517,14 @@ class HomeScreen(Screen[None]):
         self.query_one("#detail", DetailPane).start_edit(doc, self._docs)
 
     def action_new(self) -> None:
-        screen = DetailScreen(self._store, Document(), is_new=True)
-        self.app.push_screen(screen, self._after_edit)
+        if not self._show_detail:
+            self._detail_id = None
+            self._show_detail = True
+            self.set_class(True, "show-detail")
+            self._refresh_documents()  # rows collapse beside the pane
+        self.query_one("#detail", DetailPane).start_edit(
+            Document(), self._docs, is_new=True
+        )
 
     def action_move(self) -> None:
         doc = self._current_doc()
@@ -616,7 +621,8 @@ class HomeScreen(Screen[None]):
             return
         doc = self._doc_by_id(doc_id)
         if doc is not None:
-            self.app.push_screen(DetailScreen(self._store, doc), self._after_edit)
+            self.open_detail(doc.id)
+            self.query_one("#detail", DetailPane).start_edit(doc, self._docs)
 
     def _after_watch(self, doc_id: str | None) -> None:
         self._reload()  # an ignore-expiry change in the watch may have landed

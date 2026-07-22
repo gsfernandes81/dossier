@@ -42,7 +42,6 @@ from dossier.tui.detail_pane import DetailPane
 from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
-    DetailScreen,
     DocPickerScreen,
     DoctorScreen,
     SupersedeScreen,
@@ -238,16 +237,15 @@ async def test_open_document_invokes_opener(
 
 
 @pytest.mark.asyncio
-async def test_detail_screen_edits_and_saves(tmp_path: Path):
+async def test_detail_pane_edits_dates_and_notes(tmp_path: Path):
     store, config = _setup(tmp_path)
-    doc = next(d for d in store.load_all() if d.id == "coc")
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.push_screen(DetailScreen(store, doc))
-        await pilot.pause()
-        app.screen.query_one("#issue", Input).value = "2020-01-15"
-        app.screen.query_one("#expiry", Input).value = "2026-09-01"
-        app.screen.query_one("#notes", TextArea).text = "renewed early"
+        home = app.home
+        pane = await _enter_edit(pilot, home, "coc")
+        pane.query_one("#f-issue", Input).value = "2020-01-15"
+        pane.query_one("#f-expiry", Input).value = "2026-09-01"
+        pane.query_one("#f-notes", TextArea).text = "renewed early"
         await pilot.pause()
         await pilot.press("ctrl+s")
         await pilot.pause()
@@ -274,9 +272,12 @@ async def test_new_document_creates(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.push_screen(DetailScreen(store, Document(), is_new=True))
+        home = app.home
+        home.action_new()  # inline: opens the pane in new-document edit mode
         await pilot.pause()
-        app.screen.query_one("#name", Input).value = "New Passport 2026"
+        pane = home.query_one("#detail", DetailPane)
+        assert pane.editing
+        pane.query_one("#f-name", Input).value = "New Passport 2026"
         await pilot.pause()
         await pilot.press("ctrl+s")
         await pilot.pause()
@@ -549,18 +550,13 @@ async def test_reconcile_adopt_orphan_creates_document(tmp_path: Path):
         app.push_screen(screen)
         await pilot.pause()
         await _cursor_on_orphan(pilot, screen, "Marine")
-        screen.action_adopt()
+        screen.action_adopt()  # creates the doc immediately, then dismisses
         await pilot.pause()
-        detail = app.screen
-        assert isinstance(detail, DetailScreen)
-        assert detail.query_one("#name", Input).value == "New Cert"  # prefilled
-        detail.action_save()
-        await pilot.pause()
-        doc = store.load("new-cert")  # slug of the prefilled name
+        doc = store.load("new-cert")  # slug of the file-stem name
+        assert doc.name == "New Cert"
         assert [r.path for r in doc.files] == ["Marine/New Cert.pdf"]
         assert doc.has_digital
-        assert screen._report is not None
-        assert not screen._report.orphans  # adopted → no longer an orphan
+        assert app.screen is app.home  # reconcile dismissed, back to the home screen
 
 
 @pytest.mark.asyncio
