@@ -15,8 +15,10 @@
 
 """Command-line interface for the ``dossier`` / ``ds`` commands.
 
-Bare ``ds`` launches the TUI (not built yet); ``ds init`` bootstraps a device.
-Further subcommands (open, export, migrate, doctor, …) land in later slices.
+Bare ``ds`` launches the TUI; ``ds init`` bootstraps a device. The subcommands are
+``init``, ``migrate``, ``doctor``, ``reset``, ``reconcile``, ``export``, and
+``scan`` (``--mobile``/``--desktop`` force the touch vs desktop UI on the bare
+launch). ``ds import`` (bulk folder ingest) is deferred post-v1 — see DESIGN.md §12.
 """
 
 from __future__ import annotations
@@ -116,7 +118,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             "~/.termux/termux.properties so the keyboard stays down; tap the "
             "on-screen ⌨ button in the TUI to bring it up when you need to type."
         )
-    print("\nNext: add documents, then run `ds` to open the TUI (coming soon).")
+    print("\nNext: run `ds migrate` to import from Notion, or `ds` to open the TUI.")
     return 0
 
 
@@ -260,6 +262,9 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
             print(f"{check} ({len(items)}):")
             for finding in items:
                 print(f"  {finding.subject}: {finding.detail}")
+            hint = doctor.CHECK_HINTS.get(check)
+            if hint:
+                print(f"  → {hint}")
             print()
     else:
         print("doctor: all clear.")

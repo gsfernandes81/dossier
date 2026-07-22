@@ -35,6 +35,19 @@ from dossier.errors import StoreError
 from dossier.model import Document, Location
 from dossier.store import Store
 
+# Short recovery hints per check, shown under a group in the CLI/TUI doctor output.
+# Kept here (not in the UI layers) so both surfaces stay in sync, and so the guidance
+# reaches a device — e.g. a phone on Termux — that may not have the repo/docs cloned.
+CHECK_HINTS: dict[str, str] = {
+    "sync-conflict": (
+        "Syncthing kept a `*.sync-conflict-*` copy after two devices edited the same "
+        "record. dossier never loads these. To recover: diff the conflict file against "
+        "the live one, merge anything you want to keep into the live file, then delete "
+        "the conflict copy. (Prior versions are also backed up under the local history "
+        "dir on save.) See docs/guide/sync-conflicts.md."
+    ),
+}
+
 
 @dataclass(frozen=True)
 class Finding:

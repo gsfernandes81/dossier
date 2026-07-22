@@ -1,7 +1,10 @@
 # dossier — Design (v2)
 
-**Status:** Design settled, pre-implementation
-**Date:** 2026-07-21
+**Status:** As-built design record. Phases 1–7 are implemented; this document is the
+authoritative *spec and rationale*, while **`ROADMAP.md` is the source of truth for what has
+actually shipped**. Where a section below still reads as forward-looking ("open items",
+"deferred"), treat ROADMAP.md as authoritative for current status.
+**Date:** 2026-07-21 (design); implementation tracked in `ROADMAP.md`.
 **Revision:** v2 — revised after an independent adversarial design review (see §15 changelog).
 **Author:** gsfernandes81 (with Claude)
 
@@ -294,7 +297,8 @@ Two console-script entry points (`dossier` and `ds`) installed identically on bo
 | `ds doctor` | conflicts, referential integrity, round-trip lint, case/id/reserved-name checks, orphans |
 
 `ds import <folder>` (bulk folder ingest) is **deferred post-v1** — the schema stays import-ready,
-but it is not built for v1. Duplicate detection (by hash) is deferred with it.
+but it is not built. (Duplicate detection *has* shipped — perceptual-hash dedup lives in
+`dedup`/`dedup_hash`/`dedup_cache`, surfaced in the reconcile view; see ROADMAP Phase 3.)
 
 ---
 
@@ -357,6 +361,15 @@ indexing (CRDT-flavored overkill for a physical folder).
 ---
 
 ## 14. Open items
+
+> **Historical note (as-built):** this section captured the open items *at design time*. Most
+> have since shipped — the editable detail pane, the dismissable-suggestions framework, visual
+> dedup, the `ds scan` vision pass, the expiry-watch surface, in-place search filtering, and the
+> `ignore_expiry` toggle are all done. **See `ROADMAP.md` for current status**; the text below is
+> preserved as the original rationale. Genuinely still-open: Obsidian-vault confirmation, slug
+> finalization, the two-digit-year century pivot, `createdTime` year-plausibility, and
+> "issued X expires Y" range parsing.
+
 - Confirm Obsidian opens a dot-prefixed folder as a vault root (blocks any Obsidian reliance).
 - Finalize the slug algorithm: transliteration, year-suffix disambiguation (four `BRP Expires …`
   files), reserved-name guard.
