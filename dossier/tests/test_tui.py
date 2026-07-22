@@ -118,17 +118,22 @@ async def test_selecting_location_scopes_documents(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_search_shows_flat_results_and_hides_locations(tmp_path: Path):
+async def test_search_filters_in_place_keeping_columns(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         home = app.home
+        home.select_location("file")  # seed a scope so the All-snap is exercised
+        await pilot.pause()
         home.query_one("#search", Input).value = "passport"
         await pilot.pause()
         await pilot.pause()  # let the searching class re-apply the stylesheet
         assert home.has_class("searching")
-        assert not home.query_one("#locations", OptionList).display
+        assert home.query_one("#locations", OptionList).display  # columns stay put
         assert [d.id for d in home.documents_in_view()] == ["passport"]
+        # root-wide results → the locations pane snaps to "All"
+        assert home._selection == tui_home._ALL
+        assert home.query_one("#locations", OptionList).highlighted == 0
 
 
 @pytest.mark.asyncio
@@ -198,20 +203,73 @@ async def test_medium_width_detail_drops_locations(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_search_overrides_open_detail_with_flat_results(tmp_path: Path):
+async def test_search_with_detail_open_previews_top_hit(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         home = app.home
         home.open_detail("passport")
         await pilot.pause()
-        home.query_one("#search", Input).value = "card"
+        home.query_one("#search", Input).value = "card"  # filters passport out
         await pilot.pause()
         await pilot.pause()  # let the searching class re-apply the stylesheet
         assert home.has_class("searching")
-        assert not home.query_one("#detail").display  # detail hidden while searching
-        assert home._row_mode() is RowMode.DENSE  # full rows, not the collapsed cue
+        assert home.query_one("#detail").display  # detail stays open, previewing
+        assert home._row_mode() is RowMode.COMPACT  # names-only beside the detail
         assert [d.id for d in home.documents_in_view()] == ["coc"]
+        assert home._detail_id == "coc"  # preview followed the top hit
+        # medium band + detail open still drops the locations column
+        assert not home.query_one("#locations", OptionList).display
+
+
+@pytest.mark.asyncio
+async def test_escape_clears_search_in_place(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#search", Input).value = "passport"
+        await pilot.pause()
+        assert home.has_class("searching")
+        home.action_escape()
+        await pilot.pause()
+        assert not home.has_class("searching")
+        assert home.query_one("#locations", OptionList).display
+        assert {d.id for d in home.documents_in_view()} == {"passport", "coc"}
+        assert app.focused is home.query_one("#documents", OptionList)
+
+
+@pytest.mark.asyncio
+async def test_narrow_search_fronts_documents_and_drills_to_detail(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(50, 40)) as pilot:  # narrow band
+        home = app.home
+        assert home.has_class("-narrow")
+        home.query_one("#search", Input).value = "passport"
+        await pilot.pause()
+        await pilot.pause()
+        assert home.query_one("#documents", OptionList).display  # results fronted
+        assert not home.query_one("#locations", OptionList).display
+        home.open_detail("passport")  # drilling a result → detail full-screen
+        await pilot.pause()
+        assert home.query_one("#detail").display
+        assert not home.query_one("#documents", OptionList).display  # order wins
+
+
+@pytest.mark.asyncio
+async def test_expiring_toggle_keeps_columns(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.select_location("file")
+        await pilot.pause()
+        home.action_toggle_expiring()
+        await pilot.pause()
+        assert home.has_class("searching")
+        assert home.query_one("#locations", OptionList).display  # columns stay put
+        assert home._selection == tui_home._ALL
 
 
 @pytest.mark.asyncio

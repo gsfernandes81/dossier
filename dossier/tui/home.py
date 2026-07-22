@@ -27,13 +27,14 @@ screen (DESIGN §14):
   (keeping a one-char expiry cue); at medium width the *locations* column drops
   rather than shrinking everything; in narrow/portrait the detail goes
   full-screen.
-* ``searching`` (a non-empty query or the expiring filter) hides the locations
-  pane and shows a flat, root-wide result list.
+* ``searching`` (a non-empty query or the expiring filter) filters the documents
+  pane in place, root-wide, keeping the Miller columns; the detail preview (when
+  open) follows the highlighted result.
 
 ``Enter`` opens the detail pane for a document; ``o`` opens its file from
 anywhere. The search box is docked at the bottom as a thumb-reachable command
-bar (``/`` focuses it); typing collapses the panes to a flat root-wide result
-list. The touch action bar arrives in a later slice.
+bar (``/`` focuses it); typing filters the documents pane in place (root-wide),
+keeping the columns. The touch action bar arrives in a later slice.
 """
 
 from __future__ import annotations
@@ -134,6 +135,13 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.show-documents #locations { display: none; }
     HomeScreen.-narrow.show-documents #documents { display: block; }
 
+    /* Searching filters the documents pane in place (root-wide); the Miller
+       columns stay put. Only narrow needs help: front the documents pane so
+       results are visible while typing. Ordered BEFORE the show-detail rules
+       (same specificity) so drilling into a result still goes full-screen. */
+    HomeScreen.-narrow.searching #locations { display: none; }
+    HomeScreen.-narrow.searching #documents { display: block; }
+
     /* Detail open: reveal the third column. At medium width drop the locations
        column instead of shrinking; in narrow the detail takes the whole screen. */
     HomeScreen.show-detail #detail { display: block; }
@@ -141,12 +149,6 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.show-detail #locations { display: none; }
     HomeScreen.-narrow.show-detail #documents { display: none; }
     HomeScreen.-narrow.show-detail #detail { width: 1fr; border-left: none; }
-
-    /* Searching: flat root-wide results, no location scoping or detail. Ordered
-       last so it wins over the narrow/detail rules and keeps results visible. */
-    HomeScreen.searching #locations { display: none; }
-    HomeScreen.searching #detail { display: none; }
-    HomeScreen.searching #documents { display: block; width: 1fr; }
     """
 
     BINDINGS = [
@@ -262,9 +264,7 @@ class HomeScreen(Screen[None]):
     def _row_mode(self) -> RowMode:
         if self._narrow or self._portrait:
             return RowMode.MULTILINE
-        # Search shows a flat root-wide list, so use full rows even with the
-        # detail pane still nominally open (it is hidden while searching).
-        if self._show_detail and not self._is_searching():
+        if self._show_detail:
             return RowMode.COMPACT  # collapsed to names beside the detail pane
         return RowMode.DENSE
 
@@ -311,6 +311,8 @@ class HomeScreen(Screen[None]):
             ids.append(doc.id)
         if previous is not None and previous in ids:
             options.highlighted = ids.index(previous)
+        elif self._is_searching() and ids:
+            options.highlighted = 0  # the preview follows the top hit
         self.app.sub_title = f"{len(docs)} / {len(self._docs)} documents"
 
     def _update_detail(self) -> None:
@@ -554,7 +556,15 @@ class HomeScreen(Screen[None]):
     # -- helpers -------------------------------------------------------------
 
     def _update_searching(self) -> None:
-        self.set_class(self._is_searching(), "searching")
+        searching = self._is_searching()
+        was = self.has_class("searching")
+        self.set_class(searching, "searching")
+        if searching and not was:
+            # Root-wide results: snap the locations pane to "All" so the left
+            # column reflects what the middle now shows (set both the state and
+            # the highlight — an unchanged highlight wouldn't fire select_location).
+            self._selection = _ALL
+            self.query_one("#locations", OptionList).highlighted = 0
 
     def _raise_keyboard(self) -> None:
         # Termux only raises the soft keyboard while mouse tracking is off, and
@@ -635,8 +645,8 @@ class HomeScreen(Screen[None]):
 
     def on_detail_pane_editing_changed(self, event: DetailPane.EditingChanged) -> None:
         self.editing = event.editing
-        # The search box hides #detail via the `searching` class — disable it so
-        # neither Tab nor a click can steal focus and vanish the live form.
+        # Disable the search box while editing: a mid-edit filter could drop the
+        # edited doc from the list, and Tab or a click into it would steal focus.
         self.query_one("#search", Input).disabled = event.editing
 
     def on_detail_pane_saved(self, event: DetailPane.Saved) -> None:
