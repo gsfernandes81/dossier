@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date
 
 from textual import on
@@ -35,9 +36,10 @@ from textual.widgets.option_list import Option
 from dossier import doctor, query
 from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
-from dossier.model import Document, ExpiryStatus, Location
+from dossier.model import Bundle, Document, ExpiryStatus, Location
 from dossier.store import Store
 from dossier.tui import (
+    forms,
     glyphs as glyphset,
     rows,
 )
@@ -375,6 +377,110 @@ class WatchScreen(ModalScreen[str | None]):
     def _open(self, event: OptionList.OptionSelected) -> None:
         if event.option_id is not None:
             self.dismiss(event.option_id)
+
+
+class BundlesScreen(ModalScreen[str | None]):
+    """The bundles surface — grouped by category, sorted chronologically.
+
+    Dismisses with a bundle slug (the home filters the documents pane to it) or
+    ``None``. ``Enter`` opens a bundle; ``d`` sets the highlighted bundle's date.
+    """
+
+    CSS = """
+    BundlesScreen { align: center middle; }
+    #blpanel {
+        width: 85%; height: 80%; padding: 1 2;
+        background: $panel; border: round $primary;
+    }
+    #bundle-list { height: 1fr; }
+    """
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("d", "set_date", "Set date"),
+    ]
+
+    def __init__(self, store: Store, config: Config, *, today: date) -> None:
+        super().__init__()
+        self._store = store
+        self._config = config
+        self._today = today
+        self._glyphs = glyphset.resolve(config.glyphs)
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="blpanel"):
+            yield Label(id="blsummary")
+            yield OptionList(id="bundle-list")
+
+    def on_mount(self) -> None:
+        self._refresh()
+
+    def _refresh(self) -> None:
+        bundles = self._store.load_bundles()
+        counts = Counter(slug for doc in self._store.load_all() for slug in doc.bundles)
+        summary = self.query_one("#blsummary", Label)
+        options = self.query_one("#bundle-list", OptionList)
+        options.clear_options()
+        if not bundles:
+            summary.update("No bundles yet.  (Esc to close)")
+            return
+        summary.update(
+            f"{len(bundles)} bundles.  Enter filters · d sets date · Esc closes."
+        )
+        for category, group in query.group_bundles(bundles.values()):
+            header = f"{category} ▸" if category else "— other —"
+            options.add_option(Option(header, id=None))
+            for bundle in group:
+                row = rows.bundle_row(
+                    bundle, count=counts.get(bundle.slug, 0), glyphs=self._glyphs
+                )
+                options.add_option(Option(row, id=bundle.slug))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    @on(OptionList.OptionSelected, "#bundle-list")
+    def _open(self, event: OptionList.OptionSelected) -> None:
+        if event.option_id is not None:
+            self.dismiss(event.option_id)
+
+    def action_set_date(self) -> None:
+        bundle = self._highlighted()
+        if bundle is None:
+            return
+        current = bundle.date.isoformat() if bundle.date else ""
+        self.app.push_screen(
+            TextPromptScreen(
+                f"Date for {bundle.title} (YYYY-MM-DD, blank clears):",
+                initial=current,
+                placeholder="YYYY-MM-DD",
+            ),
+            lambda value: self._save_date(bundle.slug, value),
+        )
+
+    def _save_date(self, slug: str, value: str | None) -> None:
+        if value is None:
+            return
+        try:
+            new_date = forms.parse_iso(value)
+        except ValueError as exc:
+            self.notify(f"invalid date: {exc}", severity="error")
+            return
+        bundles = self._store.load_bundles()
+        if slug not in bundles:
+            return
+        bundles[slug].date = new_date
+        self._store.save_bundles(bundles)
+        self._refresh()
+
+    def _highlighted(self) -> Bundle | None:
+        options = self.query_one("#bundle-list", OptionList)
+        index = options.highlighted
+        if index is None:
+            return None
+        option = options.get_option_at_index(index)
+        if option.id is None:
+            return None
+        return self._store.load_bundles().get(option.id)
 
 
 def _loc_label(doc: Document, locations: dict[str, Location]) -> str | None:

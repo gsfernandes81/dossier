@@ -44,7 +44,7 @@ from rich.console import RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from dossier.model import Document, ExpiryStatus, FileStatus
+from dossier.model import Bundle, Document, ExpiryStatus, FileStatus
 from dossier.query import DocumentView
 from dossier.tui.glyphs import ASCII, GlyphSet
 
@@ -113,6 +113,22 @@ def watch_row(
     meta = [part for part in (location_label, " ".join(doc.tags) or None) if part]
     if meta:
         row.append("   " + "  ".join(meta), style="dim")
+    return row
+
+
+def bundle_row(bundle: Bundle, *, count: int, glyphs: GlyphSet = ASCII) -> Text:
+    """A row for the bundles surface: title, date, member count.
+
+    ``  India 2024        11 Mar 2024   6 docs``
+    """
+    row = Text()
+    if glyphs.bundle:
+        row.append(f"{glyphs.bundle} ", style="dim")
+    row.append(bundle.title or bundle.slug)
+    dated = _fmt(bundle.date) if bundle.date is not None else ""
+    if dated:
+        row.append(f"   {dated}", style="dim")
+    row.append(f"   {count} doc{'' if count == 1 else 's'}", style="dim")
     return row
 
 

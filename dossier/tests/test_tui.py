@@ -32,7 +32,7 @@ from textual.widgets import (
 
 from dossier import dedup
 from dossier.config import Config
-from dossier.model import Document, Rendition
+from dossier.model import Bundle, Document, Rendition
 from dossier.store import Store
 from dossier.tui import (
     DossierApp,
@@ -42,6 +42,7 @@ from dossier.tui.detail_pane import DetailPane
 from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
+    BundlesScreen,
     DocPickerScreen,
     DoctorScreen,
     SupersedeScreen,
@@ -836,6 +837,7 @@ async def test_suggestion_accept_prefills_and_saves(tmp_path: Path):
         assert len(pane._suggestions) == 1  # one issue-date suggestion
         pane.query_one("#sg-accept-0-0", Button).press()  # accept the reading
         await pilot.pause()
+        await pilot.pause()
         assert pane.query_one("#f-issue", Input).value == "2023-08-15"
         await pilot.press("ctrl+s")
         await pilot.pause()
@@ -853,9 +855,41 @@ async def test_suggestion_dismiss_persists_without_writing_the_doc(tmp_path: Pat
         dismissed = pane._suggestions[0]
         pane.query_one("#sg-dismiss-0", Button).press()
         await pilot.pause()
+        await pilot.pause()
         assert not list(pane.query(".sg-row").results(Horizontal))  # row gone
     assert dismissed.key in store.load_suggestions().dismissed
     assert store.load("dated").issue_date is None  # dismiss never wrote the doc
+
+
+@pytest.mark.asyncio
+async def test_bundles_screen_filters_home_to_a_bundle(tmp_path: Path):
+    store, config = _setup(tmp_path)  # passport, coc
+    store.save_bundles(
+        {"travel/india-2024": Bundle(slug="travel/india-2024", title="India 2024")}
+    )
+    coc = store.load("coc")  # give coc a bundle membership
+    coc.bundles = ["travel/india-2024"]
+    store.save(coc)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.action_bundles()
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BundlesScreen)
+        # a group header (travel ▸) plus the bundle row
+        options = screen.query_one("#bundle-list", OptionList)
+        assert any(
+            options.get_option_at_index(i).id == "travel/india-2024"
+            for i in range(options.option_count)
+        )
+        screen.dismiss("travel/india-2024")  # Enter on the bundle
+        await pilot.pause()
+        assert home._bundle_filter == "travel/india-2024"
+        assert [d.id for d in home.documents_in_view()] == ["coc"]  # scoped
+        home.action_escape()
+        await pilot.pause()
+        assert home._bundle_filter is None  # Esc clears the bundle scope
 
 
 def test_linux_driver_exposes_mouse_toggle():
