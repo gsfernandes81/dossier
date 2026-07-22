@@ -86,6 +86,7 @@ _EDIT_LOCKED = frozenset(
         "bundle",
         "edit",
         "new",
+        "accept_suggestion",
         "move",
         "supersede",
         "watch",
@@ -186,6 +187,9 @@ class HomeScreen(Screen[None]):
         Binding("n", "new", "New"),
         Binding("b", "bundle", "Bundle"),
         Binding("question_mark", "app.show_help_panel", "Help"),
+        # Quick-accept the shown doc's top suggestion; off the footer (the detail
+        # read view already prints "a accept · e review"), so it stays uncrowded.
+        Binding("a", "accept_suggestion", "Accept", show=False),
         # Kept working, but off the footer — surfaced in the help panel (`?`):
         Binding("i", "toggle_dates", "Iss/Exp", show=False),
         Binding("m", "move", "Move", show=False),
@@ -594,6 +598,12 @@ class HomeScreen(Screen[None]):
 
     def action_edit(self) -> None:
         self._open_and_edit()
+
+    def action_accept_suggestion(self) -> None:
+        # Works while browsing (documents pane focused) — the detail pane isn't
+        # focused in the wide layout, so the accept lives here and delegates.
+        if self._show_detail:
+            self._detail_pane.action_accept_suggestion()
 
     def action_new(self) -> None:
         if not self._show_detail:
