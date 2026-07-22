@@ -385,6 +385,58 @@ class DocPickerScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class TextPromptScreen(ModalScreen[str | None]):
+    """A one-line text prompt. Dismisses the entered text, or ``None`` on cancel."""
+
+    CSS = """
+    TextPromptScreen { align: center middle; }
+    #tppanel {
+        width: 70%; max-width: 80; height: auto;
+        padding: 1 2; background: $panel; border: round $primary;
+    }
+    #tpinput { margin-top: 1; margin-bottom: 1; }
+    #tpbuttons { height: auto; align: right middle; }
+    #tpbuttons Button { margin-left: 2; }
+    """
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(
+        self, prompt: str, *, initial: str = "", placeholder: str = ""
+    ) -> None:
+        super().__init__()
+        self._prompt = prompt
+        self._initial = initial
+        self._placeholder = placeholder
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="tppanel"):
+            yield Label(self._prompt)
+            yield Input(
+                value=self._initial, placeholder=self._placeholder, id="tpinput"
+            )
+            with Horizontal(id="tpbuttons"):
+                yield Button("Cancel", id="tpcancel")
+                yield Button("OK", id="tpok", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#tpinput", Input).focus()
+
+    @on(Input.Submitted, "#tpinput")
+    def _submit(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+
+    @on(Button.Pressed, "#tpok")
+    def _ok(self) -> None:
+        self.dismiss(self.query_one("#tpinput", Input).value)
+
+    @on(Button.Pressed, "#tpcancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class BundleScreen(ModalScreen[bool]):
     """Toggle a document's bundle membership; type a name to make a new bundle."""
 
