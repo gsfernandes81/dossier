@@ -23,6 +23,7 @@ from textual.containers import Horizontal
 from textual.widgets import (
     Button,
     Checkbox,
+    HelpPanel,
     Input,
     OptionList,
     TabbedContent,
@@ -92,6 +93,31 @@ async def test_app_loads_and_search_filters(tmp_path: Path):
         app.query_one("#search", Input).value = "passport"
         await pilot.pause()
         assert [d.id for d in app.home.visible_docs()] == ["passport"]
+
+
+@pytest.mark.asyncio
+async def test_footer_trims_to_common_actions_and_help_reveals_rest(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        visible = {
+            ab.binding.description
+            for ab in home.active_bindings.values()
+            if ab.binding.show
+        }
+        # High-frequency actions plus the Help affordance stay on the footer.
+        assert {"Search", "Open", "Edit", "New", "Bundle", "Help"} <= visible
+        # Low-frequency actions moved off the footer so it can't overflow...
+        assert not ({"Doctor", "Reconcile", "Supersede", "Move"} & visible)
+        # ...but remain bound and dispatchable (show=False, not disabled).
+        assert home.active_bindings["d"].binding.description == "Doctor"
+        assert home.active_bindings["d"].binding.show is False
+        # `?` reveals every binding — Textual's HelpPanel lists show=False too.
+        assert len(app.screen.query(HelpPanel)) == 0
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert len(app.screen.query(HelpPanel)) == 1
 
 
 @pytest.mark.asyncio
