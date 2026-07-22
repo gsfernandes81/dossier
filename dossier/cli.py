@@ -29,7 +29,7 @@ from pathlib import Path
 
 import tomli_w
 
-from dossier import doctor, migrate
+from dossier import doctor, migrate, reset
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError
 from dossier.platform_open import is_termux, termux_preconditions
@@ -154,6 +154,54 @@ def _print_migration_report(plan: migrate.MigrationPlan, *, verbose: bool) -> No
             print(f"  [{issue.kind}] {issue.doc}: {issue.detail}")
 
 
+def cmd_reset(args: argparse.Namespace) -> int:
+    """Clear a folder's ``.dossier`` data, or (``--global``) this device's config."""
+    if args.global_config:
+        path = per_device_config_path()
+        if not path.is_file():
+            print("no per-device config to remove.")
+            return 0
+        if not _confirm(f"remove this device's config at {path}?", args.yes):
+            return 1
+        removed = reset.reset_device_config()
+        print(f"removed device config: {removed}")
+        print("this device is no longer configured; run `ds init` to set it up again.")
+        return 0
+
+    if args.root is not None:
+        config = Config(syncthing_root=args.root.expanduser().resolve())
+    else:
+        try:
+            config = Config.load()
+        except ConfigError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+    entries = reset.folder_reset_entries(config)
+    if not entries:
+        print(f"no .dossier data to reset at {config.meta_dir}.")
+        return 0
+    print(f"This will clear {config.meta_dir}")
+    print(f"  backed up to {config.history_dir} first; your real files are untouched:")
+    for name in entries:
+        print(f"    {name}")
+    if not _confirm("proceed?", args.yes):
+        return 1
+    backup = reset.reset_folder_data(config)
+    print(f"reset complete. backup: {backup}")
+    print("run `ds migrate ... --apply` (or `ds`) to repopulate.")
+    return 0
+
+
+def _confirm(prompt: str, assume_yes: bool) -> bool:
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        print("refusing without --yes (no interactive terminal).", file=sys.stderr)
+        return False
+    return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
+
+
 def cmd_doctor(_args: argparse.Namespace) -> int:
     """Check the store for problems (conflicts, refs, dates, files)."""
     try:
@@ -237,6 +285,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="check the store for problems (conflicts, refs, dates, files)",
     )
     doctor_p.set_defaults(func=cmd_doctor)
+
+    reset_p = sub.add_parser(
+        "reset",
+        help="clear a folder's .dossier data (never real files), or --global config",
+    )
+    reset_p.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help="folder whose .dossier data to clear (default: the configured root)",
+    )
+    reset_p.add_argument(
+        "--global",
+        "--config",
+        dest="global_config",
+        action="store_true",
+        help="remove this device's config instead (un-configure this device)",
+    )
+    reset_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the confirmation prompt",
+    )
+    reset_p.set_defaults(func=cmd_reset)
 
     return parser
 
