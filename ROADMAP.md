@@ -6,8 +6,9 @@ Nerd-Font icons · spacing/gutter polish. **Expiries now come from the Notion
 _Marine Documents_ table** (#32). Since then: `ds reset` (#38), the **real
 migration applied** on `…/Official Documents`, the **expiry-watch surface** (#39),
 the **dedup engine** — perceptual page-hashing + subset/superset clustering with a
-per-device cache (#40–#41), and the **reconcile view** (#42, read-only). 115 tests,
-CI green.
+per-device cache (#40–#41), and the **reconcile view** with its full metadata-only
+action set — dismiss/ack/link/adopt/unlink/fold/ignore-glob backed by a
+`reconcile.toml` sidecar (#42–#45). 129 tests, CI green.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -20,11 +21,11 @@ Per-item rationale lives in `DESIGN.md` §14.
   auto-linked. Old store backed up by `ds reset`.
 - [x] **Reconcile / orphan view** — `ds reconcile` (CLI, #40) + the TUI reconcile
   screen (#42): orphan files (per-folder), docs whose file is missing, and duplicate
-  clusters. Read-only so far.
-- [ ] **Reconcile actions** (M) — accept/reject the suggested file matches, manually
-  link no-matches, *adopt orphan → new document*, dismiss, add ignore-glob, and
-  **fold duplicate clusters** (metadata only). Persist decisions in a
-  `.dossier/reconcile.toml` sidecar. Never moves or deletes real files. **← next**
+  clusters.
+- [x] **Reconcile actions** — the full set, all metadata-only (never moves/deletes a
+  real file), persisted in a `.dossier/reconcile.toml` sidecar:
+  - `x` dismiss orphan / ack missing (#43) · `l` link · `a` adopt orphan→new doc ·
+    `u` unlink dead rendition (#44) · `f` fold duplicate cluster · `g` ignore-glob (#45).
 
 ## Phase 2 — Expiry watch  ✅
 - [x] **`ignore_expiry` toggle** (S) — a keypress to drop residual old CDCs from the watch.
@@ -97,5 +98,9 @@ Per-item rationale lives in `DESIGN.md` §14.
   filename for each *linked* file from its document record (category / name / date), as
   a plan you review and apply. Never auto-moves. The thing that would actually *sort* a
   messy `Official Documents/` tree.
+- **Reconcile follow-ups** *(deferred, low priority)* — doctor checks for a document
+  that links a *folded* duplicate copy and for stale sidecar entries (a `dismissed`
+  path or `folded` keep that no longer exists on disk); a "show dismissed (N)" toggle
+  to review/undo suppressions from the TUI (undo today = hand-edit `reconcile.toml`).
 - **Someday:** `createdTime` year-plausibility + "issued X expires Y" range parsing
   (fold into suggestions quality), slug finalization, Obsidian-vault confirmation.
