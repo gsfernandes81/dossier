@@ -43,10 +43,13 @@ Per-item rationale lives in `DESIGN.md` §14.
     pairs only. Baseline pHash already catches most re-scans GPU-free.
 
 ## Phase 4 — Editing & search ergonomics  *(pulled up, per priority)*
-- [ ] **Editable detail pane (col 3)** (L) — edit every parameter inline (name, dates,
-  location/slot, tags, bundles, flags, renditions, `ignore_expiry`, supersession).
-  Absorbs the `e` edit modal and folds `b`/`s`/`m` into inline fields, freeing column 2
-  for navigation. (Gains an "accept suggestion" affordance once Phase 5 lands.)
+- [x] **Editable detail pane (col 3)** — the pane edits every parameter inline (name,
+  dates, location + slot + subslot with neighbour-shift, tags, bundles, copy flags,
+  renditions, `ignore_expiry`, notes); `e`/`n`/`m`/`b` all open it and the doctor jump
+  edits inline. The DetailScreen / MoveScreen / BundleScreen modals are retired; the
+  only editing surface left is the pane. Supersession stays a picker (`s`). ctrl+s
+  save · double-Esc discard · ctrl+r StaleWrite reload; home bindings are gated while
+  editing. (#46–#51). Gains an "accept suggestion" affordance once Phase 5 lands.
 - [ ] **Search as an in-place Miller filter** (M) — keep the three columns during
   search; filter the documents pane in place (root-wide), detail preview following the
   highlight.
