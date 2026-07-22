@@ -638,7 +638,8 @@ class DetailPane(VerticalScroll):
 
         suggestions = self.query_one(f"#{_SUGGESTIONS}", Vertical)
         await suggestions.remove_children()
-        self._suggestions = suggest.live(doc, self._store.load_suggestions())
+        reading = self._store.load_scans().get(doc.id)
+        self._suggestions = suggest.live(doc, self._store.load_suggestions(), reading)
         self.query_one(f"#{_SG_HEADER}").display = bool(self._suggestions)
         if self._suggestions:
             rows = [self._suggestion_row(i, s) for i, s in enumerate(self._suggestions)]

@@ -32,6 +32,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 
 from dateutil import parser as du_parser
 
@@ -44,6 +45,9 @@ from dossier.model import (
     Suggestion,
     SuggestionState,
 )
+
+if TYPE_CHECKING:
+    from dossier.scan import ScanReading
 
 # \b anchors keep a long digit run (a reference/serial number like "1234-07-2026")
 # from matching a truncated fragment as if it were a date.
@@ -152,13 +156,115 @@ def for_document(doc: Document) -> list[Suggestion]:
     ]
 
 
-def live(doc: Document, state: SuggestionState) -> list[Suggestion]:
-    """The suggestions worth showing: not dismissed, not already satisfied."""
+def live(
+    doc: Document,
+    state: SuggestionState,
+    reading: ScanReading | None = None,
+) -> list[Suggestion]:
+    """The suggestions worth showing: not dismissed, not already satisfied.
+
+    Name-derived suggestions plus, when a ``ds scan`` reading is given, the
+    dates it read from the document itself. Deduped by (field, values) so a name
+    and a scan that agree show once; when they *disagree* both surface for the
+    user to pick. A scan expiry that matches the authoritative expiry drops out via
+    :func:`_satisfied` (the doc already carries it).
+    """
+    candidates = for_document(doc)
+    if reading is not None:
+        candidates = candidates + from_reading(doc, reading)
+    out: list[Suggestion] = []
+    seen: set[tuple[SuggestedField, tuple[str, ...]]] = set()
+    for suggestion in candidates:
+        field_values = (suggestion.field, suggestion.values)
+        if field_values in seen:
+            continue
+        if not state.is_dismissed(suggestion) and not _satisfied(doc, suggestion):
+            seen.add(field_values)
+            out.append(suggestion)
+    return out
+
+
+def from_reading(doc: Document, reading: ScanReading) -> list[Suggestion]:
+    """Issue/expiry (or a notes period) suggestions from a ``ds scan`` reading.
+
+    A VLM-confirmed validity *window* (``is_validity_period`` — a CoC card, a
+    medical) yields issue + expiry. Two dates that are **not** a window are a
+    *period* (e.g. a sea-service testimonial's service dates) → a notes span, the
+    same way a date range in a name is handled — never a spurious expiry.
+    """
+    issue_text, expiry_text = reading.issue_date_text, reading.expiry_date_text
+    if not reading.is_validity_period and issue_text and expiry_text:
+        return _period_suggestion(doc, issue_text, expiry_text)
+    out: list[Suggestion] = []
+    for field, text in (
+        (SuggestedField.ISSUE, issue_text),
+        (SuggestedField.EXPIRY, expiry_text),
+    ):
+        suggestion = _scan_date_suggestion(doc, field, text)
+        if suggestion is not None:
+            out.append(suggestion)
+    return out
+
+
+def _period_suggestion(
+    doc: Document, start_text: str, end_text: str
+) -> list[Suggestion]:
+    start, _ = _scan_parse(start_text)
+    end, _ = _scan_parse(end_text)
+    if start is None or end is None:  # keep whichever single date parsed
+        return [
+            s
+            for s in (
+                _scan_date_suggestion(doc, SuggestedField.ISSUE, start_text),
+                _scan_date_suggestion(doc, SuggestedField.EXPIRY, end_text),
+            )
+            if s is not None
+        ]
+    low, high = sorted((start, end))  # scanned ranges are sometimes printed reversed
     return [
-        s
-        for s in for_document(doc)
-        if not state.is_dismissed(s) and not _satisfied(doc, s)
+        Suggestion(
+            doc_id=doc.id,
+            field=SuggestedField.NOTES,
+            values=(low.isoformat(), high.isoformat()),
+            source="scan",
+            rationale=f"scan read a period, {start_text.strip()} to {end_text.strip()}",
+        )
     ]
+
+
+def _scan_date_suggestion(
+    doc: Document, field: SuggestedField, text: str | None
+) -> Suggestion | None:
+    if not text:
+        return None
+    parsed, token = _scan_parse(text)
+    if parsed is None:
+        return None
+    ambiguous = dict(candidate_readings(text))
+    return _date_suggestion(
+        doc, field, token, parsed, ambiguous, f"scan read '{text.strip()}'", "scan"
+    )
+
+
+def _scan_parse(text: str) -> tuple[date | None, str]:
+    """Parse a scanned date string → ``(date, token)``.
+
+    Prefer a numeric token so the DD/MM ambiguity picker applies (a scanned
+    ``06/09/2024`` is offered as both readings for an issue date); fall back to a
+    free-form parse for spelled dates (``11 July 2024``).
+    """
+    for candidate in _DATE_TOKEN.findall(text):
+        parsed = _parse_token(candidate)
+        if parsed is not None:
+            return parsed, candidate
+    return _parse_freeform(text), text.strip()
+
+
+def _parse_freeform(text: str) -> date | None:
+    try:  # dayfirst — the store is UK/marine; fuzzy tolerates "Date of issue: …"
+        return du_parser.parse(text, dayfirst=True, fuzzy=True).date()
+    except (ValueError, OverflowError, TypeError):
+        return None
 
 
 def _date_suggestion(
@@ -168,6 +274,7 @@ def _date_suggestion(
     parsed: date,
     ambig: dict[str, list[date]],
     rationale: str,
+    source: str = "name",
 ) -> Suggestion:
     # Ambiguous tokens offer every reading — but only for issue dates; an expiry
     # from a name is already a stretch, so it stays single-valued.
@@ -176,7 +283,9 @@ def _date_suggestion(
         values = tuple(d.isoformat() for d in readings)
     else:
         values = (parsed.isoformat(),)
-    return Suggestion(doc_id=doc.id, field=field, values=values, rationale=rationale)
+    return Suggestion(
+        doc_id=doc.id, field=field, values=values, source=source, rationale=rationale
+    )
 
 
 def _satisfied(doc: Document, suggestion: Suggestion) -> bool:

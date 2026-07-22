@@ -51,7 +51,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, OptionList, TextArea
 from textual.widgets.option_list import Option
 
-from dossier import query, suggest
+from dossier import query, scan, suggest
 from dossier.config import Config
 from dossier.model import Document, ExpiryStatus, Location, SuggestionState
 from dossier.platform_open import OpenError, open_file
@@ -218,6 +218,7 @@ class HomeScreen(Screen[None]):
         self._locations: dict[str, Location] = {}
         self._by_location: dict[str | None, list[Document]] = {}
         self._suggestion_state = SuggestionState()  # cached; refreshed on reload
+        self._readings: dict[str, scan.ScanReading] = {}  # ds scan, refreshed on reload
         self._selection: str = _ALL
         self._filter_text = ""
         self._expiring_only = False
@@ -269,6 +270,7 @@ class HomeScreen(Screen[None]):
         self._locations = self._store.load_locations()
         self._by_location = dict(query.group_by_location(self._docs))
         self._suggestion_state = self._store.load_suggestions()
+        self._readings = self._store.load_scans()
         self._refresh_locations()
         self._refresh_documents()
         if self._show_detail:
@@ -380,7 +382,9 @@ class HomeScreen(Screen[None]):
             location_label=self._location_label(doc),
             chain=query.supersession_chain(self._docs, doc),
             superseded_by=self._superseded_by(doc),
-            suggestions=suggest.live(doc, self._suggestion_state),
+            suggestions=suggest.live(
+                doc, self._suggestion_state, self._readings.get(doc.id)
+            ),
         )
 
     def _view(self, doc: Document) -> query.DocumentView:

@@ -104,9 +104,13 @@ Per-item rationale lives in `DESIGN.md` §14.
   renewals; a fourth **reconcile "Succession" tab** accepts (`s`, sets `supersedes`) /
   dismisses (`x`). Verified on the real store: recovers the CoC-card, ENG-1 medical,
   and BRP chains, matching a filename-only inference.
-- [ ] **Expiry / issue suggestions from readings** (#3, M) — feed each reading's verbatim
-  dates through the ambiguity-aware `suggest` machinery (source `scan`) into the detail
-  pane's accept/dismiss layer, cross-checked against the authoritative expiry.
+- [x] **Expiry / issue suggestions from readings** (#3) — `suggest.from_reading` turns a
+  reading's verbatim dates into issue/expiry suggestions (source `scan`), routed through
+  `suggest.live` into the detail pane's accept/dismiss layer (deduped against name
+  suggestions; a scan expiry drops out when the doc already has an authoritative one). A
+  VLM-confirmed validity *window* gives issue+expiry; a non-window date pair (a
+  sea-service period) becomes a notes span, not a spurious expiry. Verified on the real
+  store: 11 expiry + 19 issue + 4 period suggestions surfaced.
 - [ ] **Model selection in settings** (S) — list the router's `/v1/models` and choose
   per run (URL/model are already per-device config).
   - *Stack in use:* Qwen3-VL-8B-Instruct (Q4) via a llama.cpp router behind the OpenAI
@@ -132,5 +136,12 @@ Per-item rationale lives in `DESIGN.md` §14.
   that links a *folded* duplicate copy and for stale sidecar entries (a `dismissed`
   path or `folded` keep that no longer exists on disk); a "show dismissed (N)" toggle
   to review/undo suppressions from the TUI (undo today = hand-edit `reconcile.toml`).
+- **Open from reconcile / doctor** — `o` already opens the *file* under the cursor
+  (orphans / duplicates / succession in reconcile; the finding's doc in doctor).
+  Follow-up: also open the full **detail view** for a row's document, **reusing** the
+  home detail pane rather than standing up a second surface. Worth a fable-advisor
+  pass on the cleanest seam (the reconcile/doctor modals currently *dismiss* with a
+  doc id for the home to open — a shared "open detail for id" path could serve both)
+  before building.
 - **Someday:** `createdTime` year-plausibility + "issued X expires Y" range parsing
   (fold into suggestions quality), slug finalization, Obsidian-vault confirmation.

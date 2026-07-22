@@ -18,10 +18,16 @@
 from datetime import date
 from pathlib import Path
 
-from dossier import suggest
+from dossier import scan, suggest
 from dossier.config import Config
 from dossier.model import Bundle, Document, SuggestedField, Suggestion, SuggestionState
 from dossier.store import Store
+
+
+def _reading(**fields: object) -> scan.ScanReading:
+    return scan.ScanReading.from_payload(
+        {"document_type": "X", "confidence": 0.9, **fields}, model="m"
+    )
 
 
 def _only(doc: Document) -> Suggestion:
@@ -162,3 +168,68 @@ def test_suggestions_sidecar_round_trip(tmp_path: Path):
     first = config.suggestions_path.read_bytes()
     store.save_suggestions(store.load_suggestions())
     assert config.suggestions_path.read_bytes() == first  # sorted, deterministic
+
+
+# -- scan-reading suggestions (Phase 7 #3) -----------------------------------
+
+
+def test_scan_validity_window_suggests_issue_and_expiry():
+    doc = Document(id="coc", name="CoC card")  # no dates on the doc yet
+    reading = _reading(
+        issue_date_text="14 Oct 2021",
+        expiry_date_text="28 Sep 2026",
+        is_validity_period=True,
+    )
+    live = suggest.live(doc, SuggestionState(), reading)
+    fields = {s.field for s in live}
+    assert {SuggestedField.ISSUE, SuggestedField.EXPIRY} <= fields
+    expiry = next(s for s in live if s.field is SuggestedField.EXPIRY)
+    assert expiry.values == ("2026-09-28",) and expiry.source == "scan"
+
+
+def test_scan_non_window_two_dates_becomes_a_notes_period():
+    doc = Document(id="ss", name="Sea Service Testimonial")
+    reading = _reading(  # a service period the VLM did NOT flag as a validity window
+        issue_date_text="04-May 2025",
+        expiry_date_text="13-Mar-2025",
+        is_validity_period=False,
+    )
+    live = suggest.live(doc, SuggestionState(), reading)
+    assert [s.field for s in live] == [SuggestedField.NOTES]
+    assert live[0].values == ("2025-03-13", "2025-05-04")  # sorted low..high
+    assert live[0].source == "scan"
+
+
+def test_scan_expiry_dropped_when_the_doc_already_has_one():
+    doc = Document(id="m", name="Medical", expiry_date=date(2026, 7, 10))
+    reading = _reading(
+        issue_date_text="11 July 2024",
+        expiry_date_text="10 July 2026",
+        is_validity_period=True,
+    )
+    live = suggest.live(doc, SuggestionState(), reading)
+    assert all(s.field is not SuggestedField.EXPIRY for s in live)  # satisfied
+    assert any(s.field is SuggestedField.ISSUE for s in live)
+
+
+def test_name_and_scan_agreeing_dedup_to_one_row():
+    doc = Document(id="v", name="US Visa 12-Jan-2026")  # name → issue 2026-01-12
+    reading = _reading(issue_date_text="12-Jan-2026", is_validity_period=False)
+    issues = [
+        s
+        for s in suggest.live(doc, SuggestionState(), reading)
+        if s.field is SuggestedField.ISSUE
+    ]
+    assert len(issues) == 1  # name and scan agree → shown once
+
+
+def test_scan_numeric_date_reads_day_first_with_verbatim_rationale():
+    doc = Document(id="c", name="Cert")
+    reading = _reading(issue_date_text="06/09/2024", is_validity_period=False)
+    issue = next(
+        s
+        for s in suggest.live(doc, SuggestionState(), reading)
+        if s.field is SuggestedField.ISSUE
+    )
+    assert issue.values == ("2024-09-06",)  # UK day-first: 6 Sep, not 9 Jun
+    assert "06/09/2024" in issue.rationale  # verbatim source shown, for the user
