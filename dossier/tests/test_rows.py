@@ -54,17 +54,17 @@ def test_dense_name_left_status_right():
     assert line.index("exp 15 Jan 34") > line.index("British Passport")
 
 
-def test_expired_has_permanent_marker_ok_does_not():
+def test_compact_gutter_marks_every_status():
     doc = Document(id="x", name="IDP 1926", expiry_date=date(2026, 3, 10))
-    expired = _render(
-        rows.doc_row(_view(doc, expiry=ExpiryStatus.EXPIRED), mode=RowMode.COMPACT)
-    )
-    assert expired.startswith("!")  # permanent cue in the marker gutter
-    assert "IDP 1926" in expired
 
-    ok = _render(rows.doc_row(_view(doc, expiry=ExpiryStatus.OK), mode=RowMode.COMPACT))
-    assert "!" not in ok  # no marker for an ok document
-    assert "IDP 1926" in ok
+    def gutter(status: ExpiryStatus) -> str:
+        return _render(rows.doc_row(_view(doc, expiry=status), mode=RowMode.COMPACT))
+
+    assert gutter(ExpiryStatus.EXPIRED).startswith("!")  # attention
+    assert gutter(ExpiryStatus.EXPIRING).startswith("~")
+    assert gutter(ExpiryStatus.OK).startswith("+")  # an icon, not a blank gutter
+    assert gutter(ExpiryStatus.NONE).startswith("·")  # no-expiry still anchored
+    assert "IDP 1926" in gutter(ExpiryStatus.NONE)
 
 
 def test_marker_switches_ascii_to_nerd():
