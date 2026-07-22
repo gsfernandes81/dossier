@@ -33,6 +33,7 @@ from dossier import (
     dedup_cache,
     dedup_hash,
     doctor,
+    export,
     migrate,
     reconcile,
     reset,
@@ -120,15 +121,15 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
     export_path: Path = args.notion_export
     try:
-        export = json.loads(export_path.read_text(encoding="utf-8"))
+        export_data = json.loads(export_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"error: could not read export {export_path}: {exc}", file=sys.stderr)
         return 1
-    if not isinstance(export, dict):
+    if not isinstance(export_data, dict):
         print("error: the export JSON must be an object", file=sys.stderr)
         return 1
 
-    plan = migrate.build_plan(export, migrate.build_file_index(config))
+    plan = migrate.build_plan(export_data, migrate.build_file_index(config))
     _print_migration_report(plan, verbose=args.verbose)
 
     if args.apply:
@@ -311,6 +312,54 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    """Copy (or symlink) a bundle's files into an external folder."""
+    try:
+        config = Config.load()
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    store = Store(config)
+    bundles = store.load_bundles()
+    if args.bundle not in bundles:
+        available = ", ".join(sorted(bundles)) or "(none)"
+        print(
+            f"error: unknown bundle '{args.bundle}'. Known: {available}",
+            file=sys.stderr,
+        )
+        return 1
+
+    dest_raw = args.to or bundles[args.bundle].export_dir
+    if not dest_raw:
+        print(
+            "error: no destination — pass --to DIR or set the bundle's export_dir",
+            file=sys.stderr,
+        )
+        return 1
+    dest = Path(dest_raw).expanduser()
+
+    plan = export.build_export_plan(
+        store.load_all(),
+        args.bundle,
+        root=config.syncthing_root,
+        dest=dest,
+        force=args.force,
+    )
+    print(f"export {args.bundle} → {dest}")
+    for item in plan.problems:
+        print(f"  skip  {item.name}  ({item.problem})")
+    if args.dry_run:
+        print(f"\n{len(plan.ready)} file(s) would be exported (dry run).")
+        return 0
+
+    exported, errors = export.apply_export_plan(plan, symlink=args.symlink)
+    for message in errors:
+        print(f"  error {message}", file=sys.stderr)
+    print(f"\nexported {exported} file(s); {len(plan.problems)} skipped.")
+    return 1 if errors or plan.problems else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dossier",
@@ -403,6 +452,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="list every orphan instead of per-folder counts",
     )
     reconcile_p.set_defaults(func=cmd_reconcile)
+
+    export_p = sub.add_parser(
+        "export",
+        help="copy (or symlink) a bundle's files to an external folder",
+    )
+    export_p.add_argument("bundle", help="the bundle slug to export")
+    export_p.add_argument(
+        "--to", metavar="DIR", help="destination folder (else the bundle's export_dir)"
+    )
+    export_p.add_argument(
+        "--symlink",
+        action="store_true",
+        help="symlink instead of copy (needs Developer Mode on Windows)",
+    )
+    export_p.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite files already in the destination",
+    )
+    export_p.add_argument(
+        "--dry-run", action="store_true", help="print the plan without writing"
+    )
+    export_p.set_defaults(func=cmd_export)
 
     return parser
 
