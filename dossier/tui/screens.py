@@ -37,6 +37,7 @@ from dossier import doctor, query, suggest
 from dossier.config import Config
 from dossier.errors import StaleWriteError, StoreError
 from dossier.model import Bundle, Document, ExpiryStatus, Location
+from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import (
     forms,
@@ -58,7 +59,10 @@ class DoctorScreen(ModalScreen[str | None]):
     }
     #findings { height: 1fr; }
     """
-    BINDINGS = [Binding("escape", "close", "Close")]
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("o", "open_file", "Open"),
+    ]
 
     def __init__(self, store: Store, config: Config) -> None:
         super().__init__()
@@ -99,6 +103,30 @@ class DoctorScreen(ModalScreen[str | None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def action_open_file(self) -> None:
+        """Open the highlighted finding's document file (xdg/termux opener)."""
+        option_id = _highlighted_id(self.query_one("#findings", OptionList))
+        if option_id is None:
+            return
+        doc_id = option_id.split(self._SEP, 1)[0]
+        doc = next((d for d in self._store.load_all() if d.id == doc_id), None)
+        if doc is None:
+            return
+        rendition = doc.primary_rendition()
+        if rendition is None:
+            self.notify(f"{doc.name}: no digital file linked", severity="warning")
+            return
+        path = query.resolve_path(self._config.syncthing_root, rendition.path)
+        if not path.exists():
+            self.notify(f"file not found: {path}", severity="error")
+            return
+        try:
+            open_file(path)
+        except OpenError as exc:
+            self.notify(str(exc), severity="error")
+        else:
+            self.notify(f"opened {doc.name}")
 
     @on(OptionList.OptionSelected)
     def _open(self, event: OptionList.OptionSelected) -> None:
