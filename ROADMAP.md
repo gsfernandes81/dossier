@@ -18,8 +18,9 @@ slugs, dates + chronological surface, folder→bundle suggestions, `ds export`).
 Phase 7 (vision) is **done** — `ds scan` reads linked scans with a local VLM into
 grounded readings that drive content-based succession (a reconcile tab), expiry/issue
 suggestions (the detail pane), and per-run model selection; all verified on the real
-store. **Phase 8 (organize, #4) is next.** Phases 9–11 sketch the **long horizon** —
-intake, preparedness, answers — turning the catalogue into a living system.
+store. **Phase 8 (organize, #4) is next.** Phases 9–13 sketch the **long horizon** —
+intake, preparedness, answers, durability, platform hardening — turning the
+catalogue into a living system.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -145,6 +146,12 @@ keeps the catalogue accurate in three years, and what makes owning the *whole* t
 - [ ] **Scale to the full tree** (M) — with per-doc cost near zero, revive `ds import`
   (bulk folder ingest, deferred since v1) and grow from the curated 137 docs to the
   ~900-file `Official Documents/` tree, riding the same propose-review-accept card.
+- [ ] **Phone intake rides sync-back — no on-phone VLM** (S) — a photo taken on the
+  phone syncs home via Syncthing; the desktop auto-scans new files (the Phase 13
+  service) and the reading syncs back via `scans.toml` within hours — fine for
+  documents. When the desktop is reachable, the phone's `ds scan` may instead point
+  at its llama-server (already just per-device URL config). Vision inference never
+  runs on the phone.
 
 ## Phase 10 — Preparedness: checklists, event-aware validity, reminders  *(long horizon)*
 Bundles are the app's real job (gather → check → submit, DESIGN §5) but today they are
@@ -164,12 +171,52 @@ matters, against the date you need the document, not just today.
 ## Phase 11 — Answers: content search & ask  *(long horizon)*
 `.dossier/scans.toml` already holds structured, grounded readings of every linked scan
 — currently used only for date suggestions and succession. Make the corpus queryable:
-find documents by *what they say*, not what they were named.
-- [ ] **Content search** (M) — `/` (and `ds open`) also matches scan-reading text, so
-  "the doc with my INDoS number" is findable when name/tags don't mention it.
-- [ ] **`ds ask`** (L) — a small retrieval layer over readings + the same local VLM
-  stack to answer field questions offline: "what's my CDC number?", "which visa did I
-  use for the 2024 India trip?".
+find documents by *what they say*, not what they were named. Guiding split: **vision
+is enrichment at scan time (desktop-only); queries are text, on every device.** A
+query never needs a VLM, so ask stays fast, cool, and battery-cheap on the phone.
+- [ ] **Reading transcripts** (S) — extend `ScanReading` with a full-text transcript
+  (+ keywords) emitted by the desktop VLM during the pass it already makes; synced via
+  `scans.toml`, so every device gets richer search material for free.
+- [ ] **Content search** (M) — `/` (and `ds open`) also matches reading text/
+  transcripts, so "the doc with my INDoS number" is findable when name/tags don't
+  mention it. Pure text search — no model, instant everywhere.
+- [ ] **`ds ask` — retrieval-first** (M) — tiered: **Tier 0, no model** — structured
+  field lookups ("when does my ENG-1 expire?") and BM25 over readings answer most
+  questions deterministically. **Tier 1, small text-only model** — a 1–2B Q4 text
+  model (e.g. Qwen3-1.7B) composes an answer from the retrieved snippets (~1–2k
+  tokens of context): seconds on a phone CPU, offline. The VLM is never in the query
+  path.
+
+## Phase 12 — Bulletproof sync conflicts  *(long horizon)*
+Today's handling (DESIGN §6) *contains* conflicts — the loader excludes
+`.sync-conflict-*`, the TUI shows a banner, `ds doctor` lists them with a field-diff.
+The bar for this phase: **no Syncthing conflict, on any sidecar, can silently lose an
+edit — through any means necessary.**
+- [ ] **Field-level three-way merge** (M) — when a conflict's changes don't overlap
+  (different frontmatter fields / different docs in a toml), merge automatically and
+  archive the conflict file; only overlapping edits need a human.
+- [ ] **TUI resolve surface** (M) — a per-field pick UI for genuine overlaps (ours /
+  theirs / edit), replacing "go run doctor and hand-edit"; resolved conflict files are
+  archived to the local history dir, never deleted outright.
+- [ ] **Cover every sidecar** (M) — documents get the attention today; extend
+  detection + merge to `reconcile.toml`, `suggestions.toml`, `scans.toml`,
+  `bundles.toml`, `locations.toml`, and synced `config.toml`.
+- [ ] **Fault-injection tests** (M) — simulate concurrent edits, Syncthing conflict
+  renames, stale writes, and partial syncs in the test suite; prove the no-silent-loss
+  guarantee instead of asserting it.
+
+## Phase 13 — Platform hardening & the scan service  *(long horizon)*
+- [ ] **Cross-platform test matrix** (M) — CI proves Windows, Linux, and Termux, not
+  just "pure Python so probably fine": platform-gated tests for `platform_open`,
+  path/case handling, atomic writes (`EXDEV`), and the PTY driver on each OS.
+  Investigate desktop Termux testing (qemu / Android emulator / proot-distro) for the
+  Termux leg — **drop it if the maintenance cost outweighs the coverage**; a documented
+  on-device smoke checklist is the fallback.
+- [ ] **`ds scan` service install** (M) — one command installs the auto-scan as a
+  Windows Scheduled Task / systemd user timer that scans new files in the background
+  (what Phase 9's sync-back intake rides on). **Battery-aware by requirement**: never
+  runs on battery or when any low-power/power-saver mode is active — plugged-in and
+  idle only; skips cleanly (exit 0, logged) when gated.
 
 ## Notes
 - **Quick wins:** `ds reset` (S), the `ignore_expiry` toggle (S).
