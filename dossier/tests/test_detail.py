@@ -21,7 +21,7 @@ from rich.console import Console, RenderableType
 
 from dossier import query
 from dossier.model import Document, ExpiryStatus, FileStatus, Rendition
-from dossier.tui import detail
+from dossier.tui import detail, glyphs
 
 
 def _view(
@@ -113,3 +113,33 @@ def test_render_detail_notes_no_file_and_ignored_expiry():
     assert "No digital file linked" in out
     assert "expiry ignored" in out
     assert "kept for reference" in out
+
+
+def test_render_detail_prefixes_nerd_field_icons():
+    doc = Document(
+        id="p",
+        name="Passport",
+        tags=["identity"],
+        bundles=["us-visa"],
+        issue_date=date(2024, 1, 1),
+    )
+    out = _text(
+        detail.render_detail(
+            _view(doc),
+            location_label="File",
+            chain=[],
+            superseded_by=None,
+            glyphs=glyphs.NERD,
+        )
+    )
+    assert glyphs.NERD.location in out  # location field icon
+    assert glyphs.NERD.calendar in out  # date field icon
+    assert glyphs.NERD.tag in out  # tags field icon
+    assert glyphs.NERD.bundle in out  # bundles field icon
+    # ASCII default keeps the plain labels (no icons).
+    plain = _text(
+        detail.render_detail(
+            _view(doc), location_label="File", chain=[], superseded_by=None
+        )
+    )
+    assert glyphs.NERD.location not in plain

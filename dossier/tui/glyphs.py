@@ -23,8 +23,9 @@ have a Nerd Font, so this is per-device, not synced):
 * ``ascii`` — plain fallbacks (``!``/``~``/``P``/``D``) for terminals without a
   Nerd Font, where the private-use codepoints would render as boxes.
 
-The Nerd Font codepoints are the original Font Awesome 4 range (U+F0xx–U+F1xx),
-present in every Nerd Font patch.
+Nerd codepoints are written as ``\\uXXXX`` escapes (the original Font Awesome 4
+range, U+F0xx–U+F2xx, present in every Nerd Font patch) so the source stays
+readable in editors that can't render private-use glyphs; the comment names each.
 """
 
 from __future__ import annotations
@@ -43,23 +44,53 @@ DEFAULT_STYLE = GlyphStyle.NERD
 
 @dataclass(frozen=True)
 class GlyphSet:
-    """The glyphs a row / detail renderer draws, resolved from a style."""
+    """The glyphs a row / detail renderer draws, resolved from a style.
+
+    The first five are inline status markers; the rest are leading icons for
+    labels and controls and default to empty, so the ASCII set simply omits them
+    (leaving the plain text label) while the Nerd set supplies an icon.
+    """
 
     expired: str  # a document past its expiry
     expiring: str  # inside the warn window
     physical: str  # a physical copy exists
     digital: str  # a digital file exists
     primary: str  # the primary rendition marker
+    # Leading icons (empty in ASCII).
+    folder: str = ""  # a physical location
+    inbox: str = ""  # the "All" locations row
+    unlocated: str = ""  # the "no location" row
+    location: str = ""  # the detail location field
+    calendar: str = ""  # a date field
+    tag: str = ""  # the tags field
+    bundle: str = ""  # the bundles field / action
+    link: str = ""  # supersession
+    note: str = ""  # notes
+    open: str = ""  # the open-file action
+    new: str = ""  # the new-document action
+    keyboard: str = ""  # the raise-keyboard action
 
 
 ASCII = GlyphSet(expired="!", expiring="~", physical="P", digital="D", primary="*")
 
 NERD = GlyphSet(
-    expired="",  #  nf-fa-warning
-    expiring="",  #  nf-fa-clock_o
-    physical="",  #  nf-fa-file_text
-    digital="",  #  nf-fa-paperclip
-    primary="",  #  nf-fa-star
+    expired="",  # nf-fa-warning
+    expiring="",  # nf-fa-clock_o
+    physical="",  # nf-fa-file_text
+    digital="",  # nf-fa-paperclip
+    primary="",  # nf-fa-star
+    folder="",  # nf-fa-folder
+    inbox="",  # nf-fa-list_ul
+    unlocated="",  # nf-fa-question_circle
+    location="",  # nf-fa-map_marker
+    calendar="",  # nf-fa-calendar
+    tag="",  # nf-fa-tag
+    bundle="",  # nf-fa-archive
+    link="",  # nf-fa-link
+    note="",  # nf-fa-sticky_note
+    open="",  # nf-fa-external_link
+    new="",  # nf-fa-plus
+    keyboard="",  # nf-fa-keyboard_o
 )
 
 _BY_STYLE = {GlyphStyle.ASCII: ASCII, GlyphStyle.NERD: NERD}
