@@ -29,10 +29,12 @@ device against it.
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import platformdirs
+import tomli_w
 
 from dossier.errors import ConfigError
 
@@ -183,3 +185,28 @@ def _read_toml(path: Path) -> dict[str, object]:
             return tomllib.load(fh)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ConfigError(f"could not read {path}: {exc}") from exc
+
+
+def update_per_device(changes: Mapping[str, object]) -> None:
+    """Merge ``changes`` into the per-device config file, preserving other keys.
+
+    Read-modify-write so ``syncthing_root`` and any unknown/future keys survive
+    when the settings screen writes back just glyphs or the scan settings.
+    """
+    _merge_toml(per_device_config_path(), changes)
+
+
+def update_synced(config: Config, changes: Mapping[str, object]) -> None:
+    """Merge ``changes`` into the synced ``.dossier/config.toml`` (keeps ``include``
+    / ``ignore`` and any hand-authored keys)."""
+    _merge_toml(config.synced_config_path, changes)
+
+
+def _merge_toml(path: Path, changes: Mapping[str, object]) -> None:
+    # Lazy import: store.py imports config.py, so this avoids an import cycle.
+    from dossier.store import atomic_write_bytes
+
+    current = _read_toml(path) if path.is_file() else {}
+    current.update(changes)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_bytes(path, tomli_w.dumps(current).encode("utf-8"))

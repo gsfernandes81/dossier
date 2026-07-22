@@ -21,10 +21,47 @@ from datetime import date
 
 from textual.app import App
 from textual.binding import Binding
+from textual.command import Hit, Hits, Provider
 
 from dossier.config import Config
 from dossier.store import Store
 from dossier.tui.home import HomeScreen
+
+
+class DossierCommands(Provider):
+    """Command-palette (ctrl+p) entries for the scan + settings actions.
+
+    These delegate to the home screen so a single implementation backs the
+    binding, the help panel, and the palette.
+    """
+
+    @property
+    def _commands(self) -> list[tuple[str, str, str]]:
+        # (title, home action, help)
+        return [
+            ("Settings", "settings", "Icons, scan endpoint/model, expiry threshold"),
+            ("Scan current document (vision)", "scan_doc", "Read the current doc"),
+            ("Scan all linked (vision)", "scan_all", "Read every linked document"),
+            ("Cancel vision scan", "cancel_scan", "Stop a running vision scan"),
+            ("Change scan model", "settings", "Pick the VLM model (opens Settings)"),
+        ]
+
+    async def search(self, query: str) -> Hits:
+        matcher = self.matcher(query)
+        for title, action, help_text in self._commands:
+            score = matcher.match(title)
+            if score > 0:
+                yield Hit(
+                    score,
+                    matcher.highlight(title),
+                    self._runner(action),
+                    help=help_text,
+                )
+
+    def _runner(self, action: str):
+        app = self.app
+        assert isinstance(app, DossierApp)
+        return getattr(app.home, f"action_{action}")  # bound; called on selection
 
 
 class DossierApp(App[None]):
@@ -32,6 +69,7 @@ class DossierApp(App[None]):
 
     TITLE = "dossier"
     BINDINGS = [Binding("q", "quit", "Quit")]
+    COMMANDS = App.COMMANDS | {DossierCommands}
 
     def __init__(
         self,

@@ -1141,3 +1141,83 @@ def test_linux_driver_exposes_mouse_toggle():
 
     assert hasattr(LinuxDriver, "_enable_mouse_support")
     assert hasattr(LinuxDriver, "_disable_mouse_support")
+
+
+@pytest.mark.asyncio
+async def test_scan_doc_reads_and_persists_the_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from dossier import scan as scan_mod
+
+    store, config = _setup(tmp_path)  # passport links a real passport.pdf
+    reading = scan_mod.ScanReading.from_payload(
+        {
+            "document_type": "Passport",
+            "expiry_date_text": "01 Jan 2030",
+            "is_validity_period": True,
+            "confidence": 0.9,
+        },
+        model="m",
+    )
+    monkeypatch.setattr(scan_mod, "extract", lambda path, cfg: reading)  # no VLM
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        home.action_scan_doc()  # starts the @work(thread=True) vision worker
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+    saved = store.load_scans()
+    assert "passport" in saved  # the reading was persisted
+    assert saved["passport"].expiry_date_text == "01 Jan 2030"
+    assert saved["passport"].fingerprint  # fingerprinted so a re-scan skips it
+
+
+@pytest.mark.asyncio
+async def test_settings_screen_saves_and_persists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from dossier.tui.screens import SettingsScreen
+
+    store, config = _setup(tmp_path)
+    device = tmp_path / "device.toml"
+    device.write_text(f'syncthing_root = "{tmp_path.as_posix()}"\nglyphs = "nerd"\n')
+    monkeypatch.setattr("dossier.config.per_device_config_path", lambda: device)
+    monkeypatch.setattr("dossier.tui.screens.scan.list_models", lambda cfg: [])
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = SettingsScreen(config)
+        app.push_screen(screen)
+        await pilot.pause()
+        screen.query_one("#set-threshold", Input).value = "45"
+        screen.query_one("#set-url", Input).value = "http://box:9000/v1"
+        screen.action_save()
+        await pilot.pause()
+    assert config.expiry_threshold_days == 45  # live config mutated
+    assert config.scan_base_url == "http://box:9000/v1"
+    import tomllib
+
+    saved = tomllib.loads(device.read_text())
+    assert saved["scan_base_url"] == "http://box:9000/v1"  # persisted per-device
+    assert saved["syncthing_root"] == tmp_path.as_posix()  # preserved
+
+
+@pytest.mark.asyncio
+async def test_command_palette_routes_to_home_actions(tmp_path: Path):
+    from dossier.tui.app import DossierCommands
+
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test():
+        provider = DossierCommands(app.screen)
+        # Every advertised command names an existing home action, and its runner
+        # is that bound method — guards against an action-name typo drifting from
+        # the HomeScreen binding it delegates to.
+        for _title, action, _help in provider._commands:
+            assert provider._runner(action) == getattr(app.home, f"action_{action}")
+        # A fuzzy query surfaces the matching commands as palette hits.
+        hits = [hit async for hit in provider.search("scan")]
+        titles = {hit.text for hit in hits}
+    assert "Scan current document (vision)" in titles
+    assert "Settings" not in titles  # unrelated command doesn't match "scan"
