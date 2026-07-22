@@ -13,8 +13,10 @@ Per-item rationale lives in `DESIGN.md` §14.
 - [x] **Expiries from the Notion Marine Documents table** (authoritative) — #32
 - [ ] **`ds reset`** (S) — folder-data reset (clears `.dossier/` only, never the real
   files) + `--global` config reset. The safety net that makes re-importing painless.
-- [ ] **Apply the migration** *(milestone)* — `ds init` on the real Syncthing folder,
-  `ds migrate --apply`, review. The 5 marine expiries + the file links land.
+- [ ] **Apply the migration** *(milestone)* — the one-time real import: `ds init` on the
+  real Syncthing folder, `ds migrate` (dry-run → review → `--apply`). Writes the 137
+  document records — marine expiries + file links + locations — into `.dossier/`, so
+  the TUI holds your actual documents instead of fixtures. Dogfooding starts here.
 - [ ] **Fuzzy file-suggestion review flow** (M) — a TUI screen to accept/reject the
   ~47 suggested file matches the migration couldn't auto-link.
 
@@ -26,14 +28,29 @@ Per-item rationale lives in `DESIGN.md` §14.
 
 ## Phase 3 — Dedup by visual similarity  *(sooner rather than later, not first)*
 - [ ] **Near-duplicate detection** (M–L) — the same document scanned more than once
-  from different sources at different times. Compare renditions by perceptual hash
-  and/or image embeddings, and **propose merges** (keep one, fold the rest). Review
-  only, never automatic. Desktop pass over the linked files.
+  from different sources at different times. **Propose merges** (keep one rendition,
+  fold the rest); review only, never automatic.
+  - **No VLM required.** Baseline: **perceptual hashing** (`imagehash` over the
+    rasterized page) — cheap, GPU-free, catches most re-scans. *Benefits from* an image
+    **embedding** model (CLIP/SigLIP/DINOv2, or Qwen3-VL's vision encoder via llama.cpp)
+    for harder near-dupes (different source/crop/quality), and a generative **VLM only as
+    an optional confirmer** on the few borderline candidate pairs (running it on every
+    pair is O(n²), infeasible). Pipeline: pHash → optional embeddings → optional VLM
+    confirm.
 
-## Phase 4 — Dismissable suggestions  (replaces the name-based date system)
+## Phase 4 — Editing & search ergonomics  *(pulled up, per priority)*
+- [ ] **Editable detail pane (col 3)** (L) — edit every parameter inline (name, dates,
+  location/slot, tags, bundles, flags, renditions, `ignore_expiry`, supersession).
+  Absorbs the `e` edit modal and folds `b`/`s`/`m` into inline fields, freeing column 2
+  for navigation. (Gains an "accept suggestion" affordance once Phase 5 lands.)
+- [ ] **Search as an in-place Miller filter** (M) — keep the three columns during
+  search; filter the documents pane in place (root-wide), detail preview following the
+  highlight.
+
+## Phase 5 — Dismissable suggestions  (replaces the name-based date system)
 - [ ] **Suggestions framework** (M) — per-document suggestions for fields (esp.
   issue/expiry): accept, or **dismiss individually**; dismissals persist; never
-  auto-write.
+  auto-write. (Accepted in the editable pane from Phase 4.)
 - [ ] **Demote name parsing → suggestions** (M) — the current name-based date parsing
   stops being an authority and feeds the suggestions layer instead. We don't rely on
   filenames to decide whether a doc even has an expiry. Period-docs (sea-service
@@ -42,14 +59,6 @@ Per-item rationale lives in `DESIGN.md` §14.
   - *Motorcycle expiries* (CBT, etc.) aren't in the Marine table — they arrive here as
     name suggestions to accept, or via manual entry, until/unless a structured source
     exists.
-
-## Phase 5 — Editing & search ergonomics
-- [ ] **Editable detail pane (col 3)** (L) — edit every parameter inline; the natural
-  home for **accepting suggestions** and toggling `ignore_expiry`. Absorbs the `e`
-  edit modal and folds `b`/`s`/`m` into inline fields, freeing column 2 for navigation.
-- [ ] **Search as an in-place Miller filter** (M) — keep the three columns during
-  search; filter the documents pane in place (root-wide), detail preview following the
-  highlight.
 
 ## Phase 6 — Bundles & export
 - [ ] **`ds export`** (M) — export a bundle's files to an external folder (copy or
@@ -68,8 +77,9 @@ Per-item rationale lives in `DESIGN.md` §14.
 
 ## Notes
 - **Quick wins:** `ds reset` (S), the `ignore_expiry` toggle (S).
-- **Dependencies:** the editable detail pane (Phase 5) re-homes `ignore_expiry` and
-  accept-suggestion — Phase 2 gives `ignore_expiry` a minimal key first; Phase 7
-  (vision) needs Phase 4 (suggestions) to land its proposals into.
+- **Dependencies:** the editable detail pane (Phase 4) is the home for accepting
+  suggestions — it ships with direct editing first and gains the accept affordance when
+  the suggestions framework (Phase 5) lands. Phase 7 (vision) needs Phase 5 to land its
+  proposals into.
 - **Someday:** `createdTime` year-plausibility + "issued X expires Y" range parsing
   (fold into suggestions quality), slug finalization, Obsidian-vault confirmation.
