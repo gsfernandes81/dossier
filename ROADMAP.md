@@ -17,8 +17,15 @@ Per-item rationale lives in `DESIGN.md` §14.
   real Syncthing folder, `ds migrate` (dry-run → review → `--apply`). Writes the 137
   document records — marine expiries + file links + locations — into `.dossier/`, so
   the TUI holds your actual documents instead of fixtures. Dogfooding starts here.
-- [ ] **Fuzzy file-suggestion review flow** (M) — a TUI screen to accept/reject the
-  ~47 suggested file matches the migration couldn't auto-link.
+- [x] **Applied** on `…/Official Documents` — 137 docs, 5 marine expiries, 57 files
+  auto-linked. Old store backed up by `ds reset`.
+- [ ] **Reconcile / orphan view** (S–M) — a `ds reconcile` (or doctor check) listing
+  files under the root **not linked to any document**, plus docs whose file is
+  missing. Makes an unsorted folder legible. *High value now* (the real import left
+  37 suggested + 42 no-match + 18 multi-match links).
+- [ ] **Fuzzy file-suggestion review flow** (M) — a TUI screen to accept/reject those
+  suggested file matches and manually link the no-matches. Includes *adopt orphan →
+  new document* for files that moved in but aren't in Notion.
 
 ## Phase 2 — Expiry watch (now backed by real data)
 - [ ] **`ignore_expiry` toggle** (S) — a keypress to drop residual old CDCs from the watch.
@@ -61,6 +68,15 @@ Per-item rationale lives in `DESIGN.md` §14.
     exists.
 
 ## Phase 6 — Bundles & export
+- [ ] **Bundle grouping** (M) — several joining-docs / travel-docs bundles want
+  structure:
+  - **Hierarchical bundle slugs** like tags (`joining/mv-ship-2024`, `travel/india-2024`,
+    `visa/us-2025`); group by the top segment in a bundles pane (*joining ▸ / travel ▸*).
+  - An optional **`date`** on a bundle (the joining/trip date) + a **`created`** stamp →
+    **sort bundles chronologically** (date, else creation order).
+  - A **bundles surface** grouped by category + sorted by date (sibling of the watch).
+  - **Folder → bundle suggestions** — the `Travel Documents/…` / joining folders become
+    suggested bundles to accept.
 - [ ] **`ds export`** (M) — export a bundle's files to an external folder (copy or
   symlink), the original "gather the files for this application" goal.
 
@@ -81,5 +97,9 @@ Per-item rationale lives in `DESIGN.md` §14.
   suggestions — it ships with direct editing first and gains the accept affordance when
   the suggestions framework (Phase 5) lands. Phase 7 (vision) needs Phase 5 to land its
   proposals into.
+- **Organize mode** *(feature creep, opt-in, later)* — propose a canonical folder +
+  filename for each *linked* file from its document record (category / name / date), as
+  a plan you review and apply. Never auto-moves. The thing that would actually *sort* a
+  messy `Official Documents/` tree.
 - **Someday:** `createdTime` year-plausibility + "issued X expires Y" range parsing
   (fold into suggestions quality), slug finalization, Obsidian-vault confirmation.
