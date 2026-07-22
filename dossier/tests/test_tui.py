@@ -35,6 +35,7 @@ from dossier.tui.screens import (
     DoctorScreen,
     MoveScreen,
     SupersedeScreen,
+    WatchScreen,
 )
 
 TODAY = date(2026, 7, 21)
@@ -374,6 +375,27 @@ async def test_action_bar_hidden_without_touch(tmp_path: Path):
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test():
         assert not app.home.query_one("#actionbar").display
+
+
+@pytest.mark.asyncio
+async def test_watch_screen_lists_tracked_and_ignores(tmp_path: Path):
+    store, config = _setup(tmp_path)  # coc has an expiry (tracked); passport does not
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = WatchScreen(store, config, today=TODAY)
+        app.push_screen(screen)
+        await pilot.pause()
+        watch = screen.query_one("#watch", OptionList)
+        assert watch.option_count == 1  # only the doc with an expiry is tracked
+        assert watch.get_option_at_index(0).id == "coc"
+
+        watch.highlighted = 0
+        await pilot.pause()
+        screen.action_ignore()  # drop it from the watch
+        await pilot.pause()
+        assert watch.option_count == 0
+
+    assert store.load("coc").ignore_expiry is True
 
 
 def test_linux_driver_exposes_mouse_toggle():

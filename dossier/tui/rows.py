@@ -96,6 +96,26 @@ def doc_row(
     return _dense(view, superseded=superseded, show_issue=show_issue, glyphs=glyphs)
 
 
+def watch_row(
+    view: DocumentView, *, location_label: str | None = None, glyphs: GlyphSet = ASCII
+) -> Text:
+    """A row for the expiry-watch surface: date first, then name · location · tags,
+    coloured by expiry status (``⚠ 10 Jul 26   ENG-1 Med Cert   Cert File · 2``)."""
+    doc = view.document
+    style = _STATUS_STYLE[view.expiry]
+    marker = _marker(view.expiry, glyphs)
+    row = Text()
+    row.append(f"{marker or ' '} ", style=style)
+    dated = _fmt(doc.expiry_date) if doc.expiry_date is not None else ""
+    row.append(f"{dated:>9}", style=style)
+    row.append("  ")
+    row.append(doc.name or doc.id)
+    meta = [part for part in (location_label, " ".join(doc.tags) or None) if part]
+    if meta:
+        row.append("   " + "  ".join(meta), style="dim")
+    return row
+
+
 # -- the three shapes --------------------------------------------------------
 
 
