@@ -33,6 +33,7 @@ from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundleScreen,
     DetailScreen,
+    DocPickerScreen,
     DoctorScreen,
     MoveScreen,
     SupersedeScreen,
@@ -478,6 +479,104 @@ async def test_reconcile_ack_missing_persists(tmp_path: Path):
         assert screen._report is not None
         assert not screen._report.missing
         assert store.load_reconcile().missing_ok == {"gone.pdf": {"d"}}
+
+
+async def _cursor_on_orphan(pilot, screen, folder_name: str):
+    """Switch to Orphans, expand a folder, and put the cursor on its first leaf."""
+    screen.query_one(TabbedContent).active = "tab-orphans"
+    tree = screen.query_one("#orphans", Tree)
+    folder = next(n for n in tree.root.children if n.data == folder_name)
+    folder.expand()
+    await pilot.pause()
+    tree.move_cursor(folder.children[0])
+
+
+@pytest.mark.asyncio
+async def test_reconcile_link_orphan_to_existing_document(tmp_path: Path):
+    root = tmp_path / "root"  # history_dir sibling, so backups aren't orphans
+    root.mkdir()
+    config = Config(syncthing_root=root, history_dir=tmp_path / "_hist")
+    store = Store(config)
+    store.ensure_layout()
+    (root / "Marine").mkdir()
+    (root / "Marine" / "CoC Card.pdf").write_bytes(b"x")  # orphan
+    store.save(Document(id="coc", name="CoC Card"))  # a doc with no files yet
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        await _cursor_on_orphan(pilot, screen, "Marine")
+        screen.action_link()
+        await pilot.pause()
+        picker = app.screen
+        assert isinstance(picker, DocPickerScreen)
+        picker.dismiss("coc")  # choose the document
+        await pilot.pause()
+        doc = store.load("coc")
+        assert [r.path for r in doc.files] == ["Marine/CoC Card.pdf"]
+        assert doc.files[0].primary  # first rendition becomes primary
+        assert doc.has_digital
+        assert screen._report is not None
+        assert not screen._report.orphans  # now linked → no longer an orphan
+
+
+@pytest.mark.asyncio
+async def test_reconcile_adopt_orphan_creates_document(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "Marine").mkdir()
+    (tmp_path / "Marine" / "New Cert.pdf").write_bytes(b"x")  # orphan, no doc yet
+    # (adopt creates a new doc → no overwrite backup, so root==tmp_path is fine)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        await _cursor_on_orphan(pilot, screen, "Marine")
+        screen.action_adopt()
+        await pilot.pause()
+        detail = app.screen
+        assert isinstance(detail, DetailScreen)
+        assert detail.query_one("#name", Input).value == "New Cert"  # prefilled
+        detail.action_save()
+        await pilot.pause()
+        doc = store.load("new-cert")  # slug of the prefilled name
+        assert [r.path for r in doc.files] == ["Marine/New Cert.pdf"]
+        assert doc.has_digital
+        assert screen._report is not None
+        assert not screen._report.orphans  # adopted → no longer an orphan
+
+
+@pytest.mark.asyncio
+async def test_reconcile_unlink_dead_rendition(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    store.save(
+        Document(
+            id="d",
+            name="Doc",
+            has_digital=True,
+            files=[Rendition("x", "gone.pdf", primary=True)],
+        )
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReconcileScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        screen.query_one(TabbedContent).active = "tab-missing"
+        screen.query_one("#missing", OptionList).highlighted = 0
+        await pilot.pause()
+        screen.action_unlink()
+        await pilot.pause()
+        doc = store.load("d")
+        assert doc.files == []
+        assert doc.has_digital is False
+        assert screen._report is not None
+        assert not screen._report.missing
 
 
 def test_linux_driver_exposes_mouse_toggle():

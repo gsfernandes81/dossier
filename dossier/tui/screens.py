@@ -330,6 +330,61 @@ class SupersedeScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class DocPickerScreen(ModalScreen[str | None]):
+    """Pick a document from a filterable list. Dismisses its id, or ``None``.
+
+    A read-only sibling of :class:`SupersedeScreen` — it *chooses* a document and
+    hands the id back to the caller instead of writing anything itself.
+    """
+
+    CSS = """
+    DocPickerScreen { align: center middle; }
+    #ppanel {
+        width: 80%; max-width: 90; height: 80%;
+        padding: 1 2; background: $panel; border: round $primary;
+    }
+    #pfilter { margin-bottom: 1; }
+    #pcandidates { height: 1fr; }
+    """
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, docs: list[Document], *, prompt: str, initial: str = "") -> None:
+        super().__init__()
+        self._docs = docs
+        self._prompt = prompt
+        self._initial = initial
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="ppanel"):
+            yield Label(self._prompt)
+            yield Input(value=self._initial, placeholder="filter…", id="pfilter")
+            yield OptionList(id="pcandidates")
+
+    def on_mount(self) -> None:
+        self._populate(self._initial)
+        self.query_one("#pfilter", Input).focus()
+
+    def _populate(self, needle: str) -> None:
+        options = self.query_one("#pcandidates", OptionList)
+        options.clear_options()
+        needle = needle.casefold()
+        for doc in self._docs:
+            if needle and needle not in f"{doc.name} {doc.id}".casefold():
+                continue
+            options.add_option(Option(doc.name or doc.id, id=doc.id))
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "pfilter":
+            self._populate(event.value)
+
+    @on(OptionList.OptionSelected, "#pcandidates")
+    def _pick(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option_id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class BundleScreen(ModalScreen[bool]):
     """Toggle a document's bundle membership; type a name to make a new bundle."""
 
