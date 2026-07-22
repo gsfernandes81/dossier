@@ -196,69 +196,6 @@ class DoctorScreen(ModalScreen[str | None]):
             self.dismiss(event.option_id)
 
 
-class MoveScreen(ModalScreen[bool]):
-    """Move a document to a location + slot, shifting neighbours to insert."""
-
-    CSS = """
-    MoveScreen { align: center middle; }
-    #mpanel {
-        width: 70%; max-width: 80; height: auto;
-        padding: 1 2; background: $panel; border: round $primary;
-    }
-    #mpanel Input { margin-bottom: 1; }
-    #mbuttons { height: auto; align: right middle; }
-    #mbuttons Button { margin-left: 2; }
-    """
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("ctrl+s", "save", "Move"),
-    ]
-
-    def __init__(self, store: Store, docs: list[Document], doc: Document) -> None:
-        super().__init__()
-        self._store = store
-        self._docs = docs
-        self._doc = doc
-
-    def compose(self) -> ComposeResult:
-        doc = self._doc
-        with VerticalScroll(id="mpanel"):
-            yield Label(f"Move: {doc.name}")
-            yield Label("Permanent location (slug, blank to clear)")
-            yield Input(value=doc.perm_location or "", id="mloc")
-            yield Label("Slot (blank for none; inserting shifts neighbours)")
-            yield Input(value=forms.int_text(doc.perm_slot), id="mslot")
-            with Horizontal(id="mbuttons"):
-                yield Button("Cancel", id="mcancel")
-                yield Button("Move", id="mmove", variant="primary")
-
-    def action_cancel(self) -> None:
-        self.dismiss(False)
-
-    @on(Button.Pressed, "#mcancel")
-    def _on_cancel(self) -> None:
-        self.dismiss(False)
-
-    @on(Button.Pressed, "#mmove")
-    def _on_move(self) -> None:
-        self.action_save()
-
-    def action_save(self) -> None:
-        location = forms.slug(self.query_one("#mloc", Input).value)
-        try:
-            slot = forms.parse_int(self.query_one("#mslot", Input).value)
-        except ValueError:
-            self.notify("slot must be a whole number", severity="error")
-            return
-        try:
-            for doc in query.plan_move(self._docs, self._doc, location, slot):
-                self._store.save(doc)
-        except StoreError as exc:
-            self.notify(str(exc), severity="error")
-            return
-        self.dismiss(True)
-
-
 class SupersedeScreen(ModalScreen[bool]):
     """Pick the document a renewal replaces, setting its ``supersedes`` link."""
 

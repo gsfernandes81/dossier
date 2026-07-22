@@ -45,7 +45,6 @@ from dossier.tui.screens import (
     DetailScreen,
     DocPickerScreen,
     DoctorScreen,
-    MoveScreen,
     SupersedeScreen,
     TextPromptScreen,
     WatchScreen,
@@ -291,12 +290,14 @@ async def test_move_shifts_neighbours(tmp_path: Path):
     store.save(Document(id="z", name="Z", perm_location="pouch", perm_slot=1))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        z = app.home._doc_by_id("z")
-        assert z is not None
-        app.push_screen(MoveScreen(store, app.home._docs, z))
+        home = app.home
+        home.open_detail("z")
         await pilot.pause()
-        app.screen.query_one("#mloc", Input).value = "file"
-        app.screen.query_one("#mslot", Input).value = "1"
+        home.action_move()  # inline: start_edit focused on the location field
+        await pilot.pause()
+        pane = home.query_one("#detail", DetailPane)
+        pane.query_one("#f-perm", Input).value = "file"
+        pane.query_one("#f-perm-slot", Input).value = "1"
         await pilot.pause()
         await pilot.press("ctrl+s")
         await pilot.pause()

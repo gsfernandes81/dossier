@@ -63,7 +63,6 @@ from dossier.tui.screens import (
     BundleScreen,
     DetailScreen,
     DoctorScreen,
-    MoveScreen,
     SupersedeScreen,
     WatchScreen,
 )
@@ -522,10 +521,13 @@ class HomeScreen(Screen[None]):
 
     def action_move(self) -> None:
         doc = self._current_doc()
-        if doc is not None:
-            self.app.push_screen(
-                MoveScreen(self._store, self._docs, doc), self._after_edit
-            )
+        if doc is None:
+            return
+        if not self._show_detail:
+            self.open_detail(doc.id)
+        self.query_one("#detail", DetailPane).start_edit(
+            doc, self._docs, focus="f-perm"
+        )
 
     def action_watch(self) -> None:
         self.app.push_screen(

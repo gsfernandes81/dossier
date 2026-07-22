@@ -41,7 +41,7 @@ from textual.widgets import Checkbox, ContentSwitcher, Input, Label, Static, Tex
 from dossier.errors import StaleWriteError, StoreError
 from dossier.migrate import slugify
 from dossier.model import Document
-from dossier.query import DocumentView
+from dossier.query import DocumentView, plan_move
 from dossier.store import Store
 from dossier.tui import detail, forms
 from dossier.tui.glyphs import GlyphSet
@@ -54,7 +54,11 @@ _NAME = "f-name"
 _ISSUE = "f-issue"
 _EXPIRY = "f-expiry"
 _PERM = "f-perm"
+_PERM_SLOT = "f-perm-slot"
+_PERM_SUB = "f-perm-sub"
 _TEMP = "f-temp"
+_TEMP_SLOT = "f-temp-slot"
+_TEMP_SUB = "f-temp-sub"
 _TAGS = "f-tags"
 _PHYSICAL = "f-physical"
 _DIGITAL = "f-digital"
@@ -76,6 +80,9 @@ class DetailPane(VerticalScroll):
         margin-bottom: 1;
     }
     DetailPane #detail-form TextArea { height: 5; }
+    DetailPane .df-slotrow { height: auto; }
+    DetailPane .df-loc { width: 1fr; }
+    DetailPane .df-slot { width: 10; margin-left: 1; }
     DetailPane #f-flags { height: auto; margin-bottom: 1; }
     DetailPane #f-flags Checkbox { width: auto; margin-right: 2; border: none; }
     DetailPane .df-label { color: $text-muted; }
@@ -116,6 +123,7 @@ class DetailPane(VerticalScroll):
         self._glyphs = glyphs
         self.can_focus = True
         self._doc = Document()
+        self._docs: list[Document] = []  # the collection, for plan_move neighbours
         self._is_new = False
         self._focus_target = _NAME
         self._snapshot: tuple[object, ...] = ()
@@ -131,10 +139,28 @@ class DetailPane(VerticalScroll):
                 yield Input(id=_ISSUE, placeholder="YYYY-MM-DD", classes="df-field")
                 yield Label("Expiry date (YYYY-MM-DD)", classes="df-label")
                 yield Input(id=_EXPIRY, placeholder="YYYY-MM-DD", classes="df-field")
-                yield Label("Permanent location (slug)", classes="df-label")
-                yield Input(id=_PERM, classes="df-field")
-                yield Label("Temporary location (slug)", classes="df-label")
-                yield Input(id=_TEMP, classes="df-field")
+                yield Label(
+                    "Permanent location (slug · slot · sub)", classes="df-label"
+                )
+                with Horizontal(classes="df-slotrow"):
+                    yield Input(id=_PERM, classes="df-field df-loc")
+                    yield Input(
+                        id=_PERM_SLOT, placeholder="slot", classes="df-field df-slot"
+                    )
+                    yield Input(
+                        id=_PERM_SUB, placeholder="sub", classes="df-field df-slot"
+                    )
+                yield Label(
+                    "Temporary location (slug · slot · sub)", classes="df-label"
+                )
+                with Horizontal(classes="df-slotrow"):
+                    yield Input(id=_TEMP, classes="df-field df-loc")
+                    yield Input(
+                        id=_TEMP_SLOT, placeholder="slot", classes="df-field df-slot"
+                    )
+                    yield Input(
+                        id=_TEMP_SUB, placeholder="sub", classes="df-field df-slot"
+                    )
                 yield Label("Tags (space-separated)", classes="df-label")
                 yield Input(id=_TAGS, classes="df-field")
                 with Horizontal(id="f-flags"):
@@ -189,6 +215,7 @@ class DetailPane(VerticalScroll):
     ) -> None:
         """Enter edit mode over ``doc``. ``focus`` is the field id to land on."""
         self._doc = doc
+        self._docs = docs
         self._is_new = is_new
         self._focus_target = focus
         self._populate_form(doc)
@@ -211,25 +238,44 @@ class DetailPane(VerticalScroll):
         except ValueError as exc:
             self.notify(f"invalid date: {exc}", severity="error")
             return
+        try:
+            perm_slot = forms.parse_int(self.query_one(f"#{_PERM_SLOT}", Input).value)
+            perm_sub = forms.parse_int(self.query_one(f"#{_PERM_SUB}", Input).value)
+            temp_slot = forms.parse_int(self.query_one(f"#{_TEMP_SLOT}", Input).value)
+            temp_sub = forms.parse_int(self.query_one(f"#{_TEMP_SUB}", Input).value)
+        except ValueError:
+            self.notify("slot / sub must be whole numbers", severity="error")
+            return
         name = self.query_one(f"#{_NAME}", Input).value.strip()
         if self._is_new and not name:
             self.notify("a new document needs a name", severity="error")
             return
+
         doc.name = name
         if self._is_new:
             doc.id = forms.unique_id(self._store, slugify(name))
         doc.issue_date = issue
         doc.expiry_date = expiry
-        doc.perm_location = forms.slug(self.query_one(f"#{_PERM}", Input).value)
-        doc.temp_location = forms.slug(self.query_one(f"#{_TEMP}", Input).value)
         doc.tags = self.query_one(f"#{_TAGS}", Input).value.split()
         doc.has_physical = self.query_one(f"#{_PHYSICAL}", Checkbox).value
         doc.has_digital = self.query_one(f"#{_DIGITAL}", Checkbox).value
         doc.ignore_expiry = self.query_one(f"#{_IGNORE}", Checkbox).value
         doc.notes = self.query_one(f"#{_NOTES}", TextArea).text.strip()
+        doc.temp_location = forms.slug(self.query_one(f"#{_TEMP}", Input).value)
+        doc.temp_slot = temp_slot
+        doc.temp_subslot = temp_sub
+
+        # Permanent location: a changed location/slot shifts neighbours to insert
+        # (plan_move), so save every doc it touches — the moving one last.
+        perm_loc = forms.slug(self.query_one(f"#{_PERM}", Input).value)
+        to_save = [doc]
+        if perm_loc != doc.perm_location or perm_slot != doc.perm_slot:
+            to_save = plan_move(self._docs, doc, perm_loc, perm_slot)
+        doc.perm_subslot = perm_sub  # plan_move nulls it; the form is authoritative
 
         try:
-            self._store.save(doc)
+            for pending in to_save:
+                self._store.save(pending)
         except StaleWriteError:
             self.notify(
                 "changed on disk — ctrl+r reloads (discards your edits)",
@@ -289,7 +335,11 @@ class DetailPane(VerticalScroll):
         self.query_one(f"#{_ISSUE}", Input).value = forms.iso(doc.issue_date)
         self.query_one(f"#{_EXPIRY}", Input).value = forms.iso(doc.expiry_date)
         self.query_one(f"#{_PERM}", Input).value = doc.perm_location or ""
+        self.query_one(f"#{_PERM_SLOT}", Input).value = forms.int_text(doc.perm_slot)
+        self.query_one(f"#{_PERM_SUB}", Input).value = forms.int_text(doc.perm_subslot)
         self.query_one(f"#{_TEMP}", Input).value = doc.temp_location or ""
+        self.query_one(f"#{_TEMP_SLOT}", Input).value = forms.int_text(doc.temp_slot)
+        self.query_one(f"#{_TEMP_SUB}", Input).value = forms.int_text(doc.temp_subslot)
         self.query_one(f"#{_TAGS}", Input).value = " ".join(doc.tags)
         self.query_one(f"#{_PHYSICAL}", Checkbox).value = doc.has_physical
         self.query_one(f"#{_DIGITAL}", Checkbox).value = doc.has_digital
@@ -302,7 +352,11 @@ class DetailPane(VerticalScroll):
             self.query_one(f"#{_ISSUE}", Input).value,
             self.query_one(f"#{_EXPIRY}", Input).value,
             self.query_one(f"#{_PERM}", Input).value,
+            self.query_one(f"#{_PERM_SLOT}", Input).value,
+            self.query_one(f"#{_PERM_SUB}", Input).value,
             self.query_one(f"#{_TEMP}", Input).value,
+            self.query_one(f"#{_TEMP_SLOT}", Input).value,
+            self.query_one(f"#{_TEMP_SUB}", Input).value,
             self.query_one(f"#{_TAGS}", Input).value,
             self.query_one(f"#{_PHYSICAL}", Checkbox).value,
             self.query_one(f"#{_DIGITAL}", Checkbox).value,
