@@ -438,6 +438,24 @@ A safe way to undo a setup, complementing `ds init`. Two independent scopes:
 - Guardrails: refuse without an explicit confirmation (or `--yes`); print exactly what will be
   removed first; never follow the config into the file tree to delete documents.
 
+### Backlog — after the home build
+The Miller home (locations │ documents │ detail), its actions, touch/Termux, and Nerd-Font icons
+shipped in PRs #15–#25. Still open:
+- **Keep the detail column while searching.** Search currently switches to a flat, root-wide list
+  and hides the locations *and* detail panes (`HomeScreen.searching` in `tui/home.py`). Instead the
+  **detail (third) column should stay visible during search** so a highlighted result still previews.
+  **Better still: make search an in-place filter on the Miller view** rather than a separate mode —
+  keep the three columns and just narrow the documents pane to matches (root-wide scope), with the
+  detail preview following the highlight as usual. Decide how location scoping reads while filtering
+  (show only locations with matches, or force an "All" scope).
+- **Dedicated expiry-watch surface** — the mockup's 5th screen: tracked docs soonest-expiry-first
+  with an ignore toggle and an "N tracked · M red (≤ threshold)" header. The *logic* is done
+  (`query.tracked`, opt-out; §"Supersession & the expiry watch") and `x` filters the documents pane,
+  but there is no standalone watch screen yet.
+- **A way to set `ignore_expiry`** — the model flag exists and drops a doc from the watch, but nothing
+  toggles it from the UI. Intended for the detail / edit flow (e.g. an `x`/checkbox in the edit modal,
+  or a key on the detail pane).
+
 ---
 
 ## 15. Changelog — v1 → v2 (from the adversarial review)
