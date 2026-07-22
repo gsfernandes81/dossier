@@ -89,6 +89,11 @@ class Config:
         return self.meta_dir / "reconcile.toml"
 
     @property
+    def suggestions_path(self) -> Path:
+        """Machine-owned sidecar of dismissed field suggestions."""
+        return self.meta_dir / "suggestions.toml"
+
+    @property
     def synced_config_path(self) -> Path:
         return self.meta_dir / "config.toml"
 
