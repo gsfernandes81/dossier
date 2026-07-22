@@ -98,6 +98,7 @@ class ScanReading:
     confidence: float
     evidence: str | None
     model: str = ""
+    fingerprint: str = ""  # source file size:mtime, so a re-scan skips unchanged files
 
     @classmethod
     def from_payload(cls, data: dict, model: str) -> ScanReading:
@@ -119,11 +120,18 @@ class ScanReading:
             is_validity_period=bool(data.get("is_validity_period")),
             confidence=confidence,
             evidence=text("evidence"),
-            model=model,
+            model=model or str(data.get("model") or ""),
+            fingerprint=str(data.get("fingerprint") or ""),
         )
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+
+def file_fingerprint(path: Path) -> str:
+    """A cheap change-token for a file: ``size:mtime`` (re-scan skips a match)."""
+    stat = path.stat()
+    return f"{stat.st_size}:{int(stat.st_mtime)}"
 
 
 def render_page(path: Path, dpi: int) -> bytes:

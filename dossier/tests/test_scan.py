@@ -15,6 +15,7 @@
 
 """Tests for the vision extraction engine (the VLM call itself is mocked)."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ import pytest
 from dossier import scan
 from dossier.config import Config
 from dossier.errors import ScanError
+from dossier.store import Store
 
 _PAYLOAD = {
     "document_type": "Certificate of Competency",
@@ -98,3 +100,17 @@ def test_extract_raises_scanerror_on_transport_failure(
     monkeypatch.setattr(scan, "_post", boom)
     with pytest.raises(ScanError):
         scan.extract(tmp_path / "coc.pdf", _cfg(tmp_path))
+
+
+def test_scans_sidecar_round_trips(tmp_path: Path):
+    store = Store(_cfg(tmp_path))
+    store.ensure_layout()
+    reading = replace(
+        scan.ScanReading.from_payload(_PAYLOAD, model="qwen3vl"), fingerprint="99:123"
+    )
+    store.save_scans({"coc": reading})
+    back = store.load_scans()
+    assert back["coc"].document_type == "Certificate of Competency"
+    assert back["coc"].expiry_date_text == "28/09/2026"  # verbatim survives the trip
+    assert back["coc"].is_validity_period is True
+    assert back["coc"].fingerprint == "99:123"  # so a re-scan can skip it

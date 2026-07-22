@@ -57,6 +57,7 @@ from dossier.model import (
     Rendition,
     SuggestionState,
 )
+from dossier.scan import ScanReading
 
 CONFLICT_MARKER = ".sync-conflict-"
 TEMP_PREFIX = ".dossier-tmp-"
@@ -305,6 +306,30 @@ class Store:
         if state.dismissed:
             data["dismissed"] = sorted(state.dismissed)
         self._write_toml(self.config.suggestions_path, data)
+
+    # -- scan readings sidecar (ds scan) -------------------------------------
+
+    def load_scans(self) -> dict[str, ScanReading]:
+        """VLM readings keyed by document id (absent → empty). Synced, so a phone
+        that can't run the model still benefits from a desktop scan."""
+        raw = _read_toml_or_empty(self.config.scans_path)
+        out: dict[str, ScanReading] = {}
+        for doc_id, table in raw.items():
+            if isinstance(table, dict):
+                out[doc_id] = ScanReading.from_payload(dict(table), model="")
+        return out
+
+    def save_scans(self, readings: Mapping[str, ScanReading]) -> None:
+        """Persist readings deterministically (sorted ids; nulls dropped for TOML)."""
+        data: dict[str, object] = {}
+        for doc_id in sorted(readings):
+            table = {
+                key: value
+                for key, value in readings[doc_id].as_dict().items()
+                if value is not None  # TOML has no null
+            }
+            data[doc_id] = table
+        self._write_toml(self.config.scans_path, data)
 
     @staticmethod
     def _write_toml(path: Path, data: Mapping[str, object]) -> None:

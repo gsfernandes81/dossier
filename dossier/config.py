@@ -104,6 +104,11 @@ class Config:
         return self.meta_dir / "suggestions.toml"
 
     @property
+    def scans_path(self) -> Path:
+        """Machine-owned sidecar of VLM readings (`ds scan`), keyed by document id."""
+        return self.meta_dir / "scans.toml"
+
+    @property
     def synced_config_path(self) -> Path:
         return self.meta_dir / "config.toml"
 

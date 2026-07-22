@@ -25,6 +25,7 @@ import argparse
 import json
 import sys
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 
 import tomli_w
@@ -35,11 +36,13 @@ from dossier import (
     doctor,
     export,
     migrate,
+    query,
     reconcile,
     reset,
+    scan,
 )
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
-from dossier.errors import ConfigError
+from dossier.errors import ConfigError, ScanError
 from dossier.platform_open import is_termux, termux_preconditions
 from dossier.store import Store, atomic_write_bytes
 
@@ -361,6 +364,58 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 1 if errors or plan.problems else 0
 
 
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Read linked scans with the vision model into the readings sidecar.
+
+    Skips files whose fingerprint is unchanged since the last scan (``--force``
+    overrides). Readings feed the suggestions layer and the succession matcher.
+    """
+    config = _load_config()
+    if config is None:
+        return 1
+    store = Store(config)
+    existing = store.load_scans()
+    readings = dict(existing)
+    linked = [doc for doc in store.load_all() if doc.primary_rendition() is not None]
+    scanned = skipped = missing = failed = 0
+    for doc in linked:
+        rendition = doc.primary_rendition()
+        assert rendition is not None
+        path = query.resolve_path(config.syncthing_root, rendition.path)
+        if not path.exists():
+            missing += 1
+            continue
+        fingerprint = scan.file_fingerprint(path)
+        if (
+            not args.force
+            and doc.id in existing
+            and existing[doc.id].fingerprint == fingerprint
+        ):
+            skipped += 1
+            continue
+        if args.limit and scanned >= args.limit:
+            break
+        try:
+            reading = scan.extract(path, config)
+        except ScanError as exc:
+            print(f"  ! {doc.id}: {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        readings[doc.id] = replace(reading, fingerprint=fingerprint)
+        scanned += 1
+        dates = " to ".join(
+            d for d in (reading.issue_date_text, reading.expiry_date_text) if d
+        )
+        tail = f"  [{dates}]" if dates else ""
+        print(f"  + {doc.id}: {reading.document_type}{tail}")
+    store.save_scans(readings)
+    print(
+        f"scanned {scanned}, skipped {skipped} (unchanged), "
+        f"{missing} missing on disk, {failed} failed"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dossier",
@@ -476,6 +531,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="print the plan without writing"
     )
     export_p.set_defaults(func=cmd_export)
+
+    scan_p = sub.add_parser(
+        "scan",
+        help="read linked scans with the vision model into readings (needs [scan])",
+    )
+    scan_p.add_argument(
+        "--force", action="store_true", help="re-read even unchanged files"
+    )
+    scan_p.add_argument(
+        "--limit", type=int, default=0, help="scan at most N new files (0 = all)"
+    )
+    scan_p.set_defaults(func=cmd_scan)
 
     return parser
 
