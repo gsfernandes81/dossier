@@ -161,3 +161,16 @@ def test_watch_row_is_date_first_with_location_and_tags():
     assert out.index("10 Jul 26") < out.index("ENG-1 Med Cert")  # date before name
     assert out.lstrip().startswith("!")  # expired marker leads
     assert "Cert File · 2" in out and "medical" in out
+
+
+def test_watch_row_appends_the_event_note():
+    doc = Document(id="pp", name="Passport", expiry_date=date(2026, 7, 10))
+    out = _render(
+        rows.watch_row(
+            _view(doc, expiry=ExpiryStatus.OK),
+            event_note="· needed 2026-06-01 for trip",
+            glyphs=glyphs.ASCII,
+        ),
+        width=80,
+    )
+    assert "· needed 2026-06-01 for trip" in out

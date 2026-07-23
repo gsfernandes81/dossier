@@ -26,6 +26,7 @@ import json
 import sys
 import tomllib
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import tomli_w
@@ -38,6 +39,7 @@ from dossier import (
     intake,
     migrate,
     organize,
+    preparedness,
     query,
     reconcile,
     reset,
@@ -45,6 +47,7 @@ from dossier import (
 )
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError, IntakeError, ScanError
+from dossier.model import Document
 from dossier.platform_open import is_termux, termux_preconditions
 from dossier.store import Store, atomic_write_bytes
 
@@ -583,6 +586,70 @@ def _print_proposal(p: intake.IntakeProposal) -> None:
     print(f"  read    conf {p.reading.confidence:.2f}, model {p.reading.model}")
 
 
+def cmd_expiring(args: argparse.Namespace) -> int:
+    """List documents needing attention — plain text for a scheduled reminder.
+
+    Empty stdout when nothing is due (so a cron/Task-Scheduler notification is
+    clean). Exit 0 = clean · 1 = at least one line · 2 = error, so a scheduled job
+    can tell "nag me" from "the tool is broken".
+    """
+    config = _load_config()
+    if config is None:
+        return 2
+
+    store = Store(config)
+    docs = store.load_all()
+    threshold = args.days if args.days is not None else config.expiry_threshold_days
+    bundles = store.load_bundles()
+    if args.bundle is not None:
+        if args.bundle not in bundles:
+            print(f"error: unknown bundle '{args.bundle}'", file=sys.stderr)
+            return 2
+        docs = [d for d in docs if args.bundle in d.bundles]
+
+    today = date.today()
+    flags: dict[str, list[preparedness.EventFlag]] = {}
+    if not args.no_events:
+        flags = preparedness.event_flags(
+            docs, bundles.values(), today=today, margin_days=threshold
+        )
+    return _print_expiring(docs, flags, today=today, threshold=threshold)
+
+
+def _print_expiring(
+    docs: list[Document],
+    flags: dict[str, list[preparedness.EventFlag]],
+    *,
+    today: date,
+    threshold: int,
+) -> int:
+    tracked = query.tracked(docs, today=today)  # excludes ignored/superseded
+    soon = query.expiring(tracked, today=today, threshold_days=threshold)
+    soon_ids = {doc.id for doc in soon}
+
+    rows: list[tuple[date, str, str, preparedness.EventFlag | None]] = []
+    for doc in soon:
+        assert doc.expiry_date is not None  # tracked + expiring ⇒ dated
+        label = "expired" if doc.expiry_date < today else "expiring"
+        headline = flags.get(doc.id)
+        rows.append(
+            (doc.expiry_date, label, doc.name, headline[0] if headline else None)
+        )
+    for doc in tracked:  # OK today, but lapses before an event it's needed for
+        if doc.id in soon_ids or doc.id not in flags:
+            continue
+        assert doc.expiry_date is not None
+        rows.append((doc.expiry_date, "event", doc.name, flags[doc.id][0]))
+
+    rows.sort(key=lambda row: row[0])  # soonest expiry first
+    for expiry, label, name, flag in rows:
+        line = f"{expiry}  {label:8}  {name}"
+        if flag is not None:
+            line += f"  · needed {flag.event} for {flag.bundle_slug}"
+        print(line)
+    return 1 if rows else 0
+
+
 def _print_models(config: Config) -> int:
     """List the router's models (``ds scan --list-models``), vision ones flagged."""
     try:
@@ -852,6 +919,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--yes", action="store_true", help="skip the confirmation prompt (with --apply)"
     )
     import_p.set_defaults(func=cmd_import)
+
+    expiring_p = sub.add_parser(
+        "expiring",
+        help="list documents needing attention (plain text, for a scheduled reminder)",
+    )
+    expiring_p.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        metavar="N",
+        help="warn window in days (default: the synced expiry threshold)",
+    )
+    expiring_p.add_argument(
+        "--bundle", metavar="SLUG", help="limit to a bundle's members"
+    )
+    expiring_p.add_argument(
+        "--no-events",
+        action="store_true",
+        dest="no_events",
+        help="skip event-date checks (today-relative expiry only)",
+    )
+    expiring_p.set_defaults(func=cmd_expiring)
 
     scan_p = sub.add_parser(
         "scan",

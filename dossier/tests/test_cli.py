@@ -214,3 +214,50 @@ def test_import_cli_caches_readings_then_files_in_place(
     assert len(calls) == 1  # still served from cache
     assert (root / "Papers" / "report.pdf").exists()
     assert not (root / "Papers" / "a.pdf").exists()
+
+
+def test_expiring_cli_lines_and_exit_codes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from datetime import date, timedelta
+
+    from dossier.model import Bundle, Document
+    from dossier.store import Store
+
+    root = tmp_path / "docs"
+    root.mkdir()
+    device = tmp_path / "cfg" / "config.toml"
+    monkeypatch.setattr(cli, "per_device_config_path", lambda: device)
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+    assert cli.main(["init", "--root", str(root)]) == 0
+    config = Config.load()
+    store = Store(config)
+    today = date.today()
+    capsys.readouterr()  # drop the init banner
+
+    # Clean store → exit 0, empty stdout (the cron contract).
+    assert cli.main(["expiring"]) == 0
+    assert capsys.readouterr().out == ""
+
+    # An expired doc → exit 1, one exact line.
+    exp = today - timedelta(days=3)
+    store.save(Document(id="cert", name="Old Cert", expiry_date=exp))
+    assert cli.main(["expiring"]) == 1
+    assert capsys.readouterr().out.strip() == f"{exp}  {'expired':8}  Old Cert"
+
+    # An event row: valid today, but lapses before a future bundle needs it.
+    lapses = today + timedelta(days=10)
+    store.save(Document(id="pp", name="Passport", expiry_date=lapses, bundles=["trip"]))
+    store.save_bundles(
+        {"trip": Bundle(slug="trip", title="Trip", date=today + timedelta(days=200))}
+    )
+    capsys.readouterr()  # drain
+    assert cli.main(["expiring", "--days", "5"]) == 1  # narrow window: Old Cert + event
+    lines = capsys.readouterr().out.strip().splitlines()
+    event_line = next(line for line in lines if "Passport" in line)
+    assert "event" in event_line and "· needed" in event_line and "trip" in event_line
+
+    # --no-events drops the event row; unknown bundle is exit 2.
+    assert cli.main(["expiring", "--days", "5", "--no-events"]) == 1
+    assert "Passport" not in capsys.readouterr().out
+    assert cli.main(["expiring", "--bundle", "nope"]) == 2
