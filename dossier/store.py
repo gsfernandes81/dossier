@@ -621,13 +621,17 @@ def _as_renditions(value: object) -> list[Rendition]:
 
 
 def unique_id(store: Store, base: str) -> str:
-    """``base``, suffixed ``-2``, ``-3``… until no document file collides on disk.
+    """``base``, suffixed ``-2``, ``-3``… until nothing collides (case-insensitively).
 
     The single collision guard for a new document id, used by every surface that
-    creates one (adopt, the detail pane, intake).
+    creates one (adopt, the detail pane, intake). The comparison is **casefolded**:
+    a new ``passport`` must not land beside an existing ``Passport`` on a
+    case-sensitive filesystem (Linux/Termux), because Syncthing would then deliver
+    that pair as a name collision to a case-insensitive device (Windows/macOS).
     """
+    existing = {path.stem.casefold() for path in store.iter_document_paths()}
     candidate, n = base, 2
-    while store.document_path(candidate).exists():
+    while candidate.casefold() in existing:
         candidate, n = f"{base}-{n}", n + 1
     return candidate
 
