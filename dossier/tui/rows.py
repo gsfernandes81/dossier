@@ -98,10 +98,16 @@ def doc_row(
 
 
 def watch_row(
-    view: DocumentView, *, location_label: str | None = None, glyphs: GlyphSet = ASCII
+    view: DocumentView,
+    *,
+    location_label: str | None = None,
+    glyphs: GlyphSet = ASCII,
+    event_note: str = "",
 ) -> Text:
     """A row for the expiry-watch surface: date first, then name · location · tags,
-    coloured by expiry status (``⚠ 10 Jul 26   ENG-1 Med Cert   Cert File · 2``)."""
+    coloured by expiry status (``⚠ 10 Jul 26   ENG-1 Med Cert   Cert File · 2``).
+    ``event_note`` (e.g. ``· needed 2026-03-11 for travel/india``) marks a doc that
+    lapses before a dated bundle needs it."""
     doc = view.document
     style = _STATUS_STYLE[view.expiry]
     marker = _marker(view.expiry, glyphs)
@@ -114,6 +120,8 @@ def watch_row(
     meta = [part for part in (location_label, " ".join(doc.tags) or None) if part]
     if meta:
         row.append("   " + "  ".join(meta), style="dim")
+    if event_note:
+        row.append(f"   {event_note}", style="dim")
     return row
 
 

@@ -36,7 +36,7 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from dossier import doctor, query, scan, suggest
+from dossier import doctor, preparedness, query, scan, suggest
 from dossier.config import Config, update_per_device, update_synced
 from dossier.errors import ScanError, StaleWriteError, StoreError
 from dossier.model import Bundle, Document, ExpiryStatus, Location
@@ -343,9 +343,17 @@ class WatchScreen(ModalScreen[str | None]):
         self._refresh()
 
     def _refresh(self) -> None:
-        tracked = query.tracked(self._store.load_all(), today=self._today)
+        docs = self._store.load_all()
+        tracked = query.tracked(docs, today=self._today)
         locations = self._store.load_locations()
         threshold = self._config.expiry_threshold_days
+        # Flag members that lapse before a dated bundle needs them (Phase 10).
+        flags = preparedness.event_flags(
+            docs,
+            self._store.load_bundles().values(),
+            today=self._today,
+            margin_days=threshold,
+        )
         summary = self.query_one("#wsummary", Label)
         options = self.query_one("#watch", OptionList)
         options.clear_options()
@@ -369,8 +377,16 @@ class WatchScreen(ModalScreen[str | None]):
                 today=self._today,
                 threshold_days=threshold,
             )
+            docflags = flags.get(doc.id)
+            note = ""
+            if docflags:
+                flag = docflags[0]  # worst (soonest-expired) first
+                note = f"· needed {flag.event} for {flag.bundle_slug}"
             row = rows.watch_row(
-                view, location_label=_loc_label(doc, locations), glyphs=self._glyphs
+                view,
+                location_label=_loc_label(doc, locations),
+                glyphs=self._glyphs,
+                event_note=note,
             )
             options.add_option(Option(row, id=doc.id))
 
