@@ -261,7 +261,7 @@ class HomeScreen(Screen[None]):
                 yield Button(_btn_label(g.new, "New"), id="act-new")
                 yield Button(_btn_label(g.bundle, "Bundle"), id="act-bundle")
                 yield Button(_btn_label(g.calendar, "Watch"), id="act-watch")
-            yield Input(placeholder="Search name / tags / notes…", id="search")
+            yield Input(placeholder="Search name / tags / notes / scans…", id="search")
             yield Footer(compact=True)
 
     def on_mount(self) -> None:
@@ -302,6 +302,7 @@ class HomeScreen(Screen[None]):
             flt,
             today=self._today,
             threshold_days=self._config.expiry_threshold_days,
+            readings=self._readings,  # content search: match what a scan says
         )
 
     def documents_in_view(self) -> list[Document]:

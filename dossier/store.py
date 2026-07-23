@@ -389,7 +389,9 @@ class Store:
             data[key] = {
                 field: value
                 for field, value in readings[key].as_dict().items()
-                if value is not None  # TOML has no null
+                # Drop nulls (no TOML null) and empties (""/()) so a transcript-less
+                # reading serializes byte-identically to before Phase 11 — no churn.
+                if value not in (None, "", ())
             }
         self._write_toml(path, data)
 

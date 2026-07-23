@@ -224,24 +224,34 @@ validity + reminders (slice 1) and bundle templates + the readiness checklist (s
   its row. *(Deferred: "add to bundle" from the checklist — engine `candidates` field ships
   dark; template suggestions; a global `[validity.rules]` table; a `ds ready` CLI twin.)*
 
-## Phase 11 — Answers: content search & ask  *(long horizon)*
+## Phase 11 — Answers: content search & ask  *(in progress)*
 `.dossier/scans.toml` already holds structured, grounded readings of every linked scan
 — currently used only for date suggestions and succession. Make the corpus queryable:
 find documents by *what they say*, not what they were named. Guiding split: **vision
 is enrichment at scan time (desktop-only); queries are text, on every device.** A
 query never needs a VLM, so ask stays fast, cool, and battery-cheap on the phone.
-- [ ] **Reading transcripts** (S) — extend `ScanReading` with a full-text transcript
-  (+ keywords) emitted by the desktop VLM during the pass it already makes; synced via
-  `scans.toml`, so every device gets richer search material for free.
-- [ ] **Content search** (M) — `/` (and `ds open`) also matches reading text/
-  transcripts, so "the doc with my INDoS number" is findable when name/tags don't
-  mention it. Pure text search — no model, instant everywhere.
-- [ ] **`ds ask` — retrieval-first** (M) — tiered: **Tier 0, no model** — structured
-  field lookups ("when does my ENG-1 expire?") and BM25 over readings answer most
-  questions deterministically. **Tier 1, small text-only model** — a 1–2B Q4 text
-  model (e.g. Qwen3-1.7B) composes an answer from the retrieved snippets (~1–2k
-  tokens of context): seconds on a phone CPU, offline. The VLM is never in the query
-  path.
+*Content search + `ds ask`/`ds open` landed (slices A/B); transcripts next (slice C).*
+- [x] **Content search** (M) — `query.reading_text` + an optional `readings` map on
+  `search`/`matches`, so the `/` filter (and `ds open`) match a doc by its scan's fields.
+  Verified on the real store: "bernhard" finds 4 testimonials by issuer, "ENG10166083"
+  the medical by number — invisible to name search. Query stays import-light.
+- [x] **`ds ask` — retrieval-first, Tier 0** (M) — `dossier/answers.py`: intent routing
+  (expiry/issue/number/location) → the authoritative record field, target doc found by
+  stdlib **Okapi BM25** over name/tags/notes + reading (superseded excluded; date intents
+  prefer the record carrying the structured date, latest first); unknown questions fall
+  back to ranked retrieval. `ds ask "…"` (0/1/2) + `ds open QUERY [-n]`. No model, offline.
+  - *Known limit (data, not code):* a document whose expiry lives only in its name/scan
+    text (e.g. the ENG-1 records — no structured `expiry_date`, no accepted succession)
+    is answered from the top-ranked scan text; accepting the succession / setting the
+    expiry fixes it. Tier 1 (a small text model composing prose, `--compose`) is deferred.
+- [ ] **Reading transcripts** (S) — a second `scan.transcribe()` VLM call adds a full-text
+  transcript + keywords to `ScanReading` (fields already in place, byte-stable for legacy
+  readings); `ds scan --transcribe` backfills. Makes body-content findable ("the doc with
+  my INDoS number"). **Gated on go-ahead (57 VLM calls + synced `scans.toml` rewrite).**
+  - **Search inclusion is opt-in:** the `/` filter must **not** search transcript body
+    text by default (noisy) — keep it a **discoverable toggle** (a keybind on the search,
+    surfaced in the `?` help + a visible cue). The `include_content` query split is already
+    in place; slice C wires the TUI toggle. `ds ask` always uses the full content.
 
 ## Phase 12 — Bulletproof sync conflicts  *(long horizon)*
 Today's handling (DESIGN §6) *contains* conflicts — the loader excludes

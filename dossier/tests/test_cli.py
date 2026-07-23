@@ -261,3 +261,63 @@ def test_expiring_cli_lines_and_exit_codes(
     assert cli.main(["expiring", "--days", "5", "--no-events"]) == 1
     assert "Passport" not in capsys.readouterr().out
     assert cli.main(["expiring", "--bundle", "nope"]) == 2
+
+
+def _configured_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
+    root = tmp_path / "docs"
+    root.mkdir()
+    device = tmp_path / "cfg" / "config.toml"
+    monkeypatch.setattr(cli, "per_device_config_path", lambda: device)
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+    assert cli.main(["init", "--root", str(root)]) == 0
+    return Config.load()
+
+
+def test_ask_cli_answers_expiry_and_reports_no_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from datetime import date
+
+    from dossier.model import Document
+    from dossier.store import Store
+
+    config = _configured_store(tmp_path, monkeypatch)
+    Store(config).save(
+        Document(id="eng1", name="ENG-1 Medical", expiry_date=date(2028, 5, 21))
+    )
+    capsys.readouterr()
+
+    assert cli.main(["ask", "when", "does", "my", "ENG-1", "expire"]) == 0
+    assert "2028-05-21" in capsys.readouterr().out
+    assert cli.main(["ask", "airspeed", "velocity", "swallow"]) == 1  # no match
+
+
+def test_open_cli_dry_run_prints_without_opening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from dossier.model import Document, Rendition
+    from dossier.store import Store
+
+    config = _configured_store(tmp_path, monkeypatch)
+    (config.syncthing_root / "Marine").mkdir()
+    (config.syncthing_root / "Marine" / "coc.pdf").write_bytes(b"x")
+    Store(config).save(
+        Document(
+            id="coc",
+            name="Certificate of Competency",
+            files=[Rendition("d", "Marine/coc.pdf", True)],
+        )
+    )
+    opened: list[object] = []
+    monkeypatch.setattr(cli, "open_file", lambda p: opened.append(p))
+    capsys.readouterr()
+
+    # -n prints the resolved path and does not open.
+    assert cli.main(["open", "competency", "-n"]) == 0
+    out = capsys.readouterr().out
+    assert "coc" in out and "coc.pdf" in out
+    assert opened == []
+
+    # Without -n it invokes the platform opener.
+    assert cli.main(["open", "competency"]) == 0
+    assert len(opened) == 1

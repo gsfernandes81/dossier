@@ -85,6 +85,52 @@ def test_text_search_covers_name_tags_notes():
     assert got == {"b"}
 
 
+def _reading(**fields: object):
+    from dossier.scan import ScanReading
+
+    return ScanReading.from_payload(fields, model="m")
+
+
+def test_content_search_matches_a_readings_field_not_in_the_name():
+    # "bernhard" is nowhere in the name/tags/notes — only in the scan's issuer.
+    docs = [
+        _doc("sea", name="2025-07-01 testimonial"),
+        _doc("other", name="Passport"),
+    ]
+    readings = {"sea": _reading(issuer="Bernhard Schulte", document_type="Testimonial")}
+    flt = query.Filter(text="bernhard")
+    plain = {d.id for d in query.search(docs, flt, today=TODAY, threshold_days=90)}
+    assert plain == set()  # without readings: no match
+    withr = {
+        d.id
+        for d in query.search(
+            docs, flt, today=TODAY, threshold_days=90, readings=readings
+        )
+    }
+    assert withr == {"sea"}  # content search finds it via the reading
+
+
+def test_transcript_is_opt_in_not_in_the_default_search():
+    doc = _doc("d", name="scan001")
+    reading = _reading(document_type="X", transcript="the INDoS number is 09MU1234")
+    flt = query.Filter(text="indos")
+    # The default `/` filter does NOT match transcript body text (noisy, opt-in)...
+    got = query.search(
+        [doc], flt, today=TODAY, threshold_days=90, readings={"d": reading}
+    )
+    assert got == []
+    # ...but the transcript is in the content-inclusive text `ds ask` uses.
+    assert "indos" in query.reading_text(reading, include_content=True).casefold()
+    assert "indos" not in query.reading_text(reading).casefold()
+
+
+def test_reading_text_joins_present_fields_only():
+    reading = _reading(document_type="Passport", issuer="HMPO", holder_name=None)
+    text = query.reading_text(reading)
+    assert "Passport" in text and "HMPO" in text
+    assert "None" not in text  # None fields skipped
+
+
 def test_tag_filter_is_hierarchical():
     docs = [
         _doc("a", tags=["marine/coc"]),

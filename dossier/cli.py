@@ -32,6 +32,7 @@ from pathlib import Path
 import tomli_w
 
 from dossier import (
+    answers,
     dedup_cache,
     dedup_hash,
     doctor,
@@ -48,7 +49,7 @@ from dossier import (
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError, IntakeError, ScanError
 from dossier.model import Document
-from dossier.platform_open import is_termux, termux_preconditions
+from dossier.platform_open import OpenError, is_termux, open_file, termux_preconditions
 from dossier.store import Store, atomic_write_bytes
 
 
@@ -650,6 +651,75 @@ def _print_expiring(
     return 1 if rows else 0
 
 
+def cmd_ask(args: argparse.Namespace) -> int:
+    """Answer a question from the records — retrieval-first, no model (Phase 11)."""
+    config = _load_config()
+    if config is None:
+        return 2
+    question = " ".join(args.question).strip()
+    if not question:
+        print("error: ask what? give a question", file=sys.stderr)
+        return 2
+    store = Store(config)
+    result = answers.answer(
+        question,
+        store.load_all(),
+        store.load_scans(),
+        store.load_locations(),
+        today=date.today(),
+        k=args.limit,
+    )
+    for line in result.lines:
+        print(line)
+    return 0 if result.answered else 1
+
+
+def cmd_open(args: argparse.Namespace) -> int:
+    """Open the document that best matches a query (or list ties)."""
+    config = _load_config()
+    if config is None:
+        return 2
+    term = " ".join(args.query).strip()
+    if not term:
+        print("error: open what? give a search term", file=sys.stderr)
+        return 2
+    store = Store(config)
+    docs = store.load_all()
+    by_id = {d.id: d for d in docs}
+    corpus = answers.build_corpus(docs, store.load_scans())
+    ranked = answers.rank(corpus, answers._residue(term), k=5)
+    if not ranked:
+        print(f"no match for '{term}'.", file=sys.stderr)
+        return 1
+
+    top_id, top_score = ranked[0]
+    ambiguous = len(ranked) > 1 and ranked[1][1] >= 0.8 * top_score
+    if ambiguous:
+        print(f"'{term}' is ambiguous — {len(ranked)} matches:")
+        for doc_id, score in ranked:
+            doc = by_id.get(doc_id)
+            if doc is not None:
+                print(f"  {doc.id}  {doc.name or doc.id}  ({score:.1f})")
+        return 1
+
+    doc = by_id[top_id]
+    rendition = doc.primary_rendition()
+    if rendition is None:
+        print(f"{doc.id}: no linked file to open", file=sys.stderr)
+        return 1
+    path = query.resolve_path(config.syncthing_root, rendition.path)
+    if args.dry_run:
+        print(f"{doc.id}  {doc.name or doc.id}\n  {path}")
+        return 0
+    try:
+        open_file(path)
+    except OpenError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"opened {doc.id}  ({doc.name or doc.id})")
+    return 0
+
+
 def _print_models(config: Config) -> int:
     """List the router's models (``ds scan --list-models``), vision ones flagged."""
     try:
@@ -941,6 +1011,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip event-date checks (today-relative expiry only)",
     )
     expiring_p.set_defaults(func=cmd_expiring)
+
+    ask_p = sub.add_parser(
+        "ask", help="answer a question from the records (retrieval-first, no model)"
+    )
+    ask_p.add_argument("question", nargs="+", help="the question (any words)")
+    ask_p.add_argument(
+        "--limit", type=int, default=3, metavar="N", help="top matches to consider"
+    )
+    ask_p.set_defaults(func=cmd_ask)
+
+    open_p = sub.add_parser(
+        "open", help="open the document best matching a query (content-aware)"
+    )
+    open_p.add_argument("query", nargs="+", help="search term (name / tags / scan)")
+    open_p.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="print the match + path without opening",
+    )
+    open_p.set_defaults(func=cmd_open)
 
     scan_p = sub.add_parser(
         "scan",
