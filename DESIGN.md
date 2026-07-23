@@ -270,7 +270,11 @@ Must fit portrait Termux (~40–60 cols), not just a desktop terminal.
 - Grouped by effective location; sort key **location → slot → subslot → name** (explicit
   tiebreakers; slotless/locationless docs sort last) so order never jitters between renders.
 - `/` live search across name + tags + notes; hotkeys filter by tag / bundle / location / expiry.
-- `Enter` opens the file (rendition picker if >1).
+- `Enter` opens the file (rendition picker if >1); `→` opens the record's detail. The **mouse**
+  splits that verb in two, because a click carries none of the cursor's history: the first click
+  on a row points at it (moves the cursor, shows detail), and only a click on the row already
+  under the cursor opens the file. A mis-aimed click costs a look, not a launched PDF — and a
+  double-click, being two clicks, opens in one gesture. Lives in `tui/doclist.py`.
 - **Views:** Expiring (certs first) · Reconcile (missing files ⇄ in-scope orphans) · Bundles
   (browse members + export) · Detail modal (all fields + notes + file/conflict status; add/edit).
 - **Slot op:** "insert at slot N and shift" is first-class (renumbering neighbors is the correct

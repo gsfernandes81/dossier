@@ -72,6 +72,7 @@ from dossier.model import Document, ExpiryStatus, Location, SuggestionState
 from dossier.store import Store
 from dossier.tui import glyphs, rows
 from dossier.tui.detail_pane import DetailPane
+from dossier.tui.doclist import DocumentList
 from dossier.tui.intake import IntakeScreen
 from dossier.tui.review import ReviewResult, ReviewScreen
 from dossier.tui.rows import RowMode
@@ -244,7 +245,7 @@ class HomeScreen(Screen[None]):
         yield Header()
         with Horizontal(id="panes"):
             yield OptionList(id="locations")
-            yield OptionList(id="documents")
+            yield DocumentList(id="documents")
             yield DetailPane(self._store, glyphs=self._glyphs, id="detail")
         # A fixed-height bottom bar reserves the space for the (touch-only)
         # action row, the command line, and the footer so they stack cleanly
@@ -615,6 +616,12 @@ class HomeScreen(Screen[None]):
             self._detail_id = event.option_id
             if self._show_detail:
                 self._update_detail()
+
+    def on_document_list_previewed(self, event: DocumentList.Previewed) -> None:
+        """First click on a row — show its detail. A second click opens the file."""
+        if self.editing or event.option_id is None:
+            return  # a click mid-edit must not swap the doc being edited
+        self.open_detail(event.option_id)
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_list.id == "documents":

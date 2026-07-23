@@ -47,6 +47,7 @@ from dossier.tui import (
     glyphs as glyphset,
     rows,
 )
+from dossier.tui.doclist import DocumentList
 
 
 def open_doc_file(screen: Screen, config: Config, doc: Document) -> None:
@@ -298,7 +299,7 @@ class WatchScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="wpanel"):
             yield Label(id="wsummary")
-            yield OptionList(id="watch")
+            yield DocumentList(id="watch")
 
     def on_mount(self) -> None:
         self._refresh()

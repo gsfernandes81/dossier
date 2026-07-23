@@ -41,6 +41,7 @@ from dossier.tui import (
     home as tui_home,
 )
 from dossier.tui.detail_pane import DetailPane
+from dossier.tui.doclist import DocumentList
 from dossier.tui.review import ReviewResult, ReviewScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
@@ -337,6 +338,85 @@ async def test_enter_activates_document_opens_file(
         app.home._activate_doc("passport")
         await pilot.pause()
     assert opened == [tmp_path / "passport.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_click_on_another_row_points_before_it_activates():
+    """The mouse verb is two-part: click one moves the cursor, click two activates.
+
+    Textual's OptionList does both in one click, which made a single click on the home
+    show a document *and* launch its file. Driven here on a bare list so the assertion
+    is about the widget's contract, not the home's row heights.
+    """
+    from textual.app import App, ComposeResult
+    from textual.widgets.option_list import Option
+
+    events: list[str] = []
+
+    class _Harness(App[None]):
+        def compose(self) -> ComposeResult:
+            yield DocumentList(
+                Option("first", id="first"), Option("second", id="second"), id="docs"
+            )
+
+        def on_document_list_previewed(self, event: DocumentList.Previewed) -> None:
+            events.append(f"preview:{event.option_id}")
+
+        def on_option_list_option_selected(
+            self, event: OptionList.OptionSelected
+        ) -> None:
+            events.append(f"select:{event.option_id}")
+
+    app = _Harness()
+    async with app.run_test() as pilot:
+        docs = app.query_one("#docs", DocumentList)
+        docs.highlighted = 0  # cursor parked on the first row
+        await pilot.pause()
+
+        # y counts from the widget edge, and OptionList's default border is `tall`
+        # — so row 0 sits at y=1 and the row we want at y=2.
+        await pilot.click("#docs", offset=(2, 2))  # click the *other* row
+        await pilot.pause()
+        assert events == ["preview:second"], "a click on a new row activated it"
+        assert docs.highlighted == 1, "the click did not move the cursor"
+
+        await pilot.click("#docs", offset=(2, 2))  # click it again
+        await pilot.pause()
+        assert events == ["preview:second", "select:second"]
+
+        # Enter is unaffected — the cursor is already where the user put it.
+        await pilot.press("enter")
+        await pilot.pause()
+        assert events == ["preview:second", "select:second", "select:second"]
+
+
+@pytest.mark.asyncio
+async def test_first_click_shows_detail_and_second_opens_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # The home's half of the two-part mouse verb: point (detail), then activate (open).
+    store, config = _setup(tmp_path)
+    opened: list[Path] = []
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        app.query_one("#search", Input).value = "passport"  # a single row
+        await pilot.pause()
+        documents = home.query_one("#documents", DocumentList)
+        documents.highlighted = None  # nothing pointed at yet
+        await pilot.pause()
+        assert not home.has_class("show-detail")
+
+        await pilot.click("#documents", offset=(2, 1))  # y=1: past the `tall` border
+        await pilot.pause()
+        assert home.has_class("show-detail"), "first click did not show detail"
+        assert home._detail_id == "passport"
+        assert opened == [], "first click opened the file"
+
+        await pilot.click("#documents", offset=(2, 1))
+        await pilot.pause()
+        assert opened == [tmp_path / "passport.pdf"], "second click did not open"
 
 
 @pytest.mark.asyncio
