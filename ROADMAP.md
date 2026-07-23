@@ -21,8 +21,9 @@ suggestions (the detail pane), and per-run model selection; all verified on the 
 store. **Phase 8 (organize, #4) is done** — `ds organize` gives every linked file a
 canonical name (plan → `--apply`), the first surface that touches the real files;
 verified read-only on the store (55 in-place renames, 2 shared-file flags, nothing
-applied). **Phase 9 (intake) is in progress** — the proposal engine + `ds intake` CLI
-have landed (reusing `organize` to file new documents); the TUI review card is next.
+applied). **Phase 9 (intake) is in progress** — the **inbox flow is done** (proposal engine +
+`ds intake` CLI + the `IntakeScreen` review card, reusing `organize`/`suggest`/
+`succession`); bulk `ds import` (the ~900-file scale-up) and phone sync-back remain.
 Phases 9–13 sketch the **long horizon** — intake, preparedness, answers, durability,
 platform hardening — turning the catalogue into a living system.
 
@@ -160,7 +161,7 @@ every field. Every piece needed to automate that already exists — this phase c
 them, and changes the app's economics: near-zero marginal cost per document is what
 keeps the catalogue accurate in three years, and what makes owning the *whole* tree
 (not just the curated 137) affordable.
-- [~] **Inbox flow** (L) — *engine + CLI landed; TUI card next.*
+- [x] **Inbox flow** (L) — *engine + CLI + TUI card landed; verified on the real store.*
   - [x] **Proposal engine + `ds intake`** — `dossier/intake.py` composes the record for a
     dropped file: `build_proposal` reads it with the VLM (injectable), names it from the
     reading's `document_type` (filename fallback), derives issue/expiry via `suggest`
@@ -172,8 +173,13 @@ keeps the catalogue accurate in three years, and what makes owning the *whole* t
     is dry-run by default. Synced `[intake]` config (inbox / filed / a keyword→tag map —
     intake is the first surface that sets tags). Enabling touches: `unique_id` lifted to
     `store.py`; `fallback_folder` added to `organize`.
-  - [ ] **TUI review card** — an `IntakeScreen` (`I`), one proposal at a time, keys to
-    accept / edit-in-the-pane / skip / reject; the VLM read runs in a background worker.
+  - [x] **TUI review card** — `dossier/tui/intake.py` `IntakeScreen` (`I` + palette entry),
+    one proposal at a time, each read by a background VLM worker: `a` file · `e` file+edit
+    (hands to the detail pane) · `n` rename (re-slugs id + destination) · `s` toggle
+    succession · `k` skip · `x` not-a-document · `o` open. Reuses the detail pane for edits.
+  - *Verified read-only on the real store:* `ds intake --from "…/Official Documents"
+    --limit 10` → 7 grounded proposals (name/date/canonical destination) + 3 graceful
+    non-document skips (`.txt`/`.xlsx`), images read directly by the VLM, nothing written.
 - [ ] **Scale to the full tree** (M) — with per-doc cost near zero, `ds import` = the same
   engine over an arbitrary tree (`--from`, in-place), plus a synced path-keyed reading
   cache (`.dossier/intake.toml`) so a 900-file sweep doesn't re-scan; grow from the curated
