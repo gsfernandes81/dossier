@@ -437,24 +437,77 @@ def cmd_intake(args: argparse.Namespace) -> int:
     config = _load_config()
     if config is None:
         return 1
-
     store = Store(config)
     from_dir, in_place = None, False
     if args.from_dir:
-        raw = Path(args.from_dir).expanduser()
-        abs_dir = raw if raw.is_absolute() else config.syncthing_root / raw
-        try:
-            from_dir = abs_dir.resolve().relative_to(
-                config.syncthing_root.resolve()
-            ).as_posix()
-        except ValueError:
+        from_dir = _relative_to_root(config, args.from_dir)
+        if from_dir is None:
             print("error: --from must be inside the syncthing root", file=sys.stderr)
             return 1
         in_place = True
+    return _intake_run(
+        config,
+        store,
+        from_dir=from_dir,
+        in_place=in_place,
+        limit=args.limit,
+        apply=args.apply,
+        yes=args.yes,
+    )
 
+
+def cmd_import(args: argparse.Namespace) -> int:
+    """Bulk-import a folder: intake every unfiled file, renamed in place."""
+    config = _load_config()
+    if config is None:
+        return 1
+    store = Store(config)
+    from_dir = _relative_to_root(config, args.directory)
+    if from_dir is None:
+        print("error: the directory must be inside the syncthing root", file=sys.stderr)
+        return 1
+    return _intake_run(
+        config,
+        store,
+        from_dir=from_dir,
+        in_place=True,
+        limit=args.limit,
+        apply=args.apply,
+        yes=args.yes,
+    )
+
+
+def _relative_to_root(config: Config, raw: str) -> str | None:
+    """``raw`` (absolute or root-relative) as a root-relative POSIX path, or None
+    if it falls outside the syncthing root."""
+    path = Path(raw).expanduser()
+    abs_path = path if path.is_absolute() else config.syncthing_root / path
+    try:
+        rel = abs_path.resolve().relative_to(config.syncthing_root.resolve())
+    except ValueError:
+        return None
+    return rel.as_posix()
+
+
+def _intake_run(
+    config: Config,
+    store: Store,
+    *,
+    from_dir: str | None,
+    in_place: bool,
+    limit: int,
+    apply: bool,
+    yes: bool,
+) -> int:
+    """Shared intake loop for ``ds intake`` and ``ds import`` — propose, then file.
+
+    Reuses a reading cache (``.dossier/intake.toml``) so re-running a big sweep
+    doesn't re-scan: a fresh read is persisted immediately (resumable), and a filed
+    file's entry is dropped (it now lives in ``scans.toml`` under the new id).
+    """
     pending = intake.pending_files(store, config, from_dir=from_dir)
-    if args.limit > 0:
-        pending = pending[: args.limit]
+    if limit > 0:
+        pending = pending[:limit]
     if not pending:
         where = from_dir or config.intake_inbox or "(no [intake] inbox configured)"
         print(f"no files to intake in {where}.")
@@ -462,24 +515,34 @@ def cmd_intake(args: argparse.Namespace) -> int:
 
     docs = store.load_all()
     readings = store.load_scans()
+    cache = store.load_intake_cache()
     proposals: list[intake.IntakeProposal] = []
     for rel in pending:
+        prior = cache.get(rel)
         try:
             proposal = intake.build_proposal(
-                rel, store, config, docs=docs, readings=readings, in_place=in_place
+                rel,
+                store,
+                config,
+                docs=docs,
+                readings=readings,
+                in_place=in_place,
+                cache=cache,
             )
         except ScanError as exc:
             print(f"  skip  {rel}  (scan failed: {exc})", file=sys.stderr)
             continue
+        if cache.get(rel) is not prior:  # a fresh reading — persist so a re-run resumes
+            store.save_intake_cache(cache)
         proposals.append(proposal)
         _print_proposal(proposal)
 
     if not proposals:
         return 1
-    if not args.apply:
+    if not apply:
         print(f"\n{len(proposals)} proposal(s) (dry run; pass --apply to file).")
         return 0
-    if not _confirm(f"file these {len(proposals)} document(s)?", args.yes):
+    if not _confirm(f"file these {len(proposals)} document(s)?", yes):
         return 1
 
     filed = 0
@@ -491,6 +554,8 @@ def cmd_intake(args: argparse.Namespace) -> int:
             continue
         for message in errors:
             print(f"  warn  {message}", file=sys.stderr)
+        if cache.pop(proposal.src_rel, None) is not None:  # now in scans.toml
+            store.save_intake_cache(cache)
         print(f"  filed {doc.id}  ({proposal.dst_rel})")
         filed += 1
     print(f"\nfiled {filed} document(s).")
@@ -769,6 +834,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--yes", action="store_true", help="skip the confirmation prompt (with --apply)"
     )
     intake_p.set_defaults(func=cmd_intake)
+
+    import_p = sub.add_parser(
+        "import",
+        help="bulk-import a folder's unfiled files in place (dry-run unless --apply)",
+    )
+    import_p.add_argument(
+        "directory", help="folder to import (inside the syncthing root)"
+    )
+    import_p.add_argument(
+        "--limit", type=int, default=0, help="process at most N files (0 = all)"
+    )
+    import_p.add_argument(
+        "--apply", action="store_true", help="file the proposals (default: dry run)"
+    )
+    import_p.add_argument(
+        "--yes", action="store_true", help="skip the confirmation prompt (with --apply)"
+    )
+    import_p.set_defaults(func=cmd_import)
 
     scan_p = sub.add_parser(
         "scan",

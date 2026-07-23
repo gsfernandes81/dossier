@@ -215,6 +215,63 @@ def test_with_name_reslugs_the_id_and_destination(tmp_path: Path):
     assert p.doc.name == "Passport"  # original proposal untouched (deep-copied)
 
 
+# -- reading cache -----------------------------------------------------------
+
+
+def test_build_proposal_reuses_a_cached_reading(tmp_path: Path):
+    from dataclasses import replace
+
+    from dossier.scan import file_fingerprint
+
+    store, config, root = _store(tmp_path)
+    _drop(root, "Inbox/scan.pdf")
+    fp = file_fingerprint(root / "Inbox" / "scan.pdf")
+    hit = replace(_reading(document_type="Cached"), fingerprint=fp)
+    cache = {"Inbox/scan.pdf": hit}
+
+    def boom(_path: Path, _config: Config) -> ScanReading:
+        raise AssertionError("the VLM must not run on a cache hit")
+
+    p = intake.build_proposal(
+        "Inbox/scan.pdf",
+        store,
+        config,
+        docs=[],
+        readings={},
+        extract=boom,
+        cache=cache,
+    )
+    assert p.doc.name == "Cached"  # reused the cached reading, no re-scan
+
+
+def test_build_proposal_populates_the_cache_on_a_miss(tmp_path: Path):
+    store, config, root = _store(tmp_path)
+    _drop(root, "Inbox/scan.pdf")
+    cache: dict[str, ScanReading] = {}
+    intake.build_proposal(
+        "Inbox/scan.pdf",
+        store,
+        config,
+        docs=[],
+        readings={},
+        extract=_fixed(_reading(document_type="Passport")),
+        cache=cache,
+    )
+    assert cache["Inbox/scan.pdf"].document_type == "Passport"
+    assert cache["Inbox/scan.pdf"].fingerprint  # stamped for the next run's hit test
+
+
+def test_intake_cache_round_trips_through_the_store(tmp_path: Path):
+    store, _config, _root = _store(tmp_path)
+    reading = ScanReading.from_payload(
+        {"document_type": "X", "fingerprint": "9:9"}, model="m"
+    )
+    store.save_intake_cache({"a/b.pdf": reading})
+    back = store.load_intake_cache()
+    assert back["a/b.pdf"].document_type == "X"
+    assert back["a/b.pdf"].fingerprint == "9:9"  # fingerprint survives the round-trip
+
+
 # -- pending_files -----------------------------------------------------------
 
 

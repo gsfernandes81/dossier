@@ -121,6 +121,12 @@ class Config:
         return self.meta_dir / "scans.toml"
 
     @property
+    def intake_cache_path(self) -> Path:
+        """Machine-owned VLM-reading cache for intake, keyed by root-relative path —
+        a resumable-sweep cache so `ds import` doesn't re-read unchanged files."""
+        return self.meta_dir / "intake.toml"
+
+    @property
     def synced_config_path(self) -> Path:
         return self.meta_dir / "config.toml"
 

@@ -109,6 +109,7 @@ def build_proposal(
     readings: dict[str, ScanReading],
     extract: _Extract | None = None,
     in_place: bool = False,
+    cache: dict[str, ScanReading] | None = None,
 ) -> IntakeProposal:
     """Propose the whole record for ``src_rel`` (no disk writes).
 
@@ -117,11 +118,20 @@ def build_proposal(
     link. ``extract`` is injectable so tests need no VLM (default resolves
     :func:`dossier.scan.extract` at call time, so it's monkeypatchable too).
     ``in_place`` files where the document sits (a bulk import) rather than moving it
-    to a category/fallback folder (an inbox drop).
+    to a category/fallback folder (an inbox drop). ``cache`` (path → reading) reuses
+    an unchanged file's reading instead of re-running the VLM, and is populated in
+    place on a miss for the caller to persist — the resumable-sweep cache.
     """
     read = extract if extract is not None else scan.extract
     abs_path = resolve_path(config.syncthing_root, src_rel)
-    reading = replace(read(abs_path, config), fingerprint=file_fingerprint(abs_path))
+    fingerprint = file_fingerprint(abs_path)
+    cached = cache.get(src_rel) if cache is not None else None
+    if cached is not None and cached.fingerprint == fingerprint:
+        reading = cached  # unchanged since last read — reuse, no VLM
+    else:
+        reading = replace(read(abs_path, config), fingerprint=fingerprint)
+        if cache is not None:
+            cache[src_rel] = reading  # populate; the caller persists
 
     name = _name_from_reading(reading, src_rel)
     doc = Document(
