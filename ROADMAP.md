@@ -353,12 +353,20 @@ API; never bundle, spawn, or reimplement it.
   that links a *folded* duplicate copy and for stale sidecar entries (a `dismissed`
   path or `folded` keep that no longer exists on disk); a "show dismissed (N)" toggle
   to review/undo suppressions from the TUI (undo today = hand-edit `reconcile.toml`).
-- **Open from reconcile / doctor** — `o` already opens the *file* under the cursor
-  (orphans / duplicates / succession in reconcile; the finding's doc in doctor).
-  Follow-up: also open the full **detail view** for a row's document, **reusing** the
-  home detail pane rather than standing up a second surface. Worth a fable-advisor
-  pass on the cleanest seam (the reconcile/doctor modals currently *dismiss* with a
-  doc id for the home to open — a shared "open detail for id" path could serve both)
-  before building.
+- **Finish the Enter/→ verb sweep** *(deferred — come back to this)* — Phase 14.1 settled
+  the app-wide verb (**Enter opens the file, `→` opens detail**) and applied it to the home
+  and the expiry watch, the two surfaces that list *documents*. **Bundles** and **review**
+  were left alone on purpose, not forgotten: bundles lists bundles (its `Enter` scopes the
+  home to one — already the right activate for that object, and there is no file), and
+  review lists reconciliation *records*, keeping the Phase-3 map (`o` = file, `Enter` =
+  record) — on its Missing tab the file is gone by definition, so Enter-opens-file would be
+  dead on the tab that most needs a verb. Worth revisiting both, because the rows are not
+  all the same kind of thing: review's **duplicates** and **succession** rows *are*
+  documents and could take the verb, while **orphans** rows are files with no document yet;
+  bundles could plausibly use `→` for "show me what's in it". Do it as one deliberate pass
+  (fable-advisor first) rather than per-surface drift — the point of the verb is that it is
+  predictable. Related: `open_doc_file()` in `tui/screens.py` is already the shared
+  open-the-file seam; the detail side still travels as "dismiss with a doc id for the home
+  to open", and a shared "open detail for id" path would be the equivalent seam for `→`.
 - **Someday:** `createdTime` year-plausibility + "issued X expires Y" range parsing
   (fold into suggestions quality), slug finalization, Obsidian-vault confirmation.
