@@ -15,6 +15,8 @@
 
 """Tests for the CLI dispatch and ``ds init``."""
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,35 @@ from dossier import (
     config as config_mod,
 )
 from dossier.config import Config
+
+
+def test_cli_import_stays_lean():
+    # Importing the CLI must not drag in the command-specific machinery (dedup,
+    # intake, the service installer, …) or the urllib/http stack — those are
+    # deferred into the handful of commands that use them, so a quick `ds expiring`
+    # or a bare `ds` starts fast. Run in a subprocess for a pristine sys.modules.
+    forbidden = [
+        "dossier.answers",
+        "dossier.dedup_cache",
+        "dossier.export",
+        "dossier.intake",
+        "dossier.organize",
+        "dossier.power",
+        "dossier.preparedness",
+        "dossier.reset",
+        "dossier.service",
+        "dossier.service_install",
+        "urllib.request",
+    ]
+    code = (
+        "import dossier.cli, sys; "
+        f"bad=[m for m in {forbidden!r} if m in sys.modules]; "
+        "print(','.join(bad))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "", f"CLI import pulled in: {out.stdout.strip()}"
 
 
 def test_init_creates_layout_and_loadable_config(

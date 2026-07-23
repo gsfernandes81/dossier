@@ -32,12 +32,13 @@ from __future__ import annotations
 import base64
 import io
 import json
-import urllib.error
-import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+# NB: urllib is imported lazily inside _get/_post (the only HTTP callers). It pulls
+# in http.client/email/ssl (~50 ms) that every command would otherwise pay at
+# import — including the TUI, since the store imports this module for ScanReading.
 from dossier.config import Config
 from dossier.errors import ScanError
 
@@ -303,6 +304,9 @@ def list_models(config: Config, *, timeout: float = 15.0) -> list[ModelInfo]:
 
 
 def _get(url: str, timeout: float) -> dict:
+    import urllib.error
+    import urllib.request
+
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             return json.loads(response.read())
@@ -313,6 +317,9 @@ def _get(url: str, timeout: float) -> dict:
 
 
 def _post(base_url: str, body: dict, timeout: float) -> dict:
+    import urllib.error
+    import urllib.request
+
     url = base_url.rstrip("/") + "/chat/completions"
     request = urllib.request.Request(
         url,

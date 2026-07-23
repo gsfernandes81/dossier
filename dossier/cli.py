@@ -32,32 +32,24 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import tomli_w
 
-from dossier import (
-    answers,
-    dedup_cache,
-    dedup_hash,
-    doctor,
-    export,
-    intake,
-    migrate,
-    organize,
-    power,
-    preparedness,
-    query,
-    reconcile,
-    reset,
-    resolve,
-    scan,
-    service,
-    service_install,
-)
+# Only the modules dispatch always needs are imported eagerly. The rest are
+# imported inside the handful of commands that use them (see each cmd_*), so a
+# quick command like `ds expiring` or a bare `ds` no longer pays to import the
+# dedup/intake/service machinery it never touches. `migrate`/`scan` stay because
+# `reconcile`/`store` pull them anyway. TYPE_CHECKING holds the deferred modules
+# used only in annotations (strings under `from __future__ import annotations`).
+from dossier import doctor, migrate, query, reconcile, resolve, scan
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError, IntakeError, ScanError
 from dossier.merge import FieldDecision
 from dossier.model import Document
+
+if TYPE_CHECKING:
+    from dossier import intake, preparedness, service_install
 from dossier.platform_open import OpenError, is_termux, open_file, termux_preconditions
 from dossier.store import Store, atomic_write_bytes
 
@@ -201,6 +193,8 @@ def _print_migration_report(plan: migrate.MigrationPlan, *, verbose: bool) -> No
 
 def cmd_reset(args: argparse.Namespace) -> int:
     """Clear a folder's ``.dossier`` data, or (``--global``) this device's config."""
+    from dossier import reset
+
     if args.global_config:
         path = per_device_config_path()
         if not path.is_file():
@@ -292,6 +286,8 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
 
     pages = None
     if args.dedup:
+        from dossier import dedup_cache, dedup_hash  # only the --dedup path needs these
+
         root = config.syncthing_root
         candidates = [
             root / rel
@@ -414,6 +410,8 @@ def _decision_line(decision: FieldDecision) -> str:
 
 def cmd_export(args: argparse.Namespace) -> int:
     """Copy (or symlink) a bundle's files into an external folder."""
+    from dossier import export
+
     config = _load_config()
     if config is None:
         return 1
@@ -460,6 +458,8 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 def cmd_organize(args: argparse.Namespace) -> int:
     """Rename linked files to canonical names (dry-run unless ``--apply``)."""
+    from dossier import organize
+
     config = _load_config()
     if config is None:
         return 1
@@ -596,6 +596,8 @@ def _intake_run(
     doesn't re-scan: a fresh read is persisted immediately (resumable), and a filed
     file's entry is dropped (it now lives in ``scans.toml`` under the new id).
     """
+    from dossier import intake
+
     pending = intake.pending_files(store, config, from_dir=from_dir)
     if limit > 0:
         pending = pending[:limit]
@@ -739,6 +741,8 @@ def cmd_expiring(args: argparse.Namespace) -> int:
     clean). Exit 0 = clean · 1 = at least one line · 2 = error, so a scheduled job
     can tell "nag me" from "the tool is broken".
     """
+    from dossier import preparedness
+
     config = _load_config()
     if config is None:
         return 2
@@ -798,6 +802,8 @@ def _print_expiring(
 
 def cmd_ask(args: argparse.Namespace) -> int:
     """Answer a question from the records — retrieval-first, no model (Phase 11)."""
+    from dossier import answers
+
     config = _load_config()
     if config is None:
         return 2
@@ -821,6 +827,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
 
 def cmd_open(args: argparse.Namespace) -> int:
     """Open the document that best matches a query (or list ties)."""
+    from dossier import answers
+
     config = _load_config()
     if config is None:
         return 2
@@ -991,6 +999,8 @@ def cmd_service_run(_args: argparse.Namespace) -> int:
     nags), 1 if items failed, 2 on a config error. This is what the installed
     Scheduled Task / systemd timer invokes.
     """
+    from dossier import service
+
     config = _load_config()
     if config is None:
         return 2
@@ -1021,6 +1031,8 @@ def cmd_service_install(args: argparse.Namespace) -> int:
     generated artifact(s), and the exact registration commands — and changes
     nothing. ``--yes`` writes the artifacts and registers the task/timer.
     """
+    from dossier import service_install
+
     if _load_config() is None:
         return 2
     plan = service_install.plan_install()
@@ -1033,6 +1045,8 @@ def cmd_service_install(args: argparse.Namespace) -> int:
 
 def cmd_service_uninstall(args: argparse.Namespace) -> int:
     """Show how to remove the scan service; do it only with ``--yes``."""
+    from dossier import service_install
+
     if _load_config() is None:
         return 2
     plan = service_install.plan_uninstall()
@@ -1062,6 +1076,8 @@ def _print_install_plan(plan: service_install.InstallPlan, *, verb: str) -> None
 def _apply_or_dry_run(
     plan: service_install.InstallPlan, *, apply: bool, verb: str
 ) -> int:
+    from dossier import service_install
+
     if not apply:
         print(
             "\n(dry run — nothing written or registered; re-run with --yes, "
@@ -1076,6 +1092,8 @@ def _apply_or_dry_run(
 
 def cmd_service_status(_args: argparse.Namespace) -> int:
     """Report the live power decision, artifact presence, and registration state."""
+    from dossier import power, service_install
+
     config = _load_config()
     if config is None:
         return 2
