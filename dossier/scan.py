@@ -267,7 +267,7 @@ def transcribe(
         prompt=_TRANSCRIBE_PROMPT,
         schema=_TRANSCRIBE_SCHEMA,
         schema_name="transcript",
-        max_tokens=4096,  # full-page transcripts overrun a smaller budget (truncated JSON)
+        max_tokens=4096,  # smaller budgets truncate a full-page transcript's JSON
         timeout=timeout,
     )
     transcript = str(payload.get("transcript") or "").strip()

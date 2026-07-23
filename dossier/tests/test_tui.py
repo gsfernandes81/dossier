@@ -1366,3 +1366,18 @@ async def test_ctrl_t_toggles_transcript_content_search(tmp_path: Path):
         assert home._search_content is True
         # Now the transcript is searched → the passport is found.
         assert "passport" in {d.id for d in home.visible_docs()}
+
+
+@pytest.mark.asyncio
+async def test_home_notifies_when_sync_conflicts_await(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    # Syncthing left a conflict copy of the passport document in the store.
+    conflict = store.document_path("passport").with_name(
+        "passport.sync-conflict-20260101-120000-AAAAAAA.md"
+    )
+    conflict.write_bytes(store.serialize(Document(id="passport", name="X")).encode())
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        messages = [n.message for n in app._notifications]
+        assert any("sync conflict" in m and "ds resolve" in m for m in messages)

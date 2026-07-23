@@ -36,6 +36,23 @@ class IntakeError(DossierError):
     """`ds intake` could not file a proposal — source vanished or already filed."""
 
 
+class ResolveBusyError(StoreError):
+    """The live file changed between planning a merge and applying it.
+
+    Raised by :func:`dossier.resolve.apply_resolution` when the live file's
+    content hash no longer matches the copy the merge was planned against —
+    Syncthing (or a hand-edit) rewrote it underneath us. The conflict file is
+    left in place so the next `ds resolve` re-plans against the newer copy;
+    nothing is lost.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"{name!r} changed on disk while resolving; conflict left for a retry"
+        )
+        self.name = name
+
+
 class DocumentExistsError(StoreError):
     """A new document's id collides with a file already on disk."""
 

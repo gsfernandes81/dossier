@@ -276,6 +276,23 @@ class HomeScreen(Screen[None]):
         self.set_class(self._touch, "touch")
         self._reload()
         self._focus_default()
+        self._warn_conflicts()
+
+    def _warn_conflicts(self) -> None:
+        """On entry, flag any Syncthing conflict files left to merge.
+
+        Discoverability only — the merge itself is the CLI's `ds resolve` (an
+        in-TUI resolver comes later). Kept a notice, not a blocking modal, so it
+        never gets between the user and their documents.
+        """
+        count = len(self._store.list_conflicts())
+        if count:
+            noun = "conflict" if count == 1 else "conflicts"
+            self.notify(
+                f"{count} sync {noun} to merge — run `ds resolve`",
+                severity="warning",
+                timeout=10,
+            )
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if self.editing and action in _EDIT_LOCKED:

@@ -44,10 +44,12 @@ from dossier import (
     query,
     reconcile,
     reset,
+    resolve,
     scan,
 )
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError, IntakeError, ScanError
+from dossier.merge import FieldDecision
 from dossier.model import Document
 from dossier.platform_open import OpenError, is_termux, open_file, termux_preconditions
 from dossier.store import Store, atomic_write_bytes
@@ -336,6 +338,68 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
         for missing in report.missing:
             print(f"  {missing.doc_id}: {missing.path}")
     return 0
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    """Field-merge Syncthing conflict files back into the live copies.
+
+    Dry-run by default (prints what would merge); ``--apply`` performs the merges.
+    Every merge is recoverable — the losing conflict copy and the pre-merge live
+    copy are stashed to local history first.
+    """
+    config = _load_config()
+    if config is None:
+        return 1
+    store = Store(config)
+    items = resolve.find_conflicts(store)
+    if not items:
+        print("no sync conflicts to resolve.")
+        return 0
+
+    if args.apply and not _confirm(
+        f"merge {len(items)} conflict(s) into the live copies?", args.yes
+    ):
+        return 1
+
+    report = resolve.resolve_all(store, apply=args.apply)
+    _print_resolve(report, apply=args.apply, verbose=args.verbose)
+    if args.apply:
+        return 1 if report.skipped else 0
+    return 0
+
+
+def _print_resolve(
+    report: resolve.ResolveReport, *, apply: bool, verbose: bool
+) -> None:
+    verb = "merged" if apply else "would merge"
+    print(f"{verb} {len(report.resolutions)} conflict(s):")
+    for res in report.resolutions:
+        flag = "  ⚠ whole-file replace" if res.loud else ""
+        clean = "" if res.changed else "  (identical copy — cleared)"
+        print(f"  {res.kind:11} {res.name}{flag}{clean}")
+        shown = res.decisions if verbose else res.contested
+        for decision in shown:
+            print(f"      {_decision_line(decision)}")
+    if report.skipped:
+        print(f"\n{len(report.skipped)} left for a retry (changed mid-resolve):")
+        for res in report.skipped:
+            print(f"  {res.kind:11} {res.name}")
+    if not apply:
+        print("\n(dry run — nothing written; re-run with --apply to merge.)")
+
+
+def _decision_line(decision: FieldDecision) -> str:
+    winner = decision.winner.value if decision.winner else "ours"
+    if decision.action in ("lww", "tie"):
+        return (
+            f"~ {decision.field}: {decision.ours!r} vs {decision.theirs!r} "
+            f"→ kept {winner} ({decision.action})"
+        )
+    if decision.action == "fill":
+        return f"+ {decision.field}: filled from {winner}"
+    if decision.action == "union":
+        return f"∪ {decision.field}: merged both"
+    return f"= {decision.field}: agreed"
 
 
 def cmd_export(args: argparse.Namespace) -> int:
@@ -945,6 +1009,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="list every orphan instead of per-folder counts",
     )
     reconcile_p.set_defaults(func=cmd_reconcile)
+
+    resolve_p = sub.add_parser(
+        "resolve",
+        help="merge Syncthing conflict files back into the live copies",
+    )
+    resolve_p.add_argument(
+        "--apply",
+        action="store_true",
+        help="perform the merges (default: a dry-run report)",
+    )
+    resolve_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the confirmation prompt (with --apply)",
+    )
+    resolve_p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="show every field decision, not just contested ones",
+    )
+    resolve_p.set_defaults(func=cmd_resolve)
 
     export_p = sub.add_parser(
         "export",
