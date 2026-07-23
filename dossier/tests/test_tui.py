@@ -1428,3 +1428,87 @@ async def test_esc_returns_to_reconcile_when_detail_opened_from_it(tmp_path: Pat
         home.action_escape()
         await pilot.pause()
         assert isinstance(app.screen, ReconcileScreen)  # back on reconcile, not columns
+
+
+@pytest.mark.asyncio
+async def test_intake_card_detects_and_folds_a_duplicate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from textual.widgets import Label
+
+    from dossier import (
+        intake,
+        scan as scan_mod,
+    )
+    from dossier.tui.intake import IntakeScreen
+
+    store, config = _inbox_setup(tmp_path, "dup.pdf")  # passport.pdf is already linked
+    reading = scan_mod.ScanReading.from_payload(
+        {"document_type": "Passport", "confidence": 0.9}, model="m"
+    )
+    monkeypatch.setattr(scan_mod, "extract", lambda p, c: reading)
+    # The drop is page-identical to the existing passport's rendition.
+    monkeypatch.setattr(
+        intake.dedup_cache,
+        "cached_page_hashes",
+        lambda paths, root: {"Inbox/dup.pdf": [1, 2, 3], "passport.pdf": [1, 2, 3]},
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.push_screen(IntakeScreen(store, config))
+        await pilot.pause()
+        await app.workers.wait_for_complete()  # the background read + hash
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, IntakeScreen)
+        assert screen._proposal is not None
+        assert screen._proposal.duplicate is not None
+        assert screen._proposal.duplicate.doc_id == "passport"
+        body = str(screen.query_one("#ibody", Label).render())
+        assert "duplicate of" in body and "[d folds]" in body  # the card leads with it
+        screen.action_fold()  # fold instead of filing a new record
+        await pilot.pause()
+
+    # No second Passport record; the copy became a rendition; the inbox is emptied.
+    passports = [d for d in store.load_all() if d.name == "Passport"]
+    assert [d.id for d in passports] == ["passport"]
+    assert any(r.label == "duplicate" for r in store.load("passport").files)
+    assert not (tmp_path / "Inbox" / "dup.pdf").exists()
+
+
+@pytest.mark.asyncio
+async def test_intake_card_retargets_the_succession_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from dossier import (
+        intake,
+        scan as scan_mod,
+    )
+    from dossier.tui.intake import IntakeScreen
+    from dossier.tui.screens import DocPickerScreen
+
+    store, config = _inbox_setup(tmp_path, "new.pdf")
+    reading = scan_mod.ScanReading.from_payload(
+        {"document_type": "Medical", "confidence": 0.9}, model="m"
+    )
+    monkeypatch.setattr(scan_mod, "extract", lambda p, c: reading)
+    monkeypatch.setattr(
+        intake.dedup_cache, "cached_page_hashes", lambda paths, root: {}
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.push_screen(IntakeScreen(store, config))
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, IntakeScreen)
+        assert screen._proposal is not None
+        assert screen._proposal.doc.supersedes is None  # nothing auto-proposed
+
+        screen.action_retarget()  # open the picker
+        await pilot.pause()
+        assert isinstance(app.screen, DocPickerScreen)
+        app.screen.dismiss("coc")  # pick an existing document to renew
+        await pilot.pause()
+        assert screen._proposal.doc.supersedes == "coc"  # link set by hand

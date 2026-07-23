@@ -97,3 +97,61 @@ def test_contained_uses_augmenting_paths_not_greedy():
     assert dedup.contained([0, 2], [0, 1], max_distance=1)
     # genuine non-containment still returns False
     assert not dedup.contained([0, 15], [0, 1], max_distance=1)
+
+
+# -- find_container (one probe vs an existing set — intake fold detection) ----
+
+
+def test_find_container_exact_duplicate():
+    match = dedup.find_container([1, 2, 3], {"a/keep.pdf": [1, 2, 3]}, max_distance=0)
+    assert match == dedup.Containment(path="a/keep.pdf", exact=True)
+
+
+def test_find_container_strict_subset():
+    # The probe (2 pages) is a fewer-pages copy of a 4-page existing file.
+    match = dedup.find_container(
+        [10, 20], {"a/full.pdf": [10, 20, 30, 40]}, max_distance=0
+    )
+    assert match is not None and match.path == "a/full.pdf" and match.exact is False
+
+
+def test_find_container_ignores_a_fuller_probe():
+    # The probe is a *superset* of the existing file — not a fold (adopting a better
+    # scan is a separate action), so nothing is reported.
+    fuller = dedup.find_container([1, 2, 3], {"a/short.pdf": [1, 2]}, max_distance=0)
+    assert fuller is None
+
+
+def test_find_container_none_when_unrelated():
+    assert dedup.find_container([1, 2], {"a/other.pdf": [8, 9]}, max_distance=0) is None
+
+
+def test_find_container_is_fuzzy_within_distance():
+    # 2 (0b10) vs 3 (0b11) differ by one bit — a re-scan of the same page.
+    match = dedup.find_container([1, 2], {"a/keep.pdf": [1, 3]}, max_distance=1)
+    assert match == dedup.Containment(path="a/keep.pdf", exact=True)
+
+
+def test_find_container_prefers_exact_over_subset_then_tightest():
+    probe = [1, 2]
+    match = dedup.find_container(
+        probe,
+        {
+            "a/exact.pdf": [1, 2],  # exact — should win
+            "a/loose.pdf": [1, 2, 3, 4],  # a looser container
+            "a/tight.pdf": [1, 2, 3],  # a tighter subset container
+        },
+        max_distance=0,
+    )
+    assert match == dedup.Containment(path="a/exact.pdf", exact=True)
+    # Without the exact copy, the tightest subset container wins.
+    match2 = dedup.find_container(
+        probe,
+        {"a/loose.pdf": [1, 2, 3, 4], "a/tight.pdf": [1, 2, 3]},
+        max_distance=0,
+    )
+    assert match2 == dedup.Containment(path="a/tight.pdf", exact=False)
+
+
+def test_find_container_empty_probe_is_none():
+    assert dedup.find_container([], {"a/keep.pdf": [1, 2]}, max_distance=0) is None
