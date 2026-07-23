@@ -25,8 +25,10 @@ applied). **Phase 9 (intake) is essentially done** — the **inbox flow** (propo
 CLI + the `IntakeScreen` review card) and the **full-tree scale-up** (`ds import` + a
 resumable reading cache) have landed, reusing `organize`/`suggest`/`succession`. The one
 remaining item, **phone sync-back, is deferred to Phase 13** — its automatic trigger *is*
-the scan service, and the manual loop already works over synced `scans.toml`. Phases 10–13
-sketch the **long horizon** — preparedness, answers, durability, platform hardening —
+the scan service, and the manual loop already works over synced `scans.toml`. **Phase 10
+(preparedness) is done** — event-aware validity, `ds expiring` reminders, and bundle
+templates with a readiness checklist. Phases 11–13 sketch the **long horizon** — answers,
+durability, platform hardening —
 turning the catalogue into a living system.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
@@ -198,11 +200,11 @@ keeps the catalogue accurate in three years, and what makes owning the *whole* t
   Phase 9 code. When the desktop is reachable the phone's `ds scan` may instead point at its
   llama-server (already per-device URL config); vision inference never runs on the phone.
 
-## Phase 10 — Preparedness: checklists, event-aware validity, reminders  *(in progress)*
+## Phase 10 — Preparedness: checklists, event-aware validity, reminders  ✅
 Bundles are the app's real job (gather → check → submit, DESIGN §5) but today they are
 passive labels. This phase makes dossier answer "am I ready?" — and warn *before* it
-matters, against the date you need the document, not just today. *Event-aware validity +
-reminders landed (slice 1); bundle templates next (slice 2).*
+matters, against the date you need the document, not just today. **Done** — event-aware
+validity + reminders (slice 1) and bundle templates + the readiness checklist (slice 2).
 - [x] **Event-aware validity** (M) — `dossier/preparedness.py`, a pure engine: `event_status`
   reuses `Document.expiry_status` against a bundle's **event date** (plus an optional
   `min_valid_days` floor for "passport valid ≥ 6 months past the trip"), no new rule engine;
@@ -213,13 +215,14 @@ reminders landed (slice 1); bundle templates next (slice 2).*
   stdout when clean** so a Task-Scheduler / Termux-cron notification is quiet, exit **0/1/2**
   so a job can tell "nag me" from "the tool is broken". Event-aware by default. Verified
   read-only on the real store (3 marine expiries, soonest-first).
-- [ ] **Bundle templates** (M) — a template (`.dossier/templates.toml`, a `Bundle.template`
+- [x] **Bundle templates** (M) — a template (`.dossier/templates.toml`, a `Bundle.template`
   field) lists required document *types* as **match aliases** over name + tags + scan
   `document_type` (works today — names are typed — and sharpens as intake writes tags), with
   optional `count` / `min_valid_days` / `optional`. `preparedness.check_bundle` →
   gathered / problem / missing; surfaced as a `ReadinessScreen` checklist off the bundles
-  screen (`t` attach template, `c` open checklist). *(Deferred: "add to bundle" from the
-  checklist, template suggestions, a global `[validity.rules]` table.)*
+  screen (`t` attach template, `c` open checklist), with a per-bundle readiness summary on
+  its row. *(Deferred: "add to bundle" from the checklist — engine `candidates` field ships
+  dark; template suggestions; a global `[validity.rules]` table; a `ds ready` CLI twin.)*
 
 ## Phase 11 — Answers: content search & ask  *(long horizon)*
 `.dossier/scans.toml` already holds structured, grounded readings of every linked scan

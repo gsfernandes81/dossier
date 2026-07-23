@@ -170,6 +170,44 @@ def test_bundles_round_trip_hierarchical_slug(store: Store):
     assert loaded[slug].title == "India 2024"
 
 
+def test_bundle_template_field_round_trips(store: Store):
+    slug = "travel/india-2024"
+    store.save_bundles(
+        {slug: Bundle(slug=slug, title="India", template="schengen-visa")}
+    )
+    assert store.load_bundles()[slug].template == "schengen-visa"
+
+
+def test_load_templates_parses_requirements_tolerantly(store: Store):
+    store.config.templates_path.write_text(
+        "[schengen-visa]\n"
+        'title = "Schengen visa"\n'
+        "[[schengen-visa.require]]\n"
+        'label = "passport"\n'
+        'match = ["passport"]\n'
+        "min_valid_days = 180\n"
+        "[[schengen-visa.require]]\n"
+        'label = "photo"\n'
+        "count = 2\n"
+        "optional = true\n"
+        "[[schengen-visa.require]]\n"  # junk: no label → dropped, not an error
+        'match = ["ignored"]\n',
+        encoding="utf-8",
+    )
+    templates = store.load_templates()
+    tpl = templates["schengen-visa"]
+    assert tpl.title == "Schengen visa"
+    assert [r.label for r in tpl.requires] == ["passport", "photo"]  # labelless dropped
+    passport, photo = tpl.requires
+    assert passport.match == ("passport",) and passport.min_valid_days == 180
+    assert photo.count == 2 and photo.optional is True
+    assert photo.aliases == ("photo",)  # defaults to the label
+
+
+def test_load_templates_absent_is_empty(store: Store):
+    assert store.load_templates() == {}
+
+
 def test_bundles_persist_date_and_stamp_created(tmp_path: Path):
     cfg = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
     fixed = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)

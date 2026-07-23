@@ -125,10 +125,13 @@ def watch_row(
     return row
 
 
-def bundle_row(bundle: Bundle, *, count: int, glyphs: GlyphSet = ASCII) -> Text:
+def bundle_row(
+    bundle: Bundle, *, count: int, glyphs: GlyphSet = ASCII, readiness: str = ""
+) -> Text:
     """A row for the bundles surface: title, date, member count.
 
-    ``  India 2024        11 Mar 2024   6 docs``
+    ``  India 2024        11 Mar 2024   6 docs``. ``readiness`` (e.g. ``4/6 ready``)
+    is appended for a bundle measured against a template.
     """
     row = Text()
     if glyphs.bundle:
@@ -138,6 +141,8 @@ def bundle_row(bundle: Bundle, *, count: int, glyphs: GlyphSet = ASCII) -> Text:
     if dated:
         row.append(f"   {dated}", style="dim")
     row.append(f"   {count} doc{'' if count == 1 else 's'}", style="dim")
+    if readiness:
+        row.append(f"   {readiness}", style="dim")
     return row
 
 

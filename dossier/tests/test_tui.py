@@ -1289,3 +1289,41 @@ async def test_intake_screen_reject_dismisses_without_filing(
     assert "Inbox/junk.pdf" in store.load_reconcile().dismissed  # marked not-a-doc
     assert (tmp_path / "Inbox" / "junk.pdf").exists()  # never moved or deleted
     assert intake.pending_files(store, config) == []  # no longer pending
+
+
+@pytest.mark.asyncio
+async def test_readiness_screen_shows_gathered_and_missing(tmp_path: Path):
+    from dossier.model import Requirement, Template
+    from dossier.tui.screens import ReadinessScreen
+
+    store, config = _setup(tmp_path)
+    passport = store.load("passport")  # name "Passport"
+    passport.bundles = ["trip"]
+    passport.expiry_date = date(2030, 1, 1)  # valid well past the event
+    store.save(passport)
+    bundle = Bundle(slug="trip", title="India Trip", date=date(2026, 12, 1))
+    template = Template(
+        slug="trip",
+        title="Trip pack",
+        requires=(
+            Requirement("passport", ("passport",)),
+            Requirement("photo", ("photo",)),  # no member matches → missing
+        ),
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.push_screen(
+            ReadinessScreen(
+                store, config, bundle=bundle, template=template, today=TODAY
+            )
+        )
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, ReadinessScreen)
+        options = screen.query_one("#readiness", OptionList)
+        prompts = " | ".join(
+            str(options.get_option_at_index(i).prompt)
+            for i in range(options.option_count)
+        )
+    assert "Passport" in prompts  # the gathered passport
+    assert "missing" in prompts  # the missing photo requirement
