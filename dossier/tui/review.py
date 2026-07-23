@@ -201,25 +201,68 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
                     yield OptionList(id="integrity")
 
     def on_mount(self) -> None:
-        self._state = self._store.load_reconcile()
-        self._report = reconcile.run(
-            self._store, self._config, state=self._state, docs=self._snapshot()
-        )
-        self._readings = self._store.load_scans()
-        self._populate_conflicts()
-        self._populate_orphans()
-        self._populate_missing()
-        self._populate_succession()
+        # The reads here — load_all plus reconcile.run's folder walk and per-file
+        # stat checks — are slow on a synced/network store (seconds on Termux).
+        # Do them in a thread worker so the screen paints and stays responsive
+        # (Esc/Tab/typing all work) instead of freezing until the load finishes.
         self._seed_integrity_placeholder()
         self.query_one("#dups", OptionList).add_option(
             Option("press  s  to scan for duplicates (cached after the first run)")
         )
+        self._show_loading()
+        self._focus_active_pane()
+        self._load()
+
+    def _show_loading(self) -> None:
+        self.query_one("#rsummary", Label).update("loading the collection…")
+        for pane in ("#conflicts", "#missing", "#succession"):
+            options = self.query_one(pane, OptionList)
+            options.clear_options()
+            options.add_option(Option("loading…"))
+        tree = self.query_one("#orphans", Tree)
+        tree.clear()
+        tree.root.expand()
+        tree.root.add_leaf("loading…")  # a leaf, so _populate_orphans' clear resets it
+
+    @work(thread=True, exclusive=True, group="review-load")
+    def _load(self) -> None:
+        """Do the slow store reads off-thread, then render on the UI thread."""
+        state = self._store.load_reconcile()
+        docs = self._store.load_all()
+        report = reconcile.run(self._store, self._config, state=state, docs=docs)
+        readings = self._store.load_scans()
+        plans = self._plan_conflicts()
+        self.app.call_from_thread(
+            self._apply_load, state, docs, report, readings, plans
+        )
+
+    def _apply_load(
+        self,
+        state: ReconcileState,
+        docs: list[Document],
+        report: reconcile.ReconcileReport,
+        readings: dict[str, scan.ScanReading],
+        plans: list[resolve.Resolution],
+    ) -> None:
+        if not self.is_mounted:
+            return  # dismissed mid-load (Esc) — nothing left to populate
+        self._state = state
+        self._docs = docs
+        self._report = report
+        self._readings = readings
+        self._plans = plans
+        self._render_conflicts()
+        self._populate_orphans()
+        self._populate_missing()
+        self._populate_succession()
         self._update_summary()
         # Open on a tab that actually has something to do — conflicts first (they
-        # touch real files and block clean sync), then orphans/missing, which are
-        # always-available no-deps actions; Duplicates is empty until you scan and
-        # needs the optional dedup extras, so it never leads.
-        self.query_one(TabbedContent).active = self._default_tab()
+        # touch real files and block clean sync), then orphans/missing. Only if the
+        # user hasn't already navigated during the load, so we never yank the tab.
+        tabs = self.query_one(TabbedContent)
+        if tabs.active == "tab-conflicts":
+            tabs.active = self._default_tab()
+        self._focus_active_pane()
 
     def _default_tab(self) -> str:
         report = self._report
@@ -285,17 +328,19 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
 
     # -- conflicts (in-app `ds resolve`) -------------------------------------
 
-    def _populate_conflicts(self) -> None:
-        """Plan a merge for every Syncthing conflict copy and list them.
-
-        Read-only: planning never writes — the merge happens on ``a``/``A``.
-        """
-        self._plans = []
+    def _plan_conflicts(self) -> list[resolve.Resolution]:
+        """Plan a merge for every Syncthing conflict copy (read-only store I/O; no
+        widget access, so it's safe to run off the UI thread during the load)."""
+        plans: list[resolve.Resolution] = []
         for item in resolve.find_conflicts(self._store):
             try:
-                self._plans.append(resolve.plan(self._store, item))
+                plans.append(resolve.plan(self._store, item))
             except StoreError:
                 continue  # an unreadable conflict; the Integrity tab surfaces it
+        return plans
+
+    def _render_conflicts(self) -> None:
+        """Render ``self._plans`` into the Conflicts tab (UI thread only)."""
         options = self.query_one("#conflicts", OptionList)
         options.clear_options()
         detail = self.query_one("#conflict-detail", Static)
@@ -306,6 +351,11 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         for index, plan in enumerate(self._plans):
             options.add_option(Option(_conflict_headline(plan), id=str(index)))
         self._show_conflict_detail(0)
+
+    def _populate_conflicts(self) -> None:
+        """Re-plan then re-render conflicts (used after a merge)."""
+        self._plans = self._plan_conflicts()
+        self._render_conflicts()
 
     @on(OptionList.OptionHighlighted, "#conflicts")
     def _on_conflict_highlight(self, event: OptionList.OptionHighlighted) -> None:
