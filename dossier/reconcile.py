@@ -116,16 +116,19 @@ def run(
     config: Config,
     pages_by_file: Mapping[str, Sequence[int]] | None = None,
     state: ReconcileState | None = None,
+    docs: list[Document] | None = None,
 ) -> ReconcileReport:
     """Build the reconcile report, filtered by the sidecar ``state`` if given.
 
-    Stays pure — no new I/O. The caller loads ``state`` once (from
-    :meth:`Store.load_reconcile`) so dismissed orphans, acknowledged-missing
-    renditions, folded clusters, and sidecar ignore-globs drop out at the source.
-    ``pages_by_file`` (if given) adds dup clusters.
+    The caller loads ``state`` once (from :meth:`Store.load_reconcile`) so dismissed
+    orphans, acknowledged-missing renditions, folded clusters, and sidecar
+    ignore-globs drop out at the source. ``pages_by_file`` (if given) adds dup
+    clusters. ``docs`` lets a caller pass an already-loaded document list (e.g. a
+    screen sharing one snapshot across tabs) instead of paying another
+    :meth:`Store.load_all`; omit it and one is loaded here.
     """
     state = state or ReconcileState()
-    docs = store.load_all()
+    docs = store.load_all() if docs is None else docs
     linked: dict[str, list[str]] = {}
     for doc in docs:
         for rendition in doc.files:

@@ -17,6 +17,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from dossier import reconcile
 from dossier.config import Config
 from dossier.model import Document, ReconcileState, Rendition
@@ -54,6 +56,32 @@ def _setup(tmp_path: Path) -> tuple[Store, Config]:
         )
     )
     return store, config
+
+
+def test_run_reuses_a_passed_docs_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # With docs= given, run() must not re-read the store (the Review screen shares
+    # one snapshot across tabs to avoid N reloads on a slow synced filesystem).
+    store, config = _setup(tmp_path)
+    docs = store.load_all()
+    real = Store.load_all
+    calls = 0
+
+    def counting(self: Store) -> list[Document]:
+        nonlocal calls
+        calls += 1
+        return real(self)
+
+    monkeypatch.setattr(Store, "load_all", counting)
+    report = reconcile.run(store, config, docs=docs)
+    assert calls == 0  # no reload when the snapshot is supplied
+    fresh = reconcile.run(store, config)  # parity with a fresh load
+    assert (len(report.orphans), len(report.missing), len(report.linked)) == (
+        len(fresh.orphans),
+        len(fresh.missing),
+        len(fresh.linked),
+    )
 
 
 def test_scan_files_scopes_and_excludes_noise(tmp_path: Path):

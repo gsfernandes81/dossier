@@ -418,6 +418,46 @@ async def test_review_integrity_edit_opens_the_flagged_doc(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_review_doc_write_invalidates_cached_integrity(tmp_path: Path):
+    # Slice-2 contract: the screen shares one doc snapshot across tabs, but a
+    # document write drops the cached integrity result so the next open re-checks
+    # against fresh data (never a stale copy).
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    store.save(  # a dead rendition (Missing tab) on an ambiguous-date doc (Integrity)
+        Document(
+            id="d",
+            name="Doc 21-08-23",
+            has_digital=True,
+            files=[Rendition("x", "gone.pdf", primary=True)],
+        )
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = ReviewScreen(store, config)
+        app.push_screen(screen)
+        await pilot.pause()
+        assert screen._docs is not None  # snapshot loaded once on mount
+        # Run integrity so there's a cached result to invalidate.
+        screen.query_one(TabbedContent).active = "tab-integrity"
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert screen._integrity_count is not None
+        # Unlink the dead rendition — a document write.
+        screen.query_one(TabbedContent).active = "tab-missing"
+        screen.query_one("#missing", OptionList).highlighted = 0
+        await pilot.pause()
+        screen.action_unlink()
+        await pilot.pause()
+        assert screen._report is not None
+        assert not screen._report.missing  # _refresh used a fresh snapshot
+        assert screen._integrity_count is None  # cached integrity dropped
+        assert not screen._integrity_started  # …and will re-run on next open
+
+
+@pytest.mark.asyncio
 async def test_new_document_creates(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)

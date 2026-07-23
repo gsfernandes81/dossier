@@ -44,6 +44,27 @@ def test_clean_store_has_no_findings(store: Store):
     assert doctor.run(store, store.config).findings == []
 
 
+def test_run_reuses_a_passed_docs_snapshot(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+):
+    # With docs= given, run() must not re-read the store — the Review screen shares
+    # one snapshot across tabs to avoid N reloads on a slow synced filesystem.
+    store.save(Document(id="amb", name="Cert 21-08-23"))  # an ambiguous-date finding
+    docs = store.load_all()
+    real = Store.load_all
+    calls = 0
+
+    def counting(self: Store) -> list[Document]:
+        nonlocal calls
+        calls += 1
+        return real(self)
+
+    monkeypatch.setattr(Store, "load_all", counting)
+    report = doctor.run(store, store.config, docs=docs)
+    assert calls == 0  # no reload when the snapshot is supplied
+    assert _kinds(report) == _kinds(doctor.run(store, store.config))  # same findings
+
+
 def test_location_ref_and_missing_file(store: Store):
     store.save(
         Document(

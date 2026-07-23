@@ -174,6 +174,9 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         self._readings: dict[str, scan.ScanReading] = {}
         self._successions: dict[str, succession.Succession] = {}  # row id → proposal
         self._plans: list[resolve.Resolution] = []  # planned conflict merges
+        # One document snapshot, loaded once and reused across tabs; a write
+        # invalidates it (see _snapshot / _invalidate_docs) so it never goes stale.
+        self._docs: list[Document] | None = None
         # Integrity is the priciest tab (a full `ds doctor` run), so it's deferred
         # until first opened: count is None until checked, then the finding total.
         self._integrity_count: int | None = None
@@ -199,7 +202,9 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
 
     def on_mount(self) -> None:
         self._state = self._store.load_reconcile()
-        self._report = reconcile.run(self._store, self._config, state=self._state)
+        self._report = reconcile.run(
+            self._store, self._config, state=self._state, docs=self._snapshot()
+        )
         self._readings = self._store.load_scans()
         self._populate_conflicts()
         self._populate_orphans()
@@ -235,7 +240,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         if not self._readings:
             options.add_option(Option("run  ds scan  first to propose successions"))
             return
-        docs = self._store.load_all()
+        docs = self._snapshot()
         names = {doc.id: (doc.name or doc.id) for doc in docs}
         proposals = [
             s
@@ -268,11 +273,12 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         proposal = self._highlighted_succession()
         if proposal is None:
             return
-        doc = next((d for d in self._store.load_all() if d.id == proposal.newer), None)
-        if doc is None:
+        try:  # a fresh single-file read, not the snapshot — shrinks the write window
+            doc = self._store.load(proposal.newer)
+        except StoreError:
             return
         doc.supersedes = proposal.older
-        if self._save_doc(doc):
+        if self._save_doc(doc):  # invalidates the snapshot; re-propose reloads fresh
             self.notify(f"{proposal.newer} now supersedes {proposal.older}")
             self._populate_succession()
             self._update_summary()
@@ -330,7 +336,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
             message += f", {len(report.skipped)} changed mid-merge (retry)"
             severity = "warning"
         self.notify(message, severity=severity)
-        self._invalidate_integrity()  # merges rewrote sidecars
+        self._invalidate_docs()  # merges rewrote sidecars → snapshot + integrity stale
         self._populate_conflicts()
         self._update_summary()
 
@@ -350,7 +356,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
             self.notify(str(exc), severity="error")
         else:
             self.notify(f"merged {fresh.name}")
-        self._invalidate_integrity()  # a merge rewrote the live sidecar
+        self._invalidate_docs()  # a merge rewrote the live sidecar
         self._populate_conflicts()
         self._update_summary()
 
@@ -372,7 +378,12 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
     def _run_integrity(self) -> None:
         """Run the (blocking) doctor check off-thread, then render its findings."""
         self.app.call_from_thread(self._integrity_checking)
-        report = doctor.run(self._store, self._config, skip=self._INTEGRITY_SKIP)
+        # Reuse the shared snapshot if present (a plain reference read — the worker
+        # never assigns it); load fresh off-thread if a write invalidated it.
+        docs = self._docs if self._docs is not None else self._store.load_all()
+        report = doctor.run(
+            self._store, self._config, skip=self._INTEGRITY_SKIP, docs=docs
+        )
         self.app.call_from_thread(self._populate_integrity_results, report)
 
     def _integrity_checking(self) -> None:
@@ -406,13 +417,31 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
     def _invalidate_integrity(self) -> None:
         """Drop any computed integrity result so the next tab-open re-checks.
 
-        Called from the write paths (doc saves, conflict merges): a mutation can
+        Called (via :meth:`_invalidate_docs`) from the write paths: a mutation can
         change what doctor would find. Never runs while Integrity is the active tab
         — every mutating key is gated (``check_action``) to the other tabs.
         """
         self._integrity_started = False
         self._integrity_count = None
         self._seed_integrity_placeholder()
+
+    def _snapshot(self) -> list[Document]:
+        """The screen's document list — loaded once, reused across tabs.
+
+        Every tab used to reload the whole store independently; on the user's
+        Proton Drive store that was hundreds of slow reads per open. This loads
+        them once; a write invalidates it (see :meth:`_invalidate_docs`).
+        """
+        if self._docs is None:
+            self._docs = self._store.load_all()
+        return self._docs
+
+    def _invalidate_docs(self) -> None:
+        """After a document write: drop the snapshot (reloaded fresh next use) and
+        the integrity result. Sidecar-only writes (dismiss/ack/fold/glob) don't
+        touch documents, so they leave the snapshot alone."""
+        self._docs = None
+        self._invalidate_integrity()
 
     @on(OptionList.OptionSelected, "#integrity")
     def _open_integrity(self, event: OptionList.OptionSelected) -> None:
@@ -438,7 +467,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         doc_id = self._integrity_doc_id()
         if doc_id is None:
             return None
-        doc = next((d for d in self._store.load_all() if d.id == doc_id), None)
+        doc = next((d for d in self._snapshot() if d.id == doc_id), None)
         rendition = doc.primary_rendition() if doc is not None else None
         return rendition.path if rendition is not None else None
 
@@ -696,7 +725,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         proposal = self._highlighted_succession()
         if proposal is None:
             return None
-        doc = next((d for d in self._store.load_all() if d.id == proposal.newer), None)
+        doc = next((d for d in self._snapshot() if d.id == proposal.newer), None)
         rendition = doc.primary_rendition() if doc is not None else None
         return rendition.path if rendition is not None else None
 
@@ -753,7 +782,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         if leaf is None:
             return
         path = leaf.path
-        docs = self._store.load_all()
+        docs = self._snapshot()  # read-only: the picker filters; _do_link reloads
         initial = ""
         if leaf.suggestion is not None:
             match = next((d for d in docs if d.id == leaf.suggestion), None)
@@ -881,7 +910,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         except StoreError as exc:
             self.notify(str(exc), severity="error")
             return False
-        self._invalidate_integrity()  # the saved doc may change what doctor finds
+        self._invalidate_docs()  # the snapshot + any integrity result are now stale
         return True
 
     def _persist_state(self) -> bool:
@@ -908,8 +937,14 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         expanded = self._expanded_folders(tree)
         cursor = tree.cursor_line
         pages = self._pages if refilter_dups else None
+        # A doc write already invalidated the snapshot, so this reloads fresh; a
+        # sidecar-only change (dismiss/ack/fold) reuses the still-valid snapshot.
         self._report = reconcile.run(
-            self._store, self._config, pages_by_file=pages, state=self._state
+            self._store,
+            self._config,
+            pages_by_file=pages,
+            state=self._state,
+            docs=self._snapshot(),
         )
         self._populate_orphans(expanded=expanded)
         self._populate_missing()

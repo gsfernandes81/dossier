@@ -67,20 +67,28 @@ class Report:
         return grouped
 
 
-def run(store: Store, config: Config, *, skip: frozenset[str] = frozenset()) -> Report:
+def run(
+    store: Store,
+    config: Config,
+    *,
+    skip: frozenset[str] = frozenset(),
+    docs: list[Document] | None = None,
+) -> Report:
     """Run every integrity check and collect the findings.
 
     ``skip`` drops findings of the named checks (see :class:`Finding.check`). The
     two heaviest — ``sync-conflict`` and ``missing-file`` — are also short-circuited
     when skipped so they never run; a final filter honours any other skipped kind.
     The Review screen's Integrity tab skips those two because its Conflicts and
-    Missing tabs already own them.
+    Missing tabs already own them. ``docs`` reuses an already-loaded document list
+    (findings then describe those docs *as loaded*) instead of a fresh
+    :meth:`Store.load_all`; omit it — as the CLI does — to check the live store.
     """
     report = Report()
     if "sync-conflict" not in skip:
         report.findings += _check_conflicts(store)
 
-    docs = store.load_all()
+    docs = store.load_all() if docs is None else docs
     locations = store.load_locations()
     report.findings += _check_location_refs(docs, locations)
     report.findings += _check_supersession(docs)
