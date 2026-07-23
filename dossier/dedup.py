@@ -77,6 +77,47 @@ def contained(small: Sequence[int], large: Sequence[int], max_distance: int) -> 
 
 
 @dataclass(frozen=True)
+class Containment:
+    """A file whose pages contain a probe's — an existing copy the probe folds into."""
+
+    path: str  # the containing file (the copy to keep)
+    exact: bool  # True: identical page set; False: the probe is a strict subset
+
+
+def find_container(
+    probe: Sequence[int],
+    pages_by_file: Mapping[str, Sequence[int]],
+    *,
+    max_distance: int = DEFAULT_MAX_DISTANCE,
+) -> Containment | None:
+    """The best existing file that *contains* ``probe`` (for intake fold detection).
+
+    One new file (``probe``) against an existing set — the lower-level answer
+    :func:`group_files` is built from, without its whole-set clustering. A candidate
+    ``c`` **contains** the probe when ``probe ⊆ c``; it's an **exact duplicate** when
+    also ``c ⊆ probe`` (same page set), else the probe is a **strict subset** (a
+    fewer-pages copy). The reverse-only case (the probe is the *fuller* copy) is not
+    reported here — adopting a better scan over an existing one is a separate action.
+
+    Ties: an exact duplicate beats a subset; among subsets the tightest container
+    (fewest pages) wins; then the lowest path, so the result is deterministic.
+    """
+    if not probe:
+        return None
+    best: Containment | None = None
+    best_key: tuple[int, int, str] | None = None
+    for path in pages_by_file:
+        pages = pages_by_file[path]
+        if not pages or not contained(probe, pages, max_distance):
+            continue  # probe not ⊆ this candidate
+        exact = contained(pages, probe, max_distance)
+        key = (0 if exact else 1, len(pages), path)
+        if best_key is None or key < best_key:
+            best, best_key = Containment(path=path, exact=exact), key
+    return best
+
+
+@dataclass(frozen=True)
 class DupGroup:
     """A cluster of files that are the same document (2+ members)."""
 

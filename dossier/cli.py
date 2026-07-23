@@ -635,6 +635,11 @@ def _intake_run(
 
 def _print_proposal(p: intake.IntakeProposal) -> None:
     print(f"\n{p.src_rel}")
+    if p.duplicate is not None:
+        kind = "exact duplicate of" if p.duplicate.exact else "subset of"
+        print(
+            f"  copy    {kind} {p.duplicate.doc_id}  (fold in the TUI, or file as new)"
+        )
     print(f"  name    {p.doc.name}  (id {p.doc.id})")
     if p.doc.tags:
         print(f"  tags    {' '.join(p.doc.tags)}")

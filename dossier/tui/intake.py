@@ -30,6 +30,7 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Label
+from textual.widgets.option_list import Option
 from textual.worker import get_current_worker
 
 from dossier import intake
@@ -38,7 +39,10 @@ from dossier.errors import IntakeError
 from dossier.platform_open import OpenError, open_file
 from dossier.query import resolve_path
 from dossier.store import Store
-from dossier.tui.screens import TextPromptScreen
+from dossier.tui.screens import DocPickerScreen, TextPromptScreen
+
+# Sentinel option id for the "clear the succession link" row in the retarget picker.
+_NO_SUCCESSION = "\x00no-succession"
 
 
 class IntakeScreen(ModalScreen[str | None]):
@@ -47,8 +51,9 @@ class IntakeScreen(ModalScreen[str | None]):
     BINDINGS = [
         Binding("a", "accept", "File"),
         Binding("e", "accept_edit", "File + edit"),
+        Binding("d", "fold", "Fold duplicate"),
         Binding("n", "rename", "Rename"),
-        Binding("s", "toggle_succession", "Succession"),
+        Binding("s", "retarget", "Renews"),
         Binding("k", "skip", "Skip"),
         Binding("x", "reject", "Not a doc"),
         Binding("o", "open_file", "Open"),
@@ -73,12 +78,13 @@ class IntakeScreen(ModalScreen[str | None]):
         self._index = 0
         self._filed = 0
         self._proposal: intake.IntakeProposal | None = None
-        self._succession_on = True
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="ipanel"):
             yield Label(id="ihead")
-            yield Label(id="ibody")
+            # markup off: the body is plain text with literal brackets ("[d folds]",
+            # note tags like "[fallback-folder]") that Rich would otherwise eat.
+            yield Label(id="ibody", markup=False)
             yield Label(_KEYS, id="ifoot")
 
     def on_mount(self) -> None:
@@ -128,9 +134,16 @@ class IntakeScreen(ModalScreen[str | None]):
 
     def _show_proposal(self, proposal: intake.IntakeProposal) -> None:
         self._proposal = proposal
-        self._succession_on = proposal.succession is not None
         doc = proposal.doc
-        lines = [f"name    {doc.name}   (id {doc.id})"]
+        lines: list[str] = []
+        dup = proposal.duplicate
+        if dup is not None:  # lead with it — filing as new is probably wrong
+            kind = "exact duplicate of" if dup.exact else "subset of"
+            tail = "" if dup.exact else " — fewer pages"
+            lines.append(
+                f"copy    {kind} {dup.doc_name} ({dup.doc_id}){tail}  [d folds]"
+            )
+        lines.append(f"name    {doc.name}   (id {doc.id})")
         if doc.tags:
             lines.append(f"tags    {' '.join(doc.tags)}")
         if doc.issue_date:
@@ -139,12 +152,9 @@ class IntakeScreen(ModalScreen[str | None]):
             lines.append(f"expiry  {doc.expiry_date}")
         if doc.notes:
             lines.append(f"notes   {doc.notes.splitlines()[-1]}")
-        if proposal.succession is not None:
-            mark = "on" if self._succession_on else "off (press s)"
-            conf = proposal.succession.confidence
-            lines.append(
-                f"renews  {proposal.succession.older}  (conf {conf:.2f}) [{mark}]"
-            )
+        renews = self._succession_line(proposal)
+        if renews:
+            lines.append(renews)
         note = f"  [{','.join(proposal.notes)}]" if proposal.notes else ""
         arrow = "->" if proposal.moves else "= (in place)"
         lines.append(f"file    {proposal.src_rel}  {arrow}  {proposal.dst_rel}{note}")
@@ -155,8 +165,24 @@ class IntakeScreen(ModalScreen[str | None]):
             f"read    conf {proposal.reading.confidence:.2f}, {proposal.reading.model}"
         )
         index, total = self._index, len(self._pending)
-        self.query_one("#ihead", Label).update(f"Intake  {index + 1}/{total}")
+        head = f"Intake  {index + 1}/{total}"
+        if dup is not None:
+            head += "  — possible duplicate"
+        self.query_one("#ihead", Label).update(head)
         self.query_one("#ibody", Label).update("\n".join(lines))
+
+    @staticmethod
+    def _succession_line(proposal: intake.IntakeProposal) -> str:
+        """The ``renews …`` line, derived from ``doc.supersedes`` (s retargets it)."""
+        doc = proposal.doc
+        proposed = proposal.succession
+        if doc.supersedes:
+            if proposed is not None and doc.supersedes == proposed.older:
+                return f"renews  {doc.supersedes}  (conf {proposed.confidence:.2f})"
+            return f"renews  {doc.supersedes}  (manual)"
+        if proposed is not None:  # a link was proposed but the user cleared it
+            return f"renews  {proposed.older}  — off (press s)"
+        return ""
 
     # -- actions -------------------------------------------------------------
 
@@ -203,14 +229,56 @@ class IntakeScreen(ModalScreen[str | None]):
         )
         self._show_proposal(self._proposal)
 
-    def action_toggle_succession(self) -> None:
+    def action_fold(self) -> None:
+        """File the drop as a fold of the duplicate it matches — no new record."""
         proposal = self._proposal
-        if proposal is None or proposal.succession is None:
+        if proposal is None:
+            self.notify("still reading — wait a moment", severity="warning")
             return
-        self._succession_on = not self._succession_on
-        proposal.doc.supersedes = (
-            proposal.succession.older if self._succession_on else None
+        if proposal.duplicate is None:
+            self.notify("no duplicate detected — press a to file as new")
+            return
+        try:
+            doc, errors = intake.apply_fold(proposal, self._store, self._config)
+        except IntakeError as exc:
+            self.notify(str(exc), severity="error")
+            self._advance()
+            return
+        for message in errors:
+            self.notify(message, severity="warning")
+        self._filed += 1
+        self.notify(f"folded into {doc.id}")
+        self._advance()
+
+    def action_retarget(self) -> None:
+        """Pick which existing document this one renews (or clear the link)."""
+        proposal = self._proposal
+        if proposal is None:
+            return
+        doc = proposal.doc
+        docs = self._store.load_all()
+        current = ""
+        if doc.supersedes:
+            match = next((d for d in docs if d.id == doc.supersedes), None)
+            current = match.name if match is not None else ""
+        lead = (
+            Option("— no succession —", id=_NO_SUCCESSION) if doc.supersedes else None
         )
+        self.app.push_screen(
+            DocPickerScreen(
+                docs,
+                prompt=f'"{doc.name}" renews which document?',
+                initial=current,
+                lead=lead,
+            ),
+            self._retargeted,
+        )
+
+    def _retargeted(self, doc_id: str | None) -> None:
+        proposal = self._proposal
+        if proposal is None or doc_id is None:  # cancelled
+            return
+        proposal.doc.supersedes = None if doc_id == _NO_SUCCESSION else doc_id
         self._show_proposal(proposal)
 
     def action_skip(self) -> None:
@@ -248,4 +316,6 @@ class IntakeScreen(ModalScreen[str | None]):
         self._read_current()
 
 
-_KEYS = "a file · e edit · n rename · s succ · k skip · x not-doc · o open · Esc close"
+_KEYS = (
+    "a file · d fold · e edit · n rename · s renews · k skip · x not-doc · o open · Esc"
+)

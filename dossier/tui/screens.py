@@ -361,11 +361,19 @@ class DocPickerScreen(ModalScreen[str | None]):
     """
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, docs: list[Document], *, prompt: str, initial: str = "") -> None:
+    def __init__(
+        self,
+        docs: list[Document],
+        *,
+        prompt: str,
+        initial: str = "",
+        lead: Option | None = None,
+    ) -> None:
         super().__init__()
         self._docs = docs
         self._prompt = prompt
         self._initial = initial
+        self._lead = lead  # an always-first sentinel row, e.g. "— no succession —"
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="ppanel"):
@@ -379,7 +387,7 @@ class DocPickerScreen(ModalScreen[str | None]):
 
     def _populate(self, needle: str) -> None:
         options = self.query_one("#pcandidates", OptionList)
-        _fill_doc_options(options, self._docs, needle)
+        _fill_doc_options(options, self._docs, needle, lead=self._lead)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "pfilter":

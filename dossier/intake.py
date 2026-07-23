@@ -32,14 +32,14 @@ are left unset and resurface in the detail pane after filing (the reading is syn
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from dossier import organize, scan, succession
+from dossier import dedup, dedup_cache, dedup_hash, organize, scan, succession
 from dossier.config import Config
-from dossier.errors import IntakeError
+from dossier.errors import IntakeError, StoreError
 from dossier.migrate import slugify
 from dossier.model import Document, Rendition, SuggestedField, Suggestion
 from dossier.query import resolve_path
@@ -50,6 +50,19 @@ from dossier.succession import Succession
 from dossier.suggest import from_reading
 
 _Extract = Callable[[Path, Config], ScanReading]
+# Page-hash provider: (paths, root) -> {root-relative POSIX path: [page hashes]}.
+# Defaults to the cached hasher; injectable so tests need no pypdfium2.
+_Hasher = Callable[[Iterable[Path], Path], dict[str, list[int]]]
+
+
+@dataclass(frozen=True)
+class DuplicateMatch:
+    """The drop is a copy of an existing document's rendition — fold, don't file."""
+
+    doc_id: str  # the existing document
+    doc_name: str  # for display without a reload
+    path: str  # the matched rendition's rel path — the fold "keep"
+    exact: bool  # exact duplicate vs a fewer-pages subset
 
 
 @dataclass(frozen=True)
@@ -63,6 +76,7 @@ class IntakeProposal:
     notes: tuple[str, ...]  # organize hints: fallback-folder / truncated / …
     succession: Succession | None  # a proposed "this supersedes an older doc"
     open_questions: tuple[Suggestion, ...]  # ambiguous dates left unset for the pane
+    duplicate: DuplicateMatch | None = None  # a copy of an existing doc — offer to fold
 
     @property
     def name(self) -> str:
@@ -110,6 +124,7 @@ def build_proposal(
     extract: _Extract | None = None,
     in_place: bool = False,
     cache: dict[str, ScanReading] | None = None,
+    hasher: _Hasher | None = None,
 ) -> IntakeProposal:
     """Propose the whole record for ``src_rel`` (no disk writes).
 
@@ -153,6 +168,8 @@ def build_proposal(
     if link is not None:
         doc.supersedes = link.older
 
+    duplicate = _detect_duplicate(src_rel, config, docs, hasher)
+
     dst_rel, notes = _plan_destination(doc, config, in_place)
     return IntakeProposal(
         src_rel=src_rel,
@@ -162,6 +179,49 @@ def build_proposal(
         notes=notes,
         succession=link,
         open_questions=tuple(open_questions),
+        duplicate=duplicate,
+    )
+
+
+def _detect_duplicate(
+    src_rel: str, config: Config, docs: list[Document], hasher: _Hasher | None
+) -> DuplicateMatch | None:
+    """Whether the dropped file is a page-for-page copy of an existing rendition.
+
+    Reuses the dedup engine: hash the drop + existing linked renditions (the latter
+    from the per-device cache, so only the drop is fresh) and ask
+    :func:`dossier.dedup.find_container`. Skips silently — returns None — for a
+    non-page drop or when the ``[dedup]`` extra is absent (a card must never nag).
+    """
+    if PurePosixPath(src_rel).suffix.lower() not in dedup_hash.PAGE_SUFFIXES:
+        return None
+    doc_by_path: dict[str, Document] = {}
+    for doc in docs:
+        for rendition in doc.files:
+            page = (
+                PurePosixPath(rendition.path).suffix.lower() in dedup_hash.PAGE_SUFFIXES
+            )
+            if rendition.path and page:
+                doc_by_path.setdefault(rendition.path, doc)
+
+    root = config.syncthing_root
+    run = hasher if hasher is not None else dedup_cache.cached_page_hashes
+    paths = [resolve_path(root, rel) for rel in (src_rel, *doc_by_path)]
+    try:
+        pages = run(paths, root)
+    except dedup_hash.DedupError:
+        return None  # the [dedup] extra isn't installed — skip, don't nag
+
+    probe = pages.get(src_rel)
+    if not probe:
+        return None
+    existing = {rel: pages[rel] for rel in doc_by_path if rel in pages}
+    match = dedup.find_container(probe, existing)
+    if match is None:
+        return None
+    doc = doc_by_path[match.path]
+    return DuplicateMatch(
+        doc_id=doc.id, doc_name=doc.name or doc.id, path=match.path, exact=match.exact
     )
 
 
@@ -246,6 +306,94 @@ def apply_proposal(
         _, move_errors = organize.apply_organize_plan(move_plan, store, root=root)
         errors.extend(move_errors)
     return doc, errors
+
+
+def apply_fold(
+    proposal: IntakeProposal, store: Store, config: Config
+) -> tuple[Document, list[str]]:
+    """Fold ``proposal`` into the document it duplicates — **no new record**.
+
+    The dropped file becomes a secondary rendition of the matched document, moved
+    next to that document's keep (so a later ``ds organize`` is a no-op), and
+    recorded in the reconcile ``folded`` sidecar so a future dedup scan doesn't
+    re-ask. Same crash-safe order + non-fatal-error contract as
+    :func:`apply_proposal`: hard failures raise :class:`IntakeError` before any
+    write; a failed move / unsaved reading comes back in ``errors`` with the record
+    already consistent (the copy stays linked at its inbox path, recoverable).
+    """
+    match = proposal.duplicate
+    if match is None:
+        raise IntakeError("nothing to fold: no duplicate detected")
+    root = config.syncthing_root
+    if not resolve_path(root, proposal.src_rel).exists():
+        raise IntakeError(f"source vanished: {proposal.src_rel}")
+    linked = {r.path for d in store.load_all() for r in d.files if r.path}
+    if proposal.src_rel in linked:
+        raise IntakeError(f"already filed: {proposal.src_rel}")
+    try:
+        target = store.load(match.doc_id)
+    except StoreError as exc:
+        raise IntakeError(f"fold target {match.doc_id!r} is gone: {exc}") from exc
+    if not any(r.path == match.path for r in target.files):
+        raise IntakeError(f"fold target no longer links {match.path}; re-read")
+
+    label, dst_rel = _fold_name(target, match, proposal.src_rel, root)
+    errors: list[str] = []
+    target.files.append(Rendition(label=label, path=proposal.src_rel, primary=False))
+    target.has_digital = True
+    store.save(target)  # target links the still-in-inbox copy — a consistent state
+
+    try:
+        readings = store.load_scans()
+        # A freebie for a target with no reading; never clobber a better existing one.
+        readings.setdefault(match.doc_id, proposal.reading)
+        store.save_scans(readings)
+    except OSError as exc:
+        errors.append(f"reading not saved: {exc}")
+
+    item = organize.OrganizeItem(
+        doc_id=target.id,
+        name=target.name,
+        label=label,
+        src_rel=proposal.src_rel,
+        dst_rel=dst_rel,
+        problem=None,
+    )
+    move_plan = organize.OrganizePlan(to_folders=False, items=(item,))
+    _, move_errors = organize.apply_organize_plan(move_plan, store, root=root)
+    errors.extend(move_errors)
+
+    # Record the fold last (suppression-only, self-healing): note the copy's current
+    # path — the destination on a clean move, else where it stayed on a failed one.
+    final = proposal.src_rel if move_errors else dst_rel
+    try:
+        state = store.load_reconcile()
+        state.folded.setdefault(match.path, set()).add(final)
+        store.save_reconcile(state)
+    except OSError as exc:
+        errors.append(f"fold not recorded: {exc}")
+    return store.load(target.id), errors
+
+
+def _fold_name(
+    target: Document, match: DuplicateMatch, src_rel: str, root: Path
+) -> tuple[str, str]:
+    """A unique ``(label, dst_rel)`` for the folded copy, beside the target's keep.
+
+    Mirrors organize's ``<stem>--<label>`` scheme for a secondary rendition, so the
+    copy lands where ``ds organize`` would keep it. Bumps the label (``duplicate-2``…)
+    if the canonical name is already taken by an earlier fold.
+    """
+    stem, _ = organize.canonical_stem(target)
+    parent = PurePosixPath(match.path).parent
+    suffix = PurePosixPath(src_rel).suffix.lower()
+    base = "duplicate" if match.exact else "partial"
+    for n in range(1, 100):
+        label = base if n == 1 else f"{base}-{n}"
+        dst = (parent / f"{stem}--{slugify(label)}{suffix}").as_posix()
+        if not organize._occupied(root, dst):
+            return label, dst
+    return base, (parent / f"{stem}--{base}{suffix}").as_posix()
 
 
 # -- field derivations -------------------------------------------------------
