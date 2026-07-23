@@ -37,9 +37,10 @@ a build-but-don't-run installer) that closes the phone sync-back loop. **Phases 
 complete.** Phases 14–15 are next: **find-fast UX** (launch optimized for the urgent
 lookup, undo, init/empty-state polish, typo-tolerant search) and **Syncthing integration**.
 
-**Next up:** *"not a duplicate"* — see **Dismiss a false-positive duplicate** in the Notes.
-Found in real use: every review tab has a way to say *no* except Duplicates, so a cluster
-that isn't a duplicate can only be left to resurface on every scan.
+**Next up — a review-clarity slice**, all three found in real use, all in the Notes:
+**dismiss a false-positive duplicate** (every tab can say *no* except Duplicates),
+**per-tab keys** (the footer and `?` advertise every tab's actions on every tab, which is
+what made the first one hard to find), and **open both sides of a succession**.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -366,6 +367,25 @@ API; never bundle, spawn, or reimplement it.
   a fresh decision instead of staying buried, then wire `x` on `tab-dups` — after which the
   tab reads like every other one: `f` affirms, `x` rejects. Pairs with the "show dismissed
   (N)" toggle below, which becomes the undo for both.
+- **Per-tab keys in review's footer and `?` panel** (S) — **ships with the above; same
+  method.** Review's `check_action` returns `None` for an action that doesn't apply to the
+  active tab, and Textual reads `None` as *disabled but **visible*** — `False` is
+  disabled+hidden (`DOMNode.check_action`). So every tab advertises all of Accept, Link,
+  Unlink, Dismiss, Fold, Edit and Ignore-glob, greyed, and the reader has to guess which
+  are real: this is exactly why "how do I dismiss a duplicate?" and "what's the difference
+  between accept / fold / link?" came up in real use. Return `False` instead and the footer
+  and `?` panel become per-tab for free — no separate help content to write or keep in
+  sync. The `refresh_bindings()` on `TabActivated` is already wired (its comment, "footer
+  shows only the active tab's actions", is simply not true yet). Check nothing depends on a
+  greyed key still firing before flipping it.
+- **Open both sides of a succession** (S) — `o` opens only the *newer* document's rendition
+  (`_succession_rendition_path`), but the judgement the tab asks for — "does this renewal
+  really replace that one?" — is a *comparison*, so one file can't answer it. Make `o` open
+  the older then the newer, so the renewal you're affirming lands frontmost, and open
+  whichever side exists when the other has no digital rendition (paper-only predecessors
+  are common) rather than refusing both. On Termux this degrades gracefully: sequential
+  `termux-open` intents land in the same viewer, so the phone shows the newer — today's
+  behavior, not a regression.
 - **Reconcile follow-ups** *(deferred, low priority)* — doctor checks for a document
   that links a *folded* duplicate copy and for stale sidecar entries (a `dismissed`
   path or `folded` keep that no longer exists on disk); a "show dismissed (N)" toggle
