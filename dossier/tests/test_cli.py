@@ -412,3 +412,32 @@ def test_resolve_cli_dry_run_reports_and_writes_nothing(
     assert "would merge" in out and "name" in out  # names the contested field
     assert conflict.exists()  # nothing written
     assert store.load("eng-1").name == "Passport"
+
+
+def test_relative_to_root_resolves_cwd_first_then_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A deep store root, mirroring the real "…/Official Documents".
+    home = tmp_path / "home"
+    root = home / "Proton Drive" / "Docs"
+    (root / "Applications").mkdir(parents=True)
+    config = Config(syncthing_root=root, history_dir=tmp_path / "_h")
+
+    # The reported bug: a cwd-relative path TO the root must not be doubled onto it.
+    monkeypatch.chdir(home)
+    assert cli._relative_to_root(config, "./Proton Drive/Docs") == "."
+    assert (
+        cli._relative_to_root(config, "./Proton Drive/Docs/Applications")
+        == "Applications"
+    )
+
+    # From inside the root, "." means the whole tree.
+    monkeypatch.chdir(root)
+    assert cli._relative_to_root(config, ".") == "."
+
+    # A bare subfolder name still resolves root-relative from an unrelated cwd.
+    monkeypatch.chdir(tmp_path)
+    assert cli._relative_to_root(config, "Applications") == "Applications"
+
+    # A path outside the root is rejected.
+    assert cli._relative_to_root(config, str(tmp_path / "elsewhere")) is None

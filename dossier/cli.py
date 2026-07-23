@@ -554,15 +554,28 @@ def cmd_import(args: argparse.Namespace) -> int:
 
 
 def _relative_to_root(config: Config, raw: str) -> str | None:
-    """``raw`` (absolute or root-relative) as a root-relative POSIX path, or None
-    if it falls outside the syncthing root."""
+    """``raw`` as a POSIX path relative to the syncthing root, or None if outside it.
+
+    An absolute path is used as-is. A **relative** path is resolved against the
+    shell's current directory first (the usual shell meaning) and only then against
+    the root — so ``ds import Marine`` still targets the store's ``Marine`` folder
+    from anywhere, but ``ds import ./Docs`` isn't doubled onto the root when the root
+    already *is* ``…/Docs`` (running it from the parent no longer yields a phantom
+    ``Docs/Docs``).
+    """
+    root = config.syncthing_root.resolve()
     path = Path(raw).expanduser()
-    abs_path = path if path.is_absolute() else config.syncthing_root / path
-    try:
-        rel = abs_path.resolve().relative_to(config.syncthing_root.resolve())
-    except ValueError:
-        return None
-    return rel.as_posix()
+    if path.is_absolute():
+        candidates = [path]
+    else:
+        candidates = [Path.cwd() / path, config.syncthing_root / path]
+    for candidate in candidates:
+        try:
+            rel = candidate.resolve().relative_to(root)
+        except ValueError:
+            continue  # not inside the root — try the next interpretation
+        return rel.as_posix()
+    return None
 
 
 def _intake_run(
