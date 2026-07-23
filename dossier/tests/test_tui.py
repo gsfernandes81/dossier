@@ -107,17 +107,85 @@ async def test_footer_is_a_small_core_and_occasional_actions_left_the_keys(
             for ab in home.active_bindings.values()
             if ab.binding.show
         }
-        # The footer is a small everyday core plus the Help affordance.
-        assert {"Search", "Open", "Edit", "New", "Bundle", "Help"} <= visible
-        # The occasional actions no longer own a letter at all — they moved to the
-        # command palette, shrinking what a new user must learn.
-        for gone in ("d", "r", "R", "B", "w", "x", "m", "s", "v", "I", "comma"):
+        # Find-fast home: the footer is just Search + Back + Help. No letter owns an
+        # action any more (typing starts a search), so nothing competes with a find.
+        assert {"Search", "Help"} <= visible
+        assert not (visible & {"Open", "Edit", "New", "Bundle"})  # moved to the palette
+        # No letter is a home binding — every printable is the start of a search.
+        for gone in (
+            "o",
+            "e",
+            "n",
+            "b",
+            "a",
+            "d",
+            "r",
+            "w",
+            "x",
+            "m",
+            "s",
+            "v",
+            "comma",
+        ):
             assert gone not in home.active_bindings
         # `?` still reveals the remaining bindings via Textual's HelpPanel.
         assert len(app.screen.query(HelpPanel)) == 0
         await pilot.press("question_mark")
         await pilot.pause()
         assert len(app.screen.query(HelpPanel)) == 1
+
+
+@pytest.mark.asyncio
+async def test_typing_from_a_column_routes_into_search(tmp_path: Path):
+    # Find-fast: a printable typed while a column is focused jumps into search,
+    # first character kept — no `/` mode key first.
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        await pilot.press("p")
+        await pilot.pause()
+        search = home.query_one("#search", Input)
+        assert app.focused is search
+        assert search.value == "p"  # the routed character was kept
+        await pilot.press("a")  # subsequent keys land in the now-focused Input
+        await pilot.pause()
+        assert search.value == "pa"
+
+
+@pytest.mark.asyncio
+async def test_slash_and_help_are_not_routed_into_search(tmp_path: Path):
+    # `/` focuses search without inserting a slash; `?` opens help, not a search.
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        await pilot.press("slash")
+        await pilot.pause()
+        search = home.query_one("#search", Input)
+        assert app.focused is search and search.value == ""
+
+
+@pytest.mark.asyncio
+async def test_down_from_search_steps_into_the_list_keeping_the_filter(tmp_path: Path):
+    # Enter now opens the top match, so `↓` is the "browse the hits" move: it focuses
+    # the documents pane while keeping the filter applied.
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        search = home.query_one("#search", Input)
+        search.focus()
+        search.value = "pass"
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.focused is home.query_one("#documents", OptionList)
+        assert search.value == "pass"  # filter kept
 
 
 @pytest.mark.asyncio

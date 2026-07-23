@@ -50,7 +50,7 @@ from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
-from textual.events import DescendantFocus, Resize
+from textual.events import DescendantFocus, Key, Resize
 from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, OptionList, TextArea
@@ -173,25 +173,19 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.show-detail #detail { width: 1fr; border-left: none; }
     """
 
-    # A deliberately small keybind set — browse (arrows / Enter / Esc), search
-    # (`/`), and the four everyday actions (open / edit / new / bundle). Everything
-    # occasional (review, doctor, resolve, bundles, watch, intake, scan, move,
-    # supersede, settings, the view toggles) lives in the **command palette**
-    # (`ctrl+p`, or the Commands touch button) — searchable by name, so a new user
-    # has almost nothing to memorise. `?` still opens Textual's HelpPanel.
+    # Find-fast home: typing anything routes into search (see on_key), so the home
+    # keeps no letter bindings at all — browse is arrows / Enter (open the file) / →
+    # (detail) / Esc, search is any printable or `/`, and every action (open, edit,
+    # new, bundle, accept, plus the occasional ones) lives in the **command palette**
+    # (`ctrl+p` / the Commands touch button) and on the touch button bar. `?` opens
+    # the HelpPanel; `ctrl+q` quits (Textual built-in). Letters own nothing here so
+    # the first keystroke can always be the start of a find.
     BINDINGS = [
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "escape", "Back"),
         Binding("right", "drill_in", "Detail", show=False),
         Binding("left", "drill_out", "Back", show=False),
-        Binding("o", "open_file", "Open"),
-        Binding("e", "edit", "Edit"),
-        Binding("n", "new", "New"),
-        Binding("b", "bundle", "Bundle"),
         Binding("question_mark", "toggle_help_panel", "Help"),
-        # The one non-footer letter kept: quick-accept the shown doc's top
-        # suggestion, since the detail read view already prints "a accept · e review".
-        Binding("a", "accept_suggestion", "Accept", show=False),
     ]
 
     # True while the detail pane is editing; drives check_action (and, via
@@ -259,6 +253,9 @@ class HomeScreen(Screen[None]):
         # re-querying the DOM on every arrow-key detail refresh.
         self._detail_pane = self.query_one("#detail", DetailPane)
         self.set_class(self._touch, "touch")
+        # Never select-all on focus: `/` and the type-to-search router should let
+        # you keep refining the filter, not replace it with the next keystroke.
+        self.query_one("#search", Input).select_on_focus = False
         self._reload()
         self._focus_default()
         self._warn_conflicts()
@@ -502,6 +499,43 @@ class HomeScreen(Screen[None]):
         if self._row_mode() != self._last_mode:
             self._refresh_documents()
         self._ensure_focus_visible()
+
+    def on_key(self, event: Key) -> None:
+        """Find-fast routing that runs before any binding (Textual dispatches key
+        handlers before non-priority BINDINGS):
+
+        * a printable typed while a column is focused jumps into the search box —
+          first character kept — so finding never needs a mode key first;
+        * ``↓`` from the search box steps into the documents list keeping the filter
+          (Enter now *opens* the top match, so this is the "browse the hits" move).
+
+        ``/`` and ``?`` stay reserved (search-focus and help), and the router never
+        fires mid-edit or from the detail pane / buttons — only the two lists.
+        """
+        search = self.query_one("#search", Input)
+        if self.app.focused is search:
+            if event.key == "down":
+                event.stop()
+                self._focus_documents()
+            return  # everything else in search is the Input's own to handle
+        if (
+            self.editing
+            or search.disabled
+            or not event.is_printable
+            or not event.character
+            or event.character in ("/", "?")
+        ):
+            return
+        lists = (self.query_one("#documents", OptionList), self.query_one("#locations"))
+        if self.app.focused in lists:
+            event.stop()
+            event.prevent_default()
+            # Append to the value directly (not insert_text_at_cursor): focusing an
+            # Input selects its text, and an insert would then replace it — appending
+            # keeps whatever's already typed and lands the cursor at the end.
+            search.value += event.character
+            search.focus()
+            search.cursor_position = len(search.value)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search":

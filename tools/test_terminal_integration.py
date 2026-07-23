@@ -75,8 +75,8 @@ def test_drives_real_app_in_a_real_terminal(tmp_path: Path):
         focused = term.cell(row - 1, 1)[1]
         assert focused != unfocused, "search border colour did not change on focus"
 
-        term.send("esc", settle=0.4)  # let focus leave the search box before `q`
-        term.send("q", settle=0.5)
-        assert not term.alive(), "app did not quit on q"
+        term.send("esc", settle=0.4)  # leave the search box
+        term.send("\x11", settle=0.5)  # ctrl+q quits (bare `q` is a search char now)
+        assert not term.alive(), "app did not quit on ctrl+q"
     finally:
         term.close()

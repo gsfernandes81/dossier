@@ -20,7 +20,6 @@ from __future__ import annotations
 from datetime import date
 
 from textual.app import App
-from textual.binding import Binding
 from textual.command import Hit, Hits, Provider
 from textual.events import DescendantFocus
 from textual.widgets import Input, TextArea
@@ -41,9 +40,16 @@ class DossierCommands(Provider):
 
     @staticmethod
     def _commands() -> list[tuple[str, str, str]]:
-        # (title, home action, help) — the searchable home for occasional actions,
-        # so none of these needs a dedicated keybind. Roughly frequency-ordered.
+        # (title, home action, help) — the searchable home for every action now
+        # that the home keeps no letter bindings (find-fast: printables go to
+        # search). The everyday four lead; occasional actions follow. Each also has
+        # a touch button and/or a contextual detail-pane key.
         return [
+            ("Open document file", "open_file", "Open the current doc's file"),
+            ("Edit document", "edit", "Edit the current document's fields"),
+            ("New document", "new", "Create a new document record"),
+            ("Add to bundle", "bundle", "Put the current doc in a bundle"),
+            ("Accept top suggestion", "accept_suggestion", "Apply the shown hint"),
             (
                 "Review — reconcile the collection",
                 "review",
@@ -89,7 +95,9 @@ class DossierApp(App[None]):
     """Hosts the Miller-columns home screen; a thin shell around it."""
 
     TITLE = "dossier"
-    BINDINGS = [Binding("q", "quit", "Quit")]
+    # No bare `q` — a printable belongs to search now (find-fast). `ctrl+q` (a
+    # Textual built-in priority binding) quits, and the palette's system "Quit"
+    # command covers touch.
     COMMANDS = App.COMMANDS | {DossierCommands}
 
     def __init__(
