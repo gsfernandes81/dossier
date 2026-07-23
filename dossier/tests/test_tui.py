@@ -189,6 +189,28 @@ async def test_down_from_search_steps_into_the_list_keeping_the_filter(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_termux_opens_type_first(tmp_path: Path):
+    # Touch/Termux launches with the search box focused (type-first) so a find can
+    # start on the first keystroke.
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY, touch=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.focused is app.home.query_one("#search", Input)
+
+
+@pytest.mark.asyncio
+async def test_desktop_opens_on_the_list(tmp_path: Path):
+    # Desktop keeps the list focused on launch — the router still routes the first
+    # printable into search, so both find and browse are immediate.
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.focused is app.home.query_one("#documents", OptionList)
+
+
+@pytest.mark.asyncio
 async def test_locations_and_documents_populate(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
@@ -703,7 +725,12 @@ async def test_touch_focus_drives_soft_keyboard_no_kbd_button(
         assert not home.query("#act-kbd")
         monkeypatch.setattr(app, "set_mouse_reporting", reporting.append)
         # Focusing the search field drops mouse reporting so the Termux IME can
-        # appear; focusing a non-text pane restores it so taps land again.
+        # appear; focusing a non-text pane restores it so taps land again. (Touch
+        # launches with search focused, so step onto the list first for a clean
+        # transition.)
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        assert reporting[-1] is True
         home.query_one("#search", Input).focus()
         await pilot.pause()
         assert reporting[-1] is False
@@ -1608,9 +1635,10 @@ async def test_ctrl_t_toggles_transcript_content_search(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_home_notifies_when_sync_conflicts_await(tmp_path: Path):
+async def test_sync_conflicts_show_in_the_footer_not_a_toast(tmp_path: Path):
+    # The conflict count rides in the dim footer segment (never a toast over the
+    # search box) so it can't block the find path.
     store, config = _setup(tmp_path)
-    # Syncthing left a conflict copy of the passport document in the store.
     conflict = store.document_path("passport").with_name(
         "passport.sync-conflict-20260101-120000-AAAAAAA.md"
     )
@@ -1618,8 +1646,12 @@ async def test_home_notifies_when_sync_conflicts_await(tmp_path: Path):
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         await pilot.pause()
-        messages = [n.message for n in app._notifications]
-        assert any("sync conflict" in m and "ds resolve" in m for m in messages)
+        from textual.widgets import Static
+
+        assert app.home._conflict_count == 1
+        assert "1 conflict" in str(app.home.query_one("#attention", Static).render())
+        # …and no conflict toast was raised over the search box.
+        assert not any("sync conflict" in n.message for n in app._notifications)
 
 
 @pytest.mark.asyncio

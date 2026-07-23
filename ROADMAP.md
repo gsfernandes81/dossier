@@ -298,12 +298,15 @@ This store is write-few read-fewer — but when a find is required (you're looki
 document *urgently*), it is required **now**. Launch optimizes for that, and the rest of
 the phase builds confidence: edits are reversible, first contact explains itself, and
 search forgives phone-keyboard typos.
-- [ ] **Find-fast launch** (S/M) — the home opens ready to find: the first printable
-  keystroke (or a tap on the bottom bar) goes straight into search — no mode key first,
-  no focus dance; type → filtered → Enter → open. Target: cold start to opened document
-  in under ~5 keystrokes/taps on both desktop and Termux. Attention info (expiring /
-  intake / conflict counts) may ride quietly in the footer, but it must never sit in
-  front of the find path.
+- [x] **Find-fast launch** (S/M) — **done.** A screen-level `on_key` routes any printable
+  typed in the columns straight into search (first character kept), so a find never needs a
+  mode key; `Enter` opens the top match's **file** and `→` drills to **detail** (a verb now
+  applied consistently). For typing to always mean "search" the home keeps **no letter
+  bindings** — `o`/`e`/`n`/`b`/`a` and bare `q` moved to the command palette and the touch
+  buttons (`ctrl+q` quits). Termux launches **type-first** (search focused); desktop keeps the
+  list focused since the router lands the first key in search anyway. Attention counts
+  (expiring · conflicts · inbox) now ride dim **beside the footer**, replacing a toast that
+  overlapped the search box. Budget met: cold start → `pass` + `Enter` → opened = 5 keystrokes.
 - [ ] **Undo / history restore** (M) — every save already writes the prior version to the
   local history dir; surface it. `ctrl+z` in the detail pane restores the last saved
   version of the current doc; a palette "History…" lists a doc's saved versions to

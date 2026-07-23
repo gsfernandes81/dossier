@@ -53,7 +53,15 @@ from textual.containers import Grid, Horizontal, Vertical
 from textual.events import DescendantFocus, Key, Resize
 from textual.reactive import reactive
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, OptionList, TextArea
+from textual.widgets import (
+    Button,
+    Footer,
+    Header,
+    Input,
+    OptionList,
+    Static,
+    TextArea,
+)
 from textual.widgets.option_list import Option
 from textual.worker import get_current_worker
 
@@ -130,6 +138,9 @@ class HomeScreen(Screen[None]):
         height: 3; border: round $primary 40%; background: $panel; padding: 0 1;
     }
     #search:focus { border: round $accent; background: $boost; }
+    #footrow { height: 1; }
+    #footrow Footer { width: 1fr; }
+    #attention { width: auto; color: $text-muted; padding: 0 1; text-align: right; }
     #panes { height: 1fr; }
 
     /* Touch (Termux): a tap-action grid above the command bar — big thumb
@@ -213,6 +224,11 @@ class HomeScreen(Screen[None]):
         self._filter_text = ""
         self._expiring_only = False
         self._bundle_filter: str | None = None  # scope to one bundle's docs
+        # Footer attention counts. Conflicts + inbox need directory I/O (a `.dossier`
+        # walk, slow on a synced FS), so they're scanned on mount and after the
+        # actions that change them — not on every reload; expiring is free from docs.
+        self._conflict_count = 0
+        self._inbox_count = 0
         self._show_detail = False
         # Where the open detail was launched from, so Esc returns there: "miller"
         # (the default — close back to the columns) or "review" (re-open the
@@ -246,7 +262,12 @@ class HomeScreen(Screen[None]):
                 # focusing raises the soft keyboard via the app's focus handler).
                 yield Button(_btn_label(g.commands, "Commands"), id="act-commands")
             yield Input(placeholder="Search name / tags / notes / scans…", id="search")
-            yield Footer(compact=True)
+            # Attention counts ride *beside* the footer, dim and non-focusable, so
+            # they never sit in front of the find path (they replaced a toast that
+            # overlapped the search box).
+            with Horizontal(id="footrow"):
+                yield Footer(compact=True)
+                yield Static("", id="attention")
 
     def on_mount(self) -> None:
         # Composed once in compose() and never remounted, so cache it instead of
@@ -256,9 +277,9 @@ class HomeScreen(Screen[None]):
         # Never select-all on focus: `/` and the type-to-search router should let
         # you keep refining the filter, not replace it with the next keystroke.
         self.query_one("#search", Input).select_on_focus = False
+        self._scan_attention()  # conflict/inbox counts (I/O) before the first render
         self._reload()
         self._focus_default()
-        self._warn_conflicts()
         self._warn_slow_yaml()
 
     def _warn_slow_yaml(self) -> None:
@@ -272,22 +293,36 @@ class HomeScreen(Screen[None]):
         if hint:
             self.notify(hint, severity="warning", timeout=12)
 
-    def _warn_conflicts(self) -> None:
-        """On entry, flag any Syncthing conflict files left to merge.
+    def _scan_attention(self) -> None:
+        """Refresh the directory-backed attention counts (conflicts + inbox). These
+        each cost a walk, so this runs on mount and after the actions that change
+        them (resolve / intake), not on every reload."""
+        self._conflict_count = len(self._store.list_conflicts())
+        self._inbox_count = 0
+        if self._config.intake_inbox:
+            from dossier import intake
 
-        Discoverability only — a notice, not a blocking modal, so it never gets
-        between the user and their documents. Points at the palette's "Review"
-        command (the Conflicts tab); `ds resolve` does the same from a shell.
-        """
-        count = len(self._store.list_conflicts())
-        if count:
-            noun = "conflict" if count == 1 else "conflicts"
-            self.notify(
-                f"{count} sync {noun} to merge — palette (ctrl+p) › Review › "
-                "Conflicts, or run `ds resolve`",
-                severity="warning",
-                timeout=10,
-            )
+            self._inbox_count = len(intake.pending_files(self._store, self._config))
+
+    def _refresh_attention(self) -> None:
+        """Rebuild the dim footer segment. Expiring is free (from the loaded docs);
+        conflicts/inbox reuse the cached counts (see :meth:`_scan_attention`)."""
+        threshold = self._config.expiry_threshold_days
+        expiring = sum(
+            1
+            for d in self._docs
+            if d.expiry_status(self._today, threshold)
+            in (ExpiryStatus.EXPIRED, ExpiryStatus.EXPIRING)
+        )
+        parts: list[str] = []
+        if expiring:
+            parts.append(f"{expiring} expiring")
+        if self._conflict_count:
+            noun = "conflict" if self._conflict_count == 1 else "conflicts"
+            parts.append(f"{self._conflict_count} {noun}")
+        if self._inbox_count:
+            parts.append(f"{self._inbox_count} inbox")
+        self.query_one("#attention", Static).update("  ·  ".join(parts))
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if self.editing and action in _EDIT_LOCKED:
@@ -304,6 +339,7 @@ class HomeScreen(Screen[None]):
         self._readings = self._store.load_scans()
         self._refresh_locations()
         self._refresh_documents()
+        self._refresh_attention()  # expiring count follows the (reloaded) docs
         if self._show_detail:
             self._update_detail()
 
@@ -846,6 +882,7 @@ class HomeScreen(Screen[None]):
         )
 
     def _after_intake(self, doc_id: str | None) -> None:
+        self._scan_attention()  # inbox drained (and a fold can clear a conflict)
         self._reload()  # documents were filed (new records, moved files)
         if doc_id is not None:
             doc = self._doc_by_id(doc_id)
@@ -881,6 +918,14 @@ class HomeScreen(Screen[None]):
         self.query_one("#documents", OptionList).focus()
 
     def _focus_default(self) -> None:
+        # Termux opens type-first: focus search so a find starts on the first
+        # keystroke (this drops mouse reporting, so taps need an Esc first — the
+        # accepted trade for a find-first phone; a one-line flip to tap-first).
+        # Desktop keeps the list focused — the type-to-search router already lands
+        # the first key in search, so arrows still browse instantly.
+        if self._touch:
+            self.query_one("#search", Input).focus()
+            return
         documents = self.query_one("#documents", OptionList)
         (documents if documents.display else self.query_one("#locations")).focus()
 
@@ -939,6 +984,7 @@ class HomeScreen(Screen[None]):
         # _after_watch, which WatchScreen also uses and which should close to the
         # columns as before. ``edit`` opens straight into the editor (adopt fills a
         # bare new record; the Integrity `e` jumps in to fix what was flagged).
+        self._scan_attention()  # a merge in Review may have cleared conflicts
         self._reload()
         if result is not None:
             doc = self._doc_by_id(result.doc_id)

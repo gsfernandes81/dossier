@@ -49,9 +49,10 @@ uv run ds
 
 The home screen is three columns (locations → documents → detail). Press **`?`** at any time for
 the full, always-current keybinding list (it's generated from the app itself). The essentials:
-`Enter` opens the detail pane, `o` opens a document's file, `/` searches, `e` edits, `n` makes a
-new document, and `,` opens **Settings** (icons, scan endpoint/model, expiry threshold — no
-config-file editing needed). See [workflows.md](workflows.md) for what to do next.
+**just start typing** to search (no mode key first), `Enter` opens the highlighted document's
+**file**, `→` opens its **detail** pane, `Esc` steps back, and `ctrl+p` opens the **command
+palette** — the searchable home for everything else (edit, new, add-to-bundle, review, scan,
+Settings). See [workflows.md](workflows.md) for what to do next.
 
 ## What `ds init` created — the `.dossier/` layout
 

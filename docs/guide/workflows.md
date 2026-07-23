@@ -6,10 +6,14 @@ keystrokes — press **`?`** in the TUI for the authoritative, always-current ke
 
 ## Finding and opening a document
 
-Browse by physical location in the three-column home, or press `/` to search **root-wide** by
-name, notes, tags, or bundle — the columns stay put and the documents pane filters in place.
-`Enter` opens the detail pane (edit any field inline); `o` opens the actual soft copy with your
-platform's native app. Tags are hierarchical: searching or filtering `id` also matches
+The home opens ready to find: **just start typing** — the first keystroke goes straight into
+search (no mode key), and the documents pane filters **root-wide** by name, notes, tags, or
+bundle as you type. `Enter` then **opens the document's file** in your platform's native app,
+and `→` drills into its **detail** pane (edit any field inline); `Esc` clears the search and
+steps back. You can still browse by physical location in the three columns, and `/` focuses the
+search box explicitly. Everything else — edit, new, add-to-bundle, review, scan — lives in the
+command palette (`ctrl+p`) and on the touch button bar. Tags are hierarchical: searching or
+filtering `id` also matches
 `id/passport`, `id/driving-license`, and so on. Search also matches a document's scan reading, so
 you can find a doc by text that only appears *inside* the scan.
 
