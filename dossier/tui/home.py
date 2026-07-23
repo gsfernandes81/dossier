@@ -62,6 +62,7 @@ from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import glyphs, rows
 from dossier.tui.detail_pane import DetailPane
+from dossier.tui.intake import IntakeScreen
 from dossier.tui.reconcile import ReconcileScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
@@ -93,6 +94,7 @@ _EDIT_LOCKED = frozenset(
         "new",
         "accept_suggestion",
         "scan_doc",
+        "intake",
         "settings",
         "move",
         "supersede",
@@ -200,6 +202,7 @@ class HomeScreen(Screen[None]):
         # Read the current doc with the vision model (off the footer; in the help
         # panel and the command palette). Bulk scan is palette-only.
         Binding("v", "scan_doc", "Scan (VLM)", show=False),
+        Binding("I", "intake", "Intake", show=False),
         Binding("comma", "settings", "Settings", show=False),
         # Kept working, but off the footer — surfaced in the help panel (`?`):
         Binding("i", "toggle_dates", "Iss/Exp", show=False),
@@ -722,6 +725,25 @@ class HomeScreen(Screen[None]):
         self.app.push_screen(
             ReconcileScreen(self._store, self._config), self._after_watch
         )
+
+    def action_intake(self) -> None:
+        if not self._config.intake_inbox:
+            self.notify(
+                "no inbox configured — set [intake] inbox in .dossier/config.toml",
+                severity="warning",
+            )
+            return
+        self.app.push_screen(
+            IntakeScreen(self._store, self._config), self._after_intake
+        )
+
+    def _after_intake(self, doc_id: str | None) -> None:
+        self._reload()  # documents were filed (new records, moved files)
+        if doc_id is not None:
+            doc = self._doc_by_id(doc_id)
+            if doc is not None:
+                self.open_detail(doc.id)
+                self._detail_pane.start_edit(doc, self._docs)
 
     def action_bundles(self) -> None:
         self.app.push_screen(

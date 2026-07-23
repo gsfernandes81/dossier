@@ -82,13 +82,17 @@ def pending_files(
     Reuses the reconcile file scan (so ``.dossier``/Syncthing noise and ignore
     globs are handled once) and its ``dismissed`` suppression.
     """
-    scope = from_dir if from_dir is not None else config.intake_inbox
-    if not scope:  # no inbox configured and no --from
-        return []
+    if from_dir is None:
+        if not config.intake_inbox:  # no inbox configured and no --from
+            return []
+        scope: str | None = config.intake_inbox.strip("/")
+    else:  # `--from`; "" / "." / the root itself means the whole tree
+        raw = from_dir.strip("/")
+        scope = None if raw in ("", ".") else raw
     state = store.load_reconcile()
     linked = {r.path for doc in store.load_all() for r in doc.files if r.path}
     suppressed = state.suppressed_orphans()
-    prefix = scope.rstrip("/") + "/"
+    prefix = (scope + "/") if scope else ""  # "" matches every file (whole tree)
     return [
         rel
         for rel in scan_files(config, state.ignore)
@@ -139,6 +143,43 @@ def build_proposal(
     if link is not None:
         doc.supersedes = link.older
 
+    dst_rel, notes = _plan_destination(doc, config, in_place)
+    return IntakeProposal(
+        src_rel=src_rel,
+        reading=reading,
+        doc=doc,
+        dst_rel=dst_rel,
+        notes=notes,
+        succession=link,
+        open_questions=tuple(open_questions),
+    )
+
+
+def with_name(
+    proposal: IntakeProposal,
+    new_name: str,
+    store: Store,
+    config: Config,
+    *,
+    in_place: bool = False,
+) -> IntakeProposal:
+    """A copy of ``proposal`` renamed — new id + recomputed canonical destination.
+
+    The review card's rename key: fixing the name *before* filing gives the right id
+    and filename at once (editing after filing would leave the file misnamed until
+    the next ``ds organize``).
+    """
+    doc = copy.deepcopy(proposal.doc)
+    doc.name = new_name
+    doc.id = unique_id(store, slugify(new_name))
+    dst_rel, notes = _plan_destination(doc, config, in_place)
+    return replace(proposal, doc=doc, dst_rel=dst_rel, notes=notes)
+
+
+def _plan_destination(
+    doc: Document, config: Config, in_place: bool
+) -> tuple[str, tuple[str, ...]]:
+    """The canonical destination + notes for ``doc`` via the organize planner."""
     plan = organize.build_organize_plan(
         [doc],
         root=config.syncthing_root,
@@ -147,16 +188,7 @@ def build_proposal(
         fallback_folder=None if in_place else config.intake_filed,
     )
     item = plan.items[0]
-    notes = tuple(t for t in item.note.split(",") if t)
-    return IntakeProposal(
-        src_rel=src_rel,
-        reading=reading,
-        doc=doc,
-        dst_rel=item.dst_rel,
-        notes=notes,
-        succession=link,
-        open_questions=tuple(open_questions),
-    )
+    return item.dst_rel, tuple(t for t in item.note.split(",") if t)
 
 
 def apply_proposal(

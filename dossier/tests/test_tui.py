@@ -1221,3 +1221,71 @@ async def test_command_palette_routes_to_home_actions(tmp_path: Path):
         titles = {hit.text for hit in hits}
     assert "Scan current document (vision)" in titles
     assert "Settings" not in titles  # unrelated command doesn't match "scan"
+
+
+def _inbox_setup(tmp_path: Path, name: str) -> tuple[Store, Config]:
+    store, config = _setup(tmp_path)  # passport.pdf is linked; excluded from intake
+    config.intake_inbox = "Inbox"
+    (tmp_path / "Inbox").mkdir()
+    (tmp_path / "Inbox" / name).write_bytes(b"x")
+    return store, config
+
+
+@pytest.mark.asyncio
+async def test_intake_screen_reads_and_files_a_dropped_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from dossier import scan as scan_mod
+    from dossier.tui.intake import IntakeScreen
+
+    store, config = _inbox_setup(tmp_path, "new.pdf")
+    reading = scan_mod.ScanReading.from_payload(
+        {"document_type": "Driving Licence", "confidence": 0.9}, model="m"
+    )
+    monkeypatch.setattr(scan_mod, "extract", lambda p, c: reading)  # no VLM
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.push_screen(IntakeScreen(store, config))
+        await pilot.pause()
+        await app.workers.wait_for_complete()  # the background VLM read
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, IntakeScreen)
+        assert screen._proposal is not None
+        assert screen._proposal.doc.name == "Driving Licence"
+        screen.action_accept()  # apply is synchronous
+        await pilot.pause()
+
+    filed = [d for d in store.load_all() if d.name == "Driving Licence"]
+    assert filed  # a record was created
+    assert (tmp_path / "Filed" / "driving-licence.pdf").exists()  # moved out of inbox
+    assert not (tmp_path / "Inbox" / "new.pdf").exists()
+
+
+@pytest.mark.asyncio
+async def test_intake_screen_reject_dismisses_without_filing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from dossier import (
+        intake,
+        scan as scan_mod,
+    )
+    from dossier.tui.intake import IntakeScreen
+
+    store, config = _inbox_setup(tmp_path, "junk.pdf")
+    reading = scan_mod.ScanReading.from_payload({"document_type": "X"}, model="m")
+    monkeypatch.setattr(scan_mod, "extract", lambda p, c: reading)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.push_screen(IntakeScreen(store, config))
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, IntakeScreen)
+        screen.action_reject()
+        await pilot.pause()
+
+    assert "Inbox/junk.pdf" in store.load_reconcile().dismissed  # marked not-a-doc
+    assert (tmp_path / "Inbox" / "junk.pdf").exists()  # never moved or deleted
+    assert intake.pending_files(store, config) == []  # no longer pending

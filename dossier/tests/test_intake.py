@@ -197,6 +197,24 @@ def test_proposal_finds_a_succession_link(tmp_path: Path):
     assert p.doc.supersedes == "med-old"
 
 
+def test_with_name_reslugs_the_id_and_destination(tmp_path: Path):
+    store, config, root = _store(tmp_path)
+    _drop(root, "Inbox/scan.pdf")
+    p = intake.build_proposal(
+        "Inbox/scan.pdf",
+        store,
+        config,
+        docs=[],
+        readings={},
+        extract=_fixed(_reading(document_type="Passport")),
+    )
+    renamed = intake.with_name(p, "UK Passport", store, config)
+    assert renamed.doc.name == "UK Passport"
+    assert renamed.doc.id == "uk-passport"
+    assert renamed.dst_rel == "Filed/uk-passport.pdf"
+    assert p.doc.name == "Passport"  # original proposal untouched (deep-copied)
+
+
 # -- pending_files -----------------------------------------------------------
 
 
@@ -212,6 +230,15 @@ def test_pending_files_scopes_to_inbox_minus_linked_and_dismissed(tmp_path: Path
     store.save_reconcile(state)
 
     assert intake.pending_files(store, config) == ["Inbox/a.pdf"]
+
+
+def test_pending_files_from_root_scans_the_whole_tree(tmp_path: Path):
+    store, config, root = _store(tmp_path)
+    config.intake_inbox = None  # no inbox; `--from .` (the root) drives it
+    _drop(root, "Marine/a.pdf")
+    _drop(root, "Identity/b.pdf")
+    store.save(Document(id="x", name="X", files=[Rendition("d", "Marine/a.pdf", True)]))
+    assert intake.pending_files(store, config, from_dir=".") == ["Identity/b.pdf"]
 
 
 def test_pending_files_empty_when_no_inbox_configured(tmp_path: Path):
