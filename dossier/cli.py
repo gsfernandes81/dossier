@@ -752,6 +752,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
     if args.model:
         config.scan_model = args.model  # override for this run
     store = Store(config)
+    if args.transcribe:
+        return _transcribe_pass(store, config, force=args.force, limit=args.limit)
     existing = store.load_scans()
     readings = dict(existing)
     linked = [doc for doc in store.load_all() if doc.primary_rendition() is not None]
@@ -790,6 +792,49 @@ def cmd_scan(args: argparse.Namespace) -> int:
     print(
         f"scanned {scanned}, skipped {skipped} (unchanged), "
         f"{missing} missing on disk, {failed} failed"
+    )
+    return 0
+
+
+def _transcribe_pass(store: Store, config: Config, *, force: bool, limit: int) -> int:
+    """Add a full-text transcript to each linked doc's reading (Phase 11 slice C).
+
+    A batch enrichment: interactive scans stay fast (extract only); this second VLM
+    pass fills in transcript + keywords for content search. Persists after each so a
+    big backfill is resumable. Docs without a reading yet are skipped (run `ds scan`).
+    """
+    readings = store.load_scans()
+    linked = [d for d in store.load_all() if d.primary_rendition() is not None]
+    done = skipped = missing = no_reading = failed = 0
+    for doc in linked:
+        reading = readings.get(doc.id)
+        if reading is None:
+            no_reading += 1
+            continue
+        if reading.transcript and not force:
+            skipped += 1
+            continue
+        rendition = doc.primary_rendition()
+        assert rendition is not None
+        path = query.resolve_path(config.syncthing_root, rendition.path)
+        if not path.exists():
+            missing += 1
+            continue
+        if limit and done >= limit:
+            break
+        try:
+            transcript, keywords = scan.transcribe(path, config)
+        except ScanError as exc:
+            print(f"  ! {doc.id}: {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        readings[doc.id] = replace(reading, transcript=transcript, keywords=keywords)
+        store.save_scans(readings)  # persist after each (resumable)
+        done += 1
+        print(f"  + {doc.id}: {len(transcript)} chars, {len(keywords)} keywords")
+    print(
+        f"transcribed {done}, skipped {skipped} (have transcript), "
+        f"{no_reading} without a reading, {missing} missing, {failed} failed"
     )
     return 0
 
@@ -1039,6 +1084,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan_p.add_argument(
         "--force", action="store_true", help="re-read even unchanged files"
+    )
+    scan_p.add_argument(
+        "--transcribe",
+        action="store_true",
+        help="batch-add full-text transcripts to existing readings (content search)",
     )
     scan_p.add_argument(
         "--limit", type=int, default=0, help="scan at most N new files (0 = all)"

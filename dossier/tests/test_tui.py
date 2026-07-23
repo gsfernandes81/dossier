@@ -1339,3 +1339,30 @@ async def test_readiness_screen_shows_gathered_and_missing(tmp_path: Path):
         )
     assert "Passport" in prompts  # the gathered passport
     assert "missing" in prompts  # the missing photo requirement
+
+
+@pytest.mark.asyncio
+async def test_ctrl_t_toggles_transcript_content_search(tmp_path: Path):
+    from dossier.scan import ScanReading
+
+    store, config = _setup(tmp_path)  # passport, coc
+    store.save_scans(
+        {
+            "passport": ScanReading.from_payload(
+                {"document_type": "Passport", "transcript": "the INDoS number is 09MU"},
+                model="m",
+            )
+        }
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#search", Input).value = "indos"
+        await pilot.pause()
+        # Default: the transcript body is NOT in the `/` haystack → no match.
+        assert "passport" not in {d.id for d in home.visible_docs()}
+        home.action_toggle_search_content()  # ctrl+t
+        await pilot.pause()
+        assert home._search_content is True
+        # Now the transcript is searched → the passport is found.
+        assert "passport" in {d.id for d in home.visible_docs()}

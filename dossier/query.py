@@ -82,9 +82,10 @@ def matches(
     today: date,
     threshold_days: int,
     reading: ScanReading | None = None,
+    include_content: bool = False,
 ) -> bool:
     return (
-        (not flt.text or _text_matches(doc, flt.text, reading))
+        (not flt.text or _text_matches(doc, flt.text, reading, include_content))
         and all(_has_tag(doc.tags, tag) for tag in flt.tags)
         and all(bundle in doc.bundles for bundle in flt.bundles)
         and (not flt.locations or doc.effective_location in flt.locations)
@@ -99,9 +100,11 @@ def search(
     today: date,
     threshold_days: int,
     readings: Mapping[str, ScanReading] | None = None,
+    include_content: bool = False,
 ) -> list[Document]:
-    """Documents passing ``flt``. When ``readings`` is given, the text filter also
-    matches a document's scan reading (content search — find by what it says)."""
+    """Documents passing ``flt``. With ``readings``, the text filter also matches a
+    doc's scan reading (structured fields); ``include_content`` extends that to the
+    full transcript (opt-in — the noisy body text stays off the default filter)."""
     return [
         doc
         for doc in docs
@@ -111,6 +114,7 @@ def search(
             today=today,
             threshold_days=threshold_days,
             reading=readings.get(doc.id) if readings else None,
+            include_content=include_content,
         )
     ]
 
@@ -137,11 +141,16 @@ def reading_text(reading: ScanReading, *, include_content: bool = False) -> str:
     return " ".join(part for part in parts if part)
 
 
-def _text_matches(doc: Document, text: str, reading: ScanReading | None = None) -> bool:
+def _text_matches(
+    doc: Document,
+    text: str,
+    reading: ScanReading | None = None,
+    include_content: bool = False,
+) -> bool:
     needle = text.casefold()
     parts = [doc.name, doc.notes, *doc.tags, *doc.bundles]
     if reading is not None:
-        parts.append(reading_text(reading))
+        parts.append(reading_text(reading, include_content=include_content))
     return needle in " ".join(parts).casefold()
 
 

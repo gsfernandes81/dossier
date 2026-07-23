@@ -95,6 +95,7 @@ _EDIT_LOCKED = frozenset(
         "accept_suggestion",
         "scan_doc",
         "intake",
+        "toggle_search_content",
         "settings",
         "move",
         "supersede",
@@ -203,6 +204,7 @@ class HomeScreen(Screen[None]):
         # panel and the command palette). Bulk scan is palette-only.
         Binding("v", "scan_doc", "Scan (VLM)", show=False),
         Binding("I", "intake", "Intake", show=False),
+        Binding("ctrl+t", "toggle_search_content", "Search inside scans", show=False),
         Binding("comma", "settings", "Settings", show=False),
         # Kept working, but off the footer — surfaced in the help panel (`?`):
         Binding("i", "toggle_dates", "Iss/Exp", show=False),
@@ -233,6 +235,9 @@ class HomeScreen(Screen[None]):
         self._by_location: dict[str | None, list[Document]] = {}
         self._suggestion_state = SuggestionState()  # cached; refreshed on reload
         self._readings: dict[str, scan.ScanReading] = {}  # ds scan, refreshed on reload
+        self._search_content = (
+            False  # `/` also matches scan transcripts (ctrl+t toggles)
+        )
         self._selection: str = _ALL
         self._filter_text = ""
         self._expiring_only = False
@@ -302,7 +307,8 @@ class HomeScreen(Screen[None]):
             flt,
             today=self._today,
             threshold_days=self._config.expiry_threshold_days,
-            readings=self._readings,  # content search: match what a scan says
+            readings=self._readings,  # content search: match a scan's structured fields
+            include_content=self._search_content,  # + full transcript when toggled on
         )
 
     def documents_in_view(self) -> list[Document]:
@@ -529,6 +535,22 @@ class HomeScreen(Screen[None]):
 
     def action_focus_search(self) -> None:
         self.query_one("#search", Input).focus()
+
+    def action_toggle_search_content(self) -> None:
+        """Toggle whether `/` also matches inside scan transcripts.
+
+        Off by default — the full body text is noisy — so it's an opt-in (ctrl+t),
+        advertised in the placeholder and the `?` help panel.
+        """
+        self._search_content = not self._search_content
+        search = self.query_one("#search", Input)
+        if self._search_content:
+            search.placeholder = "Search name / tags / notes / scans + contents…"
+            self.notify("searching inside scan contents  (ctrl+t to toggle off)")
+        else:
+            search.placeholder = "Search name / tags / notes / scans…"
+            self.notify("content search off  (ctrl+t to toggle on)")
+        self._refresh_documents()
 
     def action_escape(self) -> None:
         pane = self._detail_pane
