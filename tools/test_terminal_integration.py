@@ -48,8 +48,12 @@ def test_drives_real_app_in_a_real_terminal(tmp_path: Path):
         # Find-fast launch: typing a printable with NO `/` first routes into the
         # search box and filters live; Esc clears it again.
         assert term.wait_for("5 / 5"), "document count never settled"
-        term.send("pass", settle=0.8)  # 4 chars need a beat to route + filter
-        assert term.wait_for("1 / 5", timeout=6), "typing did not filter (router)"
+        # One character only: the router's job is to route the *first* keystroke, and
+        # a multi-char burst races the focus switch on a slow runner (multi-char
+        # typing is covered by test_typing_from_a_column_routes_into_search).
+        # "p" matches Passport + CoC "Competency" in the sample store.
+        term.send("p", settle=0.6)
+        assert term.wait_for("2 / 5", timeout=6), "typing did not filter (router)"
         term.send("esc", settle=0.4)
         assert term.wait_for("5 / 5"), "esc did not clear the typed filter"
 
