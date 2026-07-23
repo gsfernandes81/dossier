@@ -510,9 +510,31 @@ class HomeScreen(Screen[None]):
             self._refresh_documents()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "search":
-            self._set_mouse_reporting(True)
-            self._focus_documents()
+        # Enter from search = find-fast: open the top match's file straight away.
+        # (`↓` is the way to step into the list keeping the filter; `→` opens detail.)
+        if event.input.id != "search":
+            return
+        doc = self._highlighted_doc()  # _refresh_documents pins the top hit to row 0
+        if doc is None:
+            self.notify("no matches")
+            return
+        self._activate_doc(doc.id)
+
+    def _activate_doc(self, doc_id: str) -> None:
+        """The Enter/activate verb: open the document's file. A physical-only record
+        has nothing to open, so show its detail (where the physical copy lives)
+        instead. ``→`` (drill-in) is the way to inspect any record's detail."""
+        doc = self._doc_by_id(doc_id)
+        if doc is None:
+            return
+        if doc.primary_rendition() is None:
+            self.open_detail(doc.id)  # nothing to open — show where the copy lives
+            self.notify(f"{doc.name}: no digital file", severity="warning")
+            return
+        self._set_mouse_reporting(True)  # left the search field → tap mode resumes
+        self.open_document(doc.id)
+        if not self._narrow:
+            self._focus_documents()  # keep the list navigable after the file opens
 
     def on_descendant_focus(self, event: DescendantFocus) -> None:
         # Termux keyboard model: a tap only raises the soft keyboard while mouse
@@ -542,7 +564,7 @@ class HomeScreen(Screen[None]):
         if event.option_list.id == "documents":
             if self.editing or event.option_id is None:
                 return  # a click mid-edit must not swap the doc being edited
-            self.open_detail(event.option_id)
+            self._activate_doc(event.option_id)  # Enter/tap opens the file; → = detail
         elif event.option_list.id == "locations":
             self.action_drill_in()
 

@@ -215,6 +215,59 @@ async def test_open_file_action_uses_detailed_doc(
 
 
 @pytest.mark.asyncio
+async def test_enter_activates_document_opens_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Find-fast verb: activating a document (Enter/tap) opens its file straight away.
+    store, config = _setup(tmp_path)
+    opened: list[Path] = []
+    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.home._activate_doc("passport")
+        await pilot.pause()
+    assert opened == [tmp_path / "passport.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_activate_physical_only_shows_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A physical-only record has no file to open, so activating it shows its detail
+    # (where the physical copy lives) with a notice — never a spurious opener call.
+    store, config = _setup(tmp_path)
+    opened: list[Path] = []
+    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home._activate_doc("coc")  # coc has no digital rendition
+        await pilot.pause()
+        assert opened == []
+        assert home.has_class("show-detail")
+        assert any("no digital file" in n.message for n in app._notifications)
+
+
+@pytest.mark.asyncio
+async def test_enter_in_search_opens_top_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Enter from the search box opens the top match's file — cold-launch find-fast.
+    store, config = _setup(tmp_path)
+    opened: list[Path] = []
+    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        search = app.home.query_one("#search", Input)
+        search.focus()
+        search.value = "passport"  # filters; top hit pinned to row 0
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert opened == [tmp_path / "passport.pdf"]
+
+
+@pytest.mark.asyncio
 async def test_open_progressively_drills_columns(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
