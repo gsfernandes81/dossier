@@ -115,12 +115,13 @@ def search(
     ]
 
 
-def reading_text(reading: ScanReading) -> str:
-    """The searchable text of a scan reading — every printed field it captured.
+def reading_text(reading: ScanReading, *, include_content: bool = False) -> str:
+    """The searchable text of a scan reading.
 
-    The corpus for content search and ``ds ask``; ``transcript``/``keywords`` are
-    empty until Phase 11's transcribe pass, so this is useful on the structured
-    fields alone today.
+    Structured fields (type, issuer, holder, number, dates, evidence) by default —
+    tight and high-signal. The full ``transcript`` + ``keywords`` are added only
+    when ``include_content``: they're long and noisy, so the `/` filter keeps them
+    opt-in (a toggle), while ``ds ask`` always includes them.
     """
     parts = [
         reading.document_type,
@@ -130,9 +131,9 @@ def reading_text(reading: ScanReading) -> str:
         reading.issue_date_text,
         reading.expiry_date_text,
         reading.evidence,
-        reading.transcript,
-        *reading.keywords,
     ]
+    if include_content:
+        parts += [reading.transcript, *reading.keywords]
     return " ".join(part for part in parts if part)
 
 

@@ -110,14 +110,18 @@ def test_content_search_matches_a_readings_field_not_in_the_name():
     assert withr == {"sea"}  # content search finds it via the reading
 
 
-def test_content_search_matches_transcript_and_keywords():
+def test_transcript_is_opt_in_not_in_the_default_search():
     doc = _doc("d", name="scan001")
     reading = _reading(document_type="X", transcript="the INDoS number is 09MU1234")
     flt = query.Filter(text="indos")
+    # The default `/` filter does NOT match transcript body text (noisy, opt-in)...
     got = query.search(
         [doc], flt, today=TODAY, threshold_days=90, readings={"d": reading}
     )
-    assert [d.id for d in got] == ["d"]
+    assert got == []
+    # ...but the transcript is in the content-inclusive text `ds ask` uses.
+    assert "indos" in query.reading_text(reading, include_content=True).casefold()
+    assert "indos" not in query.reading_text(reading).casefold()
 
 
 def test_reading_text_joins_present_fields_only():
