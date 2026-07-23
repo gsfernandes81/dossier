@@ -86,6 +86,15 @@ def test_round_trip_flags_hand_edit(store: Store):
     assert _kinds(doctor.run(store, store.config)).get("round-trip") == 1
 
 
+def test_round_trip_uses_source_hash_without_rereading(store: Store):
+    # The check compares against Document.source_hash, so it needs no file read: a
+    # freshly-saved doc reports clean even with its file deleted out from under it.
+    doc = store.save(Document(id="h", name="Hand"))  # source_hash set on save
+    store.document_path("h").unlink()  # file gone — a re-read would OSError/crash
+    report = doctor.run(store, store.config, docs=[doc])
+    assert _kinds(report).get("round-trip") is None  # clean, no re-read
+
+
 def test_ambiguous_dates(store: Store):
     # single ambiguous 2-digit-year date -> flagged
     store.save(

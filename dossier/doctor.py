@@ -33,7 +33,7 @@ from dossier import query, resolve
 from dossier.config import Config
 from dossier.errors import StoreError
 from dossier.model import Document, Location
-from dossier.store import Store
+from dossier.store import Store, _hash
 
 # Short recovery hints per check, shown under a group in the CLI/TUI doctor output.
 # Kept here (not in the UI layers) so both surfaces stay in sync, and so the guidance
@@ -205,13 +205,16 @@ def _check_supersession(docs: list[Document]) -> list[Finding]:
 
 
 def _check_round_trip(store: Store, docs: list[Document]) -> list[Finding]:
+    # Compare each doc's canonical serialisation against ``source_hash`` — the hash
+    # of the bytes it was parsed from, captured at load (store._read). That answers
+    # "would this file change on the next save?" without re-reading it: on a synced
+    # network store the per-doc read was the whole cost. ``_hash`` is imported (not
+    # duplicated) so this stays in lockstep with how the store computes source_hash.
     out: list[Finding] = []
     for doc in docs:
-        try:
-            on_disk = store.document_path(doc.id).read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if store.serialize(doc) != on_disk:
+        if doc.source_hash is None:
+            continue  # never loaded/saved — nothing to compare against
+        if _hash(store.serialize(doc).encode("utf-8")) != doc.source_hash:
             out.append(
                 Finding(
                     "round-trip",
