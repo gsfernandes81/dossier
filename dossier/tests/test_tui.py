@@ -373,6 +373,16 @@ async def test_review_integrity_tab_lists_findings(tmp_path: Path):
         app.push_screen(screen)
         await pilot.pause()
         options = screen.query_one("#integrity", OptionList)
+        # Deferred: on mount the tab only shows a placeholder and the check has not
+        # run (count still None), so opening Review never pays the doctor cost.
+        assert options.option_count == 1
+        assert "open" in str(options.get_option_at_index(0).prompt)
+        assert screen._integrity_count is None
+        # Activating the tab runs the check in a worker; wait for it, then assert.
+        screen.query_one(TabbedContent).active = "tab-integrity"
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
         # An ambiguous-date finding for "amb" is listed (with a group header row).
         assert options.option_count > 1
         assert any("amb" in str(o.prompt) for o in options.options)
@@ -391,6 +401,8 @@ async def test_review_integrity_edit_opens_the_flagged_doc(tmp_path: Path):
         screen = app.screen
         assert isinstance(screen, ReviewScreen)
         screen.query_one(TabbedContent).active = "tab-integrity"
+        await pilot.pause()
+        await app.workers.wait_for_complete()  # deferred integrity check runs here
         await pilot.pause()
         options = screen.query_one("#integrity", OptionList)
         # Highlight the finding row (skip the group-header row, which has no id).

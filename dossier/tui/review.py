@@ -174,7 +174,10 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         self._readings: dict[str, scan.ScanReading] = {}
         self._successions: dict[str, succession.Succession] = {}  # row id → proposal
         self._plans: list[resolve.Resolution] = []  # planned conflict merges
-        self._integrity_count = 0  # doctor findings shown on the Integrity tab
+        # Integrity is the priciest tab (a full `ds doctor` run), so it's deferred
+        # until first opened: count is None until checked, then the finding total.
+        self._integrity_count: int | None = None
+        self._integrity_started = False
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="rpanel"):
@@ -202,7 +205,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         self._populate_orphans()
         self._populate_missing()
         self._populate_succession()
-        self._populate_integrity()
+        self._seed_integrity_placeholder()
         self.query_one("#dups", OptionList).add_option(
             Option("press  s  to scan for duplicates (cached after the first run)")
         )
@@ -327,6 +330,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
             message += f", {len(report.skipped)} changed mid-merge (retry)"
             severity = "warning"
         self.notify(message, severity=severity)
+        self._invalidate_integrity()  # merges rewrote sidecars
         self._populate_conflicts()
         self._update_summary()
 
@@ -346,34 +350,69 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
             self.notify(str(exc), severity="error")
         else:
             self.notify(f"merged {fresh.name}")
+        self._invalidate_integrity()  # a merge rewrote the live sidecar
         self._populate_conflicts()
         self._update_summary()
 
     # -- integrity (in-app `ds doctor`, minus what other tabs already own) ----
+    #
+    # Deferred: a full doctor run is the screen's priciest work (it re-reads and
+    # re-serialises every document), so it doesn't run on mount — the tab shows a
+    # placeholder until first opened, then runs in a thread worker. A write that
+    # could change the findings invalidates it so the next open re-checks.
 
-    def _populate_integrity(self) -> None:
-        """List doctor findings, skipping conflicts + missing files (own tabs)."""
+    _INTEGRITY_HINT = "open this tab to run the integrity check"
+
+    def _seed_integrity_placeholder(self) -> None:
+        options = self.query_one("#integrity", OptionList)
+        options.clear_options()
+        options.add_option(Option(self._INTEGRITY_HINT))
+
+    @work(thread=True, exclusive=True, group="integrity")
+    def _run_integrity(self) -> None:
+        """Run the (blocking) doctor check off-thread, then render its findings."""
+        self.app.call_from_thread(self._integrity_checking)
         report = doctor.run(self._store, self._config, skip=self._INTEGRITY_SKIP)
+        self.app.call_from_thread(self._populate_integrity_results, report)
+
+    def _integrity_checking(self) -> None:
+        options = self.query_one("#integrity", OptionList)
+        options.clear_options()
+        options.add_option(Option("checking integrity…"))
+
+    def _populate_integrity_results(self, report: doctor.Report) -> None:
         self._integrity_count = len(report.findings)
         options = self.query_one("#integrity", OptionList)
         options.clear_options()
         if not report.findings:
             options.add_option(Option("integrity: all clear."))
-            return
-        index = 0
-        for check, items in sorted(report.by_check().items()):
-            options.add_option(Option(f"— {check} ({len(items)}) —", id=None))
-            hint = doctor.CHECK_HINTS.get(check)
-            if hint:
-                options.add_option(Option(f"  → {hint}", id=None))
-            for finding in items:
-                # A doc can appear in several findings; a composite id keeps them
-                # unique (else OptionList raises DuplicateID).
-                oid = f"{finding.subject}{self._INTEG_SEP}{index}"
-                options.add_option(
-                    Option(f"  {finding.subject}: {finding.detail}", id=oid)
-                )
-                index += 1
+        else:
+            index = 0
+            for check, items in sorted(report.by_check().items()):
+                options.add_option(Option(f"— {check} ({len(items)}) —", id=None))
+                hint = doctor.CHECK_HINTS.get(check)
+                if hint:
+                    options.add_option(Option(f"  → {hint}", id=None))
+                for finding in items:
+                    # A doc can appear in several findings; a composite id keeps
+                    # them unique (else OptionList raises DuplicateID).
+                    oid = f"{finding.subject}{self._INTEG_SEP}{index}"
+                    options.add_option(
+                        Option(f"  {finding.subject}: {finding.detail}", id=oid)
+                    )
+                    index += 1
+        self._update_summary()
+
+    def _invalidate_integrity(self) -> None:
+        """Drop any computed integrity result so the next tab-open re-checks.
+
+        Called from the write paths (doc saves, conflict merges): a mutation can
+        change what doctor would find. Never runs while Integrity is the active tab
+        — every mutating key is gated (``check_action``) to the other tabs.
+        """
+        self._integrity_started = False
+        self._integrity_count = None
+        self._seed_integrity_placeholder()
 
     @on(OptionList.OptionSelected, "#integrity")
     def _open_integrity(self, event: OptionList.OptionSelected) -> None:
@@ -416,9 +455,12 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         )
         supp = self._suppressed_count()
         supp_part = f" · {supp} suppressed" if supp else ""
-        integ_part = (
-            f" · {self._integrity_count} integrity" if self._integrity_count else ""
-        )
+        if self._integrity_count is None:  # not checked yet (tab still unopened)
+            integ_part = " · integrity: open tab to check"
+        elif self._integrity_count:
+            integ_part = f" · {self._integrity_count} integrity"
+        else:  # checked, all clear
+            integ_part = ""
         ignore = [*self._config.ignore, *self._state.ignore]
         scope = f"   scope: {len(ignore)} ignore glob(s)" if ignore else ""
         self.query_one("#rsummary", Label).update(
@@ -508,6 +550,15 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
     def _tab_changed(self) -> None:
         self.refresh_bindings()  # footer shows only the active tab's actions
         self._focus_active_pane()  # so its list/tree is immediately navigable
+        # Integrity runs lazily on first open (never the default tab, so this is
+        # always user-driven and post-mount — _report is set by then).
+        if (
+            self._active_tab() == "tab-integrity"
+            and not self._integrity_started
+            and self._report is not None
+        ):
+            self._integrity_started = True
+            self._run_integrity()
 
     def _focus_active_pane(self) -> None:
         pane = self._TAB_PANE.get(self._active_tab())
@@ -830,6 +881,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         except StoreError as exc:
             self.notify(str(exc), severity="error")
             return False
+        self._invalidate_integrity()  # the saved doc may change what doctor finds
         return True
 
     def _persist_state(self) -> bool:
