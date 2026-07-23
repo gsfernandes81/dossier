@@ -320,11 +320,14 @@ Syncthing is the transport (the PC folder also lives in Proton Drive for an oppo
 cloud copy — meaning a Proton revert can *propagate* via Syncthing, which makes Syncthing's
 own versioning the recovery net and verifying it non-negotiable). Talk to Syncthing's REST
 API; never bundle, spawn, or reimplement it.
-- [ ] **Doctor checks** (S/M) — via the REST API on localhost: Syncthing reachable · the
-  store's folder shared and not paused · **file versioning enabled** (the net against a
-  propagated Proton revert) · folder marker present (a missing `.stfolder` pauses the
-  folder silently) · device connectivity/last-seen. Degrade gracefully to "Syncthing not
-  reachable — checks skipped" rather than failing doctor.
+- [ ] **Doctor checks** (S/M) — via the REST API on localhost: Syncthing reachable ·
+  resolve which Syncthing folder *contains* the store (the synced folder is an
+  **ancestor** of `syncthing_root` — `.stfolder` lives at the synced parent, not the
+  store root, so match the store path against the REST folder list, never expect a
+  marker in the store) · that folder shared and not paused · **file versioning
+  enabled** (the net against a propagated Proton revert) · device
+  connectivity/last-seen. Degrade gracefully to "Syncthing not reachable — checks
+  skipped" rather than failing doctor.
 - [ ] **Sync-aware service + TUI** (M) — the scan service waits for sync-idle before batch
   writes (don't race an incoming sync); a footer glyph on the home shows sync state
   (idle / syncing / conflict / unreachable).
