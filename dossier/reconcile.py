@@ -31,8 +31,10 @@ Syncthing's own dirs, and conflict files.
 
 from __future__ import annotations
 
+import stat
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dossier import dedup, migrate, query
@@ -82,11 +84,13 @@ class ReconcileReport:
 def scan_files(config: Config, extra_ignore: Sequence[str] = ()) -> list[str]:
     """Every file under the root (POSIX-relative), scoped by include/ignore globs.
 
-    Always excludes ``.dossier/``, Syncthing dirs, and ``*.sync-conflict-*``. An
-    empty ``include`` means the whole root; the ``ignore`` globs (the synced
-    config's, plus any ``extra_ignore`` from the reconcile sidecar) then drop
-    matches. ``fnmatch`` ``*`` crosses ``/`` here, so ``"Wallpapers/*"`` scopes a
-    whole subtree.
+    Always excludes ``.dossier/``, Syncthing dirs, ``*.sync-conflict-*``, and
+    **dotfiles / hidden files** (a dot-prefixed name or dir, or a Windows
+    hidden-attribute file — OS/sync cruft like ``.DS_Store``, ``._resource``,
+    ``Thumbs.db``, never a document). An empty ``include`` means the whole root;
+    the ``ignore`` globs (the synced config's, plus any ``extra_ignore`` from the
+    reconcile sidecar) then drop matches. ``fnmatch`` ``*`` crosses ``/`` here, so
+    ``"Wallpapers/*"`` scopes a whole subtree.
     """
     root = config.syncthing_root
     meta = config.meta_dir
@@ -97,7 +101,7 @@ def scan_files(config: Config, extra_ignore: Sequence[str] = ()) -> list[str]:
         if not path.is_file() or meta in path.parents:
             continue
         rel = path.relative_to(root).as_posix()
-        if _is_sync_noise(rel):
+        if _is_sync_noise(rel) or _is_hidden(rel, path):
             continue
         if include and not any(fnmatch(rel, pattern) for pattern in include):
             continue
@@ -158,6 +162,22 @@ def run(
 def _is_sync_noise(rel: str) -> bool:
     parts = rel.split("/")
     return CONFLICT_MARKER in parts[-1] or any(p in _SYNC_DIRS for p in parts[:-1])
+
+
+def _is_hidden(rel: str, path: Path) -> bool:
+    """A dotfile / dot-directory (any OS) or a Windows hidden-attribute file.
+
+    Dot-prefix catches ``.DS_Store``, AppleDouble ``._x`` sidecars, ``.git/``, etc.
+    cross-platform; the ``st_file_attributes`` check (Windows-only; absent → 0)
+    also drops attribute-hidden files like ``Thumbs.db`` / ``desktop.ini``.
+    """
+    if any(part.startswith(".") for part in rel.split("/")):
+        return True
+    try:
+        attrs = getattr(path.stat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attrs & stat.FILE_ATTRIBUTE_HIDDEN)
 
 
 def _with_suggestions(orphan_paths: list[str], docs: list[Document]) -> list[Orphan]:

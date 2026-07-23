@@ -70,6 +70,21 @@ def test_scan_files_respects_ignore_glob(tmp_path: Path):
     config.ignore = ["Wallpapers/*"]
     files = reconcile.scan_files(config)
     assert not any(f.startswith("Wallpapers/") for f in files)
+
+
+def test_scan_files_excludes_dotfiles_and_dot_dirs(tmp_path: Path):
+    _, config = _setup(tmp_path)
+    root = config.syncthing_root
+    (root / ".DS_Store").write_bytes(b"x")  # dotfile
+    (root / "Marine" / "._CoC Card.pdf").write_bytes(b"x")  # AppleDouble sidecar
+    (root / ".hidden").mkdir()
+    (root / ".hidden" / "secret.pdf").write_bytes(b"x")  # file under a dot-dir
+
+    files = reconcile.scan_files(config)
+    assert ".DS_Store" not in files
+    assert "Marine/._CoC Card.pdf" not in files
+    assert not any(f.startswith(".hidden/") for f in files)
+    assert "Marine/CoC Card.pdf" in files  # a real document is still found
     assert "Marine/CoC Card.pdf" in files
 
 

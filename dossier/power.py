@@ -104,6 +104,12 @@ def parse_windows_status(ac_line: int, status_flag: int) -> PowerSample:
 def read_windows() -> PowerSample:  # pragma: no cover - exercised only on Windows
     import ctypes
 
+    if sys.platform != "win32":
+        # ``ctypes.windll`` is Windows-only; this guard proves that to the type
+        # checker (so a Linux/CI analysis doesn't flag it) and never fires at
+        # runtime — read_sample only calls this on Windows.
+        return PowerSample(None, None, None, "windows-unavailable")
+
     class _Status(ctypes.Structure):
         _fields_ = (
             ("ACLineStatus", ctypes.c_ubyte),
@@ -115,7 +121,7 @@ def read_windows() -> PowerSample:  # pragma: no cover - exercised only on Windo
         )
 
     status = _Status()
-    ok = ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(status))  # type: ignore[attr-defined]
+    ok = ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(status))
     if not ok:
         return PowerSample(None, None, None, "windows-error")
     percent = status.BatteryLifePercent
