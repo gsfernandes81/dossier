@@ -13,7 +13,11 @@ dependencies = [
     "rich>=13.0",  # progress bars for `ds import`; also a transitive Textual dep
     "platformdirs>=4.3",
     "python-dateutil>=2.9.0",
-    "ruamel.yaml>=0.18.6",
+    # YAML front-matter read/write. The wheels for desktop platforms bundle libyaml
+    # (so the fast C loader/dumper is automatic); on Termux `pkg install libyaml`
+    # before syncing deps enables it, else it falls back to pure Python. See
+    # dossier/store.py and the `ds profile` libyaml hint.
+    "pyyaml>=6.0",
     "tomli-w>=1.1.0",
 ]
 

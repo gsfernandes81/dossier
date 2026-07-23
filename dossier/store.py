@@ -35,7 +35,6 @@ guarantees (see DESIGN.md §6):
 from __future__ import annotations
 
 import hashlib
-import io
 import os
 import tempfile
 import time
@@ -46,8 +45,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import tomli_w
-from ruamel.yaml import YAML
-from ruamel.yaml.scalarstring import DoubleQuotedScalarString as DQ
+import yaml
 
 from dossier.config import Config
 from dossier.errors import DocumentExistsError, StaleWriteError, StoreError
@@ -83,20 +81,77 @@ ignore = []
 """
 
 
-def _represent_none(representer, data):  # ruamel None -> empty scalar callback
-    # Emit ``key:`` (empty) for None instead of ``key: null`` — cleaner and it
-    # round-trips back to None.
-    return representer.represent_scalar("tag:yaml.org,2002:null", "")
+class _Quoted(str):
+    """A string that always serialises double-quoted (replaces ruamel's
+    ``DoubleQuotedScalarString``): an unquoted ``#`` would start a YAML comment and
+    truncate the value, and a bare ``yes``/``12:30`` could change type on reload."""
 
 
-def _make_dumper() -> YAML:
-    yaml = YAML()  # round-trip dumper honours DoubleQuotedScalarString
-    yaml.default_flow_style = False
-    yaml.allow_unicode = True
-    yaml.width = 4096
-    yaml.indent(mapping=2, sequence=2, offset=0)
-    yaml.representer.add_representer(type(None), _represent_none)
-    return yaml
+def _represent_quoted(dumper: yaml.Dumper, data: _Quoted) -> yaml.Node:
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data), style='"')
+
+
+def _represent_none(dumper: yaml.Dumper, data: None) -> yaml.Node:
+    # Emit ``key:`` (empty) for None instead of ``key: null`` — cleaner, round-trips.
+    return dumper.represent_scalar("tag:yaml.org,2002:null", "")
+
+
+# Use libyaml's C loader/dumper when available (desktop PyYAML wheels bundle it; on
+# Termux it needs `pkg install libyaml`), else the pure-Python fallback — byte-for-
+# byte identical output either way, so a file written on a C device matches one
+# written on a pure device (no spurious Syncthing churn). Representers live on a
+# private subclass so we never mutate PyYAML's shared dumper classes.
+HAS_LIBYAML = yaml.__with_libyaml__
+if HAS_LIBYAML:
+    _Loader = yaml.CSafeLoader
+
+    class _Dumper(yaml.CSafeDumper):
+        pass
+else:
+    _Loader = yaml.SafeLoader
+
+    class _Dumper(yaml.SafeDumper):  # type: ignore[no-redef]
+        pass
+
+
+_Dumper.add_representer(_Quoted, _represent_quoted)
+_Dumper.add_representer(type(None), _represent_none)
+
+
+def _serialize_frontmatter(mapping: dict[str, object]) -> str:
+    return yaml.dump(
+        mapping,
+        Dumper=_Dumper,
+        default_flow_style=False,
+        allow_unicode=True,
+        width=4096,
+        sort_keys=False,
+        indent=2,
+    )
+
+
+def libyaml_hint() -> str | None:
+    """A one-line nudge to enable the fast C YAML backend, or ``None`` if already on
+    it. Self-resolving — returns ``None`` the moment libyaml is active — so callers
+    (``ds profile``, the TUI startup notice) can show it unconditionally and it just
+    disappears once fixed. Desktop wheels bundle libyaml, so this only fires where
+    PyYAML fell back to pure Python (typically Termux without ``pkg install
+    libyaml``), where parsing the store is ~10x slower.
+    """
+    if HAS_LIBYAML:
+        return None
+    from dossier.platform_open import is_termux
+
+    if is_termux():
+        return (
+            "YAML is running pure-Python (~10x slower parsing). Speed it up: "
+            "`pkg install libyaml`, then reinstall so PyYAML rebuilds against it "
+            "(see docs/guide/install.md)."
+        )
+    return (
+        "YAML is running pure-Python (~10x slower parsing). Reinstall dossier so "
+        "PyYAML picks up a libyaml-backed build (see docs/guide/install.md)."
+    )
 
 
 class Store:
@@ -106,8 +161,6 @@ class Store:
         self, config: Config, *, now: Callable[[], datetime] | None = None
     ) -> None:
         self.config = config
-        self._load_yaml = YAML(typ="safe")
-        self._dump_yaml = _make_dumper()
         # Injectable clock so bundle-creation stamps are deterministic in tests.
         self._now = now or (lambda: datetime.now(UTC))
 
@@ -189,7 +242,7 @@ class Store:
 
     def _parse(self, path: Path, raw: bytes) -> Document:
         front, notes = _split_frontmatter(raw.decode("utf-8"), path)
-        data = self._load_yaml.load(front)
+        data = yaml.load(front, Loader=_Loader)
         if data is None:
             data = {}
         if not isinstance(data, dict):
@@ -245,9 +298,7 @@ class Store:
         Exposed for callers that need the exact bytes without writing (e.g. the
         round-trip lint in ``doctor``).
         """
-        buf = io.StringIO()
-        self._dump_yaml.dump(_frontmatter_from_document(doc), buf)
-        front = buf.getvalue()
+        front = _serialize_frontmatter(_frontmatter_from_document(doc))
         if not front.endswith("\n"):
             front += "\n"
         body = f"{doc.notes}\n" if doc.notes else ""
@@ -520,9 +571,9 @@ def _document_from_frontmatter(data: dict[str, object], notes: str) -> Document:
 def _frontmatter_from_document(doc: Document) -> dict[str, object]:
     # Insertion order is the on-disk key order (ruamel preserves it).
     return {
-        "name": DQ(doc.name),
-        "tags": [DQ(t) for t in doc.tags],
-        "bundles": [DQ(b) for b in doc.bundles],
+        "name": _Quoted(doc.name),
+        "tags": [_Quoted(t) for t in doc.tags],
+        "bundles": [_Quoted(b) for b in doc.bundles],
         "issue_date": doc.issue_date,
         "expiry_date": doc.expiry_date,
         "ignore_expiry": doc.ignore_expiry,
@@ -541,14 +592,14 @@ def _frontmatter_from_document(doc: Document) -> dict[str, object]:
 
 def _rendition_to_map(rendition: Rendition) -> dict[str, object]:
     return {
-        "label": DQ(rendition.label),
-        "path": DQ(rendition.path),
+        "label": _Quoted(rendition.label),
+        "path": _Quoted(rendition.path),
         "primary": rendition.primary,
     }
 
 
 def _dq_or_none(value: str | None) -> object:
-    return None if value is None else DQ(value)
+    return None if value is None else _Quoted(value)
 
 
 # -- value coercions (tolerant of hand-edited frontmatter) ------------------

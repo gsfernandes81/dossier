@@ -262,6 +262,18 @@ class HomeScreen(Screen[None]):
         self._reload()
         self._focus_default()
         self._warn_conflicts()
+        self._warn_slow_yaml()
+
+    def _warn_slow_yaml(self) -> None:
+        """Nudge to enable the fast C YAML backend when PyYAML fell back to pure
+        Python (usually Termux without ``pkg install libyaml``). Self-resolving:
+        :func:`store.libyaml_hint` returns None once libyaml is active, so the
+        notice simply stops appearing after the one-time fix — no dismiss flag."""
+        from dossier.store import libyaml_hint
+
+        hint = libyaml_hint()
+        if hint:
+            self.notify(hint, severity="warning", timeout=12)
 
     def _warn_conflicts(self) -> None:
         """On entry, flag any Syncthing conflict files left to merge.

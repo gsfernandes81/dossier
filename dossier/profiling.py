@@ -46,7 +46,7 @@ from dossier.config import Config
 # the one a bare `ds` pays to open the TUI.
 _IMPORT_TARGETS = [
     ("bare interpreter (floor)", "pass"),
-    ("+ ruamel.yaml", "import ruamel.yaml"),
+    ("+ PyYAML", "import yaml"),
     ("+ textual", "import textual.app"),
     ("dossier.store", "import dossier.store"),
     ("dossier.cli", "import dossier.cli"),
@@ -223,12 +223,19 @@ def run(config: Config | None, *, runs: int = 3, importtime: bool = False) -> in
     out.append("dossier performance profile")
     out.append("=" * 52)
 
+    from dossier.store import HAS_LIBYAML, libyaml_hint
+
     out.append("\nenvironment")
     out.append(f"  platform     : {platform.platform()}")
     out.append(f"  python       : {platform.python_version()}  ({sys.executable})")
     out.append(f"  termux       : {is_termux()}")
     out.append(f"  optimize flag: -O level {sys.flags.optimize}")
     out.append(f"  bytecode     : {_bytecode_state()}")
+    backend = "libyaml (C, fast)" if HAS_LIBYAML else "pure Python (slow)"
+    out.append(f"  yaml backend : {backend}")
+    hint = libyaml_hint()
+    if hint:
+        out.append(f"\n  ! {hint}")
 
     out.append(f"\nstartup imports  (fresh process, best of {runs})")
     imports = [(label, _time_subprocess(code, runs)) for label, code in _IMPORT_TARGETS]

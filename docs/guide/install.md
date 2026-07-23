@@ -1,7 +1,10 @@
 # Installing dossier
 
-dossier is a pure-Python app (Python 3.11+). It runs on **Windows** and **Android via
-[Termux](https://termux.dev/)**, and uses [uv](https://docs.astral.sh/uv/) for packaging.
+dossier is a Python app (3.11+) with no *required* system libraries. It runs on **Windows** and
+**Android via [Termux](https://termux.dev/)**, and uses [uv](https://docs.astral.sh/uv/) for
+packaging. One optional native library — **libyaml** — makes YAML parsing ~10× faster; it's
+bundled automatically in the desktop wheels and is a one-line install on Termux (see below).
+Without it everything still works via a pure-Python fallback, just slower on a large store.
 
 ## Core install (both platforms)
 
@@ -41,7 +44,12 @@ See [workflows.md](workflows.md#reading-dates-off-a-scan-ds-scan).
 ## Termux (Android) notes
 
 - Install Termux from **F-Droid** (the Play Store build is outdated).
-- `pkg install python git`, install `uv`, then `uv sync` as above.
+- `pkg install python git libyaml`, install `uv`, then `uv sync` as above. Installing
+  **libyaml first** matters: PyYAML compiles its fast C loader against it at install time, so
+  the order gives you the ~10× YAML speedup from the first launch. If you already installed
+  without it, run `pkg install libyaml` then rebuild PyYAML (`uv sync --reinstall-package
+  pyyaml`, or reinstall dossier). Confirm the fast path with `ds profile` (the `yaml backend`
+  line, or run it any time — dossier also shows a one-line nudge on startup until it's active).
 - Add this to `~/.termux/termux.properties` so the soft keyboard doesn't pop up on launch:
   ```properties
   hide-soft-keyboard-on-startup=true

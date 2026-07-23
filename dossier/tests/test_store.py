@@ -108,6 +108,84 @@ def test_serialization_is_deterministic(store: Store):
     assert first == second
 
 
+def test_serialize_format_conventions(store: Store):
+    # Lock the on-disk conventions the format guarantees, so a YAML-backend change
+    # (e.g. the ruamel → PyYAML swap) can't silently alter how files are written.
+    doc = Document(
+        id="p",
+        name="Hash #1",
+        tags=["marine"],
+        issue_date=date(2020, 1, 5),
+        has_physical=True,
+        has_digital=False,
+        perm_slot=3,  # perm/temp locations stay None
+    )
+    out = store.serialize(doc)
+    assert out.startswith('---\nname: "Hash #1"\n')  # strings double-quoted
+    assert '- "marine"\n' in out  # list items quoted too
+    assert "issue_date: 2020-01-05\n" in out  # dates: unquoted ISO
+    assert "has_physical: true\n" in out and "has_digital: false\n" in out  # bools
+    assert "perm_slot: 3\n" in out  # ints bare
+    assert "temp_location:\n" in out and "null" not in out  # None -> empty scalar
+
+
+def _pure_serialize(doc: Document) -> str:
+    """Serialize via PyYAML's pure-Python SafeDumper (the no-libyaml fallback)."""
+    import yaml
+
+    from dossier.store import (
+        _frontmatter_from_document,
+        _Quoted,
+        _represent_none,
+        _represent_quoted,
+    )
+
+    class PureDumper(yaml.SafeDumper):
+        pass
+
+    PureDumper.add_representer(_Quoted, _represent_quoted)
+    PureDumper.add_representer(type(None), _represent_none)
+    front = yaml.dump(
+        _frontmatter_from_document(doc),
+        Dumper=PureDumper,
+        default_flow_style=False,
+        allow_unicode=True,
+        width=4096,
+        sort_keys=False,
+        indent=2,
+    )
+    if not front.endswith("\n"):
+        front += "\n"
+    body = f"{doc.notes}\n" if doc.notes else ""
+    return f"---\n{front}---\n{body}"
+
+
+@pytest.mark.skipif(
+    not store_module.HAS_LIBYAML,
+    reason="no libyaml here — C and pure are the same path",
+)
+def test_serialize_c_dumper_matches_pure(store: Store):
+    # A file written on a libyaml device (C dumper) must be byte-identical to one
+    # written on a pure-Python device — otherwise mixed-device writes churn Syncthing.
+    docs = [
+        _sample(),
+        Document(id="empty", name="", tags=[], notes=""),
+        Document(id="u", name="Ünïçodé — #hash: yes 12:30", supersedes="x"),
+    ]
+    for doc in docs:
+        assert store.serialize(doc) == _pure_serialize(doc)
+
+
+def test_libyaml_hint_self_resolves(monkeypatch: pytest.MonkeyPatch):
+    # Active libyaml -> silent (the startup notice/profile hint just disappears).
+    monkeypatch.setattr(store_module, "HAS_LIBYAML", True)
+    assert store_module.libyaml_hint() is None
+    # Pure fallback -> a one-line nudge that names the fix.
+    monkeypatch.setattr(store_module, "HAS_LIBYAML", False)
+    hint = store_module.libyaml_hint()
+    assert hint is not None and "libyaml" in hint
+
+
 def test_conflicts_excluded_and_listed(store: Store):
     store.save(Document(id="real", name="Real"))
     conflict = store.config.documents_dir / "real.sync-conflict-20260101-abc.md"
