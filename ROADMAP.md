@@ -27,7 +27,8 @@ resumable reading cache) have landed, reusing `organize`/`suggest`/`succession`.
 remaining item, **phone sync-back, is deferred to Phase 13** — its automatic trigger *is*
 the scan service, and the manual loop already works over synced `scans.toml`. **Phase 10
 (preparedness) is done** — event-aware validity, `ds expiring` reminders, and bundle
-templates with a readiness checklist. Phases 11–13 sketch the **long horizon** — answers,
+templates with a readiness checklist. **Phase 11 (answers) is done** — content search,
+`ds ask`/`ds open`, and scan transcripts. Phases 12–13 remain — the **long horizon** —
 durability, platform hardening —
 turning the catalogue into a living system.
 
@@ -224,13 +225,13 @@ validity + reminders (slice 1) and bundle templates + the readiness checklist (s
   its row. *(Deferred: "add to bundle" from the checklist — engine `candidates` field ships
   dark; template suggestions; a global `[validity.rules]` table; a `ds ready` CLI twin.)*
 
-## Phase 11 — Answers: content search & ask  *(in progress)*
+## Phase 11 — Answers: content search & ask  ✅
 `.dossier/scans.toml` already holds structured, grounded readings of every linked scan
 — currently used only for date suggestions and succession. Make the corpus queryable:
 find documents by *what they say*, not what they were named. Guiding split: **vision
 is enrichment at scan time (desktop-only); queries are text, on every device.** A
 query never needs a VLM, so ask stays fast, cool, and battery-cheap on the phone.
-*Content search + `ds ask`/`ds open` landed (slices A/B); transcripts next (slice C).*
+**Done** — content search, `ds ask`/`ds open`, and the transcribe pass all shipped.
 - [x] **Content search** (M) — `query.reading_text` + an optional `readings` map on
   `search`/`matches`, so the `/` filter (and `ds open`) match a doc by its scan's fields.
   Verified on the real store: "bernhard" finds 4 testimonials by issuer, "ENG10166083"
@@ -244,14 +245,14 @@ query never needs a VLM, so ask stays fast, cool, and battery-cheap on the phone
     text (e.g. the ENG-1 records — no structured `expiry_date`, no accepted succession)
     is answered from the top-ranked scan text; accepting the succession / setting the
     expiry fixes it. Tier 1 (a small text model composing prose, `--compose`) is deferred.
-- [ ] **Reading transcripts** (S) — a second `scan.transcribe()` VLM call adds a full-text
-  transcript + keywords to `ScanReading` (fields already in place, byte-stable for legacy
-  readings); `ds scan --transcribe` backfills. Makes body-content findable ("the doc with
-  my INDoS number"). **Gated on go-ahead (57 VLM calls + synced `scans.toml` rewrite).**
-  - **Search inclusion is opt-in:** the `/` filter must **not** search transcript body
-    text by default (noisy) — keep it a **discoverable toggle** (a keybind on the search,
-    surfaced in the `?` help + a visible cue). The `include_content` query split is already
-    in place; slice C wires the TUI toggle. `ds ask` always uses the full content.
+- [x] **Reading transcripts** (S) — a second `scan.transcribe()` VLM call (own schema/prompt,
+  4096-token budget) adds a full-text transcript + keywords to `ScanReading` (byte-stable for
+  legacy readings); `ds scan --transcribe` batch-backfills (interactive scans stay fast).
+  Body content is now findable — `SUNTECH` (a transcript-only name) matched 2 extra docs on
+  the real store. **Search inclusion is opt-in:** the `/` filter excludes transcript body by
+  default; **ctrl+t** toggles "search inside scans" (placeholder cue + notify + `?` help).
+  `ds ask` always uses the full content. *(Real-store backfill grinds in the background — the
+  57-doc VLM pass is ~15 min, chunked/resumable; the code + toggle don't depend on it.)*
 
 ## Phase 12 — Bulletproof sync conflicts  *(long horizon)*
 Today's handling (DESIGN §6) *contains* conflicts — the loader excludes
