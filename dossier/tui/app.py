@@ -40,6 +40,7 @@ class DossierCommands(Provider):
         # (title, home action, help)
         return [
             ("Settings", "settings", "Icons, scan endpoint/model, expiry threshold"),
+            ("Intake dropped documents", "intake", "Review + file inbox files"),
             ("Scan current document (vision)", "scan_doc", "Read the current doc"),
             ("Scan all linked (vision)", "scan_all", "Read every linked document"),
             ("Cancel vision scan", "cancel_scan", "Stop a running vision scan"),

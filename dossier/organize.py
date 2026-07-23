@@ -166,13 +166,15 @@ def build_organize_plan(
     root: Path,
     to_folders: bool = False,
     folder_map: Mapping[str, str] | None = None,
+    fallback_folder: str | None = None,
 ) -> OrganizePlan:
     """Plan the canonical rename of every linked rendition (no disk writes).
 
     ``docs`` is the already-scoped set (the caller filters by id / bundle, as
     ``ds export`` does). With ``to_folders`` each file also moves into the folder
-    its primary tag maps to via ``folder_map``; unmapped or untagged docs keep
-    their current directory (a ``no-folder`` note, not a problem).
+    its primary tag maps to via ``folder_map``; an unmapped or untagged doc goes to
+    ``fallback_folder`` if given (intake files an untagged inbox scan into ``Filed/``),
+    else keeps its current directory (a ``no-folder`` note, not a problem).
     """
     folder_map = folder_map or {}
     renditions = _renditions(docs)
@@ -202,6 +204,9 @@ def build_organize_plan(
             folder = _mapped_folder(doc, folder_map)
             if folder is not None:
                 parent = folder
+            elif fallback_folder is not None:
+                parent = PurePosixPath(fallback_folder)
+                notes.append("fallback-folder")
             else:
                 notes.append("no-folder")
         drafts.append(

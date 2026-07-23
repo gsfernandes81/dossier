@@ -139,3 +139,78 @@ def test_organize_cli_dry_run_then_apply(
     assert (config.syncthing_root / "Marine" / "coc-card.pdf").exists()
     assert not (config.syncthing_root / "Marine" / "scan.pdf").exists()
     assert Store(config).load("coc").files[0].path == "Marine/coc-card.pdf"
+
+
+def test_intake_cli_dry_run_then_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from dossier import scan as scan_mod
+    from dossier.scan import ScanReading
+    from dossier.store import Store
+
+    root = tmp_path / "docs"
+    root.mkdir()
+    device = tmp_path / "cfg" / "config.toml"
+    monkeypatch.setattr(cli, "per_device_config_path", lambda: device)
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+    assert cli.main(["init", "--root", str(root)]) == 0
+
+    synced = root / ".dossier" / "config.toml"
+    synced.write_text(synced.read_text() + '\n[intake]\ninbox = "Inbox"\n', "utf-8")
+    (root / "Inbox").mkdir()
+    (root / "Inbox" / "scan.pdf").write_bytes(b"x")
+    reading = ScanReading.from_payload(
+        {"document_type": "Passport", "confidence": 0.9}, model="fake"
+    )
+    monkeypatch.setattr(scan_mod, "extract", lambda p, c: reading)  # no live VLM
+
+    # Dry run: proposes, writes nothing.
+    assert cli.main(["intake"]) == 0
+    assert "Passport" in capsys.readouterr().out
+    assert (root / "Inbox" / "scan.pdf").exists()
+
+    # Apply: files the record and moves the file to the fallback folder.
+    assert cli.main(["intake", "--apply", "--yes"]) == 0
+    assert not (root / "Inbox" / "scan.pdf").exists()
+    assert (root / "Filed" / "passport.pdf").exists()
+    assert any(d.name == "Passport" for d in Store(Config.load()).load_all())
+
+
+def test_import_cli_caches_readings_then_files_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from dossier import scan as scan_mod
+    from dossier.scan import ScanReading
+
+    root = tmp_path / "docs"
+    root.mkdir()
+    device = tmp_path / "cfg" / "config.toml"
+    monkeypatch.setattr(cli, "per_device_config_path", lambda: device)
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+    assert cli.main(["init", "--root", str(root)]) == 0
+
+    (root / "Papers").mkdir()
+    (root / "Papers" / "a.pdf").write_bytes(b"x")
+    calls: list[Path] = []
+
+    def fake(path: Path, _config: Config) -> ScanReading:
+        calls.append(path)
+        return ScanReading.from_payload({"document_type": "Report"}, model="fake")
+
+    monkeypatch.setattr(scan_mod, "extract", fake)
+
+    # First dry-run scans once and caches the reading.
+    assert cli.main(["import", str(root / "Papers")]) == 0
+    assert "Report" in capsys.readouterr().out
+    assert len(calls) == 1
+
+    # Second dry-run reuses the cache — the VLM is not called again.
+    assert cli.main(["import", str(root / "Papers")]) == 0
+    capsys.readouterr()
+    assert len(calls) == 1
+
+    # Apply files it in place (a bulk import renames where it sits).
+    assert cli.main(["import", str(root / "Papers"), "--apply", "--yes"]) == 0
+    assert len(calls) == 1  # still served from cache
+    assert (root / "Papers" / "report.pdf").exists()
+    assert not (root / "Papers" / "a.pdf").exists()

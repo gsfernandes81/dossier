@@ -208,6 +208,21 @@ def test_to_folders_keeps_current_dir_when_untagged(tmp_path: Path):
     assert "no-folder" in _note(item)
 
 
+def test_to_folders_falls_back_to_the_fallback_folder(tmp_path: Path):
+    # An untagged doc + a fallback_folder (intake's inbox → Filed/) instead of
+    # keeping the current dir; None (the default, ds organize) keeps the current dir.
+    root = _root(tmp_path, "Inbox/raw.pdf")
+    docs = [
+        Document(id="coc", name="CoC", files=[Rendition("d", "Inbox/raw.pdf", True)])
+    ]
+    plan = organize.build_organize_plan(
+        docs, root=root, to_folders=True, fallback_folder="Filed"
+    )
+    (item,) = plan.items
+    assert item.dst_rel == "Filed/coc.pdf"
+    assert "fallback-folder" in _note(item)
+
+
 def test_to_folders_longest_prefix_wins(tmp_path: Path):
     root = _root(tmp_path, "Inbox/raw.pdf")
     docs = [

@@ -315,24 +315,42 @@ class Store:
     def load_scans(self) -> dict[str, ScanReading]:
         """VLM readings keyed by document id (absent → empty). Synced, so a phone
         that can't run the model still benefits from a desktop scan."""
-        raw = _read_toml_or_empty(self.config.scans_path)
-        out: dict[str, ScanReading] = {}
-        for doc_id, table in raw.items():
-            if isinstance(table, dict):
-                out[doc_id] = ScanReading.from_payload(dict(table), model="")
-        return out
+        return self._load_readings(self.config.scans_path)
 
     def save_scans(self, readings: Mapping[str, ScanReading]) -> None:
         """Persist readings deterministically (sorted ids; nulls dropped for TOML)."""
+        self._save_readings(self.config.scans_path, readings)
+
+    def load_intake_cache(self) -> dict[str, ScanReading]:
+        """Intake's VLM-reading cache, keyed by root-relative path (absent → empty).
+
+        Lets `ds import`/`ds intake` reuse a reading whose file is unchanged (the
+        ``fingerprint`` still matches), so a big sweep doesn't re-run the model.
+        """
+        return self._load_readings(self.config.intake_cache_path)
+
+    def save_intake_cache(self, cache: Mapping[str, ScanReading]) -> None:
+        self._save_readings(self.config.intake_cache_path, cache)
+
+    def _load_readings(self, path: Path) -> dict[str, ScanReading]:
+        raw = _read_toml_or_empty(path)
+        out: dict[str, ScanReading] = {}
+        for key, table in raw.items():
+            if isinstance(table, dict):
+                out[key] = ScanReading.from_payload(dict(table), model="")
+        return out
+
+    def _save_readings(
+        self, path: Path, readings: Mapping[str, ScanReading]
+    ) -> None:
         data: dict[str, object] = {}
-        for doc_id in sorted(readings):
-            table = {
-                key: value
-                for key, value in readings[doc_id].as_dict().items()
+        for key in sorted(readings):
+            data[key] = {
+                field: value
+                for field, value in readings[key].as_dict().items()
                 if value is not None  # TOML has no null
             }
-            data[doc_id] = table
-        self._write_toml(self.config.scans_path, data)
+        self._write_toml(path, data)
 
     @staticmethod
     def _write_toml(path: Path, data: Mapping[str, object]) -> None:
@@ -510,6 +528,18 @@ def _as_renditions(value: object) -> list[Rendition]:
 
 
 # -- filesystem helpers ------------------------------------------------------
+
+
+def unique_id(store: Store, base: str) -> str:
+    """``base``, suffixed ``-2``, ``-3``… until no document file collides on disk.
+
+    The single collision guard for a new document id, used by every surface that
+    creates one (adopt, the detail pane, intake).
+    """
+    candidate, n = base, 2
+    while store.document_path(candidate).exists():
+        candidate, n = f"{base}-{n}", n + 1
+    return candidate
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:
