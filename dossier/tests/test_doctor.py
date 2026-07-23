@@ -137,3 +137,27 @@ def test_date_order_violation(store: Store):
         )
     )
     assert _kinds(doctor.run(store, store.config)).get("date-order") == 1
+
+
+def _conflict_beside(store: Store, doc_id: str, theirs: Document) -> None:
+    live = store.document_path(doc_id)
+    live.with_name(f"{doc_id}.sync-conflict-20260101-120000-AAAAAAA.md").write_bytes(
+        store.serialize(theirs).encode()
+    )
+
+
+def test_conflict_finding_names_the_contested_fields(store: Store):
+    store.save(Document(id="eng-1", name="Passport"))
+    _conflict_beside(store, "eng-1", Document(id="eng-1", name="Renewed"))
+    findings = doctor.run(store, store.config).by_check().get("sync-conflict", [])
+    assert len(findings) == 1
+    assert "contested field(s): name" in findings[0].detail
+
+
+def test_conflict_finding_flags_a_clean_auto_merge(store: Store):
+    store.save(Document(id="eng-1", name="Passport", tags=["gov"]))
+    _conflict_beside(
+        store, "eng-1", Document(id="eng-1", name="Passport", tags=["gov", "travel"])
+    )
+    findings = doctor.run(store, store.config).by_check().get("sync-conflict", [])
+    assert "auto-merges cleanly" in findings[0].detail

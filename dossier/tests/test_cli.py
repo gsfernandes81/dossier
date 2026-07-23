@@ -355,3 +355,33 @@ def test_scan_transcribe_backfills_and_skips_done(
     # Second run: the transcript is present, so it's skipped (no VLM call).
     assert cli.main(["scan", "--transcribe"]) == 0
     assert len(calls) == 1
+
+
+def test_resolve_cli_reports_nothing_when_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    _configured_store(tmp_path, monkeypatch)
+    capsys.readouterr()
+    assert cli.main(["resolve"]) == 0
+    assert "no sync conflicts" in capsys.readouterr().out
+
+
+def test_resolve_cli_dry_run_reports_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from dossier.model import Document
+    from dossier.store import Store
+
+    config = _configured_store(tmp_path, monkeypatch)
+    store = Store(config)
+    store.save(Document(id="eng-1", name="Passport"))
+    live = store.document_path("eng-1")
+    conflict = live.with_name("eng-1.sync-conflict-20260101-120000-AAAAAAA.md")
+    conflict.write_bytes(store.serialize(Document(id="eng-1", name="Renewed")).encode())
+    capsys.readouterr()
+
+    assert cli.main(["resolve"]) == 0  # dry-run is not a failure
+    out = capsys.readouterr().out
+    assert "would merge" in out and "name" in out  # names the contested field
+    assert conflict.exists()  # nothing written
+    assert store.load("eng-1").name == "Passport"

@@ -28,9 +28,11 @@ remaining item, **phone sync-back, is deferred to Phase 13** — its automatic t
 the scan service, and the manual loop already works over synced `scans.toml`. **Phase 10
 (preparedness) is done** — event-aware validity, `ds expiring` reminders, and bundle
 templates with a readiness checklist. **Phase 11 (answers) is done** — content search,
-`ds ask`/`ds open`, and scan transcripts. Phases 12–13 remain — the **long horizon** —
-durability, platform hardening —
-turning the catalogue into a living system.
+`ds ask`/`ds open`, and scan transcripts. **Phase 12 (bulletproof sync conflicts) is
+done** — a field-level 2-way merge with mtime last-writer-wins, `ds resolve` + an in-app
+ResolveScreen, every sidecar covered, and fault-injection tests proving no silent loss.
+Only **Phase 13** remains — the **long horizon** — platform hardening and the scan
+service, turning the catalogue into a living system.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -254,23 +256,26 @@ query never needs a VLM, so ask stays fast, cool, and battery-cheap on the phone
   `ds ask` always uses the full content. *(Real-store backfill grinds in the background — the
   57-doc VLM pass is ~15 min, chunked/resumable; the code + toggle don't depend on it.)*
 
-## Phase 12 — Bulletproof sync conflicts  *(long horizon)*
-Today's handling (DESIGN §6) *contains* conflicts — the loader excludes
-`.sync-conflict-*`, the TUI shows a banner, `ds doctor` lists them with a field-diff.
-The bar for this phase: **no Syncthing conflict, on any sidecar, can silently lose an
-edit — through any means necessary.**
-- [ ] **Field-level three-way merge** (M) — when a conflict's changes don't overlap
-  (different frontmatter fields / different docs in a toml), merge automatically and
-  archive the conflict file; only overlapping edits need a human.
-- [ ] **TUI resolve surface** (M) — a per-field pick UI for genuine overlaps (ours /
-  theirs / edit), replacing "go run doctor and hand-edit"; resolved conflict files are
-  archived to the local history dir, never deleted outright.
-- [ ] **Cover every sidecar** (M) — documents get the attention today; extend
-  detection + merge to `reconcile.toml`, `suggestions.toml`, `scans.toml`,
-  `bundles.toml`, `locations.toml`, and synced `config.toml`.
-- [ ] **Fault-injection tests** (M) — simulate concurrent edits, Syncthing conflict
-  renames, stale writes, and partial syncs in the test suite; prove the no-silent-loss
-  guarantee instead of asserting it.
+## Phase 12 — Bulletproof sync conflicts  ✅
+The bar for this phase — **no Syncthing conflict, on any sidecar, can silently lose an
+edit** — is met. `dossier/merge.py` is a pure field-merge engine; `dossier/resolve.py`
+discovers `.sync-conflict-*` files, plans a merge, and applies it crash-safely.
+- [x] **Field-level merge** (M) — a **2-way** merge (there is no reliable common
+  ancestor, so 3-way was dropped): agreed→keep, one-side-empty→fill, collections→union,
+  and genuinely contested scalars→**last-writer-wins by file mtime** (the confirmed
+  policy). Non-overlapping edits merge with no human; the losing copy is archived, so
+  even an LWW verdict is recoverable, never a silent loss.
+- [x] **Resolve surface** (M) — `ds resolve` (dry-run by default, `--apply`) and an
+  in-app **ResolveScreen** (shift+R): both preview each conflict's contested fields +
+  verdict, then merge; conflict copies are archived to the local history dir, never
+  deleted outright. *(A manual per-field ours/theirs/edit override is a possible future
+  enhancement; the LWW auto-policy + recoverability covers the confirmed requirement.)*
+- [x] **Cover every sidecar** (M) — documents, `reconcile.toml`, `suggestions.toml`
+  (union-only), `scans.toml`/`intake.toml` (transcript-preferring), `bundles.toml`,
+  `locations.toml`, and `templates.toml`/`config.toml` (whole-file LWW, surfaced loudly).
+- [x] **Fault-injection tests** (M) — `test_merge.py` + `test_resolve.py` inject a fault
+  at each apply step (write fails · unlink fails · a concurrent write races us) and a
+  compare-and-swap on the live copy; they *prove* the no-silent-loss guarantee.
 
 ## Phase 13 — Platform hardening & the scan service  *(long horizon)*
 - [ ] **Cross-platform test matrix** (M) — CI proves Windows, Linux, and Termux, not

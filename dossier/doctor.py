@@ -29,8 +29,9 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from dossier import query
+from dossier import query, resolve
 from dossier.config import Config
+from dossier.errors import StoreError
 from dossier.model import Document, Location
 from dossier.store import Store
 
@@ -55,8 +56,7 @@ class Report:
 
 def run(store: Store, config: Config) -> Report:
     report = Report()
-    for path in store.list_conflicts():
-        report.findings.append(Finding("sync-conflict", path.name, str(path)))
+    report.findings += _check_conflicts(store)
 
     docs = store.load_all()
     locations = store.load_locations()
@@ -66,6 +66,44 @@ def run(store: Store, config: Config) -> Report:
     report.findings += _check_files(docs, config.syncthing_root)
     report.findings += _check_dates(docs)
     return report
+
+
+def _check_conflicts(store: Store) -> list[Finding]:
+    """Preview what ``ds resolve`` would do with each Syncthing conflict file.
+
+    Read-only: plans the merge (no writes) so the finding names the contested
+    fields — or says it auto-merges cleanly — rather than just flagging a file.
+    """
+    out: list[Finding] = []
+    items = resolve.find_conflicts(store)
+    handled = {item.conflict_path for item in items}
+    for item in items:
+        try:
+            planned = resolve.plan(store, item)
+        except StoreError as exc:
+            out.append(
+                Finding("sync-conflict", item.conflict_path.name, f"unreadable: {exc}")
+            )
+            continue
+        if planned.loud:
+            detail = f"{item.name}: whole-file replace on resolve"
+        elif planned.contested:
+            fields = ", ".join(d.field for d in planned.contested)
+            count = len(planned.contested)
+            detail = f"{item.name}: {count} contested field(s): {fields}"
+        else:
+            detail = f"{item.name}: auto-merges cleanly — run `ds resolve`"
+        out.append(Finding("sync-conflict", item.conflict_path.name, detail))
+    for path in store.list_conflicts():  # anything we can't classify, still surface
+        if path not in handled:
+            out.append(
+                Finding(
+                    "sync-conflict",
+                    path.name,
+                    f"{path} (unrecognised — resolve by hand)",
+                )
+            )
+    return out
 
 
 def _check_location_refs(

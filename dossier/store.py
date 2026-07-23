@@ -147,6 +147,14 @@ class Store:
     def load_all(self) -> list[Document]:
         return [self._read(path) for path in self.iter_document_paths()]
 
+    def read_document(self, path: Path) -> Document:
+        """Parse a document from an arbitrary path (e.g. a ``.sync-conflict-`` copy).
+
+        ``id`` is set from the file stem and is meaningless for a conflict file —
+        callers merging a conflict keep the live document's id, not this one.
+        """
+        return self._read(path)
+
     def _read(self, path: Path) -> Document:
         try:
             raw = path.read_bytes()
@@ -212,9 +220,10 @@ class Store:
 
     # -- locations & bundles -------------------------------------------------
 
-    def load_locations(self) -> dict[str, Location]:
+    def load_locations(self, path: Path | None = None) -> dict[str, Location]:
         out: dict[str, Location] = {}
-        for slug, raw in _read_toml_or_empty(self.config.locations_path).items():
+        raw_toml = _read_toml_or_empty(path or self.config.locations_path)
+        for slug, raw in raw_toml.items():
             if not isinstance(raw, dict):
                 continue
             out[slug] = Location(
@@ -224,18 +233,23 @@ class Store:
             )
         return out
 
-    def save_locations(self, locations: dict[str, Location]) -> None:
+    def serialize_locations(self, locations: Mapping[str, Location]) -> bytes:
         data: dict[str, dict[str, str]] = {}
         for slug, loc in sorted(locations.items()):
             entry: dict[str, str] = {"title": loc.title}
             if loc.notes:
                 entry["notes"] = loc.notes
             data[slug] = entry
-        self._write_toml(self.config.locations_path, data)
+        return tomli_w.dumps(data).encode("utf-8")
 
-    def load_bundles(self) -> dict[str, Bundle]:
+    def save_locations(self, locations: dict[str, Location]) -> None:
+        atomic_write_bytes(
+            self.config.locations_path, self.serialize_locations(locations)
+        )
+
+    def load_bundles(self, path: Path | None = None) -> dict[str, Bundle]:
         out: dict[str, Bundle] = {}
-        for slug, raw in _read_toml_or_empty(self.config.bundles_path).items():
+        for slug, raw in _read_toml_or_empty(path or self.config.bundles_path).items():
             if not isinstance(raw, dict):
                 continue
             export_dir = raw.get("export_dir")
@@ -251,8 +265,8 @@ class Store:
             )
         return out
 
-    def save_bundles(self, bundles: dict[str, Bundle]) -> None:
-        """Persist bundles, stamping ``created`` on any that lack it."""
+    def serialize_bundles(self, bundles: Mapping[str, Bundle]) -> bytes:
+        """Serialize bundles, stamping ``created`` on any that lack it (mutates)."""
         data: dict[str, dict[str, object]] = {}
         for slug, bundle in sorted(bundles.items()):
             if bundle.created is None:
@@ -268,7 +282,11 @@ class Store:
             if bundle.template:
                 entry["template"] = bundle.template
             data[slug] = entry
-        self._write_toml(self.config.bundles_path, data)
+        return tomli_w.dumps(data).encode("utf-8")
+
+    def save_bundles(self, bundles: dict[str, Bundle]) -> None:
+        """Persist bundles, stamping ``created`` on any that lack it."""
+        atomic_write_bytes(self.config.bundles_path, self.serialize_bundles(bundles))
 
     def load_templates(self) -> dict[str, Template]:
         """Bundle-readiness checklists from ``templates.toml`` (absent → ``{}``).
@@ -309,9 +327,9 @@ class Store:
 
     # -- reconcile sidecar ---------------------------------------------------
 
-    def load_reconcile(self) -> ReconcileState:
+    def load_reconcile(self, path: Path | None = None) -> ReconcileState:
         """Load the reconcile-decisions sidecar (absent → an empty state)."""
-        raw = _read_toml_or_empty(self.config.reconcile_path)
+        raw = _read_toml_or_empty(path or self.config.reconcile_path)
         return ReconcileState(
             dismissed=set(_as_str_list(raw.get("dismissed"))),
             ignore=_as_str_list(raw.get("ignore")),
@@ -320,8 +338,9 @@ class Store:
             succession_dismissed=set(_as_str_list(raw.get("succession_dismissed"))),
         )
 
-    def save_reconcile(self, state: ReconcileState) -> None:
-        """Persist the reconcile sidecar deterministically (sorted throughout)."""
+    @staticmethod
+    def serialize_reconcile(state: ReconcileState) -> bytes:
+        """Serialize the reconcile sidecar deterministically (sorted throughout)."""
         data: dict[str, object] = {}
         if state.dismissed:
             data["dismissed"] = sorted(state.dismissed)
@@ -337,40 +356,51 @@ class Store:
             data["folded"] = {k: folded[k] for k in sorted(folded)}
         if state.succession_dismissed:
             data["succession_dismissed"] = sorted(state.succession_dismissed)
-        self._write_toml(self.config.reconcile_path, data)
+        return tomli_w.dumps(data).encode("utf-8")
+
+    def save_reconcile(self, state: ReconcileState) -> None:
+        """Persist the reconcile sidecar deterministically (sorted throughout)."""
+        atomic_write_bytes(self.config.reconcile_path, self.serialize_reconcile(state))
 
     # -- suggestions sidecar -------------------------------------------------
 
-    def load_suggestions(self) -> SuggestionState:
+    def load_suggestions(self, path: Path | None = None) -> SuggestionState:
         """Load the dismissed-suggestions sidecar (absent → an empty state)."""
-        raw = _read_toml_or_empty(self.config.suggestions_path)
+        raw = _read_toml_or_empty(path or self.config.suggestions_path)
         return SuggestionState(dismissed=set(_as_str_list(raw.get("dismissed"))))
 
-    def save_suggestions(self, state: SuggestionState) -> None:
-        """Persist the suggestions sidecar deterministically (sorted keys)."""
+    @staticmethod
+    def serialize_suggestions(state: SuggestionState) -> bytes:
+        """Serialize the suggestions sidecar deterministically (sorted keys)."""
         data: dict[str, object] = {}
         if state.dismissed:
             data["dismissed"] = sorted(state.dismissed)
-        self._write_toml(self.config.suggestions_path, data)
+        return tomli_w.dumps(data).encode("utf-8")
+
+    def save_suggestions(self, state: SuggestionState) -> None:
+        """Persist the suggestions sidecar deterministically (sorted keys)."""
+        atomic_write_bytes(
+            self.config.suggestions_path, self.serialize_suggestions(state)
+        )
 
     # -- scan readings sidecar (ds scan) -------------------------------------
 
-    def load_scans(self) -> dict[str, ScanReading]:
+    def load_scans(self, path: Path | None = None) -> dict[str, ScanReading]:
         """VLM readings keyed by document id (absent → empty). Synced, so a phone
         that can't run the model still benefits from a desktop scan."""
-        return self._load_readings(self.config.scans_path)
+        return self._load_readings(path or self.config.scans_path)
 
     def save_scans(self, readings: Mapping[str, ScanReading]) -> None:
         """Persist readings deterministically (sorted ids; nulls dropped for TOML)."""
         self._save_readings(self.config.scans_path, readings)
 
-    def load_intake_cache(self) -> dict[str, ScanReading]:
+    def load_intake_cache(self, path: Path | None = None) -> dict[str, ScanReading]:
         """Intake's VLM-reading cache, keyed by root-relative path (absent → empty).
 
         Lets `ds import`/`ds intake` reuse a reading whose file is unchanged (the
         ``fingerprint`` still matches), so a big sweep doesn't re-run the model.
         """
-        return self._load_readings(self.config.intake_cache_path)
+        return self._load_readings(path or self.config.intake_cache_path)
 
     def save_intake_cache(self, cache: Mapping[str, ScanReading]) -> None:
         self._save_readings(self.config.intake_cache_path, cache)
@@ -383,7 +413,8 @@ class Store:
                 out[key] = ScanReading.from_payload(dict(table), model="")
         return out
 
-    def _save_readings(self, path: Path, readings: Mapping[str, ScanReading]) -> None:
+    @staticmethod
+    def serialize_readings(readings: Mapping[str, ScanReading]) -> bytes:
         data: dict[str, object] = {}
         for key in sorted(readings):
             data[key] = {
@@ -393,12 +424,24 @@ class Store:
                 # reading serializes byte-identically to before Phase 11 — no churn.
                 if value not in (None, "", ())
             }
-        self._write_toml(path, data)
+        return tomli_w.dumps(data).encode("utf-8")
 
-    @staticmethod
-    def _write_toml(path: Path, data: Mapping[str, object]) -> None:
-        """Atomically serialize ``data`` to a TOML sidecar (the one write path)."""
-        atomic_write_bytes(path, tomli_w.dumps(data).encode("utf-8"))
+    def _save_readings(self, path: Path, readings: Mapping[str, ScanReading]) -> None:
+        atomic_write_bytes(path, self.serialize_readings(readings))
+
+    # -- recoverable archive (conflict resolution) ---------------------------
+
+    def stash(self, category: str, name: str, data: bytes) -> Path:
+        """Write ``data`` to the local (non-synced) history under ``category/name``.
+
+        Timestamped so repeated stashes never collide, and kept off the synced
+        tree so archiving a losing conflict copy can't itself start a new sync
+        round. Used by :mod:`dossier.resolve` to make every merge recoverable.
+        """
+        stamp = self._now().strftime("%Y%m%dT%H%M%S%fZ")
+        dest = self.config.history_dir / category / f"{name}.{stamp}"
+        atomic_write_bytes(dest, data)
+        return dest
 
 
 # -- frontmatter (de)serialization ------------------------------------------
