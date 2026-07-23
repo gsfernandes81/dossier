@@ -25,6 +25,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen, Screen
+from textual.widget import Widget
 from textual.widgets import (
     Button,
     Input,
@@ -73,18 +74,22 @@ def open_doc_file(screen: Screen, config: Config, doc: Document) -> None:
         screen.notify(f"opened {doc.name}")
 
 
-def toggle_help_panel(screen: ModalScreen) -> None:
+def toggle_help_panel(node: Widget) -> None:
     """Show or hide Textual's HelpPanel — the full, tab-aware keybind list.
 
     Every modal binds ``?`` to a one-line ``action_toggle_help_panel`` that calls
     this, so the "what keys can I press here?" affordance is identical everywhere.
+    Takes any ``Widget`` (a Screen is one) so non-screen surfaces can share it.
+    Queries the containing *screen*, never ``node`` itself: Textual mounts the panel
+    on the screen, so a widget asking whether it is open would always be told "no"
+    and this would only ever show, never hide.
     """
     from textual.widgets import HelpPanel
 
-    if screen.query(HelpPanel):
-        screen.app.action_hide_help_panel()
+    if node.screen.query(HelpPanel):
+        node.app.action_hide_help_panel()
     else:
-        screen.app.action_show_help_panel()
+        node.app.action_show_help_panel()
 
 
 class SupersedeScreen(ModalScreen[bool]):

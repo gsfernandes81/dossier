@@ -43,7 +43,8 @@ from typing import TYPE_CHECKING
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Vertical
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList, Static, TabbedContent, TabPane, Tree
 from textual.widgets.option_list import Option
@@ -99,19 +100,27 @@ class ReviewResult:
     edit: bool = False
 
 
-class ReviewScreen(ModalScreen[ReviewResult | None]):
-    """Reconcile the folder. Dismisses with a :class:`ReviewResult`, or ``None``."""
+class ReviewPane(Vertical):
+    """Reconcile the folder: the six-tab surface itself, independent of its host.
 
-    CSS = """
-    ReviewScreen { align: center middle; }
-    #rpanel {
-        width: 90%; height: 85%; padding: 1 2;
-        background: $panel; border: round $primary;
-    }
-    #rsummary { margin-bottom: 1; }
-    TabbedContent { height: 1fr; }
-    #conflicts, #dups, #integrity, #missing, #orphans, #succession { height: 1fr; }
-    #conflict-detail {
+    A widget rather than a screen so acting on a row need not *destroy* it — the host
+    can show a document's detail beside the finding instead of tearing review down to
+    do it. It reports outward the way :class:`DetailPane` does, by message
+    (:class:`OpenDocument` / :class:`CloseRequested`), and never reaches into its host.
+    """
+
+    # A widget has no `CSS` classvar — only DEFAULT_CSS, which Textual scopes to this
+    # type. That is why every rule names ReviewPane: an unprefixed `TabbedContent`
+    # here would be rewritten anyway, and rules that lead with another type (e.g.
+    # `HomeScreen.-narrow ReviewPane`) would be rewritten into something that can
+    # never match — so host-and-breakpoint rules live in HomeScreen's CSS, not here.
+    DEFAULT_CSS = """
+    ReviewPane { height: 1fr; }
+    ReviewPane #rsummary { margin-bottom: 1; }
+    ReviewPane TabbedContent { height: 1fr; }
+    ReviewPane #conflicts, ReviewPane #dups, ReviewPane #integrity,
+    ReviewPane #missing, ReviewPane #orphans, ReviewPane #succession { height: 1fr; }
+    ReviewPane #conflict-detail {
         height: auto; max-height: 40%; padding-top: 1;
         border-top: solid $primary 30%; color: $text-muted;
     }
@@ -120,8 +129,9 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         Binding("escape", "close", "Close"),
         Binding("question_mark", "toggle_help_panel", "Keys"),
         # Tab / Shift+Tab cycle the tabs. priority=True so they win over Textual's
-        # default focus-traversal (this modal has one widget per tab, so nothing
-        # needs Tab for focus); the orphans Tree keeps left/right for expand/collapse.
+        # default focus-traversal (one widget per tab, so nothing here needs Tab for
+        # focus). The priority pass walks the whole binding chain, so these still win
+        # from a mid-chain widget — but only while focus is *inside* the pane.
         Binding("tab", "next_tab", "Next tab", priority=True),
         Binding("shift+tab", "prev_tab", "Prev tab", priority=True),
         Binding("o", "open_file", "Open"),
@@ -137,6 +147,17 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         Binding("f", "fold", "Fold"),
         Binding("g", "ignore_glob", "Ignore glob"),
     ]
+
+    class OpenDocument(Message):
+        """Show this document — the host decides where (detail pane / column 3)."""
+
+        def __init__(self, doc_id: str, *, edit: bool = False) -> None:
+            super().__init__()
+            self.doc_id = doc_id
+            self.edit = edit
+
+    class CloseRequested(Message):
+        """Esc — the host decides what "back" means at its current depth."""
 
     # Tab order (as composed) and each pane's primary widget, for cycling + focus.
     _TAB_ORDER = (
@@ -183,22 +204,21 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         self._integrity_started = False
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="rpanel"):
-            yield Label(id="rsummary")
-            with TabbedContent():
-                with TabPane("Conflicts", id="tab-conflicts"):
-                    yield OptionList(id="conflicts")
-                    yield Static(id="conflict-detail")
-                with TabPane("Orphans", id="tab-orphans"):
-                    yield Tree("orphans", id="orphans")
-                with TabPane("Missing", id="tab-missing"):
-                    yield OptionList(id="missing")
-                with TabPane("Duplicates", id="tab-dups"):
-                    yield OptionList(id="dups")
-                with TabPane("Succession", id="tab-succession"):
-                    yield OptionList(id="succession")
-                with TabPane("Integrity", id="tab-integrity"):
-                    yield OptionList(id="integrity")
+        yield Label(id="rsummary")
+        with TabbedContent():
+            with TabPane("Conflicts", id="tab-conflicts"):
+                yield OptionList(id="conflicts")
+                yield Static(id="conflict-detail")
+            with TabPane("Orphans", id="tab-orphans"):
+                yield Tree("orphans", id="orphans")
+            with TabPane("Missing", id="tab-missing"):
+                yield OptionList(id="missing")
+            with TabPane("Duplicates", id="tab-dups"):
+                yield OptionList(id="dups")
+            with TabPane("Succession", id="tab-succession"):
+                yield OptionList(id="succession")
+            with TabPane("Integrity", id="tab-integrity"):
+                yield OptionList(id="integrity")
 
     def on_mount(self) -> None:
         # The reads here — load_all plus reconcile.run's folder walk and per-file
@@ -497,13 +517,13 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
     def _open_integrity(self, event: OptionList.OptionSelected) -> None:
         if event.option_id is not None:  # Enter → open the doc (read view)
             doc_id = event.option_id.split(self._INTEG_SEP, 1)[0]
-            self.dismiss(ReviewResult(doc_id))
+            self.post_message(self.OpenDocument(doc_id))
 
     def action_edit(self) -> None:
         """`e` — open the highlighted Integrity finding's document in edit mode."""
         doc_id = self._integrity_doc_id()
         if doc_id is not None:
-            self.dismiss(ReviewResult(doc_id, edit=True))
+            self.post_message(self.OpenDocument(doc_id, edit=True))
 
     def _integrity_doc_id(self) -> str | None:
         options = self.query_one("#integrity", OptionList)
@@ -716,16 +736,17 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
     def _open_orphan_match(self, event: Tree.NodeSelected) -> None:
         data = event.node.data
         if isinstance(data, _Leaf) and data.suggestion is not None:
-            self.dismiss(ReviewResult(data.suggestion))  # open best-matching document
+            # open the best-matching document
+            self.post_message(self.OpenDocument(data.suggestion))
 
     @on(OptionList.OptionSelected, "#missing")
     def _open_missing(self, event: OptionList.OptionSelected) -> None:
         if event.option_id is not None:
             doc_id = event.option_id.split(_MISSING_SEP, 1)[0]
-            self.dismiss(ReviewResult(doc_id))
+            self.post_message(self.OpenDocument(doc_id))
 
     def action_close(self) -> None:
-        self.dismiss(None)
+        self.post_message(self.CloseRequested())
 
     def action_toggle_help_panel(self) -> None:
         # `?` — the full keybind list, tab-gated actions correctly greyed via
@@ -869,7 +890,8 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         doc.id = forms.unique_id(self._store, slugify(name) or "document")
         if self._save_doc(doc):
             self.notify(f"adopted {doc.id} — open it to edit the details")
-            self.dismiss(ReviewResult(doc.id, edit=True))  # home opens it for editing
+            # the host opens it for editing
+            self.post_message(self.OpenDocument(doc.id, edit=True))
 
     def action_unlink(self) -> None:
         picked = self._highlighted_missing()
@@ -1053,6 +1075,42 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
             return self.query_one(TabbedContent).active
         except Exception:
             return ""
+
+
+class ReviewScreen(ModalScreen[ReviewResult | None]):
+    """Transitional modal wrapper around :class:`ReviewPane`.
+
+    Being a modal is what makes review lossy — acting on a row has to *destroy* the
+    screen to show the document. The pane above is the real surface; this shell only
+    exists so the change lands in reviewable steps, and it goes away once the home
+    hosts the pane as columns 1–2 of the miller view.
+    """
+
+    CSS = """
+    ReviewScreen { align: center middle; }
+    ReviewScreen ReviewPane {
+        width: 90%; height: 85%; padding: 1 2;
+        background: $panel; border: round $primary;
+    }
+    """
+
+    def __init__(self, store: Store, config: Config) -> None:
+        super().__init__()
+        self._store = store
+        self._config = config
+
+    def compose(self) -> ComposeResult:
+        yield ReviewPane(self._store, self._config)
+
+    @on(ReviewPane.OpenDocument)
+    def _open_document(self, event: ReviewPane.OpenDocument) -> None:
+        event.stop()
+        self.dismiss(ReviewResult(event.doc_id, edit=event.edit))
+
+    @on(ReviewPane.CloseRequested)
+    def _close_requested(self, event: ReviewPane.CloseRequested) -> None:
+        event.stop()
+        self.dismiss(None)
 
 
 def _conflict_headline(plan: resolve.Resolution) -> str:

@@ -42,7 +42,7 @@ from dossier.tui import (
 )
 from dossier.tui.detail_pane import DetailPane
 from dossier.tui.doclist import DocumentList
-from dossier.tui.review import ReviewResult, ReviewScreen
+from dossier.tui.review import ReviewPane, ReviewResult, ReviewScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
@@ -55,7 +55,7 @@ from dossier.tui.screens import (
 TODAY = date(2026, 7, 21)
 
 
-async def _open_review(pilot) -> ReviewScreen:
+async def _open_review(pilot) -> ReviewPane:
     """Open the review surface and wait for its load; return it.
 
     The single seam for *how review is activated*. That is about to change (it
@@ -67,23 +67,26 @@ async def _open_review(pilot) -> ReviewScreen:
     return await _await_review_load(pilot)
 
 
-async def _await_review_load(pilot) -> ReviewScreen:
-    """Wait for ReviewScreen's on-mount load worker to land; return the screen.
+async def _await_review_load(pilot) -> ReviewPane:
+    """Wait for the review pane's load worker to land; return the pane.
 
-    The load runs in a thread so opening Review never blocks the UI, which means a
+    The load runs in a thread so opening review never blocks the UI, which means a
     single ``pause()`` can come back before the worker has even registered — on a
     slow CI runner that raced the "opens on Orphans" assertion. Poll for the applied
     report instead of trusting one scheduler turn.
+
+    Queries for the pane rather than the screen, so it finds it whether review is a
+    pushed modal (today) or columns of the home (where this is heading).
     """
     for _ in range(200):
         await pilot.pause()
         await pilot.app.workers.wait_for_complete()
-        screen = pilot.app.screen
-        if isinstance(screen, ReviewScreen) and screen._report is not None:
+        panes = pilot.app.screen.query(ReviewPane)
+        if panes and panes.first()._report is not None:
             await pilot.pause()
-            return screen
+            return panes.first()
         await asyncio.sleep(0.01)
-    raise AssertionError("ReviewScreen's load worker never completed")
+    raise AssertionError("the review pane's load worker never completed")
 
 
 def _setup(tmp_path: Path) -> tuple[Store, Config]:
@@ -650,19 +653,17 @@ async def test_review_integrity_edit_opens_the_flagged_doc(tmp_path: Path):
     async with app.run_test() as pilot:
         home = app.home
         home.action_review()
-        await _await_review_load(pilot)
-        screen = app.screen
-        assert isinstance(screen, ReviewScreen)
-        screen.query_one(TabbedContent).active = "tab-integrity"
+        pane = await _await_review_load(pilot)
+        pane.query_one(TabbedContent).active = "tab-integrity"
         await pilot.pause()
         await app.workers.wait_for_complete()  # deferred integrity check runs here
         await pilot.pause()
-        options = screen.query_one("#integrity", OptionList)
+        options = pane.query_one("#integrity", OptionList)
         # Highlight the finding row (skip the group-header row, which has no id).
         options.highlighted = next(
             i for i, o in enumerate(options.options) if o.id is not None
         )
-        screen.action_edit()
+        pane.action_edit()
         await pilot.pause()
         await pilot.pause()  # let the dismiss callback open + start_edit settle
         assert app.screen is home  # review dismissed
@@ -952,13 +953,14 @@ async def test_reconcile_opens_on_orphans_and_cycles_tabs(tmp_path: Path):
         # `?` toggles the keybind help panel (discoverability).
         from textual.widgets import HelpPanel
 
-        assert not screen.query(HelpPanel)
+        # The panel mounts on the *screen*, not on the pane that binds `?`.
+        assert not app.screen.query(HelpPanel)
         await pilot.press("question_mark")
         await pilot.pause()
-        assert screen.query(HelpPanel)
+        assert app.screen.query(HelpPanel)
         await pilot.press("question_mark")
         await pilot.pause()
-        assert not screen.query(HelpPanel)
+        assert not app.screen.query(HelpPanel)
 
 
 @pytest.mark.asyncio
@@ -1763,12 +1765,10 @@ async def test_review_conflicts_tab_lists_and_merges(tmp_path: Path):
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         app.home.action_review()  # conflicts are a Review tab now
-        await _await_review_load(pilot)
-        screen = app.screen
-        assert isinstance(screen, ReviewScreen)
+        pane = await _await_review_load(pilot)
         # A pending conflict makes Conflicts the default tab.
-        assert screen.query_one(TabbedContent).active == "tab-conflicts"
-        assert screen.query_one("#conflicts", OptionList).option_count == 1
+        assert pane.query_one(TabbedContent).active == "tab-conflicts"
+        assert pane.query_one("#conflicts", OptionList).option_count == 1
 
         await pilot.press("A")  # merge all
         await pilot.pause()
