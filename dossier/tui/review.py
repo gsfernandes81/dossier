@@ -192,6 +192,7 @@ class ReviewPane(Vertical):
         # invalidates it (see _snapshot / _invalidate_docs) so it never goes stale.
         self._docs: list[Document] | None = None
         self._loads = 0  # completed loads, so tests can prove one didn't re-run
+        self._stale = False  # an outside write landed; reload on next entry
         # Integrity is the priciest tab (a full `ds doctor` run), so it's deferred
         # until first opened: count is None until checked, then the finding total.
         self._integrity_count: int | None = None
@@ -656,6 +657,23 @@ class ReviewPane(Vertical):
             self._integrity_started = True
             self._run_integrity()
 
+    def mark_stale(self) -> None:
+        """Note that something outside review changed the store.
+
+        The pane is long-lived now, so it can miss a write made from the detail
+        pane, intake or a scan. Rather than reload on every return (the cost the
+        old modal paid every single time), record it and reload on the next entry.
+        """
+        self._stale = True
+
+    def reload_if_stale(self) -> None:
+        """Reload only if an outside write landed since the last load."""
+        if not self._stale:
+            return
+        self._stale = False
+        self._show_loading()  # no key can reach a summary rebuild mid-flight
+        self._load()
+
     def focus_active_pane(self) -> None:
         """Focus the active tab's list/tree. Public: the host calls it to hand focus
         back after closing the detail column, landing on the row you came from."""
@@ -678,37 +696,38 @@ class ReviewPane(Vertical):
         self.query_one(TabbedContent).active = order[(index + delta) % len(order)]
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Gate every verb on the active tab.
+
+        ``False``, not ``None``: Textual reads ``None`` as *disabled but visible*
+        (greyed in the footer) and ``False`` as disabled **and** hidden. Returning
+        None here made every tab advertise every other tab's verbs — which is how
+        "how do I dismiss a duplicate?" became a real question about a key that was
+        listed, greyed, and dead. Hiding them makes the footer and the `?` panel
+        per-tab for free, with no help text to write or keep in step.
+        """
         active = self._active_tab()
         if action == "scan_dups":
-            return True if active == "tab-dups" else None
+            return active == "tab-dups"
         if action == "reject":
-            return (
-                True
-                if active in ("tab-orphans", "tab-missing", "tab-succession")
-                else None
-            )
+            return active in ("tab-orphans", "tab-missing", "tab-succession")
         if action == "accept":  # `a` — dispatched: merge / adopt / supersede
-            return (
-                True
-                if active in ("tab-conflicts", "tab-orphans", "tab-succession")
-                else None
-            )
+            return active in ("tab-conflicts", "tab-orphans", "tab-succession")
         if action == "accept_all":  # `A` — merge every conflict at once
-            return True if active == "tab-conflicts" else None
+            return active == "tab-conflicts"
         if action == "edit":  # `e` — edit the flagged document
-            return True if active == "tab-integrity" else None
+            return active == "tab-integrity"
         if action in ("link", "ignore_glob"):
-            return True if active == "tab-orphans" else None
+            return active == "tab-orphans"
         if action == "unlink":
-            return True if active == "tab-missing" else None
+            return active == "tab-missing"
         if action == "fold":
-            return True if active == "tab-dups" else None
+            return active == "tab-dups"
         if action == "open_file":  # only where a real file sits under the cursor
-            return (
-                True
-                if active
-                in ("tab-orphans", "tab-dups", "tab-succession", "tab-integrity")
-                else None
+            return active in (
+                "tab-orphans",
+                "tab-dups",
+                "tab-succession",
+                "tab-integrity",
             )
         return True
 

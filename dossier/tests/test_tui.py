@@ -1818,6 +1818,72 @@ async def test_review_shares_with_detail_only_where_there_is_room(
 
 
 @pytest.mark.asyncio
+async def test_each_review_tab_advertises_only_its_own_verbs(tmp_path: Path):
+    """Hidden, not greyed — the footer and `?` panel become per-tab documentation.
+
+    Returning None from check_action left every tab listing every other tab's
+    verbs, greyed; a key that is *shown* but dead reads as broken rather than
+    inapplicable ("why doesn't x dismiss this duplicate?").
+    """
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.home.action_review()
+        pane = await _await_review_load(pilot)
+        tabs = pane.query_one(TabbedContent)
+
+        expected = {
+            "tab-conflicts": {"accept", "accept_all"},
+            "tab-orphans": {"open_file", "reject", "link", "accept", "ignore_glob"},
+            "tab-missing": {"reject", "unlink"},
+            "tab-dups": {"open_file", "scan_dups", "fold"},
+            "tab-succession": {"open_file", "reject", "accept"},
+            "tab-integrity": {"open_file", "edit"},
+        }
+        every = set().union(*expected.values())
+        for tab, live in expected.items():
+            tabs.active = tab
+            await pilot.pause()
+            enabled = {a for a in every if pane.check_action(a, ()) is not False}
+            assert enabled == live, f"{tab} advertises the wrong verbs"
+
+
+@pytest.mark.asyncio
+async def test_review_reloads_only_when_something_outside_it_changed(tmp_path: Path):
+    """The pane is long-lived, so it must catch outside writes — but only those.
+
+    Reloading on every return would put back the cost the old modal paid every
+    time; never reloading would show stale findings after an edit in column 3.
+    """
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 32)) as pilot:
+        home = app.home
+        home.action_review()
+        pane = await _await_review_load(pilot)
+        baseline = pane._loads
+
+        # A reload review itself caused must not restale it.
+        home._reload(restale_review=False)
+        await pilot.pause()
+        assert not pane._stale
+
+        # A write from anywhere else does.
+        home._reload()
+        await pilot.pause()
+        assert pane._stale
+        assert pane._loads == baseline, "marking stale must not reload immediately"
+
+        # …and it is paid for on the next return into review, once.
+        home.open_detail("passport")
+        await pilot.pause()
+        await pilot.press("escape")
+        await _await_review_load(pilot)
+        assert not pane._stale
+        assert pane._loads == baseline + 1
+
+
+@pytest.mark.asyncio
 async def test_review_mode_disables_the_home_arrow_drills(tmp_path: Path):
     """`→` must not reach the home's drill while review holds the columns.
 

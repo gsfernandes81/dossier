@@ -97,10 +97,6 @@ _NARROW_COLS = 60
 # typed into a form Checkbox/SelectionList (which don't swallow it like an Input
 # does) can't fire a home binding — and the footer stops advertising them. Only the
 # still-bound letters matter here now (the rest moved to the command palette).
-# Home actions review takes over while it holds columns 1+2. `drill_out` stays
-# live whenever the detail is open, so `←` means "close detail, back to review".
-_REVIEW_LOCKED = frozenset({"focus_search", "drill_in", "drill_out"})
-
 _EDIT_LOCKED = frozenset(
     {
         "open_file",
@@ -113,6 +109,10 @@ _EDIT_LOCKED = frozenset(
         "drill_out",
     }
 )
+
+# Home actions review takes over while it holds columns 1+2. `drill_out` stays live
+# whenever the detail is open, so `←` still means "close detail, back to review".
+_REVIEW_LOCKED = frozenset({"focus_search", "drill_in", "drill_out"})
 
 
 class HomeScreen(Screen[None]):
@@ -356,7 +356,15 @@ class HomeScreen(Screen[None]):
 
     # -- data ----------------------------------------------------------------
 
-    def _reload(self) -> None:
+    def _reload(self, *, restale_review: bool = True) -> None:
+        """Re-read the store into the columns.
+
+        ``restale_review=False`` for reloads *caused by* review — it refreshes
+        itself internally, and marking it stale for its own effects would make the
+        free Esc-return expensive again.
+        """
+        if restale_review and self._review is not None:
+            self._review.mark_stale()
         self._docs = self._store.load_all()
         self._locations = self._store.load_locations()
         self._by_location = dict(query.group_by_location(self._docs))
@@ -521,6 +529,9 @@ class HomeScreen(Screen[None]):
         self._show_detail = False
         self.set_class(False, "show-detail")
         if self.has_class("review-mode") and self._review is not None:
+            # An edit made in column 3 belongs in review's lists; an untouched
+            # record costs nothing, which is the point of the flag.
+            self._review.reload_if_stale()
             self._review.focus_active_pane()  # tab and cursor exactly as left
             return
         self._refresh_documents()
@@ -907,13 +918,14 @@ class HomeScreen(Screen[None]):
         self.remove_class("searching", "show-documents")
         self.add_class("review-mode")
         if self._review is not None:
+            self._review.reload_if_stale()  # catch up on writes made outside review
             self._review.focus_active_pane()
 
     def _exit_review_mode(self) -> None:
         self.remove_class("review-mode")
         self.query_one("#search", Input).disabled = False
         self._scan_attention()  # a merge in review may have cleared conflicts
-        self._reload()
+        self._reload(restale_review=False)
         self._focus_documents()
 
     @on(ReviewPane.OpenDocument)
@@ -921,7 +933,7 @@ class HomeScreen(Screen[None]):
         """Review asked for a document — show it in column 3, review stays up."""
         event.stop()
         self._scan_attention()
-        self._reload()
+        self._reload(restale_review=False)
         doc = self._doc_by_id(event.doc_id)
         if doc is None:
             self.notify(f"{event.doc_id}: no such document", severity="warning")
