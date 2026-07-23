@@ -92,6 +92,9 @@ class DoctorScreen(ModalScreen[str | None]):
         index = 0
         for check, items in sorted(report.by_check().items()):
             options.add_option(Option(f"— {check} ({len(items)}) —", id=None))
+            hint = doctor.CHECK_HINTS.get(check)
+            if hint:
+                options.add_option(Option(f"  → {hint}", id=None))
             for finding in items:
                 # A doc can appear in several findings; a composite id keeps them
                 # unique (else OptionList raises DuplicateID). Conflicts aren't docs.

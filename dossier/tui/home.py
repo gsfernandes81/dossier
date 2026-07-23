@@ -34,7 +34,8 @@ screen (DESIGN §14):
 ``Enter`` opens the detail pane for a document; ``o`` opens its file from
 anywhere. The search box is docked at the bottom as a thumb-reachable command
 bar (``/`` focuses it); typing filters the documents pane in place (root-wide),
-keeping the columns. The touch action bar arrives in a later slice.
+keeping the columns. Under the touch/Termux UI a bottom action bar (Open / Bundle /
+New / ⌨) replaces the desktop keybind footer.
 """
 
 from __future__ import annotations

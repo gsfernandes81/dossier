@@ -188,6 +188,11 @@ class Suggestion:
 
     @property
     def key(self) -> str:
+        """Stable dismissal identity (doc/field/source/values).
+
+        Values are part of the key, so a re-parse yielding *different* values is a
+        new suggestion, not a dismissed one.
+        """
         return f"{self.doc_id}:{self.field.value}:{self.source}:{'|'.join(self.values)}"
 
 
@@ -260,18 +265,25 @@ class Document:
 
     @property
     def is_temp_located(self) -> bool:
+        """Whether a temp override is set (the doc is currently away from its home)."""
         return self.temp_location is not None
 
+    # The permanent/temp override (from the Notion system): a doc has a permanent home
+    # but may currently be elsewhere. When a temp location is set it wins wholesale —
+    # location *and* slot *and* subslot come from the temp side, never a mix.
     @property
     def effective_location(self) -> str | None:
+        """Where the doc is now: the temp location if set, else the permanent one."""
         return self.temp_location if self.is_temp_located else self.perm_location
 
     @property
     def effective_slot(self) -> int | None:
+        """The slot within :attr:`effective_location` (temp side when temp-located)."""
         return self.temp_slot if self.is_temp_located else self.perm_slot
 
     @property
     def effective_subslot(self) -> int | None:
+        """The subslot within :attr:`effective_location` (temp side if temp-located)."""
         return self.temp_subslot if self.is_temp_located else self.perm_subslot
 
     def primary_rendition(self) -> Rendition | None:

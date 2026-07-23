@@ -1,7 +1,10 @@
 # dossier — Design (v2)
 
-**Status:** Design settled, pre-implementation
-**Date:** 2026-07-21
+**Status:** As-built design record. Phases 1–7 are implemented; this document is the
+authoritative *spec and rationale*, while **`ROADMAP.md` is the source of truth for what has
+actually shipped**. Where a section below still reads as forward-looking ("open items",
+"deferred"), treat ROADMAP.md as authoritative for current status.
+**Date:** 2026-07-21 (design); implementation tracked in `ROADMAP.md`.
 **Revision:** v2 — revised after an independent adversarial design review (see §15 changelog).
 **Author:** gsfernandes81 (with Claude)
 
@@ -294,7 +297,8 @@ Two console-script entry points (`dossier` and `ds`) installed identically on bo
 | `ds doctor` | conflicts, referential integrity, round-trip lint, case/id/reserved-name checks, orphans |
 
 `ds import <folder>` (bulk folder ingest) is **deferred post-v1** — the schema stays import-ready,
-but it is not built for v1. Duplicate detection (by hash) is deferred with it.
+but it is not built. (Duplicate detection *has* shipped — perceptual-hash dedup lives in
+`dedup`/`dedup_hash`/`dedup_cache`, surfaced in the reconcile view; see ROADMAP Phase 3.)
 
 ---
 
@@ -334,18 +338,57 @@ Termux also needs `termux-api` + the Termux:API app for `termux-open`.
 ---
 
 ## 12. Module layout
+
+As-built map (Phases 1–7). See `ROADMAP.md` for per-module shipping history.
 ```
 dossier/
-├─ model.py          # Document, Rendition, Location, Bundle
-├─ config.py         # per-device + synced config; syncthing_root resolution & sanity check
-├─ store.py          # load/save (quote-safe, byte-stable, atomic same-dir); conflict exclusion; history
-├─ query.py          # search/filter/sort; effective location; expiry & file status
-├─ platform_open.py  # cross-platform open + detection + opener verification
-├─ export.py         # bundle → folder (copies + manifest)
-├─ migrate.py        # Notion + tree → .md files + review report + raw archive
-├─ doctor.py         # integrity/durability checks
-└─ tui/              # Textual app: narrow-first list, detail modal, expiring/reconcile/bundle views
+├─ model.py          # dataclasses/enums shared everywhere: Document, Rendition, Location,
+│                    #   Bundle, ReconcileState, Suggestion/SuggestionState, ExpiryStatus, FileStatus
+├─ config.py         # per-device + synced config; history/cache dirs; update_* persist helpers
+│                    #   (read-modify-write, backing the TUI Settings screen)
+├─ errors.py         # exception hierarchy: DossierError → Config/Store/Scan, Stale/Exists
+├─ store.py          # the persistence hub: load/save (quote-safe, byte-stable, atomic same-dir);
+│                    #   conflict exclusion; optimistic concurrency + history; owns ALL sidecar
+│                    #   (de)serialization — locations/bundles/reconcile/suggestions/scans TOML
+├─ query.py          # pure read layer over loaded docs: search/filter/sort; effective location;
+│                    #   expiry & file status; `tracked` (the expiry watch)
+├─ platform_open.py  # cross-platform file open + platform detection + opener verification
+├─ migrate.py        # Notion export + soft-copy tree → .md files + review report + raw archive
+├─ export.py         # bundle → folder (copies/symlinks + manifest)
+├─ reconcile.py      # orphan files / missing renditions / duplicate clusters + reconcile.toml actions
+├─ suggest.py        # dismissable per-field suggestions (issue/expiry/notes, bundles) engine
+├─ succession.py     # content-based renewal-chain clustering → `supersedes` proposals
+├─ scan.py           # `ds scan`: VLM reads a scan into a grounded ScanReading (verbatim dates)
+├─ dedup.py          # near-duplicate clustering (containment fold) over…
+├─ dedup_hash.py     #   …perceptual page dHashes, cached per-device by size+mtime in…
+├─ dedup_cache.py    #   …the platform cache dir (disposable, never synced)
+├─ organize.py       # `ds organize`: canonical-rename engine (plan + apply) for linked files
+├─ intake.py         # `ds import`/`ds intake`: propose a full record for an unfiled file
+│                    #   (composes scan + suggest + succession + organize); resumable read cache
+├─ preparedness.py   # event-aware validity: is a doc valid at a bundle's event date? + readiness
+├─ answers.py        # `ds ask`: retrieval-first answers over the records (no model)
+├─ reset.py          # `ds reset`: folder-data reset (.dossier/ only) + `--global` config reset
+└─ tui/              # Textual app: Miller home, editable detail pane, reconcile/bundles/doctor/
+                     #   expiry-watch/readiness/intake screens, touch/Termux action bar
 ```
+
+**Data flow.** `model` is the shared vocabulary; `store` is the only thing that touches disk
+(every sidecar format is (de)serialized there); `query` is a pure read layer over documents
+`store` has loaded. The two front-ends — `cli.py` and `tui/` — read through `store`+`query` and
+write through `store`. Everything else is a **feeder** that produces records or *proposals*:
+`migrate` seeds the store; `scan`/`succession`/`suggest`/`reconcile`/`dedup`/`intake` propose
+changes a human accepts (they never auto-write user data — `intake`/`import` file only on
+`--apply`/confirmation); `organize` renames on apply; `preparedness`/`answers`/`doctor`/`reset`/
+`export` are read-only or operational commands. A background desktop `ds service` (power-gated)
+can drive `scan`/`intake` unattended.
+
+**Extension points.**
+- *New suggestion source* → emit `Suggestion`s from `suggest.py` (or feed verbatim dates through
+  it, as `scan` does); the detail pane's accept/dismiss layer and `suggestions.toml` handle the rest.
+- *New integrity check* → add a `_check_*` to `doctor.py` returning `Finding`s; add a
+  `CHECK_HINTS` entry for recovery guidance. It surfaces in both CLI and TUI automatically.
+- *New sidecar file* → add its load/save to `store.py` (fixed key order, double-quoted scalars,
+  atomic write) so it inherits durability + conflict handling; add a model dataclass in `model.py`.
 
 ---
 
@@ -357,6 +400,15 @@ indexing (CRDT-flavored overkill for a physical folder).
 ---
 
 ## 14. Open items
+
+> **Historical note (as-built):** this section captured the open items *at design time*. Most
+> have since shipped — the editable detail pane, the dismissable-suggestions framework, visual
+> dedup, the `ds scan` vision pass, the expiry-watch surface, in-place search filtering, and the
+> `ignore_expiry` toggle are all done. **See `ROADMAP.md` for current status**; the text below is
+> preserved as the original rationale. Genuinely still-open: Obsidian-vault confirmation, slug
+> finalization, the two-digit-year century pivot, `createdTime` year-plausibility, and
+> "issued X expires Y" range parsing.
+
 - Confirm Obsidian opens a dot-prefixed folder as a vault root (blocks any Obsidian reliance).
 - Finalize the slug algorithm: transliteration, year-suffix disambiguation (four `BRP Expires …`
   files), reserved-name guard.

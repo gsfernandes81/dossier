@@ -77,8 +77,9 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 
 - All metadata in `pyproject.toml` (PEP 621); build backend **hatchling**. No `setup.py`,
   `setup.cfg`, or `requirements.txt`.
-- Planned module map (see `DESIGN.md` §11): `model`, `config`, `store`, `query`,
-  `platform_open`, `export`, `migrate`, `doctor`, `tui/`.
+- Module map (see `DESIGN.md` §12): `model`, `config`, `store`, `query`,
+  `platform_open`, `export`, `migrate`, `doctor`, `reconcile`, `suggest`, `succession`,
+  `scan`, `dedup`/`dedup_hash`/`dedup_cache`, `reset`, `tui/`.
 
 ## Conventions
 

@@ -210,6 +210,13 @@ class Store:
             return
 
     def serialize(self, doc: Document) -> str:
+        """Render a document to its on-disk form: ``---`` frontmatter + Markdown body.
+
+        Deterministic (fixed key order, double-quoted scalars) so re-saving an
+        unchanged document is a byte-identical no-op — see the module docstring.
+        Exposed for callers that need the exact bytes without writing (e.g. the
+        round-trip lint in ``doctor``).
+        """
         buf = io.StringIO()
         self._dump_yaml.dump(_frontmatter_from_document(doc), buf)
         front = buf.getvalue()

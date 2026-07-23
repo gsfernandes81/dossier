@@ -5,17 +5,40 @@ and Android (Termux). It replaces a Notion-based system with local, Syncthing-sy
 files: find documents by name/tags, track where the physical copy lives, open the synced soft
 copy with the platform's native opener, and track issue/expiry dates.
 
-**Status:** pre-implementation. The full specification is in [DESIGN.md](DESIGN.md); working
-conventions are in [CLAUDE.md](CLAUDE.md).
-
 ## Highlights
 - Flat Markdown + YAML files (one per document) — Syncthing-safe, greppable, no database.
+- A three-column (Miller) TUI: browse by location, scan documents, edit every field inline in
+  the detail pane; root-wide search filters in place.
 - Permanent/temporary location tracking with an effective-location override.
 - Hierarchical **tags** (what a doc is) and **bundles** (what it's gathered for — export a
   bundle to a folder for a visa/OCI application or a trip, no file duplication).
-- Issue/expiry dates with an expiring-soon view.
+- Issue/expiry dates with an **expiring-soon watch** (opt-out; superseded docs drop off).
+- **Reconcile** view for orphan files, missing renditions, and perceptual-hash **duplicate**
+  clusters — all metadata-only, never touching the real files.
+- **`ds scan`** reads issue/expiry dates off scanned PDFs with a local vision model, surfacing
+  them as accept/dismiss suggestions; content-based **succession** links renewal chains.
 - `dossier` / `ds` CLI + TUI; opens files via `os.startfile` (Windows) and `termux-open`
   (Termux).
+
+## Quickstart
+```sh
+uv sync                          # install (see Development for the [dedup]/scan extras)
+uv run ds init                   # point this device at its Syncthing root
+uv run ds migrate --help         # one-time Notion → local cutover (dry-run + review first)
+uv run ds                        # launch the TUI (press ? in-app for the keybindings)
+```
+Other commands: `ds import <folder>` / `ds intake` (file unfiled documents), `ds organize`
+(canonical renames), `ds expiring` (what needs renewing), `ds doctor` (integrity +
+sync-conflict checks), `ds reconcile` (orphans & duplicates), `ds export <bundle> <dest>`,
+`ds scan`, `ds ask`, `ds reset`. See [docs/guide/](docs/guide/) for install, first-run, and
+workflow walkthroughs.
+
+## Documentation map
+- **README.md** (this file) — start here: what it is, quickstart, where everything lives.
+- **[docs/guide/](docs/guide/)** — how to *use* dossier: install, getting started, workflows.
+- **[DESIGN.md](DESIGN.md)** — the authoritative spec & rationale (as-built design record).
+- **[ROADMAP.md](ROADMAP.md)** — source of truth for what has shipped and what's next.
+- **[CLAUDE.md](CLAUDE.md)** — contributor rules (tooling, tests, lint, conventions).
 
 ## Background scan & phone intake (desktop service)
 On a desktop, an opt-in background service reads new scans with the local vision model so the
@@ -68,6 +91,9 @@ uv run ruff format dossier  # format
 uv run ty check dossier     # type-check
 uv run python -m pytest     # test
 ```
+
+The dedup and vision-scan features have optional dependency groups — see
+[docs/guide/install.md](docs/guide/install.md).
 
 ## License
 [AGPL-3.0-or-later](LICENSE). © 2026–present gsfernandes81.
