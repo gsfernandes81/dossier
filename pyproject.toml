@@ -10,6 +10,7 @@ readme = "README.md"
 license = "AGPL-3.0-or-later"
 dependencies = [
     "textual>=1.0.0",
+    "rich>=13.0",  # progress bars for `ds import`; also a transitive Textual dep
     "platformdirs>=4.3",
     "python-dateutil>=2.9.0",
     "ruamel.yaml>=0.18.6",

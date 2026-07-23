@@ -441,3 +441,10 @@ def test_relative_to_root_resolves_cwd_first_then_root(
 
     # A path outside the root is rejected.
     assert cli._relative_to_root(config, str(tmp_path / "elsewhere")) is None
+
+
+def test_progress_name_truncates_long_basenames():
+    assert cli._progress_name("Marine/short.pdf") == "short.pdf"  # short: unchanged
+    long_name = "x" * 60 + ".pdf"
+    out = cli._progress_name(f"Dir/{long_name}")
+    assert len(out) == 40 and out.endswith("…")  # truncated to the column width

@@ -24,9 +24,11 @@ launch). ``ds import`` (bulk folder ingest) is deferred post-v1 — see DESIGN.m
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import sys
 import tomllib
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -606,25 +608,34 @@ def _intake_run(
     readings = store.load_scans()
     cache = store.load_intake_cache()
     proposals: list[intake.IntakeProposal] = []
-    for rel in pending:
-        prior = cache.get(rel)
-        try:
-            proposal = intake.build_proposal(
-                rel,
-                store,
-                config,
-                docs=docs,
-                readings=readings,
-                in_place=in_place,
-                cache=cache,
-            )
-        except ScanError as exc:
-            print(f"  skip  {rel}  (scan failed: {exc})", file=sys.stderr)
-            continue
-        if cache.get(rel) is not prior:  # a fresh reading — persist so a re-run resumes
-            store.save_intake_cache(cache)
-        proposals.append(proposal)
-        _print_proposal(proposal)
+    # A progress bar with an ETA for the slow (VLM) read pass; disabled off a TTY
+    # so piped/redirected output stays plain (and tests stay clean).
+    progress = _intake_progress()
+    with progress:
+        task = progress.add_task("reading", total=len(pending))
+        write = functools.partial(progress.console.print, soft_wrap=True, markup=False)
+        for rel in pending:
+            progress.update(task, description=_progress_name(rel))
+            prior = cache.get(rel)
+            try:
+                proposal = intake.build_proposal(
+                    rel,
+                    store,
+                    config,
+                    docs=docs,
+                    readings=readings,
+                    in_place=in_place,
+                    cache=cache,
+                )
+            except ScanError as exc:
+                write(f"  skip  {rel}  (scan failed: {exc})")
+                progress.advance(task)
+                continue
+            if cache.get(rel) is not prior:  # fresh reading — persist for a resume
+                store.save_intake_cache(cache)
+            proposals.append(proposal)
+            _print_proposal(proposal, write)
+            progress.advance(task)
 
     if not proposals:
         return 1
@@ -635,46 +646,90 @@ def _intake_run(
         return 1
 
     filed = 0
-    for proposal in proposals:
-        try:
-            doc, errors = intake.apply_proposal(proposal, store, config)
-        except IntakeError as exc:
-            print(f"  error {proposal.name}: {exc}", file=sys.stderr)
-            continue
-        for message in errors:
-            print(f"  warn  {message}", file=sys.stderr)
-        if cache.pop(proposal.src_rel, None) is not None:  # now in scans.toml
-            store.save_intake_cache(cache)
-        print(f"  filed {doc.id}  ({proposal.dst_rel})")
-        filed += 1
+    progress = _intake_progress()
+    with progress:
+        task = progress.add_task("filing", total=len(proposals))
+        write = functools.partial(progress.console.print, soft_wrap=True, markup=False)
+        for proposal in proposals:
+            progress.update(task, description=_progress_name(proposal.dst_rel))
+            try:
+                doc, errors = intake.apply_proposal(proposal, store, config)
+            except IntakeError as exc:
+                write(f"  error {proposal.name}: {exc}")
+                progress.advance(task)
+                continue
+            for message in errors:
+                write(f"  warn  {message}")
+            if cache.pop(proposal.src_rel, None) is not None:  # now in scans.toml
+                store.save_intake_cache(cache)
+            write(f"  filed {doc.id}  ({proposal.dst_rel})")
+            filed += 1
+            progress.advance(task)
     print(f"\nfiled {filed} document(s).")
     return 0
 
 
-def _print_proposal(p: intake.IntakeProposal) -> None:
-    print(f"\n{p.src_rel}")
+def _intake_progress():
+    """A Rich progress bar (bar · count · % · elapsed · ETA) for a long intake pass.
+
+    Disabled when stdout isn't a TTY, so ``ds import`` piped to a file or a test
+    harness emits only the plain per-file lines, no live-render control codes.
+    """
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TaskProgressColumn,
+        TextColumn,
+        TimeElapsedColumn,
+        TimeRemainingColumn,
+    )
+
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TaskProgressColumn(),
+        TextColumn("· elapsed"),
+        TimeElapsedColumn(),
+        TextColumn("· eta"),
+        TimeRemainingColumn(),
+        disable=not sys.stdout.isatty(),
+    )
+
+
+def _progress_name(rel: str, width: int = 40) -> str:
+    """The file's basename, truncated, for the progress bar's description column."""
+    name = rel.rsplit("/", 1)[-1]
+    return name if len(name) <= width else name[: width - 1] + "…"
+
+
+def _print_proposal(
+    p: intake.IntakeProposal, write: Callable[[str], None] = print
+) -> None:
+    write(f"\n{p.src_rel}")
     if p.duplicate is not None:
         kind = "exact duplicate of" if p.duplicate.exact else "subset of"
-        print(
-            f"  copy    {kind} {p.duplicate.doc_id}  (fold in the TUI, or file as new)"
-        )
-    print(f"  name    {p.doc.name}  (id {p.doc.id})")
+        write(f"  copy    {kind} {p.duplicate.doc_id}  (fold in the TUI, or file new)")
+    write(f"  name    {p.doc.name}  (id {p.doc.id})")
     if p.doc.tags:
-        print(f"  tags    {' '.join(p.doc.tags)}")
+        write(f"  tags    {' '.join(p.doc.tags)}")
     if p.doc.issue_date:
-        print(f"  issue   {p.doc.issue_date}")
+        write(f"  issue   {p.doc.issue_date}")
     if p.doc.expiry_date:
-        print(f"  expiry  {p.doc.expiry_date}")
+        write(f"  expiry  {p.doc.expiry_date}")
     if p.doc.notes:
-        print(f"  notes   {p.doc.notes.splitlines()[-1]}")
+        write(f"  notes   {p.doc.notes.splitlines()[-1]}")
     if p.succession is not None:
         conf = p.succession.confidence
-        print(f"  renews  {p.succession.older}  (conf {conf:.2f})")
+        write(f"  renews  {p.succession.older}  (conf {conf:.2f})")
     dst = p.dst_rel + (f"  [{','.join(p.notes)}]" if p.notes else "")
-    print(f"  file    {p.src_rel}  {'->' if p.moves else '= (in place)'}  {dst}")
+    write(f"  file    {p.src_rel}  {'->' if p.moves else '= (in place)'}  {dst}")
     for q in p.open_questions:
-        print(f"  ?       {q.field.value}: {' / '.join(q.values)}  (pick in the pane)")
-    print(f"  read    conf {p.reading.confidence:.2f}, model {p.reading.model}")
+        write(f"  ?       {q.field.value}: {' / '.join(q.values)}  (pick in the pane)")
+    write(f"  read    conf {p.reading.confidence:.2f}, model {p.reading.model}")
 
 
 def cmd_expiring(args: argparse.Namespace) -> int:
