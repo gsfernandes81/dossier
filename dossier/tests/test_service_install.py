@@ -92,6 +92,19 @@ def test_apply_writes_artifacts_and_runs_commands(tmp_path: Path):
     assert any("wrote" in line for line in log)
 
 
+def test_apply_writes_the_task_xml_as_utf16(tmp_path: Path):
+    # Task Scheduler reads the XML per its `encoding="UTF-16"` declaration, so the
+    # bytes on disk must actually be UTF-16 (with a BOM), not UTF-8.
+    artifact = Artifact(tmp_path / "t.xml", "<Task>é</Task>", encoding="utf-16")
+    apply(
+        InstallPlan(supported=True, platform="test", artifacts=(artifact,)),
+        runner=_ok,
+    )
+    raw = artifact.path.read_bytes()
+    assert raw[:2] in (b"\xff\xfe", b"\xfe\xff")  # a UTF-16 byte-order mark
+    assert artifact.path.read_text(encoding="utf-16") == "<Task>é</Task>"
+
+
 def test_apply_removes_files_on_uninstall(tmp_path: Path):
     target = tmp_path / "dossier-scan.timer"
     target.write_text("[Timer]\n")

@@ -154,6 +154,9 @@ WantedBy=timers.target
 class Artifact:
     path: Path
     content: str
+    # The Windows task XML declares UTF-16 and Task Scheduler expects it as such;
+    # systemd units are plain UTF-8. Written with this codec by :func:`apply`.
+    encoding: str = "utf-8"
 
 
 @dataclass(frozen=True)
@@ -184,7 +187,9 @@ def plan_install(run_command: list[str] | None = None) -> InstallPlan:
             supported=True,
             platform="windows",
             run_command=run_command,
-            artifacts=(Artifact(xml_path, windows_task_xml(run_command)),),
+            artifacts=(
+                Artifact(xml_path, windows_task_xml(run_command), encoding="utf-16"),
+            ),
             commands=(
                 ["schtasks", "/Create", "/TN", TASK_NAME, "/XML", str(xml_path), "/F"],
             ),
@@ -272,7 +277,7 @@ def apply(plan: InstallPlan, *, runner: _Runner = _default_runner) -> list[str]:
     log: list[str] = []
     for artifact in plan.artifacts:
         artifact.path.parent.mkdir(parents=True, exist_ok=True)
-        artifact.path.write_text(artifact.content, encoding="utf-8")
+        artifact.path.write_text(artifact.content, encoding=artifact.encoding)
         log.append(f"wrote {artifact.path}")
     for target in plan.removes:
         if target.exists():
