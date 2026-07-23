@@ -198,20 +198,28 @@ keeps the catalogue accurate in three years, and what makes owning the *whole* t
   Phase 9 code. When the desktop is reachable the phone's `ds scan` may instead point at its
   llama-server (already per-device URL config); vision inference never runs on the phone.
 
-## Phase 10 — Preparedness: checklists, event-aware validity, reminders  *(long horizon)*
+## Phase 10 — Preparedness: checklists, event-aware validity, reminders  *(in progress)*
 Bundles are the app's real job (gather → check → submit, DESIGN §5) but today they are
 passive labels. This phase makes dossier answer "am I ready?" — and warn *before* it
-matters, against the date you need the document, not just today.
-- [ ] **Bundle templates** (M) — a template lists required document *types*
-  (`schengen-visa`: passport, photo, CoC, ENG-1…). A bundle opened against a template
-  shows gathered / missing / problematic instead of a bare member list.
-- [ ] **Event-aware validity** (M) — bundles already carry a `date`; cross-check
-  members against it with real-world rules — "passport expires < 6 months after the
-  trip date", "ENG-1 lapses before the joining date". Surfaced in the bundles screen
-  and the expiry watch.
-- [ ] **Proactive reminders** (S) — `ds expiring --days N` with plain-text output and
-  clean exit codes, so a scheduled task (Task Scheduler / Termux cron) can nag by
-  notification without the TUI ever being opened.
+matters, against the date you need the document, not just today. *Event-aware validity +
+reminders landed (slice 1); bundle templates next (slice 2).*
+- [x] **Event-aware validity** (M) — `dossier/preparedness.py`, a pure engine: `event_status`
+  reuses `Document.expiry_status` against a bundle's **event date** (plus an optional
+  `min_valid_days` floor for "passport valid ≥ 6 months past the trip"), no new rule engine;
+  `event_flags` flags members of a *future* dated bundle that lapse by then (superseded /
+  ignored never nag). Surfaced in the expiry watch (a dim "· needed <date> for <slug>" note).
+- [x] **Proactive reminders** (S) — `ds expiring [--days N] [--bundle SLUG] [--no-events]`:
+  plain text, one line per doc needing attention (`expired` / `expiring` / `event`), **empty
+  stdout when clean** so a Task-Scheduler / Termux-cron notification is quiet, exit **0/1/2**
+  so a job can tell "nag me" from "the tool is broken". Event-aware by default. Verified
+  read-only on the real store (3 marine expiries, soonest-first).
+- [ ] **Bundle templates** (M) — a template (`.dossier/templates.toml`, a `Bundle.template`
+  field) lists required document *types* as **match aliases** over name + tags + scan
+  `document_type` (works today — names are typed — and sharpens as intake writes tags), with
+  optional `count` / `min_valid_days` / `optional`. `preparedness.check_bundle` →
+  gathered / problem / missing; surfaced as a `ReadinessScreen` checklist off the bundles
+  screen (`t` attach template, `c` open checklist). *(Deferred: "add to bundle" from the
+  checklist, template suggestions, a global `[validity.rules]` table.)*
 
 ## Phase 11 — Answers: content search & ask  *(long horizon)*
 `.dossier/scans.toml` already holds structured, grounded readings of every linked scan
