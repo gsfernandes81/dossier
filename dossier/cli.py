@@ -26,7 +26,7 @@ import json
 import sys
 import tomllib
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import tomli_w
@@ -46,6 +46,7 @@ from dossier import (
     reset,
     resolve,
     scan,
+    service,
 )
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError, IntakeError, ScanError
@@ -903,6 +904,42 @@ def _transcribe_pass(store: Store, config: Config, *, force: bool, limit: int) -
     return 0
 
 
+def cmd_service_run(_args: argparse.Namespace) -> int:
+    """Run one background scan pass now — power-gated, single-instance locked.
+
+    Exits 0 on a clean pass *and* on any gated/locked skip (so a scheduler never
+    nags), 1 if items failed, 2 on a config error. This is what the installed
+    Scheduled Task / systemd timer invokes.
+    """
+    config = _load_config()
+    if config is None:
+        return 2
+    result = service.run_service(Store(config), config)
+    print(result.summary())
+    _append_service_log(result.summary())
+    return result.exit_code
+
+
+def _append_service_log(line: str) -> None:
+    """Best-effort append of a run summary to the per-device service log."""
+    import platformdirs
+
+    try:
+        log_dir = Path(platformdirs.user_log_dir("dossier", appauthor=False))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC).isoformat(timespec="seconds")
+        with (log_dir / "scan-service.log").open("a", encoding="utf-8") as handle:
+            handle.write(f"{stamp} {line}\n")
+    except OSError:
+        pass
+
+
+def cmd_service(_args: argparse.Namespace) -> int:
+    """Bare ``ds service`` — point at the subcommands."""
+    print("usage: ds service run   (install/uninstall/status land in a later slice)")
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dossier",
@@ -1188,6 +1225,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="list the router's models (vision-capable flagged) and exit",
     )
     scan_p.set_defaults(func=cmd_scan)
+
+    service_p = sub.add_parser(
+        "service",
+        help="the background scan service (desktop only; power-gated)",
+    )
+    service_p.set_defaults(func=cmd_service)
+    service_sub = service_p.add_subparsers(
+        dest="service_command", metavar="<subcommand>"
+    )
+    service_run_p = service_sub.add_parser(
+        "run",
+        help="run one batch pass now (scan + transcribe + intake; power-gated, locked)",
+    )
+    service_run_p.set_defaults(func=cmd_service_run)
 
     return parser
 

@@ -357,6 +357,12 @@ def test_scan_transcribe_backfills_and_skips_done(
     assert len(calls) == 1
 
 
+def test_service_subcommands_wire_up():
+    parser = cli.build_parser()
+    assert parser.parse_args(["service", "run"]).func is cli.cmd_service_run
+    assert parser.parse_args(["service"]).func is cli.cmd_service
+
+
 def test_resolve_cli_reports_nothing_when_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
