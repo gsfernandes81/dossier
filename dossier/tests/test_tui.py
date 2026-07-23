@@ -46,6 +46,7 @@ from dossier.tui.screens import (
     BundlesScreen,
     DocPickerScreen,
     DoctorScreen,
+    ResolveScreen,
     SupersedeScreen,
     TextPromptScreen,
     WatchScreen,
@@ -1381,3 +1382,24 @@ async def test_home_notifies_when_sync_conflicts_await(tmp_path: Path):
         await pilot.pause()
         messages = [n.message for n in app._notifications]
         assert any("sync conflict" in m and "ds resolve" in m for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_resolve_screen_lists_and_merges_conflicts(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    live = store.document_path("passport")
+    conflict = live.with_name("passport.sync-conflict-20260101-120000-AAAAAAA.md")
+    theirs = Document(id="passport", name="Passport", tags=["identity", "travel"])
+    conflict.write_bytes(store.serialize(theirs).encode())
+
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        await pilot.press("R")  # open the in-app resolver (shift+R)
+        await pilot.pause()
+        assert isinstance(app.screen, ResolveScreen)
+        assert app.screen.query_one("#rvlist", OptionList).option_count == 1
+
+        await pilot.press("a")  # merge all
+        await pilot.pause()
+        assert not conflict.exists()  # conflict cleared
+        assert "travel" in store.load("passport").tags  # tags unioned in
