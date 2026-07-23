@@ -37,11 +37,9 @@ a build-but-don't-run installer) that closes the phone sync-back loop. **Phases 
 complete.** Phases 14–15 are next: **find-fast UX** (launch optimized for the urgent
 lookup, undo, init/empty-state polish, typo-tolerant search) and **Syncthing integration**.
 
-**Next up — "Review in the miller view"** (first open item in Phase 14). Review stops being
-a modal that must be destroyed to act on a row; it takes columns 1–2 and the detail pane
-becomes column 3. It carries four fixes found in real use: per-tab keys, dismissing a
-false-positive duplicate, Integrity taking the app-wide verb, and opening both sides of a
-succession.
+**Next up:** the rest of Phase 14 — **undo / history restore**, then first-run & empty
+states and typo-tolerant search. ("Review in the miller view" landed, with its four
+carried fixes.)
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -316,46 +314,36 @@ search forgives phone-keyboard typos.
   list focused since the router lands the first key in search anyway. Attention counts
   (expiring · conflicts · inbox) now ride dim **beside the footer**, replacing a toast that
   overlapped the search box. Budget met: cold start → `pass` + `Enter` → opened = 5 keystrokes.
-- [ ] **Review in the miller view** (M/L) — **next.** Review is a modal, so acting on a row
-  *destroys* it: activating an Integrity finding dismisses the screen to show the record,
-  losing the finding, the tab and the cursor — and Esc back runs `action_review()`, which
-  builds a **fresh** ReviewScreen and re-runs the entire load. The round trip is lossy, and
-  on the phone slow. Instead let review **replace columns 1 and 2** of the miller view and
-  let the home's existing detail pane serve as **column 3**, appearing as needed without ever
-  tearing review down. It deletes rather than adds: the `ReviewResult` dismiss protocol and
-  the `_detail_origin == "review"` Esc special-case both go away. Feasible because
-  `DetailPane` already talks to its host purely by message (`EditingChanged` / `Saved` /
-  `ReloadRequested`) — it never needed to be the home's. Three seams to watch: the home's
-  type-to-search `on_key` router must not fire while review holds the columns, `escape` means
-  something to both, and the narrow/Termux collapse needs its own rule. Carries four fixes
-  found in real use, each cheap once the layout is right:
-  - **Per-tab keys** — `check_action` returns `None` for an inapplicable action, and Textual
-    reads `None` as disabled-but-**visible** (`False` is disabled+hidden). So every tab
-    advertises every tab's verbs, greyed — which is why "how do I dismiss a duplicate?" and
-    "accept vs fold vs link?" both came up in use. Return `False` and the footer and `?` panel
-    become per-tab for free, with no help content to author or keep in sync; the
-    `refresh_bindings()` on `TabActivated` is already wired (its comment is simply not true
-    yet). Check nothing depends on a greyed key still firing before flipping it.
-  - **Dismiss a false-positive duplicate** — `dedup` matches on visual similarity, so it will
-    sometimes cluster two genuinely different documents. Duplicates is the only tab with no
-    way to say *no*: `ReconcileState` suppresses orphans (`dismissed`), missing (`missing_ok`)
-    and succession (`succession_dismissed`), but for duplicates only `folded`, which asserts
-    the opposite. Folding a false positive is actively wrong — `suppressed_orphans()` hides
-    every folded subset, so a genuinely different document that is still an orphan vanishes
-    from the list that would have prompted you to adopt it. Add `dup_dismissed` keyed by keep
-    + subsets exactly as `folded` is, reusing `covers()` so a **new** copy resurfaces the
-    cluster for a fresh decision, then wire `x` — after which `f` affirms and `x` rejects,
-    like everywhere else.
-  - **Integrity takes the app-wide verb** — `Enter` opens the file, `→` focuses the record, so
-    the tab reads like the home and the watch. The record is the more useful target for most
-    findings (date-order, supersession, location-ref and round-trip are sidecar problems a PDF
-    cannot fix), which is precisely why keeping it *beside* the finding is the win here.
-  - **Open both sides of a succession** — `o` opens only the newer rendition
-    (`_succession_rendition_path`), but "does this renewal really replace that one?" is a
-    comparison, so one file cannot answer it. Open older then newer so the renewal lands
-    frontmost, and open whichever side exists when the other is paper-only. Termux degrades
-    gracefully: sequential `termux-open` intents share a viewer, so the phone shows the
-    newer — today's behavior, not a regression.
+- [x] **Review in the miller view** (M/L) — **done.** Review was a modal, so acting on a
+  row *destroyed* it: opening an Integrity finding's record lost the finding, the tab and
+  the cursor, and Esc ran `action_review()`, which built a **fresh** screen and re-ran the
+  entire load. It is now a `ReviewPane` widget holding **columns 1+2**, with the home's own
+  detail pane as **column 3** — so the record opens beside the finding and Esc peels only
+  the record, leaving the tab and cursor untouched. A load counter in the tests pins the
+  headline claim: that return now runs **zero** loads. Wide shares review with the record;
+  narrow/medium swap between them (hidden, never unmounted). Net-negative: the
+  `ReviewResult` dismiss protocol, `_detail_origin`, `open_detail(origin=)` and
+  `_after_review` are all gone. Staleness is direction-aware — an outside write marks the
+  pane stale and is paid for once on the next entry, while review's own writes don't
+  restale it. Two traps the modal had masked: bare `→`/`←`/`/` used to die at the modal
+  boundary and now bubble to the home (gated off in review-mode, except `←` with a record
+  open), and `.searching` out-ranks `.review-mode #documents` on class count, so entering
+  review normalises the filter state rather than escalating selectors. Carried its four
+  fixes:
+  - [x] **Per-tab keys** — `check_action` returned `None`, which Textual reads as
+    disabled-but-**visible**; every tab advertised every other tab's verbs, greyed and
+    overflowing the footer. `False` hides them, so the footer is now per-tab documentation
+    with no help text to author. Verified in a real terminal, one line per tab.
+  - [x] **Dismiss a false-positive duplicate** — `dup_dismissed` in the sidecar, keyed by
+    keep + subsets exactly as `folded` is and sharing `covers()`, so a new copy resurfaces
+    the cluster. `x` now works on Duplicates, and unlike folding it does **not** hide the
+    paths from the orphan list — a different document still awaiting adoption stays
+    adoptable.
+  - [x] **Integrity takes the app-wide verb** — `Enter` opens the file, `→` opens the
+    record. When a finding's document has no digital file (most integrity findings are
+    sidecar problems), `Enter` falls through to the record rather than doing nothing.
+  - [x] **Open both sides of a succession** — `o` opens older then newer so the renewal
+    lands frontmost, and opens whichever side exists when the other is paper-only.
 - [ ] **Undo / history restore** (M) — every save already writes the prior version to the
   local history dir; surface it. `ctrl+z` in the detail pane restores the last saved
   version of the current doc; a palette "History…" lists a doc's saved versions to

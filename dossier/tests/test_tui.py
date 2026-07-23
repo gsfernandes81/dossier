@@ -16,6 +16,7 @@
 """Tests for the Textual TUI (driven headlessly via App.run_test)."""
 
 import asyncio
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -32,7 +33,7 @@ from textual.widgets import (
     Tree,
 )
 
-from dossier import dedup
+from dossier import dedup, succession
 from dossier.config import Config
 from dossier.model import Bundle, Document, Rendition
 from dossier.store import Store
@@ -63,6 +64,16 @@ async def _open_review(pilot) -> ReviewPane:
     """
     pilot.app.home.action_review()
     return await _await_review_load(pilot)
+
+
+async def _open_review_tab(pilot, tab: str) -> ReviewPane:
+    """Open review, switch to `tab`, and settle any work that tab defers."""
+    pane = await _await_review_load(pilot)
+    pane.query_one(TabbedContent).active = tab
+    await pilot.pause()
+    await pilot.app.workers.wait_for_complete()  # e.g. Integrity's deferred check
+    await pilot.pause()
+    return pane
 
 
 async def _await_review_load(pilot) -> ReviewPane:
@@ -1188,6 +1199,139 @@ async def test_reconcile_fold_cluster_persists_and_suppresses(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_integrity_enter_opens_the_file_and_right_opens_the_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Integrity joins the app-wide verb: Enter opens the file, `→` shows the record.
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    store.save(
+        Document(
+            id="passport",
+            name="Passport",
+            perm_location="nowhere",  # unknown slug -> a location-ref finding
+            has_digital=True,
+            files=[Rendition(label="d", path="passport.pdf", primary=True)],
+        )
+    )
+    (tmp_path / "passport.pdf").write_bytes(b"x")
+    opened: list[Path] = []
+    monkeypatch.setattr("dossier.tui.review.open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 32)) as pilot:
+        home = app.home
+        home.action_review()
+        pane = await _open_review_tab(pilot, "tab-integrity")
+        options = pane.query_one("#integrity", OptionList)
+        options.highlighted = next(
+            i
+            for i in range(options.option_count)
+            if (options.get_option_at_index(i).id or "").startswith("passport")
+        )
+        options.focus()
+        await pilot.pause()
+
+        await pilot.press("enter")  # activate → the file
+        await pilot.pause()
+        assert opened == [tmp_path / "passport.pdf"]
+        assert not home.has_class("show-detail"), "Enter should not open the record"
+
+        await pilot.press("right")  # → the record, where a sidecar finding is fixed
+        await pilot.pause()
+        assert home.has_class("show-detail")
+        assert home._detail_id == "passport"
+
+
+@pytest.mark.asyncio
+async def test_succession_o_opens_both_sides_older_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A succession asks a comparison question, so one file cannot answer it."""
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    for doc_id, rel in (("old-coc", "old.pdf"), ("new-coc", "new.pdf")):
+        store.save(
+            Document(
+                id=doc_id,
+                name=doc_id,
+                has_digital=True,
+                files=[Rendition(label="d", path=rel, primary=True)],
+            )
+        )
+        (tmp_path / rel).write_bytes(b"x")
+    opened: list[Path] = []
+    monkeypatch.setattr("dossier.tui.review.open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        pane = await _open_review(pilot)
+        proposal = succession.Succession(
+            newer="new-coc",
+            older="old-coc",
+            document_type="CoC",
+            confidence=0.9,
+            rationale="test",
+        )
+        monkeypatch.setattr(pane, "_highlighted_succession", lambda: proposal)
+        pane.query_one(TabbedContent).active = "tab-succession"
+        await pilot.pause()
+        pane.action_open_file()
+        await pilot.pause()
+        # Older first, so the renewal you are judging ends up frontmost.
+        assert opened == [tmp_path / "old.pdf", tmp_path / "new.pdf"]
+
+        # A paper-only predecessor opens the side that exists rather than neither.
+        opened.clear()
+        store.save(replace(store.load("old-coc"), files=[], has_digital=False))
+        pane._docs = None  # drop the snapshot so the change is seen
+        pane.action_open_file()
+        await pilot.pause()
+        assert opened == [tmp_path / "new.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_dups_x_dismisses_a_false_positive_cluster(tmp_path: Path):
+    """`x` on Duplicates — the verdict the tab had no way to record.
+
+    dedup matches on visual similarity, so it will sometimes cluster two genuinely
+    different documents (same template, adjacent pages). Every other tab could say
+    *no*; this one could only fold, which asserts the opposite.
+    """
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        pane = await _open_review(pilot)
+        pane.query_one(TabbedContent).active = "tab-dups"
+        await pilot.pause()
+        pane._pages = {"form-p1.pdf": [1, 2], "form-p2.pdf": [1]}
+        pane._populate_dups(
+            [
+                dedup.DupGroup(
+                    files=["form-p2.pdf", "form-p1.pdf"],
+                    keep="form-p1.pdf",
+                    subsets=["form-p2.pdf"],
+                    ambiguous=False,
+                )
+            ]
+        )
+        await pilot.pause()
+        pane.query_one("#dups", OptionList).highlighted = 0
+        pane.query_one("#dups", OptionList).focus()
+        await pilot.press("x")  # the real key: it was gated off this tab before
+        await pilot.pause()
+
+        state = store.load_reconcile()
+        assert state.dup_dismissed == {"form-p1.pdf": {"form-p2.pdf"}}
+        assert state.folded == {}, "dismissing must not claim they are duplicates"
+        assert pane._dups_count == 0, "the cluster should stop resurfacing"
+        # …and the copy stays adoptable, which folding would have prevented.
+        assert "form-p2.pdf" not in state.suppressed_orphans()
+
+
+@pytest.mark.asyncio
 async def test_reconcile_ignore_glob_adds_and_hides(tmp_path: Path):
     config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
     store = Store(config)
@@ -1836,7 +1980,7 @@ async def test_each_review_tab_advertises_only_its_own_verbs(tmp_path: Path):
             "tab-conflicts": {"accept", "accept_all"},
             "tab-orphans": {"open_file", "reject", "link", "accept", "ignore_glob"},
             "tab-missing": {"reject", "unlink"},
-            "tab-dups": {"open_file", "scan_dups", "fold"},
+            "tab-dups": {"open_file", "scan_dups", "fold", "reject"},
             "tab-succession": {"open_file", "reject", "accept"},
             "tab-integrity": {"open_file", "edit"},
         }

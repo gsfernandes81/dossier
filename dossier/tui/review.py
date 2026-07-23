@@ -128,6 +128,7 @@ class ReviewPane(Vertical):
         Binding("tab", "next_tab", "Next tab", priority=True),
         Binding("shift+tab", "prev_tab", "Prev tab", priority=True),
         Binding("o", "open_file", "Open"),
+        Binding("right", "detail", "Details"),
         Binding("s", "scan_dups", "Find duplicates"),
         Binding("x", "reject", "Dismiss"),
         Binding("l", "link", "Link"),
@@ -512,9 +513,21 @@ class ReviewPane(Vertical):
 
     @on(OptionList.OptionSelected, "#integrity")
     def _open_integrity(self, event: OptionList.OptionSelected) -> None:
+        """Enter — the app-wide activate verb: open the flagged document's file."""
         event.stop()
-        if event.option_id is not None:  # Enter → open the doc (read view)
-            doc_id = event.option_id.split(self._INTEG_SEP, 1)[0]
+        rel = self._integrity_rendition_path()
+        if rel is None:
+            # Most integrity findings are sidecar problems (date order, supersession,
+            # location refs) that no PDF can answer — so fall through to the record.
+            self.action_detail()
+            return
+        if self._open_one(rel):
+            self.notify(f"opened {rel}")
+
+    def action_detail(self) -> None:
+        """`→` — show the flagged record, which is where most findings get fixed."""
+        doc_id = self._integrity_doc_id()
+        if doc_id is not None:
             self.post_message(self.OpenDocument(doc_id))
 
     def action_edit(self) -> None:
@@ -574,6 +587,7 @@ class ReviewPane(Vertical):
             len(state.dismissed)
             + sum(len(ids) for ids in state.missing_ok.values())
             + sum(len(subs) for subs in state.folded.values())
+            + sum(len(subs) for subs in state.dup_dismissed.values())
         )
 
     def _populate_orphans(self, expanded: set[str] | None = None) -> None:
@@ -709,12 +723,17 @@ class ReviewPane(Vertical):
         if action == "scan_dups":
             return active == "tab-dups"
         if action == "reject":
-            return active in ("tab-orphans", "tab-missing", "tab-succession")
+            return active in (
+                "tab-orphans",
+                "tab-missing",
+                "tab-dups",
+                "tab-succession",
+            )
         if action == "accept":  # `a` — dispatched: merge / adopt / supersede
             return active in ("tab-conflicts", "tab-orphans", "tab-succession")
         if action == "accept_all":  # `A` — merge every conflict at once
             return active == "tab-conflicts"
-        if action == "edit":  # `e` — edit the flagged document
+        if action in ("edit", "detail"):  # `e` edit, `→` show the flagged record
             return active == "tab-integrity"
         if action in ("link", "ignore_glob"):
             return active == "tab-orphans"
@@ -774,32 +793,42 @@ class ReviewPane(Vertical):
         toggle_help_panel(self)
 
     def action_open_file(self) -> None:
-        """Open the file under the cursor with the platform opener (xdg/termux)."""
+        """Open what the cursor points at with the platform opener (xdg/termux).
+
+        Usually one file; on Succession, *both* — "does this renewal really replace
+        that one?" is a comparison, and one file cannot answer it.
+        """
         active = self._active_tab()
         if active == "tab-orphans":
             leaf = self._cursor_leaf()
-            rel = leaf.path if leaf is not None else None
+            rels = [leaf.path] if leaf is not None else []
         elif active == "tab-dups":
-            rel = self._cursor_dup_path()
+            rels = [rel for rel in (self._cursor_dup_path(),) if rel]
         elif active == "tab-succession":
-            rel = self._succession_rendition_path()
+            rels = self._succession_rendition_paths()
         elif active == "tab-integrity":
-            rel = self._integrity_rendition_path()
+            rels = [rel for rel in (self._integrity_rendition_path(),) if rel]
         else:
-            rel = None
-        if rel is None:
+            rels = []
+        if not rels:
             self.notify("no file under the cursor")
             return
+        opened = [rel for rel in rels if self._open_one(rel)]
+        if opened:
+            self.notify(f"opened {' + '.join(opened)}")
+
+    def _open_one(self, rel: str) -> bool:
+        """Open one relative path, reporting rather than raising. True if it opened."""
         path = query.resolve_path(self._config.syncthing_root, rel)
         if not path.exists():
             self.notify(f"file not found: {path}", severity="error")
-            return
+            return False
         try:
             open_file(path)
         except OpenError as exc:
             self.notify(str(exc), severity="error")
-        else:
-            self.notify(f"opened {rel}")
+            return False
+        return True
 
     def _cursor_dup_path(self) -> str | None:
         options = self.query_one("#dups", OptionList)
@@ -812,13 +841,23 @@ class ReviewPane(Vertical):
 
     # -- decisions (sidecar only — never touches a real file) ----------------
 
-    def _succession_rendition_path(self) -> str | None:
+    def _succession_rendition_paths(self) -> list[str]:
+        """Both sides of the proposal, older first so the renewal lands frontmost.
+
+        Whichever side has a digital file: a paper-only predecessor is common, and
+        showing the one you *can* read beats refusing both.
+        """
         proposal = self._highlighted_succession()
         if proposal is None:
-            return None
-        doc = next((d for d in self._snapshot() if d.id == proposal.newer), None)
-        rendition = doc.primary_rendition() if doc is not None else None
-        return rendition.path if rendition is not None else None
+            return []
+        by_id = {d.id: d for d in self._snapshot()}
+        paths = []
+        for doc_id in (proposal.older, proposal.newer):
+            doc = by_id.get(doc_id)
+            rendition = doc.primary_rendition() if doc is not None else None
+            if rendition is not None:
+                paths.append(rendition.path)
+        return paths
 
     def action_accept(self) -> None:
         """`a` — the primary accept, meaning whatever the active tab affirms.
@@ -841,6 +880,8 @@ class ReviewPane(Vertical):
             self._dismiss_orphan()
         elif active == "tab-missing":
             self._ack_missing()
+        elif active == "tab-dups":
+            self._dismiss_dups()
         elif active == "tab-succession":
             self._dismiss_succession()
 
@@ -929,19 +970,43 @@ class ReviewPane(Vertical):
             self.notify(f"unlinked {path}")
             self._refresh()
 
-    def action_fold(self) -> None:
+    def _cursor_group(self) -> dedup.DupGroup | None:
         options = self.query_one("#dups", OptionList)
         index = options.highlighted
         if index is None or index >= len(self._row_group):
-            return
+            return None
         gi = self._row_group[index]
         if not (0 <= gi < len(self._groups)):
-            return  # cursor on a placeholder / "no duplicates" row
-        group = self._groups[gi]
+            return None  # cursor on a placeholder / "no duplicates" row
+        return self._groups[gi]
+
+    def action_fold(self) -> None:
+        """`f` — yes, these are the same file: record the copies under the keep."""
+        group = self._cursor_group()
+        if group is None:
+            return
         self._state.folded.setdefault(group.keep, set()).update(group.subsets)
         if not self._persist_state():
             return
         self.notify(f"folded {len(group.subsets)} copy(ies) under {_stem(group.keep)}")
+        self._refresh(refilter_dups=True)
+
+    def _dismiss_dups(self) -> None:
+        """`x` — no, these aren't duplicates: settle the cluster without claiming it.
+
+        The mirror of fold, and deliberately *not* fold: folding would hide these
+        paths from the orphan list (``suppressed_orphans``), so a genuinely
+        different document still awaiting adoption would vanish from the list that
+        would have prompted you to adopt it. Keyed like fold, so a new copy
+        resurfaces the cluster for a fresh look rather than staying buried.
+        """
+        group = self._cursor_group()
+        if group is None:
+            return
+        self._state.dup_dismissed.setdefault(group.keep, set()).update(group.subsets)
+        if not self._persist_state():
+            return
+        self.notify(f"not duplicates: {_stem(group.keep)} — cluster dismissed")
         self._refresh(refilter_dups=True)
 
     def action_ignore_glob(self) -> None:

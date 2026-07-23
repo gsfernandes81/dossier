@@ -334,6 +334,7 @@ def test_reconcile_sidecar_round_trips_paths_with_slashes(store: Store):
         ignore=["Wallpapers/*"],
         missing_ok={"Marine/PSCRB Cert gone.pdf": {"pscrb"}},
         folded={"Marine/CoC Card.pdf": {"Applications/2024/CoC Card.pdf"}},
+        dup_dismissed={"Forms/Page 1.pdf": {"Forms/Page 2.pdf"}},
     )
     store.save_reconcile(state)
     loaded = store.load_reconcile()
@@ -341,6 +342,25 @@ def test_reconcile_sidecar_round_trips_paths_with_slashes(store: Store):
     assert loaded.ignore == ["Wallpapers/*"]
     assert loaded.missing_ok == {"Marine/PSCRB Cert gone.pdf": {"pscrb"}}
     assert loaded.folded == {"Marine/CoC Card.pdf": {"Applications/2024/CoC Card.pdf"}}
+    assert loaded.dup_dismissed == {"Forms/Page 1.pdf": {"Forms/Page 2.pdf"}}
+
+
+def test_dismissing_a_cluster_settles_it_without_hiding_its_files(store: Store):
+    """A false-positive verdict must not do what folding does.
+
+    Folding asserts the copies *are* the same file and hides them from the orphan
+    list; using it to silence a false positive would make a genuinely different
+    document — one still awaiting adoption — vanish from the list that would have
+    prompted you to adopt it.
+    """
+    state = ReconcileState(dup_dismissed={"a.pdf": {"b.pdf"}})
+    assert state.covers("a.pdf", ["b.pdf"])  # settled: stays off the duplicates tab
+    assert "b.pdf" not in state.suppressed_orphans()  # but still adoptable
+    assert ReconcileState(folded={"a.pdf": {"b.pdf"}}).suppressed_orphans() == {"b.pdf"}
+
+    # A new copy is new evidence, so the cluster comes back for a fresh look —
+    # the same rule folding follows.
+    assert not state.covers("a.pdf", ["b.pdf", "c.pdf"])
 
 
 def test_reconcile_sidecar_empty_and_absent(store: Store):

@@ -66,10 +66,16 @@ Validity is **event-aware**: a document isn't judged only against today but agai
 
 ## Reconciling files against records — `ds reconcile`
 
-Over time the file tree and the document records drift apart. The TUI's **Review** screen (or the
-`ds reconcile` CLI) surfaces three kinds of mismatch, each with **metadata-only** actions — it
+Over time the file tree and the document records drift apart. The TUI's **Review** surface (or
+the `ds reconcile` CLI) surfaces three kinds of mismatch, each with **metadata-only** actions — it
 **never moves or deletes a real file**. (In the TUI these are tabs alongside Conflicts and
-Integrity, so one screen covers the whole tidy-up.)
+Integrity, so one surface covers the whole tidy-up.)
+
+Review takes over the first two miller columns rather than opening a modal, so acting on a finding
+keeps it in view: `Enter` opens the file under the cursor and `→` opens the record in **column 3**,
+beside the finding that sent you there. `Esc` closes the record and leaves review exactly where it
+was — same tab, same cursor — and a second `Esc` leaves review. The footer lists only the **active
+tab's** keys, so what you can press is what you can see.
 
 - **Orphan files** — a file on disk that no document links. Adopt it into a new document, link it
   to an existing one, or dismiss it (persisted so it stays quiet). An ignore-glob handles whole
@@ -78,8 +84,13 @@ Integrity, so one screen covers the whole tidy-up.)
   unlink the dead rendition.
 - **Duplicate clusters** *(needs the `dedup` extra; run with `--dedup`)* — the same document
   scanned more than once. dossier perceptual-hashes each page and folds subsets under their
-  superset; you review and **fold** a cluster (keep one, mark the rest). Folding is always
-  review-only, never automatic.
+  superset; you review and **fold** a cluster (`f` — keep one, mark the rest). Folding is always
+  review-only, never automatic. Matching is visual, so it will sometimes cluster two genuinely
+  *different* documents (same template, adjacent pages): dismiss those with `x`. Use `x`, not `f` —
+  folding asserts the copies are the same file and hides them from the orphan list, which would
+  make a different document that is still awaiting adoption disappear from the list that would have
+  prompted you to adopt it. Either verdict settles the cluster, and adding a new copy brings it
+  back for a fresh look.
 
 ## Filing unfiled documents — `ds import` / `ds intake`
 

@@ -92,3 +92,43 @@ def test_drives_real_app_in_a_real_terminal(tmp_path: Path):
         assert not term.alive(), "app did not quit on ctrl+q"
     finally:
         term.close()
+
+
+def test_review_takes_the_columns_and_keeps_its_place(tmp_path: Path):
+    """Review is a widget on the home now, so its keys share one binding chain.
+
+    That is precisely what a headless test can't vouch for: which surface claims
+    Tab, whether a letter reaches review or leaks into the type-to-search router,
+    and whether the footer follows focus. Drive it for real.
+    """
+    term = PtyTerm([sys.executable, LAUNCH, str(tmp_path)], cols=100, rows=30)
+    try:
+        assert term.wait_for("dossier"), "home never rendered"
+        assert term.wait_for("Passport"), "documents pane never populated"
+
+        term.send("\x10", settle=0.4)  # ctrl+p
+        term.send("review", settle=0.4)
+        term.send("enter", settle=1.0)
+        assert term.wait_for("Conflicts", timeout=10), "review never opened"
+        assert term.wait_for("Duplicates"), "the tab bar is missing"
+
+        # Tab belongs to review while focus is inside it — not to focus-traversal.
+        term.send("tab", settle=0.5)
+        term.send("tab", settle=0.5)
+        assert term.wait_for("press  s  to scan", timeout=6), "Tab did not cycle tabs"
+
+        # The footer follows the active tab, offering this tab's verbs and no other
+        # tab's. (It still truncates at the right edge, so assert on an early entry.)
+        footer = term.text().splitlines()[-1]
+        assert "Find duplicates" in footer, f"Duplicates lost its verb: {footer!r}"
+        assert "Unlink" not in footer, f"footer shows another tab's verb: {footer!r}"
+        assert "Link" not in footer, f"footer shows another tab's verb: {footer!r}"
+
+        # Esc leaves review and gives the columns back.
+        term.send("esc", settle=0.6)
+        assert term.wait_for("Passport"), "Esc did not return to the columns"
+
+        term.send("\x11", settle=0.5)
+        assert not term.alive(), "app did not quit on ctrl+q"
+    finally:
+        term.close()

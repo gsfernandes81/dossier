@@ -130,12 +130,17 @@ class ReconcileState:
       its comments).
     * ``missing_ok`` — ``path → {doc ids}`` whose lost rendition is acknowledged.
     * ``folded`` — ``keep path → {confirmed duplicate/subset paths}``.
+    * ``dup_dismissed`` — ``keep path → {subset paths}`` for clusters judged *not*
+      duplicates, the mirror of ``folded``. Kept apart because it means the
+      opposite: folding asserts the copies are the same file and hides them from
+      the orphan list, so it is the wrong way to silence a false positive.
     """
 
     dismissed: set[str] = field(default_factory=set)
     ignore: list[str] = field(default_factory=list)
     missing_ok: dict[str, set[str]] = field(default_factory=dict)
     folded: dict[str, set[str]] = field(default_factory=dict)
+    dup_dismissed: dict[str, set[str]] = field(default_factory=dict)
     # Rejected succession proposals, keyed "newer\x00older" (see dossier.succession).
     succession_dismissed: set[str] = field(default_factory=set)
 
@@ -151,14 +156,19 @@ class ReconcileState:
         return doc_id in self.missing_ok.get(path, frozenset())
 
     def covers(self, keep: str, subsets: Sequence[str]) -> bool:
-        """Whether a scanned cluster is fully accounted for by a fold decision.
+        """Whether a scanned cluster is fully accounted for by a past decision.
 
-        Suppress iff the same ``keep`` was folded *and* every current subset was
-        recorded — so a new copy (an unrecorded subset) resurfaces the whole
-        cluster for a fresh decision.
+        Suppress iff the same ``keep`` was judged — folded ("yes, duplicates") or
+        dismissed ("no, they aren't") — *and* every current subset was recorded, so
+        a new copy (an unrecorded subset) resurfaces the whole cluster for a fresh
+        decision. Both verdicts settle the cluster; only their meaning differs, and
+        only ``folded`` additionally hides its subsets from the orphan list.
         """
-        recorded = self.folded.get(keep)
-        return recorded is not None and set(subsets) <= recorded
+        wanted = set(subsets)
+        return any(
+            recorded is not None and wanted <= recorded
+            for recorded in (self.folded.get(keep), self.dup_dismissed.get(keep))
+        )
 
 
 class SuggestedField(StrEnum):

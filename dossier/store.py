@@ -421,6 +421,7 @@ class Store:
             ignore=_as_str_list(raw.get("ignore")),
             missing_ok=_as_str_set_map(raw.get("missing_ok")),
             folded=_as_str_set_map(raw.get("folded")),
+            dup_dismissed=_as_str_set_map(raw.get("dup_dismissed")),
             succession_dismissed=set(_as_str_list(raw.get("succession_dismissed"))),
         )
 
@@ -440,6 +441,11 @@ class Store:
         folded = {keep: sorted(subs) for keep, subs in state.folded.items() if subs}
         if folded:
             data["folded"] = {k: folded[k] for k in sorted(folded)}
+        not_dups = {
+            keep: sorted(subs) for keep, subs in state.dup_dismissed.items() if subs
+        }
+        if not_dups:
+            data["dup_dismissed"] = {k: not_dups[k] for k in sorted(not_dups)}
         if state.succession_dismissed:
             data["succession_dismissed"] = sorted(state.succession_dismissed)
         return tomli_w.dumps(data).encode("utf-8")
