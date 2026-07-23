@@ -18,8 +18,9 @@
 from datetime import date, timedelta
 
 from dossier import preparedness
-from dossier.model import Bundle, Document
-from dossier.preparedness import EventStatus
+from dossier.model import Bundle, Document, Requirement, Template
+from dossier.preparedness import EventStatus, ReadyState
+from dossier.scan import ScanReading
 
 EVENT = date(2026, 6, 1)
 TODAY = date(2026, 1, 1)
@@ -132,3 +133,110 @@ def test_event_flags_excludes_superseded_members():
     bundles = [Bundle(slug="trip", title="Trip", date=EVENT)]
     flags = preparedness.event_flags(docs, bundles, today=TODAY, margin_days=30)
     assert "old" not in flags  # renewed away — never nags
+
+
+# -- matches_requirement -----------------------------------------------------
+
+
+def test_matches_requirement_by_name_substring():
+    doc = Document(id="p", name="British Passport 2024")
+    assert preparedness.matches_requirement(doc, Requirement("passport", ("passport",)))
+
+
+def test_matches_requirement_by_scan_document_type():
+    doc = Document(id="d", name="scan001")
+    reading = ScanReading.from_payload({"document_type": "ENG-1 Medical"}, model="m")
+    req = Requirement("eng1", ("eng-1",))
+    assert preparedness.matches_requirement(doc, req, reading)
+    assert not preparedness.matches_requirement(doc, req)  # nothing without the reading
+
+
+def test_matches_requirement_hierarchical_tag_alias():
+    doc = Document(id="c", name="Cert", tags=["marine/coc"])
+    assert preparedness.matches_requirement(doc, Requirement("x", ("marine/coc",)))
+    # a /-alias matches tags only — not a name that happens to contain the text
+    named = Document(id="n", name="marine/foo in the name")
+    assert not preparedness.matches_requirement(
+        named, Requirement("x", ("marine/foo",))
+    )
+
+
+def test_matches_requirement_defaults_alias_to_the_label():
+    doc = Document(id="p", name="My Passport")
+    assert preparedness.matches_requirement(
+        doc, Requirement("passport")
+    )  # no match given
+
+
+# -- check_bundle ------------------------------------------------------------
+
+
+def test_check_bundle_gathered_missing_and_problem():
+    docs = [
+        Document(
+            id="pp", name="Passport", bundles=["trip"], expiry_date=date(2030, 1, 1)
+        ),
+        Document(
+            id="coc", name="CoC Card", bundles=["trip"], expiry_date=date(2026, 3, 1)
+        ),  # lapses before the event
+    ]
+    bundle = Bundle(slug="trip", title="Trip", date=EVENT)
+    template = Template(
+        slug="trip",
+        title="Trip",
+        requires=(
+            Requirement("passport", ("passport",)),
+            Requirement("coc", ("coc",)),
+            Requirement("photo", ("photo",)),  # no member matches
+        ),
+    )
+    readiness = preparedness.check_bundle(
+        bundle, template, docs, {}, today=TODAY, margin_days=30
+    )
+    by_label = {c.requirement.label: c for c in readiness.checks}
+    assert by_label["passport"].state is ReadyState.GATHERED
+    assert by_label["coc"].state is ReadyState.PROBLEM  # expired-by-event
+    assert by_label["photo"].state is ReadyState.MISSING
+    assert not readiness.ready
+    assert "1/3 ready" in readiness.summary
+
+
+def test_check_bundle_optional_missing_does_not_block_ready():
+    docs = [
+        Document(
+            id="pp", name="Passport", bundles=["trip"], expiry_date=date(2030, 1, 1)
+        )
+    ]
+    bundle = Bundle(slug="trip", title="Trip", date=EVENT)
+    template = Template(
+        slug="trip",
+        title="Trip",
+        requires=(
+            Requirement("passport", ("passport",)),
+            Requirement("photo", ("photo",), optional=True),
+        ),
+    )
+    readiness = preparedness.check_bundle(
+        bundle, template, docs, {}, today=TODAY, margin_days=30
+    )
+    assert readiness.ready  # the optional-missing photo doesn't block
+
+
+def test_check_bundle_reports_extras_and_candidates():
+    docs = [
+        Document(
+            id="pp", name="Passport", bundles=["trip"], expiry_date=date(2030, 1, 1)
+        ),
+        Document(id="misc", name="Random Note", bundles=["trip"]),  # matches nothing
+        Document(id="pp2", name="Old Passport", bundles=[]),  # matches, not a member
+    ]
+    bundle = Bundle(slug="trip", title="Trip", date=None)  # undated: presence only
+    template = Template(
+        slug="trip", title="Trip", requires=(Requirement("passport", ("passport",)),)
+    )
+    readiness = preparedness.check_bundle(
+        bundle, template, docs, {}, today=TODAY, margin_days=30
+    )
+    assert readiness.extras == ("misc",)
+    assert "pp2" in readiness.checks[0].candidates
+    assert readiness.checks[0].state is ReadyState.GATHERED  # undated → no problem

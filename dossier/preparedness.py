@@ -34,8 +34,9 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import StrEnum
 
-from dossier.model import Bundle, Document
+from dossier.model import Bundle, Document, Requirement, Template
 from dossier.query import superseded_ids
+from dossier.scan import ScanReading
 
 
 class EventStatus(StrEnum):
@@ -109,3 +110,131 @@ def event_flags(
     for flags in out.values():
         flags.sort(key=lambda flag: (_SEVERITY[flag.status], flag.event))
     return out
+
+
+# -- bundle templates (readiness) --------------------------------------------
+
+
+class ReadyState(StrEnum):
+    """A requirement's state within a bundle."""
+
+    GATHERED = "gathered"  # enough valid members
+    PROBLEM = "problem"  # matched, but a member lapses by the event
+    MISSING = "missing"  # too few members match
+
+
+def matches_requirement(
+    doc: Document, req: Requirement, reading: ScanReading | None = None
+) -> bool:
+    """Whether ``doc`` satisfies ``req`` — any alias hits its name / tags / scan type.
+
+    A plain alias is a casefolded substring over ``name + tags + document_type``
+    (works today: names carry the type words). An alias with a ``/`` is matched
+    hierarchically against tags only (``marine`` covers ``marine/coc``), so it
+    sharpens as intake writes tags without over-matching a name.
+    """
+    tags_cf = [tag.casefold() for tag in doc.tags]
+    parts = [doc.name, *doc.tags]
+    if reading is not None and reading.document_type:
+        parts.append(reading.document_type)
+    haystack = " ".join(parts).casefold()
+    for alias in req.aliases:
+        needle = alias.casefold().strip()
+        if not needle:
+            continue
+        if "/" in needle:
+            if any(tag == needle or tag.startswith(needle + "/") for tag in tags_cf):
+                return True
+        elif needle in haystack:
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class RequirementCheck:
+    requirement: Requirement
+    matched: tuple[str, ...]  # member ids satisfying it
+    statuses: dict[str, EventStatus]  # per matched member, when the bundle is dated
+    candidates: tuple[str, ...]  # store docs that match but aren't members yet
+
+    @property
+    def state(self) -> ReadyState:
+        if len(self.matched) < self.requirement.count:
+            return ReadyState.MISSING
+        problem = (EventStatus.EXPIRED, EventStatus.EXPIRING)
+        if any(status in problem for status in self.statuses.values()):
+            return ReadyState.PROBLEM
+        return ReadyState.GATHERED
+
+
+@dataclass(frozen=True)
+class BundleReadiness:
+    bundle: Bundle
+    template: Template
+    checks: tuple[RequirementCheck, ...]
+    extras: tuple[str, ...]  # member ids matching no requirement
+
+    @property
+    def ready(self) -> bool:
+        """Every *non-optional* requirement gathered."""
+        return all(
+            check.state is ReadyState.GATHERED
+            for check in self.checks
+            if not check.requirement.optional
+        )
+
+    @property
+    def summary(self) -> str:
+        gathered = sum(1 for c in self.checks if c.state is ReadyState.GATHERED)
+        problems = sum(1 for c in self.checks if c.state is ReadyState.PROBLEM)
+        missing = sum(1 for c in self.checks if c.state is ReadyState.MISSING)
+        parts = [f"{gathered}/{len(self.checks)} ready"]
+        if problems:
+            parts.append(f"{problems} problem")
+        if missing:
+            parts.append(f"{missing} missing")
+        return " · ".join(parts)
+
+
+def check_bundle(
+    bundle: Bundle,
+    template: Template,
+    docs: list[Document],
+    readings: dict[str, ScanReading],
+    *,
+    today: date,
+    margin_days: int,
+) -> BundleReadiness:
+    """Measure ``bundle``'s members against ``template`` (event-aware when dated)."""
+    superseded = superseded_ids(docs)
+    members = [d for d in docs if bundle.slug in d.bundles and d.id not in superseded]
+    event = bundle.date if (bundle.date is not None and bundle.date >= today) else None
+
+    checks: list[RequirementCheck] = []
+    claimed: set[str] = set()
+    for req in template.requires:
+        matched: list[str] = []
+        statuses: dict[str, EventStatus] = {}
+        for doc in members:
+            if not matches_requirement(doc, req, readings.get(doc.id)):
+                continue
+            matched.append(doc.id)
+            if event is not None:
+                statuses[doc.id] = event_status(
+                    doc,
+                    event,
+                    margin_days=margin_days,
+                    min_valid_days=req.min_valid_days,
+                )
+        claimed.update(matched)
+        candidates = tuple(
+            d.id
+            for d in docs
+            if bundle.slug not in d.bundles
+            and d.id not in superseded
+            and matches_requirement(d, req, readings.get(d.id))
+        )
+        checks.append(RequirementCheck(req, tuple(matched), statuses, candidates))
+
+    extras = tuple(d.id for d in members if d.id not in claimed)
+    return BundleReadiness(bundle, template, tuple(checks), extras)

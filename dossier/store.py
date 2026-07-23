@@ -55,7 +55,9 @@ from dossier.model import (
     Location,
     ReconcileState,
     Rendition,
+    Requirement,
     SuggestionState,
+    Template,
 )
 from dossier.scan import ScanReading
 
@@ -237,6 +239,7 @@ class Store:
             if not isinstance(raw, dict):
                 continue
             export_dir = raw.get("export_dir")
+            template = raw.get("template")
             out[slug] = Bundle(
                 slug=slug,
                 title=str(raw.get("title", slug)),
@@ -244,6 +247,7 @@ class Store:
                 created=_as_datetime(raw.get("created")),
                 export_dir=str(export_dir) if export_dir else None,
                 notes=str(raw.get("notes", "")),
+                template=str(template) if template else None,
             )
         return out
 
@@ -261,8 +265,47 @@ class Store:
                 entry["export_dir"] = bundle.export_dir
             if bundle.notes:
                 entry["notes"] = bundle.notes
+            if bundle.template:
+                entry["template"] = bundle.template
             data[slug] = entry
         self._write_toml(self.config.bundles_path, data)
+
+    def load_templates(self) -> dict[str, Template]:
+        """Bundle-readiness checklists from ``templates.toml`` (absent → ``{}``).
+
+        Hand-authored, synced, keyed by slug; tolerant of missing/junk fields so a
+        typo degrades one requirement rather than erroring the whole file.
+        """
+        out: dict[str, Template] = {}
+        for slug, raw in _read_toml_or_empty(self.config.templates_path).items():
+            if not isinstance(raw, dict):
+                continue
+            requires: list[Requirement] = []
+            require = raw.get("require")
+            for req in require if isinstance(require, list) else []:
+                if not isinstance(req, dict):
+                    continue
+                label = str(req.get("label", "")).strip()
+                if not label:
+                    continue
+                match_raw = req.get("match")
+                aliases = match_raw if isinstance(match_raw, list) else []
+                match = tuple(str(a) for a in aliases if str(a).strip())
+                requires.append(
+                    Requirement(
+                        label=label,
+                        match=match,
+                        count=_as_int(req.get("count"), 1),
+                        min_valid_days=_as_int(req.get("min_valid_days"), 0),
+                        optional=bool(req.get("optional", False)),
+                    )
+                )
+            out[slug] = Template(
+                slug=slug,
+                title=str(raw.get("title", slug)),
+                requires=tuple(requires),
+            )
+        return out
 
     # -- reconcile sidecar ---------------------------------------------------
 
@@ -461,6 +504,10 @@ def _as_opt_int(value: object) -> int | None:
         return int(str(value))
     except ValueError:
         return None
+
+
+def _as_int(value: object, default: int) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
 
 
 def _as_str_list(value: object) -> list[str]:

@@ -80,6 +80,39 @@ class Bundle:
     created: dt.datetime | None = None
     export_dir: str | None = None
     notes: str = ""
+    # Slug of a `templates.toml` checklist this bundle is measured against (Phase 10).
+    template: str | None = None
+
+
+@dataclass(frozen=True)
+class Requirement:
+    """One document type a bundle template needs.
+
+    ``match`` are casefolded-substring aliases tried against a doc's name, tags, and
+    scan ``document_type`` (an alias containing ``/`` is matched as a hierarchical
+    tag) — empty defaults to ``(label,)``. ``count`` is how many distinct members
+    must match; ``min_valid_days`` is how long past the event they must stay valid;
+    ``optional`` requirements inform but never block "ready".
+    """
+
+    label: str
+    match: tuple[str, ...] = ()
+    count: int = 1
+    min_valid_days: int = 0
+    optional: bool = False
+
+    @property
+    def aliases(self) -> tuple[str, ...]:
+        return self.match or (self.label,)
+
+
+@dataclass(frozen=True)
+class Template:
+    """A named checklist of required document types, attached to a bundle by slug."""
+
+    slug: str
+    title: str
+    requires: tuple[Requirement, ...] = ()
 
 
 @dataclass
