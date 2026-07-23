@@ -1403,3 +1403,28 @@ async def test_resolve_screen_lists_and_merges_conflicts(tmp_path: Path):
         await pilot.pause()
         assert not conflict.exists()  # conflict cleared
         assert "travel" in store.load("passport").tags  # tags unioned in
+
+
+@pytest.mark.asyncio
+async def test_esc_returns_to_reconcile_when_detail_opened_from_it(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+
+        # A normal (columns) detail closes back to the columns on Esc.
+        home.open_detail("passport")
+        await pilot.pause()
+        assert home.has_class("show-detail")
+        home.action_escape()
+        await pilot.pause()
+        assert not home.has_class("show-detail")
+        assert app.screen is home  # stayed on the home columns
+
+        # A detail opened *from reconcile* (dismiss-with-doc-id) re-opens reconcile.
+        home._after_reconcile("passport")
+        await pilot.pause()
+        assert home.has_class("show-detail")
+        home.action_escape()
+        await pilot.pause()
+        assert isinstance(app.screen, ReconcileScreen)  # back on reconcile, not columns
