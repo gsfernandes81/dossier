@@ -90,8 +90,15 @@ succession + a canonical name), which you review then apply. Two entry points:
   be re-run without re-scanning what it already read.
 - **`ds intake`** — the ongoing drop-box flow. Configure an inbox once (`[intake] inbox` in
   `.dossier/config.toml`), drop files there (e.g. from your phone), then `ds intake --apply`, or
-  press **`I`** in the TUI for the review card and file each proposal with one key (`a` file,
-  `e` file + edit, `n` rename, `k` skip, `x` not a document).
+  press **`I`** in the TUI for the review card and act on each proposal with one key (`a` file,
+  `e` file + edit, `d` fold duplicate, `n` rename, `s` renews an existing doc, `k` skip,
+  `x` not a document).
+
+The intake card also resolves a drop's **relationship to what you already have**: if it's an exact
+copy (or a fewer-pages subset) of an existing document's rendition, it's flagged as a duplicate and
+`d` **folds** it instead of creating a second record — avoiding the duplicate record, the canonical
+filename collision, and the false "renewal" that would otherwise follow. (Duplicate detection needs
+the `[dedup]` extra; without it the card simply doesn't nag.)
 
 Both lean on the vision scan for their proposals, so they shine with the `scan` extra and a vision
 endpoint configured; per-file scan failures are skipped, not fatal. For a hands-free loop, the
