@@ -119,7 +119,7 @@ def test_transcribe_posts_the_transcript_schema(
     transcript, keywords = scan.transcribe(tmp_path / "x.pdf", _cfg(tmp_path))
     assert transcript == "Hi World"  # stripped
     assert keywords == ("Hello", "World")  # blanks dropped
-    assert seen == {"schema": "transcript", "max_tokens": 2048, "has_image": True}
+    assert seen == {"schema": "transcript", "max_tokens": 4096, "has_image": True}
 
 
 def test_scans_sidecar_round_trips(tmp_path: Path):
