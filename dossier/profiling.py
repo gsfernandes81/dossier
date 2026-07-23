@@ -269,10 +269,11 @@ def run(config: Config | None, *, runs: int = 3, importtime: bool = False) -> in
     t = timings
     out.append(f"\nstore data  ({t.doc_count} docs, {t.total_kib:.0f} KiB)")
     out.append(f"  location            : {t.documents_dir}")
-    out.append(f"  read all bytes (I/O): {_fmt(t.read_ms)}")
-    out.append(f"  load_all (read+parse): {_fmt(t.load_all_ms)}")
+    out.append(f"  read bytes (serial) : {_fmt(t.read_ms)}   (reference only)")
+    out.append(
+        f"  load_all (parallel) : {_fmt(t.load_all_ms)}   (16-thread read + parse)"
+    )
     out.append(f"  load_all again      : {_fmt(t.load_all_again_ms)}")
-    out.append(f"  parse only (warm)   : {_fmt(t.load_all_again_ms)}")
     out.append(f"  load one document   : {_fmt(t.load_one_ms)}")
     out.append(
         f"  scan_files (walk)   : {_fmt(t.scan_files_ms)}  ({t.scan_files_count})"
@@ -289,25 +290,29 @@ def run(config: Config | None, *, runs: int = 3, importtime: bool = False) -> in
 
 
 def _diagnose(t: StoreTimings, imports: list[tuple[str, float | None]]) -> list[str]:
-    """A few heuristic pointers at the dominant cost, for a fix to target."""
+    """A few heuristic pointers at the dominant cost, for a fix to target.
+
+    Opening Review costs ≈ ``load_all`` + ``reconcile.run`` (which itself contains
+    the ``scan_files`` orphan walk); the Integrity tab's ``doctor.run`` is deferred.
+    """
     notes: list[str] = []
     if _looks_fuse(t.documents_dir):
         notes.append(
-            "store is under Android shared storage (FUSE) — every read pays "
-            "syscall overhead; moving the Syncthing folder to Termux-internal "
-            "storage (~/) is likely the biggest single win."
+            "store is under Android shared storage (FUSE) — every open/stat pays "
+            "syscall overhead; the folder walk below is the clearest victim."
         )
-    parse_ms = t.load_all_again_ms
-    if parse_ms > t.read_ms * 1.5 and parse_ms > 200:
+    if t.reconcile_ms > t.load_all_ms and t.reconcile_ms > 300:
         notes.append(
-            "load_all is parse-bound (YAML parsing >> file I/O) - a per-device "
-            "metadata index (re-parse only changed files) or a faster front-matter "
-            "parser would help most."
+            f"reconcile.run ({t.reconcile_ms:.0f} ms), mostly its orphan folder-walk "
+            f"(scan_files, {t.scan_files_ms:.0f} ms), now dominates the Review-open "
+            "load. Deferring the orphan scan to the Orphans tab (like Integrity) or "
+            "caching the file tree is the next lever."
         )
-    elif t.read_ms > parse_ms * 1.5 and t.read_ms > 200:
+    if t.read_ms > t.load_all_ms * 1.5 and t.read_ms > 300:
         notes.append(
-            "load_all is I/O-bound (reads >> parse) - check the storage location "
-            "above; a cached index avoids re-reading unchanged files."
+            f"the parallel load_all ({t.load_all_ms:.0f} ms) is already well under a "
+            f"serial read ({t.read_ms:.0f} ms) — the read parallelism is doing its "
+            "job; load_all is not the bottleneck."
         )
     tui = next((ms for label, ms in imports if label.startswith("dossier.tui")), None)
     floor = imports[0][1] or 0.0
