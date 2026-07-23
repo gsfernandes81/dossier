@@ -22,7 +22,7 @@ import pytest
 
 from dossier import store as store_module
 from dossier.config import Config
-from dossier.errors import DocumentExistsError, StaleWriteError
+from dossier.errors import DocumentExistsError, StaleWriteError, StoreError
 from dossier.model import Bundle, Document, Location, ReconcileState, Rendition
 from dossier.store import TEMP_PREFIX, Store, atomic_write_bytes, unique_id
 
@@ -115,6 +115,29 @@ def test_conflicts_excluded_and_listed(store: Store):
 
     assert [d.id for d in store.load_all()] == ["real"]
     assert conflict in store.list_conflicts()
+
+
+def test_load_all_parallel_matches_serial(store: Store):
+    # load_all reads files in parallel then parses serially; it must return the
+    # same documents, in the same order, as reading them one at a time.
+    for i in range(25):
+        store.save(Document(id=f"doc-{i:02d}", name=f"Doc {i}", tags=[f"t{i}"]))
+    paths = list(store.iter_document_paths())
+    serial = [store._read(p) for p in paths]
+    parallel = store.load_all()
+    assert [d.id for d in parallel] == [d.id for d in serial]
+    assert [d.name for d in parallel] == [d.name for d in serial]
+    assert [d.source_hash for d in parallel] == [d.source_hash for d in serial]
+
+
+def test_load_all_propagates_parse_errors(store: Store):
+    # A malformed file must still raise from the parallel path, not be dropped —
+    # matching the old serial comprehension's behaviour.
+    store.save(Document(id="ok", name="OK"))
+    bad = store.config.documents_dir / "bad.md"
+    bad.write_text("---\n- 1\n- 2\n---\n", encoding="utf-8")  # a list, not a mapping
+    with pytest.raises(StoreError):
+        store.load_all()
 
 
 def test_atomic_write_leaves_no_temp_files(store: Store):

@@ -41,6 +41,7 @@ import tempfile
 import time
 import tomllib
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -64,6 +65,11 @@ from dossier.scan import ScanReading
 
 CONFLICT_MARKER = ".sync-conflict-"
 TEMP_PREFIX = ".dossier-tmp-"
+
+# Threads for the parallel read phase of load_all. File reads are latency-bound
+# and release the GIL, so overlapping them is a big win on a synced/network store;
+# ~16 measured optimal on Termux /sdcard (more workers stop helping).
+_READ_WORKERS = 16
 
 _DEFAULT_SYNCED_CONFIG = b"""\
 # dossier synced settings - shared across devices via Syncthing.
@@ -146,7 +152,23 @@ class Store:
         return self._read(self.document_path(doc_id))
 
     def load_all(self) -> list[Document]:
-        return [self._read(path) for path in self.iter_document_paths()]
+        """Load every document, reading the files in parallel then parsing serially.
+
+        The read is I/O-latency-bound — brutal one-at-a-time on a synced/network
+        store (hundreds of slow opens on Termux's ``/sdcard``), but it overlaps
+        cleanly because file reads release the GIL. Parsing is CPU/GIL-bound, so it
+        stays serial (threads would just thrash the GIL). ``ThreadPoolExecutor.map``
+        keeps output order and re-raises the first read error, so behaviour matches
+        the old serial comprehension — only faster.
+        """
+        paths = list(self.iter_document_paths())
+        if not paths:
+            return []
+        with ThreadPoolExecutor(max_workers=_READ_WORKERS) as pool:
+            blobs = pool.map(self._read_bytes, paths)  # parallel I/O, ordered
+            return [
+                self._parse(path, raw) for path, raw in zip(paths, blobs, strict=True)
+            ]
 
     def read_document(self, path: Path) -> Document:
         """Parse a document from an arbitrary path (e.g. a ``.sync-conflict-`` copy).
@@ -157,10 +179,15 @@ class Store:
         return self._read(path)
 
     def _read(self, path: Path) -> Document:
+        return self._parse(path, self._read_bytes(path))
+
+    def _read_bytes(self, path: Path) -> bytes:
         try:
-            raw = path.read_bytes()
+            return path.read_bytes()
         except OSError as exc:
             raise StoreError(f"could not read {path}: {exc}") from exc
+
+    def _parse(self, path: Path, raw: bytes) -> Document:
         front, notes = _split_frontmatter(raw.decode("utf-8"), path)
         data = self._load_yaml.load(front)
         if data is None:
