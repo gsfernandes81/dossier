@@ -35,6 +35,7 @@ from dossier import (
     dedup_hash,
     doctor,
     export,
+    intake,
     migrate,
     organize,
     query,
@@ -43,7 +44,7 @@ from dossier import (
     scan,
 )
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
-from dossier.errors import ConfigError, ScanError
+from dossier.errors import ConfigError, IntakeError, ScanError
 from dossier.platform_open import is_termux, termux_preconditions
 from dossier.store import Store, atomic_write_bytes
 
@@ -431,6 +432,92 @@ def cmd_organize(args: argparse.Namespace) -> int:
     return 1 if errors or plan.problems else 0
 
 
+def cmd_intake(args: argparse.Namespace) -> int:
+    """Propose records for dropped files, and (``--apply``) file them."""
+    config = _load_config()
+    if config is None:
+        return 1
+
+    store = Store(config)
+    from_dir, in_place = None, False
+    if args.from_dir:
+        raw = Path(args.from_dir).expanduser()
+        abs_dir = raw if raw.is_absolute() else config.syncthing_root / raw
+        try:
+            from_dir = abs_dir.resolve().relative_to(
+                config.syncthing_root.resolve()
+            ).as_posix()
+        except ValueError:
+            print("error: --from must be inside the syncthing root", file=sys.stderr)
+            return 1
+        in_place = True
+
+    pending = intake.pending_files(store, config, from_dir=from_dir)
+    if args.limit > 0:
+        pending = pending[: args.limit]
+    if not pending:
+        where = from_dir or config.intake_inbox or "(no [intake] inbox configured)"
+        print(f"no files to intake in {where}.")
+        return 0
+
+    docs = store.load_all()
+    readings = store.load_scans()
+    proposals: list[intake.IntakeProposal] = []
+    for rel in pending:
+        try:
+            proposal = intake.build_proposal(
+                rel, store, config, docs=docs, readings=readings, in_place=in_place
+            )
+        except ScanError as exc:
+            print(f"  skip  {rel}  (scan failed: {exc})", file=sys.stderr)
+            continue
+        proposals.append(proposal)
+        _print_proposal(proposal)
+
+    if not proposals:
+        return 1
+    if not args.apply:
+        print(f"\n{len(proposals)} proposal(s) (dry run; pass --apply to file).")
+        return 0
+    if not _confirm(f"file these {len(proposals)} document(s)?", args.yes):
+        return 1
+
+    filed = 0
+    for proposal in proposals:
+        try:
+            doc, errors = intake.apply_proposal(proposal, store, config)
+        except IntakeError as exc:
+            print(f"  error {proposal.name}: {exc}", file=sys.stderr)
+            continue
+        for message in errors:
+            print(f"  warn  {message}", file=sys.stderr)
+        print(f"  filed {doc.id}  ({proposal.dst_rel})")
+        filed += 1
+    print(f"\nfiled {filed} document(s).")
+    return 0
+
+
+def _print_proposal(p: intake.IntakeProposal) -> None:
+    print(f"\n{p.src_rel}")
+    print(f"  name    {p.doc.name}  (id {p.doc.id})")
+    if p.doc.tags:
+        print(f"  tags    {' '.join(p.doc.tags)}")
+    if p.doc.issue_date:
+        print(f"  issue   {p.doc.issue_date}")
+    if p.doc.expiry_date:
+        print(f"  expiry  {p.doc.expiry_date}")
+    if p.doc.notes:
+        print(f"  notes   {p.doc.notes.splitlines()[-1]}")
+    if p.succession is not None:
+        conf = p.succession.confidence
+        print(f"  renews  {p.succession.older}  (conf {conf:.2f})")
+    dst = p.dst_rel + (f"  [{','.join(p.notes)}]" if p.notes else "")
+    print(f"  file    {p.src_rel}  {'->' if p.moves else '= (in place)'}  {dst}")
+    for q in p.open_questions:
+        print(f"  ?       {q.field.value}: {' / '.join(q.values)}  (pick in the pane)")
+    print(f"  read    conf {p.reading.confidence:.2f}, model {p.reading.model}")
+
+
 def _print_models(config: Config) -> int:
     """List the router's models (``ds scan --list-models``), vision ones flagged."""
     try:
@@ -661,6 +748,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="also list files already at their canonical name",
     )
     organize_p.set_defaults(func=cmd_organize)
+
+    intake_p = sub.add_parser(
+        "intake",
+        help="file dropped documents from the inbox (dry-run unless --apply)",
+    )
+    intake_p.add_argument(
+        "--from",
+        dest="from_dir",
+        metavar="DIR",
+        help="source folder (files renamed in place) instead of the configured inbox",
+    )
+    intake_p.add_argument(
+        "--limit", type=int, default=0, help="process at most N files (0 = all)"
+    )
+    intake_p.add_argument(
+        "--apply", action="store_true", help="file the proposals (default: dry run)"
+    )
+    intake_p.add_argument(
+        "--yes", action="store_true", help="skip the confirmation prompt (with --apply)"
+    )
+    intake_p.set_defaults(func=cmd_intake)
 
     scan_p = sub.add_parser(
         "scan",

@@ -103,19 +103,21 @@ def build_proposal(
     *,
     docs: list[Document],
     readings: dict[str, ScanReading],
-    extract: _Extract = scan.extract,
+    extract: _Extract | None = None,
     in_place: bool = False,
 ) -> IntakeProposal:
     """Propose the whole record for ``src_rel`` (no disk writes).
 
     ``docs``/``readings`` are the existing store (loaded once by the caller, as
     :func:`dossier.succession.propose` expects) — used only to detect a succession
-    link. ``extract`` is injectable so tests need no VLM. ``in_place`` files where
-    the document sits (a bulk import) rather than moving it to a category/fallback
-    folder (an inbox drop).
+    link. ``extract`` is injectable so tests need no VLM (default resolves
+    :func:`dossier.scan.extract` at call time, so it's monkeypatchable too).
+    ``in_place`` files where the document sits (a bulk import) rather than moving it
+    to a category/fallback folder (an inbox drop).
     """
+    read = extract if extract is not None else scan.extract
     abs_path = resolve_path(config.syncthing_root, src_rel)
-    reading = replace(extract(abs_path, config), fingerprint=file_fingerprint(abs_path))
+    reading = replace(read(abs_path, config), fingerprint=file_fingerprint(abs_path))
 
     name = _name_from_reading(reading, src_rel)
     doc = Document(
