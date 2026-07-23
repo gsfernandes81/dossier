@@ -234,3 +234,27 @@ Termux share-sheet hook — is in the [project README](../../README.md#backgroun
   [sync-conflicts.md](sync-conflicts.md).
 - **`ds reset`** — start a folder's `.dossier/` data over (never the real files), or
   `--global` to un-configure just this device. Both confirm first and back up before acting.
+
+## Diagnosing performance — `ds profile`
+
+If the app feels slow to start or to open the Review screen — most likely on a phone — run:
+
+```sh
+ds profile              # times startup + data-load, then prints a diagnosis
+ds profile --importtime # also break the import cost down by module
+```
+
+It's **read-only** (it never writes to the store) and splits the two slow paths into measured
+buckets so a fix targets the real cost:
+
+- **startup imports** — bare interpreter, Textual, and the dossier package, each timed in a fresh
+  process, so you can see how much of launch is the framework (a fixed floor) versus our code.
+- **store data** — reading every document's bytes (pure I/O) versus `load_all` (read **plus**
+  YAML parse), plus the reconcile folder-walk and the Integrity check. The gap between the two
+  `load_all` lines and the raw-read line tells you whether opening a screen is **parse-bound**
+  (CPU — a metadata cache or faster parser helps) or **I/O-bound** (storage — e.g. the store
+  sitting on Android's `/sdcard` FUSE layer; moving the Syncthing folder to Termux-internal
+  storage helps). The `diagnosis` section at the end spells out the likely culprit.
+
+Run it before and after any perf change to confirm the number actually moved on the device that
+was slow — desktop timings rarely predict a phone's.

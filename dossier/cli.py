@@ -1129,6 +1129,17 @@ def cmd_service(_args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_profile(args: argparse.Namespace) -> int:
+    """Time startup + data-load to locate performance bottlenecks (read-only)."""
+    from dossier import profiling
+
+    try:
+        config: Config | None = Config.load()
+    except ConfigError:
+        config = None  # imports/environment section still works without a store
+    return profiling.run(config, runs=args.runs, importtime=args.importtime)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dossier",
@@ -1451,6 +1462,20 @@ def build_parser() -> argparse.ArgumentParser:
         "status", help="show the live power decision, artifacts, and registration state"
     )
     service_status_p.set_defaults(func=cmd_service_status)
+
+    profile_p = sub.add_parser(
+        "profile",
+        help="time startup + data-load to find performance bottlenecks (read-only)",
+    )
+    profile_p.add_argument(
+        "--runs", type=int, default=3, help="best-of-N runs for the import timings"
+    )
+    profile_p.add_argument(
+        "--importtime",
+        action="store_true",
+        help="also print the per-module import cost breakdown",
+    )
+    profile_p.set_defaults(func=cmd_profile)
 
     return parser
 

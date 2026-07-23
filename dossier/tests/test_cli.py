@@ -41,6 +41,7 @@ def test_cli_import_stays_lean():
         "dossier.organize",
         "dossier.power",
         "dossier.preparedness",
+        "dossier.profiling",
         "dossier.reset",
         "dossier.service",
         "dossier.service_install",

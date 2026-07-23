@@ -31,8 +31,9 @@ uv run ds                        # launch the TUI (press ? in-app for the keybin
 Other commands: `ds import <folder>` / `ds intake` (file unfiled documents), `ds organize`
 (canonical renames), `ds expiring` (what needs renewing), `ds doctor` (integrity +
 sync-conflict checks), `ds reconcile` (orphans & duplicates), `ds export <bundle> <dest>`,
-`ds scan`, `ds ask`, `ds reset`. See [docs/guide/](docs/guide/) for install, first-run, and
-workflow walkthroughs.
+`ds scan`, `ds ask`, `ds reset`, `ds profile` (time startup + data-load to find perf
+bottlenecks). See [docs/guide/](docs/guide/) for install, first-run, and workflow
+walkthroughs.
 
 ## Documentation map
 - **README.md** (this file) — start here: what it is, quickstart, where everything lives.
