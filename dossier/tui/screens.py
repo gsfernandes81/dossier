@@ -39,7 +39,7 @@ from textual.widgets.option_list import Option
 from dossier import doctor, preparedness, query, scan, suggest
 from dossier.config import Config, update_per_device, update_synced
 from dossier.errors import ScanError, StaleWriteError, StoreError
-from dossier.model import Bundle, Document, ExpiryStatus, Location
+from dossier.model import Bundle, Document, ExpiryStatus, Location, Template
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import (
@@ -445,6 +445,8 @@ class BundlesScreen(ModalScreen[str | None]):
     BINDINGS = [
         Binding("escape", "close", "Close"),
         Binding("d", "set_date", "Set date"),
+        Binding("t", "set_template", "Template"),
+        Binding("c", "check", "Readiness"),
         Binding("a", "accept", "Accept"),
         Binding("i", "ignore", "Dismiss"),
     ]
@@ -479,14 +481,31 @@ class BundlesScreen(ModalScreen[str | None]):
             return
         summary.update(
             f"{len(bundles)} bundles · {len(self._suggested)} suggested.  "
-            "Enter opens · d date · a accept · i dismiss · Esc closes."
+            "Enter opens · d date · t template · c readiness · "
+            "a accept · i dismiss · Esc closes."
         )
+        templates = self._store.load_templates()
+        readings = self._store.load_scans()
         for category, group in query.group_bundles(bundles.values()):
             header = f"{category} ▸" if category else "— other —"
             options.add_option(Option(header, id=None))
             for bundle in group:
+                readiness = ""
+                template = templates.get(bundle.template) if bundle.template else None
+                if template is not None:
+                    readiness = preparedness.check_bundle(
+                        bundle,
+                        template,
+                        docs,
+                        readings,
+                        today=self._today,
+                        margin_days=self._config.expiry_threshold_days,
+                    ).summary
                 row = rows.bundle_row(
-                    bundle, count=counts.get(bundle.slug, 0), glyphs=self._glyphs
+                    bundle,
+                    count=counts.get(bundle.slug, 0),
+                    glyphs=self._glyphs,
+                    readiness=readiness,
                 )
                 options.add_option(Option(row, id=bundle.slug))
         if self._suggested:
@@ -575,11 +594,137 @@ class BundlesScreen(ModalScreen[str | None]):
         self._store.save_bundles(bundles)
         self._refresh()
 
+    def action_set_template(self) -> None:
+        bundle = self._highlighted()
+        if bundle is None:
+            return
+        available = ", ".join(sorted(self._store.load_templates())) or "(none defined)"
+        self.app.push_screen(
+            TextPromptScreen(
+                f"Template for {bundle.title} (blank clears). Available: {available}",
+                initial=bundle.template or "",
+            ),
+            lambda value: self._save_template(bundle.slug, value),
+        )
+
+    def _save_template(self, slug: str, value: str | None) -> None:
+        if value is None:
+            return
+        bundles = self._store.load_bundles()
+        if slug not in bundles:
+            return
+        bundles[slug].template = value.strip() or None
+        self._store.save_bundles(bundles)
+        self._refresh()
+
+    def action_check(self) -> None:
+        bundle = self._highlighted()
+        if bundle is None:
+            return
+        if not bundle.template:
+            self.notify("attach a template first (t)", severity="warning")
+            return
+        template = self._store.load_templates().get(bundle.template)
+        if template is None:
+            self.notify(
+                f"template '{bundle.template}' not in templates.toml", severity="error"
+            )
+            return
+        self.app.push_screen(
+            ReadinessScreen(
+                self._store,
+                self._config,
+                bundle=bundle,
+                template=template,
+                today=self._today,
+            )
+        )
+
     def _highlighted(self) -> Bundle | None:
         option_id = _highlighted_id(self.query_one("#bundle-list", OptionList))
         if option_id is None:
             return None
         return self._store.load_bundles().get(option_id)
+
+
+class ReadinessScreen(ModalScreen[None]):
+    """A bundle's template checklist — gathered / problem / missing per requirement.
+
+    Read-only: shows which required document types are gathered, which lapse before
+    the event date, and which are missing, plus members matching no requirement.
+    """
+
+    CSS = """
+    ReadinessScreen { align: center middle; }
+    #rdpanel {
+        width: 85%; height: 80%; padding: 1 2;
+        background: $panel; border: round $primary;
+    }
+    #readiness { height: 1fr; }
+    """
+    BINDINGS = [Binding("escape", "close", "Close")]
+
+    _MARK = {"gathered": "+", "problem": "!", "missing": "x"}
+
+    def __init__(
+        self,
+        store: Store,
+        config: Config,
+        *,
+        bundle: Bundle,
+        template: Template,
+        today: date,
+    ) -> None:
+        super().__init__()
+        self._store = store
+        self._config = config
+        self._bundle = bundle
+        self._template = template
+        self._today = today
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="rdpanel"):
+            yield Label(id="rdsummary")
+            yield OptionList(id="readiness")
+
+    def on_mount(self) -> None:
+        docs = self._store.load_all()
+        names = {d.id: (d.name or d.id) for d in docs}
+        readiness = preparedness.check_bundle(
+            self._bundle,
+            self._template,
+            docs,
+            self._store.load_scans(),
+            today=self._today,
+            margin_days=self._config.expiry_threshold_days,
+        )
+        verdict = "READY" if readiness.ready else "not ready"
+        self.query_one("#rdsummary", Label).update(
+            f"{self._bundle.title} vs {self._template.title} — {verdict} · "
+            f"{readiness.summary}.  (Esc closes)"
+        )
+        options = self.query_one("#readiness", OptionList)
+        flagged = (preparedness.EventStatus.EXPIRED, preparedness.EventStatus.EXPIRING)
+        for check in readiness.checks:
+            mark = self._MARK[check.state.value]
+            label = check.requirement.label + (
+                " (optional)" if check.requirement.optional else ""
+            )
+            if not check.matched:
+                options.add_option(Option(f"{mark} {label}: — missing —", id=None))
+                continue
+            for doc_id in check.matched:
+                status = check.statuses.get(doc_id)
+                flag = f"  [{status.value}]" if status in flagged else ""
+                name = names.get(doc_id, doc_id)
+                options.add_option(Option(f"{mark} {label}: {name}{flag}", id=doc_id))
+        if readiness.extras:
+            options.add_option(Option("extras (match no requirement) ▸", id=None))
+            for doc_id in readiness.extras:
+                options.add_option(Option(f"  {names.get(doc_id, doc_id)}", id=doc_id))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
 
 
 def _highlighted_id(options: OptionList) -> str | None:
