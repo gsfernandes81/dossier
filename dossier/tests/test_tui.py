@@ -46,7 +46,6 @@ from dossier.tui.screens import (
     BundlesScreen,
     DocPickerScreen,
     DoctorScreen,
-    ResolveScreen,
     SupersedeScreen,
     TextPromptScreen,
     WatchScreen,
@@ -1386,7 +1385,7 @@ async def test_home_notifies_when_sync_conflicts_await(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_resolve_screen_lists_and_merges_conflicts(tmp_path: Path):
+async def test_review_conflicts_tab_lists_and_merges(tmp_path: Path):
     store, config = _setup(tmp_path)
     live = store.document_path("passport")
     conflict = live.with_name("passport.sync-conflict-20260101-120000-AAAAAAA.md")
@@ -1395,12 +1394,15 @@ async def test_resolve_screen_lists_and_merges_conflicts(tmp_path: Path):
 
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.home.action_resolve()  # opened via the palette command now
+        app.home.action_review()  # conflicts are a Review tab now
         await pilot.pause()
-        assert isinstance(app.screen, ResolveScreen)
-        assert app.screen.query_one("#rvlist", OptionList).option_count == 1
+        screen = app.screen
+        assert isinstance(screen, ReviewScreen)
+        # A pending conflict makes Conflicts the default tab.
+        assert screen.query_one(TabbedContent).active == "tab-conflicts"
+        assert screen.query_one("#conflicts", OptionList).option_count == 1
 
-        await pilot.press("a")  # merge all
+        await pilot.press("A")  # merge all
         await pilot.pause()
         assert not conflict.exists()  # conflict cleared
         assert "travel" in store.load("passport").tags  # tags unioned in
@@ -1525,7 +1527,6 @@ def test_palette_covers_the_occasional_actions():
     assert {
         "review",
         "doctor",
-        "resolve",
         "bundles",
         "watch",
         "toggle_expiring",

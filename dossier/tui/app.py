@@ -44,8 +44,11 @@ class DossierCommands(Provider):
         # (title, home action, help) — the searchable home for occasional actions,
         # so none of these needs a dedicated keybind. Roughly frequency-ordered.
         return [
-            ("Review — reconcile the collection", "review", "Orphans, missing, dups"),
-            ("Resolve sync conflicts", "resolve", "Merge Syncthing conflict copies"),
+            (
+                "Review — reconcile the collection",
+                "review",
+                "Conflicts, orphans, missing, dups",
+            ),
             ("Doctor — integrity check", "doctor", "Conflicts, refs, dates, files"),
             ("Bundles", "bundles", "Browse and edit document bundles"),
             ("Watch expiry", "watch", "The expiry-watch surface"),

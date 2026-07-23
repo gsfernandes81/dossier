@@ -33,13 +33,12 @@ from textual.widgets import (
     RadioButton,
     RadioSet,
     Select,
-    Static,
 )
 from textual.widgets.option_list import Option
 
-from dossier import doctor, preparedness, query, resolve, scan, suggest
+from dossier import doctor, preparedness, query, scan, suggest
 from dossier.config import Config, update_per_device, update_synced
-from dossier.errors import ResolveBusyError, ScanError, StaleWriteError, StoreError
+from dossier.errors import ScanError, StaleWriteError, StoreError
 from dossier.model import Bundle, Document, ExpiryStatus, Location, Template
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
@@ -139,143 +138,6 @@ class DoctorScreen(ModalScreen[str | None]):
     def _open(self, event: OptionList.OptionSelected) -> None:
         if event.option_id is not None:
             self.dismiss(event.option_id.split(self._SEP, 1)[0])  # back to the doc id
-
-
-class ResolveScreen(ModalScreen[bool]):
-    """Review and merge Syncthing conflict files in-app (the TUI face of `ds resolve`).
-
-    Read-only until the user acts: highlighting a conflict previews the planned
-    merge (contested fields and their last-writer-wins verdict); ``a`` merges them
-    all, Enter merges the highlighted one. Every merge is recoverable — the losing
-    copy is archived first — so this stays a one-key action, not a wizard.
-    """
-
-    CSS = """
-    ResolveScreen { align: center middle; }
-    #rvpanel {
-        width: 85%; height: 80%; padding: 1 2;
-        background: $panel; border: round $primary;
-    }
-    #rvsummary { margin-bottom: 1; }
-    #rvlist { height: 1fr; }
-    #rvdetail {
-        height: auto; max-height: 45%; padding-top: 1;
-        border-top: solid $primary 30%; color: $text-muted;
-    }
-    """
-    BINDINGS = [
-        Binding("escape", "close", "Close"),
-        Binding("a", "apply_all", "Merge all"),
-        Binding("enter", "apply_one", "Merge selected", show=False),
-    ]
-
-    def __init__(self, store: Store, config: Config) -> None:
-        super().__init__()
-        self._store = store
-        self._config = config
-        self._plans: list[resolve.Resolution] = []
-        self._applied = False
-
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(id="rvpanel"):
-            yield Label(id="rvsummary")
-            yield OptionList(id="rvlist")
-            yield Static(id="rvdetail")
-
-    def on_mount(self) -> None:
-        self._refresh()
-
-    def _refresh(self) -> None:
-        self._plans = []
-        for item in resolve.find_conflicts(self._store):
-            try:
-                self._plans.append(resolve.plan(self._store, item))
-            except StoreError:
-                continue  # an unreadable conflict; doctor surfaces it instead
-        summary = self.query_one("#rvsummary", Label)
-        options = self.query_one("#rvlist", OptionList)
-        options.clear_options()
-        detail = self.query_one("#rvdetail", Static)
-        if not self._plans:
-            summary.update("No sync conflicts to merge.  (Esc closes)")
-            detail.update("")
-            return
-        summary.update(
-            f"{len(self._plans)} conflict(s).  "
-            "a merges all · Enter merges the selected · Esc closes"
-        )
-        for index, plan in enumerate(self._plans):
-            options.add_option(Option(self._headline(plan), id=str(index)))
-        self._show_detail(0)
-
-    @staticmethod
-    def _headline(plan: resolve.Resolution) -> str:
-        if plan.loud:
-            tag = "whole-file replace"
-        elif plan.contested:
-            tag = f"{len(plan.contested)} contested field(s)"
-        elif plan.changed:
-            tag = "auto-merge"
-        else:
-            tag = "identical — will clear"
-        return f"{plan.kind:11} {plan.name}  —  {tag}"
-
-    @on(OptionList.OptionHighlighted, "#rvlist")
-    def _on_highlight(self, event: OptionList.OptionHighlighted) -> None:
-        if event.option_id is not None:
-            self._show_detail(int(event.option_id))
-
-    def _show_detail(self, index: int) -> None:
-        if not 0 <= index < len(self._plans):
-            return
-        plan = self._plans[index]
-        lines = [_resolve_decision_text(d) for d in plan.contested]
-        fills = sum(1 for d in plan.decisions if d.action == "fill")
-        unions = sum(1 for d in plan.decisions if d.action == "union")
-        if fills:
-            lines.append(f"+ {fills} field(s) filled from the other copy")
-        if unions:
-            lines.append(f"∪ {unions} list(s)/table(s) merged")
-        if not lines:
-            lines.append("identical copy — will be cleared")
-        self.query_one("#rvdetail", Static).update("\n".join(lines))
-
-    def action_apply_all(self) -> None:
-        report = resolve.resolve_all(self._store, apply=True)
-        if report.resolutions:
-            self._applied = True
-        message = f"merged {len(report.resolutions)} conflict(s)"
-        severity = "information"
-        if report.skipped:
-            message += f", {len(report.skipped)} changed mid-merge (retry)"
-            severity = "warning"
-        self.notify(message, severity=severity)
-        self._refresh()
-
-    def action_apply_one(self) -> None:
-        option_id = _highlighted_id(self.query_one("#rvlist", OptionList))
-        if option_id is None:
-            return
-        item = self._plans[int(option_id)].item
-        try:
-            fresh = resolve.plan(self._store, item)  # re-plan against current live
-            resolve.apply_resolution(self._store, fresh)
-        except ResolveBusyError:
-            self.notify("changed mid-merge — retry", severity="warning")
-        except StoreError as exc:
-            self.notify(str(exc), severity="error")
-        else:
-            self._applied = True
-            self.notify(f"merged {fresh.name}")
-        self._refresh()
-
-    def action_close(self) -> None:
-        self.dismiss(self._applied)
-
-
-def _resolve_decision_text(decision: resolve.FieldDecision) -> str:
-    winner = decision.winner.value if decision.winner else "ours"
-    return f"~ {decision.field}: {decision.ours} vs {decision.theirs} → keep {winner}"
 
 
 class SupersedeScreen(ModalScreen[bool]):

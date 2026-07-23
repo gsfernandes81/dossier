@@ -71,7 +71,6 @@ from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
     DoctorScreen,
-    ResolveScreen,
     SettingsScreen,
     SupersedeScreen,
     WatchScreen,
@@ -269,15 +268,15 @@ class HomeScreen(Screen[None]):
         """On entry, flag any Syncthing conflict files left to merge.
 
         Discoverability only — a notice, not a blocking modal, so it never gets
-        between the user and their documents. Points at the palette's "Resolve"
-        command; `ds resolve` does the same from a shell.
+        between the user and their documents. Points at the palette's "Review"
+        command (the Conflicts tab); `ds resolve` does the same from a shell.
         """
         count = len(self._store.list_conflicts())
         if count:
             noun = "conflict" if count == 1 else "conflicts"
             self.notify(
-                f"{count} sync {noun} to merge — palette (ctrl+p) › Resolve, "
-                "or run `ds resolve`",
+                f"{count} sync {noun} to merge — palette (ctrl+p) › Review › "
+                "Conflicts, or run `ds resolve`",
                 severity="warning",
                 timeout=10,
             )
@@ -797,17 +796,6 @@ class HomeScreen(Screen[None]):
         self.app.push_screen(
             DoctorScreen(self._store, self._config), self._after_doctor
         )
-
-    def action_resolve(self) -> None:
-        self.app.push_screen(
-            ResolveScreen(self._store, self._config), self._after_resolve
-        )
-
-    def _after_resolve(self, applied: bool | None) -> None:
-        # A merge rewrites documents/sidecars in place — reload so the panes and
-        # readings reflect the merged copies.
-        if applied:
-            self._reload()
 
     # -- helpers -------------------------------------------------------------
 

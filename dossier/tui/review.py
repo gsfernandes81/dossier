@@ -13,23 +13,26 @@
 # You should have received a copy of the GNU Affero General Public License along with
 # dossier. If not, see <https://www.gnu.org/licenses/>.
 
-"""The reconcile screen: orphans, missing files, duplicates, and successions.
+"""The review screen: sync conflicts, orphans, missing files, duplicates, successions.
 
-Four tabs. Orphans are a per-folder tree (leaves fill lazily on expand) with a
-"suggested matches" node on top; missing is a list where ``Enter`` opens the
-document; the duplicate scan runs in a **thread worker** off ``d`` (rasterizing
-is blocking), reusing the per-device page-hash cache so a warm cache is ~instant.
-Succession lists renewals inferred from ``ds scan`` readings (see
-:mod:`dossier.succession`); ``s`` accepts one (setting the ``supersedes`` link a
-user would otherwise pick by hand), ``x`` dismisses it into the sidecar.
+The single hub for tidying the collection. Conflicts merges Syncthing
+conflict copies in-app (the TUI face of ``ds resolve``); orphans are a
+per-folder tree (leaves fill lazily on expand) with a "suggested matches" node
+on top; missing is a list where ``Enter`` opens the document; the duplicate scan
+runs in a **thread worker** off ``d`` (rasterizing is blocking), reusing the
+per-device page-hash cache so a warm cache is ~instant. Succession lists renewals
+inferred from ``ds scan`` readings (see :mod:`dossier.succession`).
 
-``x`` records a *decision* in the ``.dossier/reconcile.toml`` sidecar — dismiss an
-orphan (it's not a document) or acknowledge a missing file — so it stays gone on
-re-run. ``l`` links an orphan to an existing document, ``a`` adopts it as a new
-document, and ``u`` unlinks a dead rendition. ``f`` folds a duplicate cluster
-(records the copies as dupes of the keep) and ``g`` adds a reconcile ignore-glob.
-Folds and globs live in the sidecar; link/adopt/unlink edit the ``.dossier``
-store. No real file is ever moved or deleted.
+``a`` is the primary *accept*, dispatched by the active tab: merge the
+highlighted conflict, adopt an orphan as a new document, or accept a succession
+link; ``A`` merges every conflict at once. ``x`` records a *decision* in the
+``.dossier/reconcile.toml`` sidecar — dismiss an orphan (it's not a document),
+acknowledge a missing file, or dismiss a succession — so it stays gone on re-run.
+``l`` links an orphan to an existing document, ``u`` unlinks a dead rendition,
+``f`` folds a duplicate cluster (records the copies as dupes of the keep) and
+``g`` adds a reconcile ignore-glob. Folds and globs live in the sidecar;
+link/adopt/unlink edit the ``.dossier`` store. Conflict merges archive the losing
+copy first, so every action here is recoverable and no real file is deleted.
 """
 
 from __future__ import annotations
@@ -42,12 +45,21 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Label, OptionList, TabbedContent, TabPane, Tree
+from textual.widgets import Label, OptionList, Static, TabbedContent, TabPane, Tree
 from textual.widgets.option_list import Option
 
-from dossier import dedup, dedup_cache, dedup_hash, query, reconcile, scan, succession
+from dossier import (
+    dedup,
+    dedup_cache,
+    dedup_hash,
+    query,
+    reconcile,
+    resolve,
+    scan,
+    succession,
+)
 from dossier.config import Config
-from dossier.errors import StaleWriteError, StoreError
+from dossier.errors import ResolveBusyError, StaleWriteError, StoreError
 from dossier.migrate import slugify
 from dossier.model import Document, ReconcileState, Rendition
 from dossier.platform_open import OpenError, open_file
@@ -81,7 +93,11 @@ class ReviewScreen(ModalScreen[str | None]):
     }
     #rsummary { margin-bottom: 1; }
     TabbedContent { height: 1fr; }
-    #dups, #missing, #orphans, #succession { height: 1fr; }
+    #conflicts, #dups, #missing, #orphans, #succession { height: 1fr; }
+    #conflict-detail {
+        height: auto; max-height: 40%; padding-top: 1;
+        border-top: solid $primary 30%; color: $text-muted;
+    }
     """
     BINDINGS = [
         Binding("escape", "close", "Close"),
@@ -95,16 +111,25 @@ class ReviewScreen(ModalScreen[str | None]):
         Binding("d", "scan_dups", "Find duplicates"),
         Binding("x", "reject", "Dismiss"),
         Binding("l", "link", "Link"),
-        Binding("a", "adopt", "Adopt"),
-        Binding("s", "accept_succession", "Supersede"),
+        # `a` is the primary accept, dispatched per active tab (see action_accept);
+        # `A` merges every conflict at once.
+        Binding("a", "accept", "Accept"),
+        Binding("A", "accept_all", "Merge all"),
         Binding("u", "unlink", "Unlink"),
         Binding("f", "fold", "Fold"),
         Binding("g", "ignore_glob", "Ignore glob"),
     ]
 
     # Tab order (as composed) and each pane's primary widget, for cycling + focus.
-    _TAB_ORDER = ("tab-dups", "tab-orphans", "tab-missing", "tab-succession")
+    _TAB_ORDER = (
+        "tab-conflicts",
+        "tab-orphans",
+        "tab-missing",
+        "tab-dups",
+        "tab-succession",
+    )
     _TAB_PANE = {
+        "tab-conflicts": "#conflicts",
         "tab-dups": "#dups",
         "tab-orphans": "#orphans",
         "tab-missing": "#missing",
@@ -125,17 +150,21 @@ class ReviewScreen(ModalScreen[str | None]):
         self._row_group: list[int] = []  # dups option index → group index (−1 = none)
         self._readings: dict[str, scan.ScanReading] = {}
         self._successions: dict[str, succession.Succession] = {}  # row id → proposal
+        self._plans: list[resolve.Resolution] = []  # planned conflict merges
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="rpanel"):
             yield Label(id="rsummary")
             with TabbedContent():
-                with TabPane("Duplicates", id="tab-dups"):
-                    yield OptionList(id="dups")
+                with TabPane("Conflicts", id="tab-conflicts"):
+                    yield OptionList(id="conflicts")
+                    yield Static(id="conflict-detail")
                 with TabPane("Orphans", id="tab-orphans"):
                     yield Tree("orphans", id="orphans")
                 with TabPane("Missing", id="tab-missing"):
                     yield OptionList(id="missing")
+                with TabPane("Duplicates", id="tab-dups"):
+                    yield OptionList(id="dups")
                 with TabPane("Succession", id="tab-succession"):
                     yield OptionList(id="succession")
 
@@ -143,6 +172,7 @@ class ReviewScreen(ModalScreen[str | None]):
         self._state = self._store.load_reconcile()
         self._report = reconcile.run(self._store, self._config, state=self._state)
         self._readings = self._store.load_scans()
+        self._populate_conflicts()
         self._populate_orphans()
         self._populate_missing()
         self._populate_succession()
@@ -150,13 +180,16 @@ class ReviewScreen(ModalScreen[str | None]):
             Option("press  d  to scan for duplicates (cached after the first run)")
         )
         self._update_summary()
-        # Open on a tab that actually has something to do — orphans/missing are
-        # always-available, no-deps actions; Duplicates (the composed default)
-        # is empty until you scan and needs the optional dedup extras.
+        # Open on a tab that actually has something to do — conflicts first (they
+        # touch real files and block clean sync), then orphans/missing, which are
+        # always-available no-deps actions; Duplicates is empty until you scan and
+        # needs the optional dedup extras, so it never leads.
         self.query_one(TabbedContent).active = self._default_tab()
 
     def _default_tab(self) -> str:
         report = self._report
+        if self._plans:
+            return "tab-conflicts"
         if report is not None and report.orphans:
             return "tab-orphans"
         if report is not None and report.missing:
@@ -214,12 +247,88 @@ class ReviewScreen(ModalScreen[str | None]):
             self._populate_succession()
             self._update_summary()
 
+    # -- conflicts (in-app `ds resolve`) -------------------------------------
+
+    def _populate_conflicts(self) -> None:
+        """Plan a merge for every Syncthing conflict copy and list them.
+
+        Read-only: planning never writes — the merge happens on ``a``/``A``.
+        """
+        self._plans = []
+        for item in resolve.find_conflicts(self._store):
+            try:
+                self._plans.append(resolve.plan(self._store, item))
+            except StoreError:
+                continue  # an unreadable conflict; the Integrity tab surfaces it
+        options = self.query_one("#conflicts", OptionList)
+        options.clear_options()
+        detail = self.query_one("#conflict-detail", Static)
+        if not self._plans:
+            options.add_option(Option("no sync conflicts to merge."))
+            detail.update("")
+            return
+        for index, plan in enumerate(self._plans):
+            options.add_option(Option(_conflict_headline(plan), id=str(index)))
+        self._show_conflict_detail(0)
+
+    @on(OptionList.OptionHighlighted, "#conflicts")
+    def _on_conflict_highlight(self, event: OptionList.OptionHighlighted) -> None:
+        if event.option_id is not None:
+            self._show_conflict_detail(int(event.option_id))
+
+    def _show_conflict_detail(self, index: int) -> None:
+        if not 0 <= index < len(self._plans):
+            return
+        plan = self._plans[index]
+        lines = [_conflict_decision_text(d) for d in plan.contested]
+        fills = sum(1 for d in plan.decisions if d.action == "fill")
+        unions = sum(1 for d in plan.decisions if d.action == "union")
+        if fills:
+            lines.append(f"+ {fills} field(s) filled from the other copy")
+        if unions:
+            lines.append(f"∪ {unions} list(s)/table(s) merged")
+        if not lines:
+            lines.append("identical copy — will be cleared")
+        self.query_one("#conflict-detail", Static).update("\n".join(lines))
+
+    def action_accept_all(self) -> None:
+        """`A` — merge every conflict at once (the losing copy is archived first)."""
+        report = resolve.resolve_all(self._store, apply=True)
+        message = f"merged {len(report.resolutions)} conflict(s)"
+        severity = "information"
+        if report.skipped:
+            message += f", {len(report.skipped)} changed mid-merge (retry)"
+            severity = "warning"
+        self.notify(message, severity=severity)
+        self._populate_conflicts()
+        self._update_summary()
+
+    def _merge_highlighted(self) -> None:
+        """Merge the highlighted conflict, re-planning against the live copy first."""
+        options = self.query_one("#conflicts", OptionList)
+        index = options.highlighted
+        if index is None or not self._plans:
+            return
+        item = self._plans[index].item
+        try:
+            fresh = resolve.plan(self._store, item)  # re-plan against current live
+            resolve.apply_resolution(self._store, fresh)
+        except ResolveBusyError:
+            self.notify("changed mid-merge — retry", severity="warning")
+        except StoreError as exc:
+            self.notify(str(exc), severity="error")
+        else:
+            self.notify(f"merged {fresh.name}")
+        self._populate_conflicts()
+        self._update_summary()
+
     # -- population ----------------------------------------------------------
 
     def _update_summary(self) -> None:
         report = self._report
         assert report is not None
         dups = self._dups_count
+        conf_part = f"{len(self._plans)} conflicts · " if self._plans else ""
         dup_part = f" · {dups} duplicate clusters" if dups is not None else ""
         succ_part = (
             f" · {len(self._successions)} successions" if self._successions else ""
@@ -229,7 +338,8 @@ class ReviewScreen(ModalScreen[str | None]):
         ignore = [*self._config.ignore, *self._state.ignore]
         scope = f"   scope: {len(ignore)} ignore glob(s)" if ignore else ""
         self.query_one("#rsummary", Label).update(
-            f"reconcile: {len(report.orphans)} orphans · {len(report.linked)} linked · "
+            f"review: {conf_part}{len(report.orphans)} orphans · "
+            f"{len(report.linked)} linked · "
             f"{len(report.missing)} missing{dup_part}{succ_part}{supp_part}{scope}\n"
             "Tab/Shift+Tab switch tabs · ? shows all keys · Esc closes"
         )
@@ -343,14 +453,20 @@ class ReviewScreen(ModalScreen[str | None]):
                 if active in ("tab-orphans", "tab-missing", "tab-succession")
                 else None
             )
-        if action in ("link", "adopt", "ignore_glob"):
+        if action == "accept":  # `a` — dispatched: merge / adopt / supersede
+            return (
+                True
+                if active in ("tab-conflicts", "tab-orphans", "tab-succession")
+                else None
+            )
+        if action == "accept_all":  # `A` — merge every conflict at once
+            return True if active == "tab-conflicts" else None
+        if action in ("link", "ignore_glob"):
             return True if active == "tab-orphans" else None
         if action == "unlink":
             return True if active == "tab-missing" else None
         if action == "fold":
             return True if active == "tab-dups" else None
-        if action == "accept_succession":
-            return True if active == "tab-succession" else None
         if action == "open_file":  # only where a real file sits under the cursor
             return (
                 True
@@ -447,6 +563,21 @@ class ReviewScreen(ModalScreen[str | None]):
         doc = next((d for d in self._store.load_all() if d.id == proposal.newer), None)
         rendition = doc.primary_rendition() if doc is not None else None
         return rendition.path if rendition is not None else None
+
+    def action_accept(self) -> None:
+        """`a` — the primary accept, meaning whatever the active tab affirms.
+
+        One key across the hub: merge the highlighted conflict, adopt an orphan as
+        a new document, or accept a proposed succession. ``x`` is its inverse
+        (dismiss); ``A`` is the conflicts-only bulk form.
+        """
+        active = self._active_tab()
+        if active == "tab-conflicts":
+            self._merge_highlighted()
+        elif active == "tab-orphans":
+            self.action_adopt()
+        elif active == "tab-succession":
+            self.action_accept_succession()
 
     def action_reject(self) -> None:
         active = self._active_tab()
@@ -700,6 +831,23 @@ class ReviewScreen(ModalScreen[str | None]):
             return self.query_one(TabbedContent).active
         except Exception:
             return ""
+
+
+def _conflict_headline(plan: resolve.Resolution) -> str:
+    if plan.loud:
+        tag = "whole-file replace"
+    elif plan.contested:
+        tag = f"{len(plan.contested)} contested field(s)"
+    elif plan.changed:
+        tag = "auto-merge"
+    else:
+        tag = "identical — will clear"
+    return f"{plan.kind:11} {plan.name}  —  {tag}"
+
+
+def _conflict_decision_text(decision: resolve.FieldDecision) -> str:
+    winner = decision.winner.value if decision.winner else "ours"
+    return f"~ {decision.field}: {decision.ours} vs {decision.theirs} → keep {winner}"
 
 
 def _folder_of(rel: str) -> str:
