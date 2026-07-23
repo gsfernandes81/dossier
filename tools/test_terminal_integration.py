@@ -52,7 +52,12 @@ def test_drives_real_app_in_a_real_terminal(tmp_path: Path):
         assert term.wait_for("Location:"), "detail pane did not open"
 
         # The expiring filter narrows the list (2 of the 5 sample docs expire soon).
-        term.send("x")
+        # It's a command-palette entry now (Phase 1 dropped the `x` keybind), so
+        # drive it there — which also exercises the palette in a real terminal.
+        term.send("\x10", settle=0.4)  # Ctrl+P opens the command palette
+        term.send("expiring", settle=0.4)
+        assert term.wait_for("Toggle expiring", timeout=6), "palette command missing"
+        term.send("enter", settle=0.5)
         assert term.wait_for("2 / 5"), "expiring filter did not apply"
 
         # Esc clears the filter; the bordered search box brightens on focus —
@@ -70,8 +75,8 @@ def test_drives_real_app_in_a_real_terminal(tmp_path: Path):
         focused = term.cell(row - 1, 1)[1]
         assert focused != unfocused, "search border colour did not change on focus"
 
-        term.send("esc")
-        term.send("q", settle=0.4)
+        term.send("esc", settle=0.4)  # let focus leave the search box before `q`
+        term.send("q", settle=0.5)
         assert not term.alive(), "app did not quit on q"
     finally:
         term.close()
