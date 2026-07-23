@@ -40,6 +40,7 @@ from dossier import (
     intake,
     migrate,
     organize,
+    power,
     preparedness,
     query,
     reconcile,
@@ -47,6 +48,7 @@ from dossier import (
     resolve,
     scan,
     service,
+    service_install,
 )
 from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
 from dossier.errors import ConfigError, IntakeError, ScanError
@@ -934,9 +936,100 @@ def _append_service_log(line: str) -> None:
         pass
 
 
+def cmd_service_install(args: argparse.Namespace) -> int:
+    """Show how to install the scan service; register it only with ``--yes``.
+
+    Build-but-don't-run: the default prints the resolved command, the full
+    generated artifact(s), and the exact registration commands — and changes
+    nothing. ``--yes`` writes the artifacts and registers the task/timer.
+    """
+    if _load_config() is None:
+        return 2
+    plan = service_install.plan_install()
+    if not plan.supported:
+        print(f"the scan service is not available here: {plan.note}", file=sys.stderr)
+        return 2
+    _print_install_plan(plan, verb="install")
+    return _apply_or_dry_run(plan, apply=args.yes, verb="installed")
+
+
+def cmd_service_uninstall(args: argparse.Namespace) -> int:
+    """Show how to remove the scan service; do it only with ``--yes``."""
+    if _load_config() is None:
+        return 2
+    plan = service_install.plan_uninstall()
+    if not plan.supported:
+        print("nothing to uninstall (the service is desktop-only).", file=sys.stderr)
+        return 2
+    _print_install_plan(plan, verb="uninstall")
+    return _apply_or_dry_run(plan, apply=args.yes, verb="uninstalled")
+
+
+def _print_install_plan(plan: service_install.InstallPlan, *, verb: str) -> None:
+    if plan.run_command:
+        print(f"run command : {' '.join(plan.run_command)}")
+    for artifact in plan.artifacts:
+        print(f"\n--- {artifact.path} ---")
+        print(artifact.content.rstrip("\n"))
+    for target in plan.removes:
+        print(f"remove file : {target}")
+    if plan.commands:
+        print(f"\ncommands ({verb}):")
+        for argv in plan.commands:
+            print(f"  {' '.join(argv)}")
+    if plan.note:
+        print(f"\nnote: {plan.note}")
+
+
+def _apply_or_dry_run(
+    plan: service_install.InstallPlan, *, apply: bool, verb: str
+) -> int:
+    if not apply:
+        print(
+            "\n(dry run — nothing written or registered; re-run with --yes, "
+            "or run the commands above yourself.)"
+        )
+        return 0
+    for line in service_install.apply(plan):
+        print(f"  {line}")
+    print(f"\n{verb}.")
+    return 0
+
+
+def cmd_service_status(_args: argparse.Namespace) -> int:
+    """Report the live power decision, artifact presence, and registration state."""
+    config = _load_config()
+    if config is None:
+        return 2
+    sample = power.read_sample()
+    decision = power.decide(sample, assume_ac=config.service_assume_ac)
+    verdict = "would run" if decision.run else "would skip"
+    print(
+        f"power   : {sample.source} · on_ac={sample.on_ac} saver={sample.saver} "
+        f"→ {verdict} ({decision.reason})"
+    )
+    plan = service_install.plan_install()
+    for artifact in plan.artifacts:
+        state = "present" if artifact.path.exists() else "absent"
+        print(f"artifact: {artifact.path} ({state})")
+    query_cmd = service_install.status_query_command()
+    if query_cmd is not None:
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                query_cmd, capture_output=True, text=True, check=False
+            )
+            registered = "registered" if result.returncode == 0 else "not registered"
+        except OSError as exc:
+            registered = f"could not query ({exc})"
+        print(f"schedule: {registered}  ({' '.join(query_cmd)})")
+    return 0
+
+
 def cmd_service(_args: argparse.Namespace) -> int:
     """Bare ``ds service`` — point at the subcommands."""
-    print("usage: ds service run   (install/uninstall/status land in a later slice)")
+    print("usage: ds service {run | install | uninstall | status}")
     return 2
 
 
@@ -1239,6 +1332,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="run one batch pass now (scan + transcribe + intake; power-gated, locked)",
     )
     service_run_p.set_defaults(func=cmd_service_run)
+    service_install_p = service_sub.add_parser(
+        "install",
+        help="show how to install the auto-scan task/timer (registers only with --yes)",
+    )
+    service_install_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="actually write the artifacts and register (default: print the plan)",
+    )
+    service_install_p.set_defaults(func=cmd_service_install)
+    service_uninstall_p = service_sub.add_parser(
+        "uninstall", help="show how to remove the auto-scan task/timer (--yes to do it)"
+    )
+    service_uninstall_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="actually unregister and remove the artifacts",
+    )
+    service_uninstall_p.set_defaults(func=cmd_service_uninstall)
+    service_status_p = service_sub.add_parser(
+        "status", help="show the live power decision, artifacts, and registration state"
+    )
+    service_status_p.set_defaults(func=cmd_service_status)
 
     return parser
 
