@@ -100,6 +100,10 @@ class ScanReading:
     evidence: str | None
     model: str = ""
     fingerprint: str = ""  # source file size:mtime, so a re-scan skips unchanged files
+    # Full-text transcript + keywords for content search / `ds ask` (Phase 11).
+    # Empty until a `ds scan --transcribe` pass; legacy readings default cleanly.
+    transcript: str = ""
+    keywords: tuple[str, ...] = ()
 
     @classmethod
     def from_payload(cls, data: dict, model: str) -> ScanReading:
@@ -123,6 +127,10 @@ class ScanReading:
             evidence=text("evidence"),
             model=model or str(data.get("model") or ""),
             fingerprint=str(data.get("fingerprint") or ""),
+            transcript=str(data.get("transcript") or "").strip(),
+            keywords=tuple(
+                str(k).strip() for k in (data.get("keywords") or []) if str(k).strip()
+            ),
         )
 
     def as_dict(self) -> dict:

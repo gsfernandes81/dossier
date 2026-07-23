@@ -22,12 +22,16 @@ root. The TUI drives everything here.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from dossier.model import Bundle, Document, ExpiryStatus, FileStatus
+
+if TYPE_CHECKING:  # kept import-light: readings are duck-typed at runtime
+    from dossier.scan import ScanReading
 
 # -- file resolution ---------------------------------------------------------
 
@@ -71,9 +75,16 @@ class Filter:
     expiry: tuple[ExpiryStatus, ...] = ()
 
 
-def matches(doc: Document, flt: Filter, *, today: date, threshold_days: int) -> bool:
+def matches(
+    doc: Document,
+    flt: Filter,
+    *,
+    today: date,
+    threshold_days: int,
+    reading: ScanReading | None = None,
+) -> bool:
     return (
-        (not flt.text or _text_matches(doc, flt.text))
+        (not flt.text or _text_matches(doc, flt.text, reading))
         and all(_has_tag(doc.tags, tag) for tag in flt.tags)
         and all(bundle in doc.bundles for bundle in flt.bundles)
         and (not flt.locations or doc.effective_location in flt.locations)
@@ -82,19 +93,55 @@ def matches(doc: Document, flt: Filter, *, today: date, threshold_days: int) -> 
 
 
 def search(
-    docs: list[Document], flt: Filter, *, today: date, threshold_days: int
+    docs: list[Document],
+    flt: Filter,
+    *,
+    today: date,
+    threshold_days: int,
+    readings: Mapping[str, ScanReading] | None = None,
 ) -> list[Document]:
+    """Documents passing ``flt``. When ``readings`` is given, the text filter also
+    matches a document's scan reading (content search — find by what it says)."""
     return [
         doc
         for doc in docs
-        if matches(doc, flt, today=today, threshold_days=threshold_days)
+        if matches(
+            doc,
+            flt,
+            today=today,
+            threshold_days=threshold_days,
+            reading=readings.get(doc.id) if readings else None,
+        )
     ]
 
 
-def _text_matches(doc: Document, text: str) -> bool:
+def reading_text(reading: ScanReading) -> str:
+    """The searchable text of a scan reading — every printed field it captured.
+
+    The corpus for content search and ``ds ask``; ``transcript``/``keywords`` are
+    empty until Phase 11's transcribe pass, so this is useful on the structured
+    fields alone today.
+    """
+    parts = [
+        reading.document_type,
+        reading.issuer,
+        reading.holder_name,
+        reading.document_number,
+        reading.issue_date_text,
+        reading.expiry_date_text,
+        reading.evidence,
+        reading.transcript,
+        *reading.keywords,
+    ]
+    return " ".join(part for part in parts if part)
+
+
+def _text_matches(doc: Document, text: str, reading: ScanReading | None = None) -> bool:
     needle = text.casefold()
-    hay = " ".join([doc.name, doc.notes, *doc.tags, *doc.bundles]).casefold()
-    return needle in hay
+    parts = [doc.name, doc.notes, *doc.tags, *doc.bundles]
+    if reading is not None:
+        parts.append(reading_text(reading))
+    return needle in " ".join(parts).casefold()
 
 
 def _has_tag(tags: list[str], wanted: str) -> bool:
