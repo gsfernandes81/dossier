@@ -292,3 +292,40 @@ def test_atomic_write_uses_a_same_directory_temp(
     atomic_write_bytes(target, b"data")
     assert seen["dir"] == str(target.parent)  # same dir as target, not TMPDIR
     assert target.read_bytes() == b"data"
+
+
+def test_atomic_write_retries_a_transient_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A cloud-sync FS (Proton Drive) briefly locks the target; the replace retries."""
+    real_replace = store_module.os.replace
+    calls = {"n": 0}
+
+    def flaky(src: str, dst: str) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise PermissionError(5, "Access is denied")  # first attempt: locked
+        real_replace(src, dst)
+
+    monkeypatch.setattr(store_module.os, "replace", flaky)
+    monkeypatch.setattr(store_module.time, "sleep", lambda _s: None)  # no real waiting
+
+    target = tmp_path / "probe.bin"
+    atomic_write_bytes(target, b"data")
+    assert calls["n"] == 2  # retried once, then succeeded
+    assert target.read_bytes() == b"data"
+
+
+def test_atomic_write_raises_after_a_persistent_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def denied(_src: str, _dst: str) -> None:
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(store_module.os, "replace", denied)
+    monkeypatch.setattr(store_module.time, "sleep", lambda _s: None)
+
+    with pytest.raises(PermissionError):
+        atomic_write_bytes(tmp_path / "probe.bin", b"data")
+    # the temp file is cleaned up, not left behind
+    assert not list(tmp_path.glob(f"{TEMP_PREFIX}*"))
