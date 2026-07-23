@@ -37,10 +37,11 @@ a build-but-don't-run installer) that closes the phone sync-back loop. **Phases 
 complete.** Phases 14–15 are next: **find-fast UX** (launch optimized for the urgent
 lookup, undo, init/empty-state polish, typo-tolerant search) and **Syncthing integration**.
 
-**Next up — a review-clarity slice**, all three found in real use, all in the Notes:
-**dismiss a false-positive duplicate** (every tab can say *no* except Duplicates),
-**per-tab keys** (the footer and `?` advertise every tab's actions on every tab, which is
-what made the first one hard to find), and **open both sides of a succession**.
+**Next up — "Review in the miller view"** (first open item in Phase 14). Review stops being
+a modal that must be destroyed to act on a row; it takes columns 1–2 and the detail pane
+becomes column 3. It carries four fixes found in real use: per-tab keys, dismissing a
+false-positive duplicate, Integrity taking the app-wide verb, and opening both sides of a
+succession.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -315,6 +316,46 @@ search forgives phone-keyboard typos.
   list focused since the router lands the first key in search anyway. Attention counts
   (expiring · conflicts · inbox) now ride dim **beside the footer**, replacing a toast that
   overlapped the search box. Budget met: cold start → `pass` + `Enter` → opened = 5 keystrokes.
+- [ ] **Review in the miller view** (M/L) — **next.** Review is a modal, so acting on a row
+  *destroys* it: activating an Integrity finding dismisses the screen to show the record,
+  losing the finding, the tab and the cursor — and Esc back runs `action_review()`, which
+  builds a **fresh** ReviewScreen and re-runs the entire load. The round trip is lossy, and
+  on the phone slow. Instead let review **replace columns 1 and 2** of the miller view and
+  let the home's existing detail pane serve as **column 3**, appearing as needed without ever
+  tearing review down. It deletes rather than adds: the `ReviewResult` dismiss protocol and
+  the `_detail_origin == "review"` Esc special-case both go away. Feasible because
+  `DetailPane` already talks to its host purely by message (`EditingChanged` / `Saved` /
+  `ReloadRequested`) — it never needed to be the home's. Three seams to watch: the home's
+  type-to-search `on_key` router must not fire while review holds the columns, `escape` means
+  something to both, and the narrow/Termux collapse needs its own rule. Carries four fixes
+  found in real use, each cheap once the layout is right:
+  - **Per-tab keys** — `check_action` returns `None` for an inapplicable action, and Textual
+    reads `None` as disabled-but-**visible** (`False` is disabled+hidden). So every tab
+    advertises every tab's verbs, greyed — which is why "how do I dismiss a duplicate?" and
+    "accept vs fold vs link?" both came up in use. Return `False` and the footer and `?` panel
+    become per-tab for free, with no help content to author or keep in sync; the
+    `refresh_bindings()` on `TabActivated` is already wired (its comment is simply not true
+    yet). Check nothing depends on a greyed key still firing before flipping it.
+  - **Dismiss a false-positive duplicate** — `dedup` matches on visual similarity, so it will
+    sometimes cluster two genuinely different documents. Duplicates is the only tab with no
+    way to say *no*: `ReconcileState` suppresses orphans (`dismissed`), missing (`missing_ok`)
+    and succession (`succession_dismissed`), but for duplicates only `folded`, which asserts
+    the opposite. Folding a false positive is actively wrong — `suppressed_orphans()` hides
+    every folded subset, so a genuinely different document that is still an orphan vanishes
+    from the list that would have prompted you to adopt it. Add `dup_dismissed` keyed by keep
+    + subsets exactly as `folded` is, reusing `covers()` so a **new** copy resurfaces the
+    cluster for a fresh decision, then wire `x` — after which `f` affirms and `x` rejects,
+    like everywhere else.
+  - **Integrity takes the app-wide verb** — `Enter` opens the file, `→` focuses the record, so
+    the tab reads like the home and the watch. The record is the more useful target for most
+    findings (date-order, supersession, location-ref and round-trip are sidecar problems a PDF
+    cannot fix), which is precisely why keeping it *beside* the finding is the win here.
+  - **Open both sides of a succession** — `o` opens only the newer rendition
+    (`_succession_rendition_path`), but "does this renewal really replace that one?" is a
+    comparison, so one file cannot answer it. Open older then newer so the renewal lands
+    frontmost, and open whichever side exists when the other is paper-only. Termux degrades
+    gracefully: sequential `termux-open` intents share a viewer, so the phone shows the
+    newer — today's behavior, not a regression.
 - [ ] **Undo / history restore** (M) — every save already writes the prior version to the
   local history dir; surface it. `ctrl+z` in the detail pane restores the last saved
   version of the current doc; a palette "History…" lists a doc's saved versions to
@@ -354,38 +395,6 @@ API; never bundle, spawn, or reimplement it.
   suggestions — it ships with direct editing first and gains the accept affordance when
   the suggestions framework (Phase 5) lands. Phase 7 (vision) needs Phase 5 to land its
   proposals into.
-- **Dismiss a false-positive duplicate** (S) — **build this next.** `dedup` matches on
-  visual similarity, so it will sometimes cluster two genuinely different documents (same
-  template, same form, adjacent pages). Today the Duplicates tab has no way to say so: `x`
-  is gated off there (`check_action`), and `ReconcileState` has a suppression for orphans
-  (`dismissed`), for missing (`missing_ok`) and for succession (`succession_dismissed`) —
-  but for duplicates only `folded`, which asserts the *opposite*. Folding a false positive
-  is actively wrong, not just untidy: `suppressed_orphans()` hides every folded subset, so
-  a genuinely different document that is still an orphan disappears from the list that
-  would have prompted you to adopt it. Add `dup_dismissed` keyed by keep + subsets exactly
-  as `folded` is, reusing the `covers()` rule so a **new** copy resurfaces the cluster for
-  a fresh decision instead of staying buried, then wire `x` on `tab-dups` — after which the
-  tab reads like every other one: `f` affirms, `x` rejects. Pairs with the "show dismissed
-  (N)" toggle below, which becomes the undo for both.
-- **Per-tab keys in review's footer and `?` panel** (S) — **ships with the above; same
-  method.** Review's `check_action` returns `None` for an action that doesn't apply to the
-  active tab, and Textual reads `None` as *disabled but **visible*** — `False` is
-  disabled+hidden (`DOMNode.check_action`). So every tab advertises all of Accept, Link,
-  Unlink, Dismiss, Fold, Edit and Ignore-glob, greyed, and the reader has to guess which
-  are real: this is exactly why "how do I dismiss a duplicate?" and "what's the difference
-  between accept / fold / link?" came up in real use. Return `False` instead and the footer
-  and `?` panel become per-tab for free — no separate help content to write or keep in
-  sync. The `refresh_bindings()` on `TabActivated` is already wired (its comment, "footer
-  shows only the active tab's actions", is simply not true yet). Check nothing depends on a
-  greyed key still firing before flipping it.
-- **Open both sides of a succession** (S) — `o` opens only the *newer* document's rendition
-  (`_succession_rendition_path`), but the judgement the tab asks for — "does this renewal
-  really replace that one?" — is a *comparison*, so one file can't answer it. Make `o` open
-  the older then the newer, so the renewal you're affirming lands frontmost, and open
-  whichever side exists when the other has no digital rendition (paper-only predecessors
-  are common) rather than refusing both. On Termux this degrades gracefully: sequential
-  `termux-open` intents land in the same viewer, so the phone shows the newer — today's
-  behavior, not a regression.
 - **Reconcile follow-ups** *(deferred, low priority)* — doctor checks for a document
   that links a *folded* duplicate copy and for stale sidecar entries (a `dismissed`
   path or `folded` keep that no longer exists on disk); a "show dismissed (N)" toggle
@@ -402,8 +411,11 @@ API; never bundle, spawn, or reimplement it.
   documents and could take the verb, while **orphans** rows are files with no document yet;
   bundles could plausibly use `→` for "show me what's in it". Do it as one deliberate pass
   (fable-advisor first) rather than per-surface drift — the point of the verb is that it is
-  predictable. Related: `open_doc_file()` in `tui/screens.py` is already the shared
-  open-the-file seam; the detail side still travels as "dismiss with a doc id for the home
-  to open", and a shared "open detail for id" path would be the equivalent seam for `→`.
+  predictable. **Partly settled:** *Integrity* adopts the verb as part of "Review in the
+  miller view" above, which is also what makes `→` cheap everywhere else in review — with
+  the detail pane sitting in column 3, "show the record" stops meaning "tear the screen
+  down". Related: `open_doc_file()` in `tui/screens.py` is already the shared open-the-file
+  seam; once review is a column, the home's `open_detail()` is the matching seam for `→`,
+  and the "dismiss with a doc id" protocol it replaces goes away.
 - **Someday:** `createdTime` year-plausibility + "issued X expires Y" range parsing
   (fold into suggestions quality), slug finalization, Obsidian-vault confirmation.
