@@ -246,6 +246,10 @@ class HomeScreen(Screen[None]):
         self._expiring_only = False
         self._bundle_filter: str | None = None  # scope to one bundle's docs
         self._show_detail = False
+        # Where the open detail was launched from, so Esc returns there: "miller"
+        # (the default — close back to the columns) or "reconcile" (re-open the
+        # reconcile screen the doc was opened from).
+        self._detail_origin = "miller"
         self._show_issue = False
         self._detail_id: str | None = None
         self._narrow = False
@@ -443,8 +447,16 @@ class HomeScreen(Screen[None]):
         self._selection = selection
         self._refresh_documents()
 
-    def open_detail(self, doc_id: str) -> None:
-        """Reveal the detail pane for ``doc_id`` (Enter / drill right)."""
+    def open_detail(self, doc_id: str, *, origin: str | None = "miller") -> None:
+        """Reveal the detail pane for ``doc_id`` (Enter / drill right).
+
+        ``origin`` records where this view was launched from so Esc returns there
+        ("miller" closes to the columns; "reconcile" re-opens the reconcile
+        screen). ``None`` keeps the current origin — used when a save/reload
+        re-opens the same doc, so the return target survives an edit.
+        """
+        if origin is not None:
+            self._detail_origin = origin
         self._detail_id = doc_id
         first_open = not self._show_detail
         self._show_detail = True
@@ -460,10 +472,14 @@ class HomeScreen(Screen[None]):
             return
         if self._detail_pane.editing:
             return  # an edit in progress owns Esc; don't fall through to close
+        origin = self._detail_origin
+        self._detail_origin = "miller"
         self._show_detail = False
         self.set_class(False, "show-detail")
         self._refresh_documents()
         self._focus_documents()
+        if origin == "reconcile":
+            self.action_reconcile()  # Esc returns to reconcile, not the columns
 
     def open_document(self, doc_id: str) -> None:
         """Open a document's primary rendition with the platform opener."""
@@ -766,7 +782,7 @@ class HomeScreen(Screen[None]):
 
     def action_reconcile(self) -> None:
         self.app.push_screen(
-            ReconcileScreen(self._store, self._config), self._after_watch
+            ReconcileScreen(self._store, self._config), self._after_reconcile
         )
 
     def action_intake(self) -> None:
@@ -891,6 +907,17 @@ class HomeScreen(Screen[None]):
             if doc is not None:
                 self.open_detail(doc.id)
 
+    def _after_reconcile(self, doc_id: str | None) -> None:
+        # Shares the reload with _after_watch, but tags the detail so Esc lands
+        # back on the reconcile screen (open-match / open-missing / adopt) rather
+        # than on the columns. Kept separate from _after_watch, which WatchScreen
+        # also uses and which should close to the columns as before.
+        self._reload()
+        if doc_id is not None:
+            doc = self._doc_by_id(doc_id)
+            if doc is not None:
+                self.open_detail(doc.id, origin="reconcile")
+
     def _after_bundles(self, slug: str | None) -> None:
         self._reload()  # a bundle date edit may have landed
         if slug is not None:
@@ -909,7 +936,7 @@ class HomeScreen(Screen[None]):
 
     def on_detail_pane_saved(self, event: DetailPane.Saved) -> None:
         self._reload()
-        self.open_detail(event.doc_id)
+        self.open_detail(event.doc_id, origin=None)  # keep the Esc return target
         self._detail_pane.focus()
 
     def on_detail_pane_reload_requested(
