@@ -13,8 +13,9 @@ copy with the platform's native opener, and track issue/expiry dates.
 - Hierarchical **tags** (what a doc is) and **bundles** (what it's gathered for — export a
   bundle to a folder for a visa/OCI application or a trip, no file duplication).
 - Issue/expiry dates with an **expiring-soon watch** (opt-out; superseded docs drop off).
-- **Reconcile** view for orphan files, missing renditions, and perceptual-hash **duplicate**
-  clusters — all metadata-only, never touching the real files.
+- **Review** screen for tidying the collection — sync-conflict merges, orphan files, missing
+  renditions, perceptual-hash **duplicate** clusters, successions, and integrity checks, gathered
+  into one place (the `ds reconcile`/`ds resolve`/`ds doctor` CLIs cover the same ground).
 - **`ds scan`** reads issue/expiry dates off scanned PDFs with a local vision model, surfacing
   them as accept/dismiss suggestions; content-based **succession** links renewal chains.
 - `dossier` / `ds` CLI + TUI; opens files via `os.startfile` (Windows) and `termux-open`

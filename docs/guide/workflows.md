@@ -60,9 +60,10 @@ Validity is **event-aware**: a document isn't judged only against today but agai
 
 ## Reconciling files against records — `ds reconcile`
 
-Over time the file tree and the document records drift apart. Reconcile (a TUI screen, or the
+Over time the file tree and the document records drift apart. The TUI's **Review** screen (or the
 `ds reconcile` CLI) surfaces three kinds of mismatch, each with **metadata-only** actions — it
-**never moves or deletes a real file**:
+**never moves or deletes a real file**. (In the TUI these are tabs alongside Conflicts and
+Integrity, so one screen covers the whole tidy-up.)
 
 - **Orphan files** — a file on disk that no document links. Adopt it into a new document, link it
   to an existing one, or dismiss it (persisted so it stays quiet). An ignore-glob handles whole
@@ -76,7 +77,7 @@ Over time the file tree and the document records drift apart. Reconcile (a TUI s
 
 ## Filing unfiled documents — `ds import` / `ds intake`
 
-Reconcile's `a`/`l` file **one** orphan at a time by hand. To bring in **many at once**, the
+Review's `a`/`l` file **one** orphan at a time by hand. To bring in **many at once**, the
 intake engine proposes a full document record per file (composing scan + suggestions +
 succession + a canonical name), which you review then apply. Two entry points:
 
@@ -150,9 +151,9 @@ llama.cpp router), with `scan_temperature` and `scan_dpi` tunable.
 ### Succession from content
 
 `ds scan` also feeds **content-based succession**: documents that share a credential (a document
-number, or type + issuer + holder) are clustered into renewal chains, and the reconcile
-"Succession" tab proposes linking each renewal to the one it replaces. Accept to set the
-`supersedes` link (which then quiets the expiry watch, above), or dismiss.
+number, or type + issuer + holder) are clustered into renewal chains, and the **Review** screen's
+"Succession" tab proposes linking each renewal to the one it replaces. Accept (`a`) to set the
+`supersedes` link (which then quiets the expiry watch, above), or dismiss (`x`).
 
 ## Accepting suggestions
 

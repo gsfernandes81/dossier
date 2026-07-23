@@ -15,8 +15,9 @@ This is normal and non-destructive: **no data is lost**, it's just parked in a s
 
 - **Conflict files are never loaded.** Anything with `.sync-conflict-` in its name is ignored
   by the store, so a conflict copy can't corrupt your data or show up as a phantom document.
-- **`ds doctor` surfaces them.** Run `ds doctor` (or open the doctor screen in the TUI) and any
-  conflict files appear under a `sync-conflict` group, with a recovery reminder.
+- **`ds doctor` surfaces them; the TUI can merge them.** Run `ds doctor` and any conflict files
+  appear under a `sync-conflict` group with a recovery reminder. Or open **Review › Conflicts** in
+  the TUI, which previews and merges each conflict in place (the losing copy is archived first).
 - **Prior versions are backed up on every save.** Before overwriting a document, dossier copies
   the previous version into a **local, non-synced** history directory
   (`<user-data-dir>/dossier/history/<doc-name>/<timestamp>.md`, last 10 kept). If you lose an
