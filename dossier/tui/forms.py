@@ -24,7 +24,19 @@ from __future__ import annotations
 
 from datetime import date
 
-from dossier.store import Store
+# unique_id now lives in the store (a core module can create ids without importing
+# the TUI); re-exported here so the editing surfaces keep using forms.unique_id.
+from dossier.store import Store, unique_id
+
+__all__ = [
+    "Store",
+    "unique_id",
+    "iso",
+    "parse_iso",
+    "int_text",
+    "parse_int",
+    "slug",
+]
 
 
 def iso(value: date | None) -> str:
@@ -51,11 +63,3 @@ def parse_int(text: str) -> int | None:
 def slug(text: str) -> str | None:
     """A trimmed slug field, or ``None`` when blank."""
     return text.strip() or None
-
-
-def unique_id(store: Store, base: str) -> str:
-    """``base``, suffixed ``-2``, ``-3``… until no document file collides on disk."""
-    candidate, n = base, 2
-    while store.document_path(candidate).exists():
-        candidate, n = f"{base}-{n}", n + 1
-    return candidate

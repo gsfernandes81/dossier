@@ -81,6 +81,13 @@ class Config:
     # `ds organize --to-folders`: a doc's primary tag → the category folder its file
     # moves into (longest-prefix match). Synced, from `[organize.folders]`.
     organize_folders: dict[str, str] = field(default_factory=dict)
+    # `ds intake`: where dropped documents land + how they're auto-tagged. Synced
+    # (both devices must agree — the phone drops, the desktop files), from `[intake]`.
+    # ``intake_inbox`` unset = intake disabled; ``intake_filed`` is the fallback folder
+    # for an untagged scan; ``intake_tags`` is a keyword→tag map.
+    intake_inbox: str | None = None
+    intake_filed: str = "Filed"
+    intake_tags: dict[str, str] = field(default_factory=dict)
 
     @property
     def meta_dir(self) -> Path:
@@ -185,6 +192,17 @@ class Config:
             folders = organize.get("folders")
             if isinstance(folders, dict):
                 self.organize_folders = {str(k): str(v) for k, v in folders.items()}
+        intake = synced.get("intake")
+        if isinstance(intake, dict):
+            inbox = intake.get("inbox")
+            if isinstance(inbox, str) and inbox:
+                self.intake_inbox = inbox
+            filed = intake.get("filed")
+            if isinstance(filed, str) and filed:
+                self.intake_filed = filed
+            tags = intake.get("tags")
+            if isinstance(tags, dict):
+                self.intake_tags = {str(k): str(v) for k, v in tags.items()}
 
 
 def _read_toml(path: Path) -> dict[str, object]:

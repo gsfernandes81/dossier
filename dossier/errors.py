@@ -32,6 +32,10 @@ class ScanError(DossierError):
     """`ds scan` could not read a document — VLM unreachable or a bad response."""
 
 
+class IntakeError(DossierError):
+    """`ds intake` could not file a proposal — source vanished or already filed."""
+
+
 class DocumentExistsError(StoreError):
     """A new document's id collides with a file already on disk."""
 

@@ -109,6 +109,27 @@ def test_organize_folders_defaults_empty(tmp_path: Path):
     assert Config(syncthing_root=tmp_path).organize_folders == {}
 
 
+def test_merge_synced_reads_intake_config(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path)
+    config.meta_dir.mkdir(parents=True)
+    config.synced_config_path.write_text(
+        '[intake]\ninbox = "Inbox"\nfiled = "Archive"\n'
+        '[intake.tags]\ncompetency = "marine/coc"\n',
+        encoding="utf-8",
+    )
+    config.merge_synced()
+    assert config.intake_inbox == "Inbox"
+    assert config.intake_filed == "Archive"
+    assert config.intake_tags == {"competency": "marine/coc"}
+
+
+def test_intake_defaults_when_unconfigured(tmp_path: Path):
+    cfg = Config(syncthing_root=tmp_path)
+    assert cfg.intake_inbox is None  # intake disabled
+    assert cfg.intake_filed == "Filed"
+    assert cfg.intake_tags == {}
+
+
 def test_update_synced_merges_preserving_other_keys(tmp_path: Path):
     config = Config(syncthing_root=tmp_path)
     config.meta_dir.mkdir(parents=True)

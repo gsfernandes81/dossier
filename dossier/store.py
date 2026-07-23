@@ -512,6 +512,18 @@ def _as_renditions(value: object) -> list[Rendition]:
 # -- filesystem helpers ------------------------------------------------------
 
 
+def unique_id(store: Store, base: str) -> str:
+    """``base``, suffixed ``-2``, ``-3``… until no document file collides on disk.
+
+    The single collision guard for a new document id, used by every surface that
+    creates one (adopt, the detail pane, intake).
+    """
+    candidate, n = base, 2
+    while store.document_path(candidate).exists():
+        candidate, n = f"{base}-{n}", n + 1
+    return candidate
+
+
 def atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write ``data`` to ``path`` via a same-directory temp file + ``os.replace``."""
     path.parent.mkdir(parents=True, exist_ok=True)
