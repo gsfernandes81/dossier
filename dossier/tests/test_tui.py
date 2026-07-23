@@ -55,6 +55,18 @@ from dossier.tui.screens import (
 TODAY = date(2026, 7, 21)
 
 
+async def _open_review(pilot) -> ReviewScreen:
+    """Open the review surface and wait for its load; return it.
+
+    The single seam for *how review is activated*. That is about to change (it
+    becomes columns of the miller view rather than a pushed modal), and this is the
+    only place the tests should have to learn about it.
+    """
+    app = pilot.app
+    app.push_screen(ReviewScreen(app._store, app._config))
+    return await _await_review_load(pilot)
+
+
 async def _await_review_load(pilot) -> ReviewScreen:
     """Wait for ReviewScreen's on-mount load worker to land; return the screen.
 
@@ -612,9 +624,7 @@ async def test_review_integrity_tab_lists_findings(tmp_path: Path):
     store.save(Document(id="amb", name="Cert 21-08-23", expiry_date=date(2023, 8, 21)))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         options = screen.query_one("#integrity", OptionList)
         # Deferred: on mount the tab only shows a placeholder and the check has not
         # run (count still None), so opening Review never pays the doctor cost.
@@ -678,9 +688,7 @@ async def test_review_doc_write_invalidates_cached_integrity(tmp_path: Path):
     )
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         assert screen._docs is not None  # snapshot loaded once on mount
         # Run integrity so there's a cached result to invalidate.
         screen.query_one(TabbedContent).active = "tab-integrity"
@@ -912,9 +920,7 @@ async def test_reconcile_screen_shows_orphans_and_missing(tmp_path: Path):
     )  # links a missing file
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         folders = [
             str(node.label) for node in screen.query_one("#orphans", Tree).root.children
         ]
@@ -932,9 +938,7 @@ async def test_reconcile_opens_on_orphans_and_cycles_tabs(tmp_path: Path):
     (tmp_path / "loose.pdf").write_bytes(b"x")  # an orphan on disk
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         # Opens on Orphans (actionable) — not the empty, scan-only Duplicates tab.
         tabs = screen.query_one(TabbedContent)
         assert tabs.active == "tab-orphans"
@@ -1004,9 +1008,7 @@ async def test_reconcile_open_file_opens_orphan_under_cursor(
     monkeypatch.setattr(tui_review, "open_file", opened.append)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         tree = screen.query_one("#orphans", Tree)
         screen.query_one(TabbedContent).active = "tab-orphans"
         folder = next(n for n in tree.root.children if n.data == "Wallpapers")
@@ -1027,9 +1029,7 @@ async def test_reconcile_dismiss_orphan_persists_and_hides(tmp_path: Path):
     (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")  # a non-document orphan
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         tree = screen.query_one("#orphans", Tree)
         assert screen._report is not None
         assert any(o.path == "Wallpapers/bg.jpg" for o in screen._report.orphans)
@@ -1060,9 +1060,7 @@ async def test_reconcile_ack_missing_persists(tmp_path: Path):
     )
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         screen.query_one(TabbedContent).active = "tab-missing"
         screen.query_one("#missing", OptionList).highlighted = 0
         await pilot.pause()
@@ -1095,9 +1093,7 @@ async def test_reconcile_link_orphan_to_existing_document(tmp_path: Path):
     store.save(Document(id="coc", name="CoC Card"))  # a doc with no files yet
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         await _cursor_on_orphan(pilot, screen, "Marine")
         screen.action_link()
         await pilot.pause()
@@ -1123,9 +1119,7 @@ async def test_reconcile_adopt_orphan_creates_document(tmp_path: Path):
     # (adopt creates a new doc → no overwrite backup, so root==tmp_path is fine)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         await _cursor_on_orphan(pilot, screen, "Marine")
         screen.action_adopt()  # creates the doc immediately, then dismisses
         await pilot.pause()
@@ -1151,9 +1145,7 @@ async def test_reconcile_unlink_dead_rendition(tmp_path: Path):
     )
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         screen.query_one(TabbedContent).active = "tab-missing"
         screen.query_one("#missing", OptionList).highlighted = 0
         await pilot.pause()
@@ -1173,9 +1165,7 @@ async def test_reconcile_fold_cluster_persists_and_suppresses(tmp_path: Path):
     store.ensure_layout()
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         screen.query_one(TabbedContent).active = "tab-dups"
         # Inject a scanned cluster directly (no rasterizing in the test).
         screen._pages = {"keep.pdf": [1, 2, 3], "copy.pdf": [1, 2]}
@@ -1206,9 +1196,7 @@ async def test_reconcile_ignore_glob_adds_and_hides(tmp_path: Path):
     (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReviewScreen(store, config)
-        app.push_screen(screen)
-        await _await_review_load(pilot)
+        screen = await _open_review(pilot)
         screen.query_one(TabbedContent).active = "tab-orphans"
         tree = screen.query_one("#orphans", Tree)
         folder = next(n for n in tree.root.children if n.data == "Wallpapers")
