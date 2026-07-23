@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License along with
 # dossier. If not, see <https://www.gnu.org/licenses/>.
 
-"""Modal screens: document detail/edit, and the doctor review list."""
+"""Assorted modal screens: supersede/doc-picker/prompt, watch, bundles, settings."""
 
 from __future__ import annotations
 
@@ -36,108 +36,16 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from dossier import doctor, preparedness, query, scan, suggest
+from dossier import preparedness, query, scan, suggest
 from dossier.config import Config, update_per_device, update_synced
 from dossier.errors import ScanError, StaleWriteError, StoreError
 from dossier.model import Bundle, Document, ExpiryStatus, Location, Template
-from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import (
     forms,
     glyphs as glyphset,
     rows,
 )
-
-
-class DoctorScreen(ModalScreen[str | None]):
-    """List doctor findings. Dismisses with a document id to open its editor."""
-
-    _SEP = "\x00"  # composite option id: f"{doc_id}{sep}{index}" (ids must be unique)
-
-    CSS = """
-    DoctorScreen { align: center middle; }
-    #dpanel {
-        width: 85%; height: 80%; padding: 1 2;
-        background: $panel; border: round $primary;
-    }
-    #findings { height: 1fr; }
-    """
-    BINDINGS = [
-        Binding("escape", "close", "Close"),
-        Binding("o", "open_file", "Open"),
-    ]
-
-    def __init__(self, store: Store, config: Config) -> None:
-        super().__init__()
-        self._store = store
-        self._config = config
-
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(id="dpanel"):
-            yield Label(id="summary")
-            yield OptionList(id="findings")
-
-    def on_mount(self) -> None:
-        report = doctor.run(self._store, self._config)
-        summary = self.query_one("#summary", Label)
-        options = self.query_one("#findings", OptionList)
-        if not report.findings:
-            summary.update("doctor: all clear.  (Esc to close)")
-            return
-        summary.update(
-            f"doctor: {len(report.findings)} finding(s). "
-            "Enter a document to edit it; Esc closes."
-        )
-        index = 0
-        for check, items in sorted(report.by_check().items()):
-            options.add_option(Option(f"— {check} ({len(items)}) —", id=None))
-            hint = doctor.CHECK_HINTS.get(check)
-            if hint:
-                options.add_option(Option(f"  → {hint}", id=None))
-            for finding in items:
-                # A doc can appear in several findings; a composite id keeps them
-                # unique (else OptionList raises DuplicateID). Conflicts aren't docs.
-                oid = (
-                    None
-                    if finding.check == "sync-conflict"
-                    else f"{finding.subject}{self._SEP}{index}"
-                )
-                options.add_option(
-                    Option(f"  {finding.subject}: {finding.detail}", id=oid)
-                )
-                index += 1
-
-    def action_close(self) -> None:
-        self.dismiss(None)
-
-    def action_open_file(self) -> None:
-        """Open the highlighted finding's document file (xdg/termux opener)."""
-        option_id = _highlighted_id(self.query_one("#findings", OptionList))
-        if option_id is None:
-            return
-        doc_id = option_id.split(self._SEP, 1)[0]
-        doc = next((d for d in self._store.load_all() if d.id == doc_id), None)
-        if doc is None:
-            return
-        rendition = doc.primary_rendition()
-        if rendition is None:
-            self.notify(f"{doc.name}: no digital file linked", severity="warning")
-            return
-        path = query.resolve_path(self._config.syncthing_root, rendition.path)
-        if not path.exists():
-            self.notify(f"file not found: {path}", severity="error")
-            return
-        try:
-            open_file(path)
-        except OpenError as exc:
-            self.notify(str(exc), severity="error")
-        else:
-            self.notify(f"opened {doc.name}")
-
-    @on(OptionList.OptionSelected)
-    def _open(self, event: OptionList.OptionSelected) -> None:
-        if event.option_id is not None:
-            self.dismiss(event.option_id.split(self._SEP, 1)[0])  # back to the doc id
 
 
 class SupersedeScreen(ModalScreen[bool]):

@@ -67,17 +67,29 @@ class Report:
         return grouped
 
 
-def run(store: Store, config: Config) -> Report:
+def run(store: Store, config: Config, *, skip: frozenset[str] = frozenset()) -> Report:
+    """Run every integrity check and collect the findings.
+
+    ``skip`` drops findings of the named checks (see :class:`Finding.check`). The
+    two heaviest — ``sync-conflict`` and ``missing-file`` — are also short-circuited
+    when skipped so they never run; a final filter honours any other skipped kind.
+    The Review screen's Integrity tab skips those two because its Conflicts and
+    Missing tabs already own them.
+    """
     report = Report()
-    report.findings += _check_conflicts(store)
+    if "sync-conflict" not in skip:
+        report.findings += _check_conflicts(store)
 
     docs = store.load_all()
     locations = store.load_locations()
     report.findings += _check_location_refs(docs, locations)
     report.findings += _check_supersession(docs)
     report.findings += _check_round_trip(store, docs)
-    report.findings += _check_files(docs, config.syncthing_root)
+    if "missing-file" not in skip:
+        report.findings += _check_files(docs, config.syncthing_root)
     report.findings += _check_dates(docs)
+    if skip:
+        report.findings = [f for f in report.findings if f.check not in skip]
     return report
 
 

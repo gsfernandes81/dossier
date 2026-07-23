@@ -47,9 +47,8 @@ class DossierCommands(Provider):
             (
                 "Review — reconcile the collection",
                 "review",
-                "Conflicts, orphans, missing, dups",
+                "Conflicts, orphans, missing, dups, integrity",
             ),
-            ("Doctor — integrity check", "doctor", "Conflicts, refs, dates, files"),
             ("Bundles", "bundles", "Browse and edit document bundles"),
             ("Watch expiry", "watch", "The expiry-watch surface"),
             ("Toggle expiring-only filter", "toggle_expiring", "Just expiring docs"),

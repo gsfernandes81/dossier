@@ -40,12 +40,11 @@ from dossier.tui import (
     home as tui_home,
 )
 from dossier.tui.detail_pane import DetailPane
-from dossier.tui.review import ReviewScreen
+from dossier.tui.review import ReviewResult, ReviewScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
     DocPickerScreen,
-    DoctorScreen,
     SupersedeScreen,
     TextPromptScreen,
     WatchScreen,
@@ -365,37 +364,45 @@ async def test_detail_pane_edits_dates_and_notes(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_doctor_screen_lists_findings(tmp_path: Path):
+async def test_review_integrity_tab_lists_findings(tmp_path: Path):
     store, config = _setup(tmp_path)
     store.save(Document(id="amb", name="Cert 21-08-23", expiry_date=date(2023, 8, 21)))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.push_screen(DoctorScreen(store, config))
+        screen = ReviewScreen(store, config)
+        app.push_screen(screen)
         await pilot.pause()
-        assert app.screen.query_one("#findings", OptionList).option_count > 0
+        options = screen.query_one("#integrity", OptionList)
+        # An ambiguous-date finding for "amb" is listed (with a group header row).
+        assert options.option_count > 1
+        assert any("amb" in str(o.prompt) for o in options.options)
 
 
 @pytest.mark.asyncio
-async def test_doctor_screen_handles_a_doc_with_two_findings(tmp_path: Path):
-    # A doc appearing in >1 finding must not crash on_mount with DuplicateID.
+async def test_review_integrity_edit_opens_the_flagged_doc(tmp_path: Path):
+    # `e` on an Integrity finding dismisses with an edit request for that doc.
     store, config = _setup(tmp_path)
-    store.save(
-        Document(
-            id="multi",
-            name="Multi",
-            has_digital=True,
-            files=[
-                Rendition("a", "gone-1.pdf", primary=True),  # two missing renditions
-                Rendition("b", "gone-2.pdf"),
-            ],
-        )
-    )
+    store.save(Document(id="amb", name="Cert 21-08-23", expiry_date=date(2023, 8, 21)))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.push_screen(DoctorScreen(store, config))
+        home = app.home
+        home.action_review()
         await pilot.pause()
-        options = app.screen.query_one("#findings", OptionList)
-        assert options.option_count > 0  # rendered without a DuplicateID crash
+        screen = app.screen
+        assert isinstance(screen, ReviewScreen)
+        screen.query_one(TabbedContent).active = "tab-integrity"
+        await pilot.pause()
+        options = screen.query_one("#integrity", OptionList)
+        # Highlight the finding row (skip the group-header row, which has no id).
+        options.highlighted = next(
+            i for i, o in enumerate(options.options) if o.id is not None
+        )
+        screen.action_edit()
+        await pilot.pause()
+        await pilot.pause()  # let the dismiss callback open + start_edit settle
+        assert app.screen is home  # review dismissed
+        assert home.has_class("show-detail")  # the flagged doc opened
+        assert home.editing  # …in edit mode
 
 
 @pytest.mark.asyncio
@@ -1424,8 +1431,8 @@ async def test_esc_returns_to_reconcile_when_detail_opened_from_it(tmp_path: Pat
         assert not home.has_class("show-detail")
         assert app.screen is home  # stayed on the home columns
 
-        # A detail opened *from reconcile* (dismiss-with-doc-id) re-opens reconcile.
-        home._after_review("passport")
+        # A detail opened *from review* (dismiss-with-result) re-opens review.
+        home._after_review(ReviewResult("passport"))
         await pilot.pause()
         assert home.has_class("show-detail")
         home.action_escape()
@@ -1526,7 +1533,6 @@ def test_palette_covers_the_occasional_actions():
     # The actions that lost their dedicated letter now live in the palette.
     assert {
         "review",
-        "doctor",
         "bundles",
         "watch",
         "toggle_expiring",

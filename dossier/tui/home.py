@@ -66,11 +66,10 @@ from dossier.store import Store
 from dossier.tui import glyphs, rows
 from dossier.tui.detail_pane import DetailPane
 from dossier.tui.intake import IntakeScreen
-from dossier.tui.review import ReviewScreen
+from dossier.tui.review import ReviewResult, ReviewScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
-    DoctorScreen,
     SettingsScreen,
     SupersedeScreen,
     WatchScreen,
@@ -792,11 +791,6 @@ class HomeScreen(Screen[None]):
             self._after_bundles,
         )
 
-    def action_doctor(self) -> None:
-        self.app.push_screen(
-            DoctorScreen(self._store, self._config), self._after_doctor
-        )
-
     # -- helpers -------------------------------------------------------------
 
     def _update_searching(self) -> None:
@@ -863,14 +857,6 @@ class HomeScreen(Screen[None]):
         if saved:
             self._reload()
 
-    def _after_doctor(self, doc_id: str | None) -> None:
-        if doc_id is None:
-            return
-        doc = self._doc_by_id(doc_id)
-        if doc is not None:
-            self.open_detail(doc.id)
-            self._detail_pane.start_edit(doc, self._docs)
-
     def _after_watch(self, doc_id: str | None) -> None:
         self._reload()  # an ignore-expiry change in the watch may have landed
         if doc_id is not None:
@@ -878,16 +864,20 @@ class HomeScreen(Screen[None]):
             if doc is not None:
                 self.open_detail(doc.id)
 
-    def _after_review(self, doc_id: str | None) -> None:
+    def _after_review(self, result: ReviewResult | None) -> None:
         # Shares the reload with _after_watch, but tags the detail so Esc lands
-        # back on the review screen (open-match / open-missing / adopt) rather
-        # than on the columns. Kept separate from _after_watch, which WatchScreen
-        # also uses and which should close to the columns as before.
+        # back on the review screen (open-match / open-missing / adopt / an
+        # Integrity finding) rather than on the columns. Kept separate from
+        # _after_watch, which WatchScreen also uses and which should close to the
+        # columns as before. ``edit`` opens straight into the editor (adopt fills a
+        # bare new record; the Integrity `e` jumps in to fix what was flagged).
         self._reload()
-        if doc_id is not None:
-            doc = self._doc_by_id(doc_id)
+        if result is not None:
+            doc = self._doc_by_id(result.doc_id)
             if doc is not None:
                 self.open_detail(doc.id, origin="review")
+                if result.edit:
+                    self._detail_pane.start_edit(doc, self._docs)
 
     def _after_bundles(self, slug: str | None) -> None:
         self._reload()  # a bundle date edit may have landed

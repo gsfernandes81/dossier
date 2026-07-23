@@ -52,6 +52,7 @@ from dossier import (
     dedup,
     dedup_cache,
     dedup_hash,
+    doctor,
     query,
     reconcile,
     resolve,
@@ -82,8 +83,20 @@ class _Leaf:
     suggestion: str | None  # id of the best-matching document — Enter opens it
 
 
-class ReviewScreen(ModalScreen[str | None]):
-    """Reconcile the folder. Dismisses with a document id to open it, or ``None``."""
+@dataclass(frozen=True)
+class ReviewResult:
+    """What Review hands back to the home screen: a document to surface, and how.
+
+    Most tabs open the document read-only (adopt, open-match, open-missing); the
+    Integrity tab's ``e`` sets ``edit`` so a flagged document opens ready to fix.
+    """
+
+    doc_id: str
+    edit: bool = False
+
+
+class ReviewScreen(ModalScreen[ReviewResult | None]):
+    """Reconcile the folder. Dismisses with a :class:`ReviewResult`, or ``None``."""
 
     CSS = """
     ReviewScreen { align: center middle; }
@@ -93,7 +106,7 @@ class ReviewScreen(ModalScreen[str | None]):
     }
     #rsummary { margin-bottom: 1; }
     TabbedContent { height: 1fr; }
-    #conflicts, #dups, #missing, #orphans, #succession { height: 1fr; }
+    #conflicts, #dups, #integrity, #missing, #orphans, #succession { height: 1fr; }
     #conflict-detail {
         height: auto; max-height: 40%; padding-top: 1;
         border-top: solid $primary 30%; color: $text-muted;
@@ -115,6 +128,7 @@ class ReviewScreen(ModalScreen[str | None]):
         # `A` merges every conflict at once.
         Binding("a", "accept", "Accept"),
         Binding("A", "accept_all", "Merge all"),
+        Binding("e", "edit", "Edit"),
         Binding("u", "unlink", "Unlink"),
         Binding("f", "fold", "Fold"),
         Binding("g", "ignore_glob", "Ignore glob"),
@@ -127,6 +141,7 @@ class ReviewScreen(ModalScreen[str | None]):
         "tab-missing",
         "tab-dups",
         "tab-succession",
+        "tab-integrity",
     )
     _TAB_PANE = {
         "tab-conflicts": "#conflicts",
@@ -134,7 +149,11 @@ class ReviewScreen(ModalScreen[str | None]):
         "tab-orphans": "#orphans",
         "tab-missing": "#missing",
         "tab-succession": "#succession",
+        "tab-integrity": "#integrity",
     }
+    # Integrity re-runs the doctor checks, minus the two other tabs already own.
+    _INTEGRITY_SKIP = frozenset({"sync-conflict", "missing-file"})
+    _INTEG_SEP = "\x00"  # composite integrity-row id: f"{doc_id}{sep}{index}"
     _SUCC_SEP = "\x00"  # composite succession-row id: f"{newer}{sep}{older}"
 
     def __init__(self, store: Store, config: Config) -> None:
@@ -151,6 +170,7 @@ class ReviewScreen(ModalScreen[str | None]):
         self._readings: dict[str, scan.ScanReading] = {}
         self._successions: dict[str, succession.Succession] = {}  # row id → proposal
         self._plans: list[resolve.Resolution] = []  # planned conflict merges
+        self._integrity_count = 0  # doctor findings shown on the Integrity tab
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="rpanel"):
@@ -167,6 +187,8 @@ class ReviewScreen(ModalScreen[str | None]):
                     yield OptionList(id="dups")
                 with TabPane("Succession", id="tab-succession"):
                     yield OptionList(id="succession")
+                with TabPane("Integrity", id="tab-integrity"):
+                    yield OptionList(id="integrity")
 
     def on_mount(self) -> None:
         self._state = self._store.load_reconcile()
@@ -176,6 +198,7 @@ class ReviewScreen(ModalScreen[str | None]):
         self._populate_orphans()
         self._populate_missing()
         self._populate_succession()
+        self._populate_integrity()
         self.query_one("#dups", OptionList).add_option(
             Option("press  d  to scan for duplicates (cached after the first run)")
         )
@@ -322,6 +345,60 @@ class ReviewScreen(ModalScreen[str | None]):
         self._populate_conflicts()
         self._update_summary()
 
+    # -- integrity (in-app `ds doctor`, minus what other tabs already own) ----
+
+    def _populate_integrity(self) -> None:
+        """List doctor findings, skipping conflicts + missing files (own tabs)."""
+        report = doctor.run(self._store, self._config, skip=self._INTEGRITY_SKIP)
+        self._integrity_count = len(report.findings)
+        options = self.query_one("#integrity", OptionList)
+        options.clear_options()
+        if not report.findings:
+            options.add_option(Option("integrity: all clear."))
+            return
+        index = 0
+        for check, items in sorted(report.by_check().items()):
+            options.add_option(Option(f"— {check} ({len(items)}) —", id=None))
+            hint = doctor.CHECK_HINTS.get(check)
+            if hint:
+                options.add_option(Option(f"  → {hint}", id=None))
+            for finding in items:
+                # A doc can appear in several findings; a composite id keeps them
+                # unique (else OptionList raises DuplicateID).
+                oid = f"{finding.subject}{self._INTEG_SEP}{index}"
+                options.add_option(
+                    Option(f"  {finding.subject}: {finding.detail}", id=oid)
+                )
+                index += 1
+
+    @on(OptionList.OptionSelected, "#integrity")
+    def _open_integrity(self, event: OptionList.OptionSelected) -> None:
+        if event.option_id is not None:  # Enter → open the doc (read view)
+            doc_id = event.option_id.split(self._INTEG_SEP, 1)[0]
+            self.dismiss(ReviewResult(doc_id))
+
+    def action_edit(self) -> None:
+        """`e` — open the highlighted Integrity finding's document in edit mode."""
+        doc_id = self._integrity_doc_id()
+        if doc_id is not None:
+            self.dismiss(ReviewResult(doc_id, edit=True))
+
+    def _integrity_doc_id(self) -> str | None:
+        options = self.query_one("#integrity", OptionList)
+        index = options.highlighted
+        if index is None:
+            return None
+        option = options.get_option_at_index(index)
+        return option.id.split(self._INTEG_SEP, 1)[0] if option.id else None
+
+    def _integrity_rendition_path(self) -> str | None:
+        doc_id = self._integrity_doc_id()
+        if doc_id is None:
+            return None
+        doc = next((d for d in self._store.load_all() if d.id == doc_id), None)
+        rendition = doc.primary_rendition() if doc is not None else None
+        return rendition.path if rendition is not None else None
+
     # -- population ----------------------------------------------------------
 
     def _update_summary(self) -> None:
@@ -335,12 +412,16 @@ class ReviewScreen(ModalScreen[str | None]):
         )
         supp = self._suppressed_count()
         supp_part = f" · {supp} suppressed" if supp else ""
+        integ_part = (
+            f" · {self._integrity_count} integrity" if self._integrity_count else ""
+        )
         ignore = [*self._config.ignore, *self._state.ignore]
         scope = f"   scope: {len(ignore)} ignore glob(s)" if ignore else ""
         self.query_one("#rsummary", Label).update(
             f"review: {conf_part}{len(report.orphans)} orphans · "
             f"{len(report.linked)} linked · "
-            f"{len(report.missing)} missing{dup_part}{succ_part}{supp_part}{scope}\n"
+            f"{len(report.missing)} missing{dup_part}{succ_part}{integ_part}"
+            f"{supp_part}{scope}\n"
             "Tab/Shift+Tab switch tabs · ? shows all keys · Esc closes"
         )
 
@@ -461,6 +542,8 @@ class ReviewScreen(ModalScreen[str | None]):
             )
         if action == "accept_all":  # `A` — merge every conflict at once
             return True if active == "tab-conflicts" else None
+        if action == "edit":  # `e` — edit the flagged document
+            return True if active == "tab-integrity" else None
         if action in ("link", "ignore_glob"):
             return True if active == "tab-orphans" else None
         if action == "unlink":
@@ -470,7 +553,8 @@ class ReviewScreen(ModalScreen[str | None]):
         if action == "open_file":  # only where a real file sits under the cursor
             return (
                 True
-                if active in ("tab-orphans", "tab-dups", "tab-succession")
+                if active
+                in ("tab-orphans", "tab-dups", "tab-succession", "tab-integrity")
                 else None
             )
         return True
@@ -498,13 +582,13 @@ class ReviewScreen(ModalScreen[str | None]):
     def _open_orphan_match(self, event: Tree.NodeSelected) -> None:
         data = event.node.data
         if isinstance(data, _Leaf) and data.suggestion is not None:
-            self.dismiss(data.suggestion)  # open its best-matching document
+            self.dismiss(ReviewResult(data.suggestion))  # open best-matching document
 
     @on(OptionList.OptionSelected, "#missing")
     def _open_missing(self, event: OptionList.OptionSelected) -> None:
         if event.option_id is not None:
             doc_id = event.option_id.split(_MISSING_SEP, 1)[0]
-            self.dismiss(doc_id)
+            self.dismiss(ReviewResult(doc_id))
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -529,6 +613,8 @@ class ReviewScreen(ModalScreen[str | None]):
             rel = self._cursor_dup_path()
         elif active == "tab-succession":
             rel = self._succession_rendition_path()
+        elif active == "tab-integrity":
+            rel = self._integrity_rendition_path()
         else:
             rel = None
         if rel is None:
@@ -654,7 +740,7 @@ class ReviewScreen(ModalScreen[str | None]):
         doc.id = forms.unique_id(self._store, slugify(name) or "document")
         if self._save_doc(doc):
             self.notify(f"adopted {doc.id} — open it to edit the details")
-            self.dismiss(doc.id)  # the home screen opens it for inline editing
+            self.dismiss(ReviewResult(doc.id, edit=True))  # home opens it for editing
 
     def action_unlink(self) -> None:
         picked = self._highlighted_missing()
