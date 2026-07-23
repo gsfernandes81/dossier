@@ -592,13 +592,25 @@ async def test_reconcile_opens_on_orphans_and_cycles_tabs(tmp_path: Path):
         app.push_screen(screen)
         await pilot.pause()
         # Opens on Orphans (actionable) — not the empty, scan-only Duplicates tab.
-        assert screen.query_one(TabbedContent).active == "tab-orphans"
-        screen.action_next_tab()
+        tabs = screen.query_one(TabbedContent)
+        assert tabs.active == "tab-orphans"
+        # Tab / Shift+Tab (real key presses) cycle the tabs, beating focus-traversal.
+        await pilot.press("tab")
         await pilot.pause()
-        assert screen.query_one(TabbedContent).active == "tab-missing"
-        screen.action_prev_tab()
+        assert tabs.active == "tab-missing"
+        await pilot.press("shift+tab")
         await pilot.pause()
-        assert screen.query_one(TabbedContent).active == "tab-orphans"
+        assert tabs.active == "tab-orphans"
+        # `?` toggles the keybind help panel (discoverability).
+        from textual.widgets import HelpPanel
+
+        assert not screen.query(HelpPanel)
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert screen.query(HelpPanel)
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert not screen.query(HelpPanel)
 
 
 @pytest.mark.asyncio
