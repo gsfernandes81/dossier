@@ -40,7 +40,7 @@ from dossier.tui import (
     home as tui_home,
 )
 from dossier.tui.detail_pane import DetailPane
-from dossier.tui.reconcile import ReconcileScreen
+from dossier.tui.review import ReviewScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
@@ -570,7 +570,7 @@ async def test_reconcile_screen_shows_orphans_and_missing(tmp_path: Path):
     )  # links a missing file
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         folders = [
@@ -590,7 +590,7 @@ async def test_reconcile_opens_on_orphans_and_cycles_tabs(tmp_path: Path):
     (tmp_path / "loose.pdf").write_bytes(b"x")  # an orphan on disk
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         # Opens on Orphans (actionable) — not the empty, scan-only Duplicates tab.
@@ -651,7 +651,7 @@ async def test_help_panel_toggles_with_question_mark(tmp_path: Path):
 async def test_reconcile_open_file_opens_orphan_under_cursor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    import dossier.tui.reconcile as tui_reconcile
+    import dossier.tui.review as tui_review
 
     config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
     store = Store(config)
@@ -659,10 +659,10 @@ async def test_reconcile_open_file_opens_orphan_under_cursor(
     (tmp_path / "Wallpapers").mkdir()
     (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")
     opened: list[Path] = []
-    monkeypatch.setattr(tui_reconcile, "open_file", opened.append)
+    monkeypatch.setattr(tui_review, "open_file", opened.append)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         tree = screen.query_one("#orphans", Tree)
@@ -685,7 +685,7 @@ async def test_reconcile_dismiss_orphan_persists_and_hides(tmp_path: Path):
     (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")  # a non-document orphan
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         tree = screen.query_one("#orphans", Tree)
@@ -718,7 +718,7 @@ async def test_reconcile_ack_missing_persists(tmp_path: Path):
     )
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         screen.query_one(TabbedContent).active = "tab-missing"
@@ -753,7 +753,7 @@ async def test_reconcile_link_orphan_to_existing_document(tmp_path: Path):
     store.save(Document(id="coc", name="CoC Card"))  # a doc with no files yet
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         await _cursor_on_orphan(pilot, screen, "Marine")
@@ -781,7 +781,7 @@ async def test_reconcile_adopt_orphan_creates_document(tmp_path: Path):
     # (adopt creates a new doc → no overwrite backup, so root==tmp_path is fine)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         await _cursor_on_orphan(pilot, screen, "Marine")
@@ -809,7 +809,7 @@ async def test_reconcile_unlink_dead_rendition(tmp_path: Path):
     )
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         screen.query_one(TabbedContent).active = "tab-missing"
@@ -831,7 +831,7 @@ async def test_reconcile_fold_cluster_persists_and_suppresses(tmp_path: Path):
     store.ensure_layout()
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         screen.query_one(TabbedContent).active = "tab-dups"
@@ -864,7 +864,7 @@ async def test_reconcile_ignore_glob_adds_and_hides(tmp_path: Path):
     (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = ReconcileScreen(store, config)
+        screen = ReviewScreen(store, config)
         app.push_screen(screen)
         await pilot.pause()
         screen.query_one(TabbedContent).active = "tab-orphans"
@@ -1423,12 +1423,12 @@ async def test_esc_returns_to_reconcile_when_detail_opened_from_it(tmp_path: Pat
         assert app.screen is home  # stayed on the home columns
 
         # A detail opened *from reconcile* (dismiss-with-doc-id) re-opens reconcile.
-        home._after_reconcile("passport")
+        home._after_review("passport")
         await pilot.pause()
         assert home.has_class("show-detail")
         home.action_escape()
         await pilot.pause()
-        assert isinstance(app.screen, ReconcileScreen)  # back on reconcile, not columns
+        assert isinstance(app.screen, ReviewScreen)  # back on reconcile, not columns
 
 
 @pytest.mark.asyncio
@@ -1523,7 +1523,7 @@ def test_palette_covers_the_occasional_actions():
     actions = {action for _title, action, _help in commands}
     # The actions that lost their dedicated letter now live in the palette.
     assert {
-        "reconcile",
+        "review",
         "doctor",
         "resolve",
         "bundles",

@@ -70,11 +70,11 @@ class _Leaf:
     suggestion: str | None  # id of the best-matching document — Enter opens it
 
 
-class ReconcileScreen(ModalScreen[str | None]):
+class ReviewScreen(ModalScreen[str | None]):
     """Reconcile the folder. Dismisses with a document id to open it, or ``None``."""
 
     CSS = """
-    ReconcileScreen { align: center middle; }
+    ReviewScreen { align: center middle; }
     #rpanel {
         width: 90%; height: 85%; padding: 1 2;
         background: $panel; border: round $primary;

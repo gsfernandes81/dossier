@@ -66,7 +66,7 @@ from dossier.store import Store
 from dossier.tui import glyphs, rows
 from dossier.tui.detail_pane import DetailPane
 from dossier.tui.intake import IntakeScreen
-from dossier.tui.reconcile import ReconcileScreen
+from dossier.tui.review import ReviewScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
@@ -177,7 +177,7 @@ class HomeScreen(Screen[None]):
 
     # A deliberately small keybind set — browse (arrows / Enter / Esc), search
     # (`/`), and the four everyday actions (open / edit / new / bundle). Everything
-    # occasional (reconcile, doctor, resolve, bundles, watch, intake, scan, move,
+    # occasional (review, doctor, resolve, bundles, watch, intake, scan, move,
     # supersede, settings, the view toggles) lives in the **command palette**
     # (`ctrl+p`, or the Commands touch button) — searchable by name, so a new user
     # has almost nothing to memorise. `?` still opens Textual's HelpPanel.
@@ -223,8 +223,8 @@ class HomeScreen(Screen[None]):
         self._bundle_filter: str | None = None  # scope to one bundle's docs
         self._show_detail = False
         # Where the open detail was launched from, so Esc returns there: "miller"
-        # (the default — close back to the columns) or "reconcile" (re-open the
-        # reconcile screen the doc was opened from).
+        # (the default — close back to the columns) or "review" (re-open the
+        # review screen the doc was opened from).
         self._detail_origin = "miller"
         self._show_issue = False
         self._detail_id: str | None = None
@@ -432,7 +432,7 @@ class HomeScreen(Screen[None]):
         """Reveal the detail pane for ``doc_id`` (Enter / drill right).
 
         ``origin`` records where this view was launched from so Esc returns there
-        ("miller" closes to the columns; "reconcile" re-opens the reconcile
+        ("miller" closes to the columns; "review" re-opens the review
         screen). ``None`` keeps the current origin — used when a save/reload
         re-opens the same doc, so the return target survives an edit.
         """
@@ -459,8 +459,8 @@ class HomeScreen(Screen[None]):
         self.set_class(False, "show-detail")
         self._refresh_documents()
         self._focus_documents()
-        if origin == "reconcile":
-            self.action_reconcile()  # Esc returns to reconcile, not the columns
+        if origin == "review":
+            self.action_review()  # Esc returns to review, not the columns
 
     def open_document(self, doc_id: str) -> None:
         """Open a document's primary rendition with the platform opener."""
@@ -763,9 +763,9 @@ class HomeScreen(Screen[None]):
             WatchScreen(self._store, self._config, today=self._today), self._after_watch
         )
 
-    def action_reconcile(self) -> None:
+    def action_review(self) -> None:
         self.app.push_screen(
-            ReconcileScreen(self._store, self._config), self._after_reconcile
+            ReviewScreen(self._store, self._config), self._after_review
         )
 
     def action_intake(self) -> None:
@@ -890,16 +890,16 @@ class HomeScreen(Screen[None]):
             if doc is not None:
                 self.open_detail(doc.id)
 
-    def _after_reconcile(self, doc_id: str | None) -> None:
+    def _after_review(self, doc_id: str | None) -> None:
         # Shares the reload with _after_watch, but tags the detail so Esc lands
-        # back on the reconcile screen (open-match / open-missing / adopt) rather
+        # back on the review screen (open-match / open-missing / adopt) rather
         # than on the columns. Kept separate from _after_watch, which WatchScreen
         # also uses and which should close to the columns as before.
         self._reload()
         if doc_id is not None:
             doc = self._doc_by_id(doc_id)
             if doc is not None:
-                self.open_detail(doc.id, origin="reconcile")
+                self.open_detail(doc.id, origin="review")
 
     def _after_bundles(self, slug: str | None) -> None:
         self._reload()  # a bundle date edit may have landed
