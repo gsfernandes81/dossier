@@ -48,7 +48,9 @@ document turns **red within ~9 months** of expiry. Two things quiet the noise:
   have a date but no longer matter. Toggle it in the detail pane.
 
 Filter the home to just the expiring set from the documents pane, or open the dedicated
-expiry-watch surface for a soonest-first list with an "N tracked · M red" header.
+expiry-watch surface for a soonest-first list with an "N tracked · M red" header. It follows
+the same verb as the home: `Enter` opens the document's file, `→` shows its detail, and `x`
+drops it from the watch.
 
 For use **outside** the TUI — say a scheduled reminder — `ds expiring` prints the same "needs
 attention" list as plain text:

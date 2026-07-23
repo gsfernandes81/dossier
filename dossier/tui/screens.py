@@ -24,7 +24,7 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
     Input,
@@ -40,12 +40,36 @@ from dossier import preparedness, query, scan, suggest
 from dossier.config import Config, update_per_device, update_synced
 from dossier.errors import ScanError, StaleWriteError, StoreError
 from dossier.model import Bundle, Document, ExpiryStatus, Location, Template
+from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import (
     forms,
     glyphs as glyphset,
     rows,
 )
+
+
+def open_doc_file(screen: Screen, config: Config, doc: Document) -> None:
+    """Open a document's primary rendition with the platform opener.
+
+    The app-wide **activate** verb (Enter/tap opens the file; ``→`` shows detail),
+    shared by the home and every modal so all of them report the same misses the
+    same way instead of each raising or notifying differently.
+    """
+    rendition = doc.primary_rendition()
+    if rendition is None:
+        screen.notify(f"{doc.name}: no digital file linked", severity="warning")
+        return
+    path = query.resolve_path(config.syncthing_root, rendition.path)
+    if not path.exists():
+        screen.notify(f"file not found: {path}", severity="error")
+        return
+    try:
+        open_file(path)
+    except OpenError as exc:
+        screen.notify(str(exc), severity="error")
+    else:
+        screen.notify(f"opened {doc.name}")
 
 
 def toggle_help_panel(screen: ModalScreen) -> None:
@@ -243,8 +267,10 @@ class TextPromptScreen(ModalScreen[str | None]):
 class WatchScreen(ModalScreen[str | None]):
     """The expiry watch — tracked documents, soonest expiry first.
 
-    Dismisses with a document id (open it) or ``None``. ``x`` ignores the
-    highlighted document, dropping it from the watch (sets ``ignore_expiry``).
+    Follows the app-wide verb: **Enter opens the document's file**, **``→`` opens its
+    detail** (dismissing with the document id so the home shows the record). ``x``
+    ignores the highlighted document, dropping it from the watch
+    (sets ``ignore_expiry``). Dismisses with a document id or ``None``.
     """
 
     CSS = """
@@ -257,6 +283,7 @@ class WatchScreen(ModalScreen[str | None]):
     """
     BINDINGS = [
         Binding("escape", "close", "Close"),
+        Binding("right", "detail", "Details"),
         Binding("x", "ignore", "Ignore"),
         Binding("question_mark", "toggle_help_panel", "Keys"),
     ]
@@ -302,7 +329,7 @@ class WatchScreen(ModalScreen[str | None]):
         )
         summary.update(
             f"Expiry watch — {len(tracked)} tracked · {red} within {threshold}d.  "
-            "Enter opens · x ignores · ? keys · Esc closes."
+            "Enter opens the file · → details · x ignores · ? keys · Esc closes."
         )
         for doc in tracked:
             view = query.view(
@@ -352,12 +379,23 @@ class WatchScreen(ModalScreen[str | None]):
         option_id = _highlighted_id(self.query_one("#watch", OptionList))
         if option_id is None:
             return None
-        return next((d for d in self._store.load_all() if d.id == option_id), None)
+        try:  # one file read — not a whole load_all just to find a single document
+            return self._store.load(option_id)
+        except StoreError:
+            return None
 
     @on(OptionList.OptionSelected, "#watch")
-    def _open(self, event: OptionList.OptionSelected) -> None:
-        if event.option_id is not None:
-            self.dismiss(event.option_id)
+    def _activate(self, event: OptionList.OptionSelected) -> None:
+        """Enter/tap opens the document's file — the app-wide activate verb."""
+        doc = self._highlighted()
+        if doc is not None:
+            open_doc_file(self, self._config, doc)
+
+    def action_detail(self) -> None:
+        """`→` — hand the id back so the home opens the document's detail pane."""
+        doc = self._highlighted()
+        if doc is not None:
+            self.dismiss(doc.id)
 
 
 class BundlesScreen(ModalScreen[str | None]):

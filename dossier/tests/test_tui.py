@@ -294,7 +294,7 @@ async def test_open_file_action_uses_detailed_doc(
 ):
     store, config = _setup(tmp_path)
     opened: list[Path] = []
-    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         home = app.home
@@ -311,7 +311,7 @@ async def test_enter_activates_document_opens_file(
     # Find-fast verb: activating a document (Enter/tap) opens its file straight away.
     store, config = _setup(tmp_path)
     opened: list[Path] = []
-    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         app.home._activate_doc("passport")
@@ -327,7 +327,7 @@ async def test_activate_physical_only_shows_detail(
     # (where the physical copy lives) with a notice — never a spurious opener call.
     store, config = _setup(tmp_path)
     opened: list[Path] = []
-    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         home = app.home
@@ -345,7 +345,7 @@ async def test_enter_in_search_opens_top_match(
     # Enter from the search box opens the top match's file — cold-launch find-fast.
     store, config = _setup(tmp_path)
     opened: list[Path] = []
-    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         search = app.home.query_one("#search", Input)
@@ -479,7 +479,7 @@ async def test_open_document_invokes_opener(
 ):
     store, config = _setup(tmp_path)
     opened: list[Path] = []
-    monkeypatch.setattr(tui_home, "open_file", lambda p: opened.append(p))
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test():
         app.home.open_document("passport")
@@ -766,6 +766,42 @@ async def test_watch_screen_lists_tracked_and_ignores(tmp_path: Path):
         assert watch.option_count == 0
 
     assert store.load("coc").ignore_expiry is True
+
+
+@pytest.mark.asyncio
+async def test_watch_enter_opens_file_and_right_opens_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # The app-wide verb reaches the watch too: Enter opens the document's file,
+    # `→` hands the id back so the home shows its detail record.
+    store, config = _setup(tmp_path)
+    tracked = store.load("passport")  # has a digital file; give it an expiry
+    tracked.expiry_date = date(2026, 9, 1)
+    store.save(tracked)
+    opened: list[Path] = []
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        screen = WatchScreen(store, config, today=TODAY)
+        dismissed: list[str | None] = []
+        app.push_screen(screen, dismissed.append)
+        await pilot.pause()
+        options = screen.query_one("#watch", OptionList)
+        options.focus()
+        options.highlighted = next(
+            i
+            for i in range(options.option_count)
+            if options.get_option_at_index(i).id == "passport"
+        )
+        await pilot.pause()
+        await pilot.press("enter")  # activate → open the file, screen stays up
+        await pilot.pause()
+        assert opened == [tmp_path / "passport.pdf"]
+        assert dismissed == []
+
+        await pilot.press("right")  # → hands the doc to the home for its detail
+        await pilot.pause()
+        assert dismissed == ["passport"]
 
 
 @pytest.mark.asyncio

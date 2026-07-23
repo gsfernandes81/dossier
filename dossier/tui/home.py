@@ -69,7 +69,6 @@ from dossier import query, scan, suggest
 from dossier.config import Config
 from dossier.errors import ScanError
 from dossier.model import Document, ExpiryStatus, Location, SuggestionState
-from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import glyphs, rows
 from dossier.tui.detail_pane import DetailPane
@@ -81,6 +80,7 @@ from dossier.tui.screens import (
     SettingsScreen,
     SupersedeScreen,
     WatchScreen,
+    open_doc_file,
 )
 
 # Sentinel option ids for the two synthetic locations-pane rows (real location
@@ -508,22 +508,8 @@ class HomeScreen(Screen[None]):
     def open_document(self, doc_id: str) -> None:
         """Open a document's primary rendition with the platform opener."""
         doc = self._doc_by_id(doc_id)
-        if doc is None:
-            return
-        rendition = doc.primary_rendition()
-        if rendition is None:
-            self.notify(f"{doc.name}: no digital file linked", severity="warning")
-            return
-        path = query.resolve_path(self._config.syncthing_root, rendition.path)
-        if not path.exists():
-            self.notify(f"file not found: {path}", severity="error")
-            return
-        try:
-            open_file(path)
-        except OpenError as exc:
-            self.notify(str(exc), severity="error")
-        else:
-            self.notify(f"opened {doc.name}")
+        if doc is not None:
+            open_doc_file(self, self._config, doc)
 
     # -- events --------------------------------------------------------------
 

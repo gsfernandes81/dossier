@@ -303,7 +303,10 @@ search forgives phone-keyboard typos.
   mode key; `Enter` opens the top match's **file** and `→` drills to **detail** (a verb now
   applied consistently). For typing to always mean "search" the home keeps **no letter
   bindings** — `o`/`e`/`n`/`b`/`a` and bare `q` moved to the command palette and the touch
-  buttons (`ctrl+q` quits). Termux launches **type-first** (search focused); desktop keeps the
+  buttons (`ctrl+q` quits). The same verb was swept across the other **document**-listing
+  surface, the expiry **watch** (`Enter` opens the file, `→` details); bundles and review keep
+  their own activate targets, which list bundles and records rather than documents. Termux
+  launches **type-first** (search focused); desktop keeps the
   list focused since the router lands the first key in search anyway. Attention counts
   (expiring · conflicts · inbox) now ride dim **beside the footer**, replacing a toast that
   overlapped the search box. Budget met: cold start → `pass` + `Enter` → opened = 5 keystrokes.
