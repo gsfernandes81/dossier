@@ -42,7 +42,7 @@ from dossier.tui import (
 )
 from dossier.tui.detail_pane import DetailPane
 from dossier.tui.doclist import DocumentList
-from dossier.tui.review import ReviewPane, ReviewScreen
+from dossier.tui.review import ReviewPane
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
@@ -58,12 +58,10 @@ TODAY = date(2026, 7, 21)
 async def _open_review(pilot) -> ReviewPane:
     """Open the review surface and wait for its load; return it.
 
-    The single seam for *how review is activated*. That is about to change (it
-    becomes columns of the miller view rather than a pushed modal), and this is the
-    only place the tests should have to learn about it.
+    The single seam for *how review is activated* — now a mode of the home rather
+    than a pushed modal, which is why this is the only place that had to learn.
     """
-    app = pilot.app
-    app.push_screen(ReviewScreen(app._store, app._config))
+    pilot.app.home.action_review()
     return await _await_review_load(pilot)
 
 

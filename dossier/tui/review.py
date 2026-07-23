@@ -13,9 +13,15 @@
 # You should have received a copy of the GNU Affero General Public License along with
 # dossier. If not, see <https://www.gnu.org/licenses/>.
 
-"""The review screen: sync conflicts, orphans, missing files, duplicates, successions.
+"""The review pane: sync conflicts, orphans, missing files, duplicates, successions.
 
-The single hub for tidying the collection. Conflicts merges Syncthing
+The single hub for tidying the collection, living as **columns 1+2 of the home's
+miller view** rather than a modal — so activating a finding opens its record in
+column 3 *beside* it, and Esc peels the record without disturbing the tab or the
+cursor. Everything it wants from its host it asks for by message
+(:class:`ReviewPane.OpenDocument` / :class:`ReviewPane.CloseRequested`).
+
+Conflicts merges Syncthing
 conflict copies in-app (the TUI face of ``ds resolve``); orphans are a
 per-folder tree (leaves fill lazily on expand) with a "suggested matches" node
 on top; missing is a list where ``Enter`` opens the document; the duplicate scan
@@ -45,7 +51,6 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.message import Message
-from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList, Static, TabbedContent, TabPane, Tree
 from textual.widgets.option_list import Option
 
@@ -86,18 +91,6 @@ class _Leaf:
 
     path: str  # POSIX, relative to the root
     suggestion: str | None  # id of the best-matching document — Enter opens it
-
-
-@dataclass(frozen=True)
-class ReviewResult:
-    """What Review hands back to the home screen: a document to surface, and how.
-
-    Most tabs open the document read-only (adopt, open-match, open-missing); the
-    Integrity tab's ``e`` sets ``edit`` so a flagged document opens ready to fix.
-    """
-
-    doc_id: str
-    edit: bool = False
 
 
 class ReviewPane(Vertical):
@@ -1083,42 +1076,6 @@ class ReviewPane(Vertical):
             return self.query_one(TabbedContent).active
         except Exception:
             return ""
-
-
-class ReviewScreen(ModalScreen[ReviewResult | None]):
-    """Transitional modal wrapper around :class:`ReviewPane`.
-
-    Being a modal is what makes review lossy — acting on a row has to *destroy* the
-    screen to show the document. The pane above is the real surface; this shell only
-    exists so the change lands in reviewable steps, and it goes away once the home
-    hosts the pane as columns 1–2 of the miller view.
-    """
-
-    CSS = """
-    ReviewScreen { align: center middle; }
-    ReviewScreen ReviewPane {
-        width: 90%; height: 85%; padding: 1 2;
-        background: $panel; border: round $primary;
-    }
-    """
-
-    def __init__(self, store: Store, config: Config) -> None:
-        super().__init__()
-        self._store = store
-        self._config = config
-
-    def compose(self) -> ComposeResult:
-        yield ReviewPane(self._store, self._config)
-
-    @on(ReviewPane.OpenDocument)
-    def _open_document(self, event: ReviewPane.OpenDocument) -> None:
-        event.stop()
-        self.dismiss(ReviewResult(event.doc_id, edit=event.edit))
-
-    @on(ReviewPane.CloseRequested)
-    def _close_requested(self, event: ReviewPane.CloseRequested) -> None:
-        event.stop()
-        self.dismiss(None)
 
 
 def _conflict_headline(plan: resolve.Resolution) -> str:
