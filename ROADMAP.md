@@ -37,6 +37,10 @@ a build-but-don't-run installer) that closes the phone sync-back loop. **Phases 
 complete.** Phases 14–15 are next: **find-fast UX** (launch optimized for the urgent
 lookup, undo, init/empty-state polish, typo-tolerant search) and **Syncthing integration**.
 
+**Next up:** *"not a duplicate"* — see **Dismiss a false-positive duplicate** in the Notes.
+Found in real use: every review tab has a way to say *no* except Duplicates, so a cluster
+that isn't a duplicate can only be left to resurface on every scan.
+
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
 
@@ -349,6 +353,19 @@ API; never bundle, spawn, or reimplement it.
   suggestions — it ships with direct editing first and gains the accept affordance when
   the suggestions framework (Phase 5) lands. Phase 7 (vision) needs Phase 5 to land its
   proposals into.
+- **Dismiss a false-positive duplicate** (S) — **build this next.** `dedup` matches on
+  visual similarity, so it will sometimes cluster two genuinely different documents (same
+  template, same form, adjacent pages). Today the Duplicates tab has no way to say so: `x`
+  is gated off there (`check_action`), and `ReconcileState` has a suppression for orphans
+  (`dismissed`), for missing (`missing_ok`) and for succession (`succession_dismissed`) —
+  but for duplicates only `folded`, which asserts the *opposite*. Folding a false positive
+  is actively wrong, not just untidy: `suppressed_orphans()` hides every folded subset, so
+  a genuinely different document that is still an orphan disappears from the list that
+  would have prompted you to adopt it. Add `dup_dismissed` keyed by keep + subsets exactly
+  as `folded` is, reusing the `covers()` rule so a **new** copy resurfaces the cluster for
+  a fresh decision instead of staying buried, then wire `x` on `tab-dups` — after which the
+  tab reads like every other one: `f` affirms, `x` rejects. Pairs with the "show dismissed
+  (N)" toggle below, which becomes the undo for both.
 - **Reconcile follow-ups** *(deferred, low priority)* — doctor checks for a document
   that links a *folded* duplicate copy and for stale sidecar entries (a `dismissed`
   path or `folded` keep that no longer exists on disk); a "show dismissed (N)" toggle
