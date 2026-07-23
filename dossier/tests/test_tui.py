@@ -42,7 +42,7 @@ from dossier.tui import (
 )
 from dossier.tui.detail_pane import DetailPane
 from dossier.tui.doclist import DocumentList
-from dossier.tui.review import ReviewPane, ReviewResult, ReviewScreen
+from dossier.tui.review import ReviewPane, ReviewScreen
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
@@ -1777,7 +1777,7 @@ async def test_review_conflicts_tab_lists_and_merges(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_esc_returns_to_reconcile_when_detail_opened_from_it(tmp_path: Path):
+async def test_esc_closes_a_columns_detail_back_to_the_columns(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
@@ -1792,13 +1792,102 @@ async def test_esc_returns_to_reconcile_when_detail_opened_from_it(tmp_path: Pat
         assert not home.has_class("show-detail")
         assert app.screen is home  # stayed on the home columns
 
-        # A detail opened *from review* (dismiss-with-result) re-opens review.
-        home._after_review(ReviewResult("passport"))
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("size", "review_shares_with_detail"),
+    [((120, 32), True), ((80, 24), False), ((50, 30), False)],
+)
+async def test_review_shares_with_detail_only_where_there_is_room(
+    tmp_path: Path, size: tuple[int, int], review_shares_with_detail: bool
+):
+    # Wide shows review and the record side by side; narrow and medium swap to the
+    # record (hiding is not teardown — review keeps its tab and cursor underneath).
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=size) as pilot:
+        home = app.home
+        home.action_review()
+        pane = await _await_review_load(pilot)
+        assert pane.display, "review is not visible in review-mode"
+
+        home.open_detail("passport")
+        await pilot.pause()
+        assert home.query_one("#detail").display, "the record never appeared"
+        assert pane.display is review_shares_with_detail
+        # Either way the pane is only hidden, never unmounted.
+        assert pane.is_mounted
+
+
+@pytest.mark.asyncio
+async def test_review_mode_disables_the_home_arrow_drills(tmp_path: Path):
+    """`→` must not reach the home's drill while review holds the columns.
+
+    As a modal, review swallowed bare arrows at the screen boundary. As a widget
+    they bubble, and `→` would open the detail for whatever the *hidden* documents
+    cursor happens to sit on.
+    """
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        assert home.check_action("drill_in", ()) is True  # normal browsing
+
+        home.action_review()
+        await _await_review_load(pilot)
+        assert home.check_action("drill_in", ()) is False
+        assert home.check_action("focus_search", ()) is False
+        assert home.check_action("drill_out", ()) is False
+
+        # With a record open, `←` gets its meaning back: close it, back to review.
+        home.open_detail("passport")
+        await pilot.pause()
+        assert home.check_action("drill_out", ()) is True
+        assert home.check_action("drill_in", ()) is False
+
+
+@pytest.mark.asyncio
+async def test_esc_from_a_review_detail_keeps_review_exactly_as_left(tmp_path: Path):
+    """The point of the whole refactor: acting on a finding costs you nothing.
+
+    Review used to be a modal, so opening a finding's record dismissed it — losing
+    the tab and the cursor — and Esc rebuilt it from scratch on a fresh load. Now
+    the record opens in column 3 beside the finding, and Esc peels only that.
+    """
+    store, config = _setup(tmp_path)
+    (tmp_path / "loose.pdf").write_bytes(b"x")  # an orphan, so Orphans has rows
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 32)) as pilot:  # wide: review + detail at once
+        home = app.home
+        home.action_review()
+        pane = await _await_review_load(pilot)
+        assert home.has_class("review-mode")
+
+        # Park somewhere specific, so "exactly as left" has something to mean.
+        tabs = pane.query_one(TabbedContent)
+        tabs.active = "tab-missing"
+        await pilot.pause()
+        loads_before = pane._loads
+
+        home._review_open_document(ReviewPane.OpenDocument("passport"))
         await pilot.pause()
         assert home.has_class("show-detail")
-        home.action_escape()
+        assert home.has_class("review-mode"), "review was torn down to show a record"
+        assert home._detail_id == "passport"
+
+        # Real keys, not action calls: which Esc fires depends on where focus sits
+        # in the binding chain, and that cascade is the risky part of this change.
+        await pilot.press("escape")  # focus is in the detail → home peels it
         await pilot.pause()
-        assert isinstance(app.screen, ReviewScreen)  # back on reconcile, not columns
+        assert not home.has_class("show-detail")
+        assert home.has_class("review-mode"), "Esc left review instead of the detail"
+        assert tabs.active == "tab-missing", "review lost the tab it was on"
+        assert pane._loads == loads_before, "Esc re-ran the load it used to re-run"
+
+        await pilot.press("escape")  # focus is back in the pane → review closes
+        await pilot.pause()
+        assert not home.has_class("review-mode")
+        assert app.screen is home
 
 
 @pytest.mark.asyncio

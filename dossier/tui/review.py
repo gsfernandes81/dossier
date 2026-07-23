@@ -198,6 +198,7 @@ class ReviewPane(Vertical):
         # One document snapshot, loaded once and reused across tabs; a write
         # invalidates it (see _snapshot / _invalidate_docs) so it never goes stale.
         self._docs: list[Document] | None = None
+        self._loads = 0  # completed loads, so tests can prove one didn't re-run
         # Integrity is the priciest tab (a full `ds doctor` run), so it's deferred
         # until first opened: count is None until checked, then the finding total.
         self._integrity_count: int | None = None
@@ -230,7 +231,7 @@ class ReviewPane(Vertical):
             Option("press  s  to scan for duplicates (cached after the first run)")
         )
         self._show_loading()
-        self._focus_active_pane()
+        self.focus_active_pane()
         self._load()
 
     def _show_loading(self) -> None:
@@ -247,6 +248,7 @@ class ReviewPane(Vertical):
     @work(thread=True, exclusive=True, group="review-load")
     def _load(self) -> None:
         """Do the slow store reads off-thread, then render on the UI thread."""
+        self._loads += 1  # observable: the load is the expensive thing to avoid
         state = self._store.load_reconcile()
         docs = self._store.load_all()
         report = reconcile.run(self._store, self._config, state=state, docs=docs)
@@ -282,7 +284,7 @@ class ReviewPane(Vertical):
         tabs = self.query_one(TabbedContent)
         if tabs.active == "tab-conflicts":
             tabs.active = self._default_tab()
-        self._focus_active_pane()
+        self.focus_active_pane()
 
     def _default_tab(self) -> str:
         report = self._report
@@ -379,6 +381,7 @@ class ReviewPane(Vertical):
 
     @on(OptionList.OptionHighlighted, "#conflicts")
     def _on_conflict_highlight(self, event: OptionList.OptionHighlighted) -> None:
+        event.stop()  # the host screen has OptionList handlers too; this one is ours
         if event.option_id is not None:
             self._show_conflict_detail(int(event.option_id))
 
@@ -515,6 +518,7 @@ class ReviewPane(Vertical):
 
     @on(OptionList.OptionSelected, "#integrity")
     def _open_integrity(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
         if event.option_id is not None:  # Enter → open the doc (read view)
             doc_id = event.option_id.split(self._INTEG_SEP, 1)[0]
             self.post_message(self.OpenDocument(doc_id))
@@ -648,7 +652,7 @@ class ReviewPane(Vertical):
     @on(TabbedContent.TabActivated)
     def _tab_changed(self) -> None:
         self.refresh_bindings()  # footer shows only the active tab's actions
-        self._focus_active_pane()  # so its list/tree is immediately navigable
+        self.focus_active_pane()  # so its list/tree is immediately navigable
         # Integrity runs lazily on first open (never the default tab, so this is
         # always user-driven and post-mount — _report is set by then).
         if (
@@ -659,7 +663,9 @@ class ReviewPane(Vertical):
             self._integrity_started = True
             self._run_integrity()
 
-    def _focus_active_pane(self) -> None:
+    def focus_active_pane(self) -> None:
+        """Focus the active tab's list/tree. Public: the host calls it to hand focus
+        back after closing the detail column, landing on the row you came from."""
         pane = self._TAB_PANE.get(self._active_tab())
         if pane:
             hits = self.query(pane)
@@ -734,6 +740,7 @@ class ReviewPane(Vertical):
 
     @on(Tree.NodeSelected, "#orphans")
     def _open_orphan_match(self, event: Tree.NodeSelected) -> None:
+        event.stop()
         data = event.node.data
         if isinstance(data, _Leaf) and data.suggestion is not None:
             # open the best-matching document
@@ -741,6 +748,7 @@ class ReviewPane(Vertical):
 
     @on(OptionList.OptionSelected, "#missing")
     def _open_missing(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
         if event.option_id is not None:
             doc_id = event.option_id.split(_MISSING_SEP, 1)[0]
             self.post_message(self.OpenDocument(doc_id))

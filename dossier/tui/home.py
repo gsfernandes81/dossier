@@ -46,7 +46,7 @@ from dataclasses import replace
 from datetime import date
 
 from rich.text import Text
-from textual import work
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
@@ -74,7 +74,7 @@ from dossier.tui import glyphs, rows
 from dossier.tui.detail_pane import DetailPane
 from dossier.tui.doclist import DocumentList
 from dossier.tui.intake import IntakeScreen
-from dossier.tui.review import ReviewResult, ReviewScreen
+from dossier.tui.review import ReviewPane
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
@@ -97,6 +97,10 @@ _NARROW_COLS = 60
 # typed into a form Checkbox/SelectionList (which don't swallow it like an Input
 # does) can't fire a home binding — and the footer stops advertising them. Only the
 # still-bound letters matter here now (the rest moved to the command palette).
+# Home actions review takes over while it holds columns 1+2. `drill_out` stays
+# live whenever the detail is open, so `←` means "close detail, back to review".
+_REVIEW_LOCKED = frozenset({"focus_search", "drill_in", "drill_out"})
+
 _EDIT_LOCKED = frozenset(
     {
         "open_file",
@@ -183,6 +187,20 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.show-detail #locations { display: none; }
     HomeScreen.-narrow.show-detail #documents { display: none; }
     HomeScreen.-narrow.show-detail #detail { width: 1fr; border-left: none; }
+
+    /* Review takes columns 1+2, leaving the detail pane as column 3 — so acting
+       on a finding shows the record *beside* it instead of tearing review down.
+       These rules live here, not in ReviewPane.DEFAULT_CSS: a widget's CSS is
+       scoped to its own type, and a rule leading with another type is rewritten
+       into one that can never match. Only wide can afford both at once; narrow
+       and medium swap to the detail (display:none is not teardown — review keeps
+       its tab, cursor and loaded report while hidden). */
+    ReviewPane { display: none; width: 1fr; }
+    HomeScreen.review-mode ReviewPane { display: block; }
+    HomeScreen.review-mode #locations { display: none; }
+    HomeScreen.review-mode #documents { display: none; }
+    HomeScreen.-narrow.review-mode.show-detail ReviewPane { display: none; }
+    HomeScreen.-medium.review-mode.show-detail ReviewPane { display: none; }
     """
 
     # Find-fast home: typing anything routes into search (see on_key), so the home
@@ -231,10 +249,7 @@ class HomeScreen(Screen[None]):
         self._conflict_count = 0
         self._inbox_count = 0
         self._show_detail = False
-        # Where the open detail was launched from, so Esc returns there: "miller"
-        # (the default — close back to the columns) or "review" (re-open the
-        # review screen the doc was opened from).
-        self._detail_origin = "miller"
+        self._review: ReviewPane | None = None  # mounted on first `action_review`
         self._show_issue = False
         self._detail_id: str | None = None
         self._narrow = False
@@ -327,8 +342,17 @@ class HomeScreen(Screen[None]):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if self.editing and action in _EDIT_LOCKED:
-            return None  # suppressed + hidden from the footer while editing
-        return True
+            return None  # suppressed, but still shown (greyed) in the footer
+        # Review holds the columns these act on. Unlike a modal, a widget lets
+        # unhandled keys bubble up here — `→` would otherwise open the detail for
+        # whatever the *hidden* documents cursor sits on. False, not None: dead as a
+        # key AND absent from the footer, which is the honest reading. `drill_out`
+        # survives while the detail is open, so `←` means "close detail, to review".
+        return not (
+            self.has_class("review-mode")
+            and action in _REVIEW_LOCKED
+            and not (action == "drill_out" and self._show_detail)
+        )
 
     # -- data ----------------------------------------------------------------
 
@@ -472,24 +496,21 @@ class HomeScreen(Screen[None]):
         self._selection = selection
         self._refresh_documents()
 
-    def open_detail(self, doc_id: str, *, origin: str | None = "miller") -> None:
+    def open_detail(self, doc_id: str) -> None:
         """Reveal the detail pane for ``doc_id`` (Enter / drill right).
 
-        ``origin`` records where this view was launched from so Esc returns there
-        ("miller" closes to the columns; "review" re-opens the review
-        screen). ``None`` keeps the current origin — used when a save/reload
-        re-opens the same doc, so the return target survives an edit.
+        Column 3 either way: opened from the miller columns or from a review
+        finding. Review no longer needs an "origin" to return to, because it was
+        never dismissed — it is still sitting in columns 1+2 behind this.
         """
-        if origin is not None:
-            self._detail_origin = origin
         self._detail_id = doc_id
         first_open = not self._show_detail
         self._show_detail = True
         self.set_class(True, "show-detail")
-        if first_open:
+        if first_open and not self.has_class("review-mode"):
             self._refresh_documents()  # rows collapse to their compact shape
         self._update_detail()
-        if self._narrow:
+        if self._narrow or self.has_class("review-mode"):
             self._detail_pane.focus()
 
     def close_detail(self) -> None:
@@ -497,14 +518,13 @@ class HomeScreen(Screen[None]):
             return
         if self._detail_pane.editing:
             return  # an edit in progress owns Esc; don't fall through to close
-        origin = self._detail_origin
-        self._detail_origin = "miller"
         self._show_detail = False
         self.set_class(False, "show-detail")
+        if self.has_class("review-mode") and self._review is not None:
+            self._review.focus_active_pane()  # tab and cursor exactly as left
+            return
         self._refresh_documents()
         self._focus_documents()
-        if origin == "review":
-            self.action_review()  # Esc returns to review, not the columns
 
     def open_document(self, doc_id: str) -> None:
         """Open a document's primary rendition with the platform opener."""
@@ -859,9 +879,65 @@ class HomeScreen(Screen[None]):
         )
 
     def action_review(self) -> None:
-        self.app.push_screen(
-            ReviewScreen(self._store, self._config), self._after_review
-        )
+        """Toggle review into columns 1+2. Mounted once, then shown and hidden.
+
+        Never unmounted: tearing it down is what made the old modal lossy, and a
+        remount would re-run the whole load (documents + reconcile + conflict plans)
+        just to show a surface the user already had.
+        """
+        if self.has_class("review-mode"):
+            self._exit_review_mode()
+            return
+        if self._review is None:
+            self._review = ReviewPane(self._store, self._config)
+            self.query_one("#panes").mount(self._review, before=self._detail_pane)
+        self._enter_review_mode()
+
+    def _enter_review_mode(self) -> None:
+        # Normalise the filter state rather than out-specifying it in CSS: a stale
+        # `searching` class carries two class selectors and would out-rank
+        # `.review-mode #documents { display: none }`, resurrecting the documents
+        # column underneath review on a narrow screen.
+        search = self.query_one("#search", Input)
+        search.value = ""
+        search.disabled = True  # the filter targets a hidden pane while review is up
+        self._filter_text = ""
+        self._bundle_filter = None
+        self._expiring_only = False
+        self.remove_class("searching", "show-documents")
+        self.add_class("review-mode")
+        if self._review is not None:
+            self._review.focus_active_pane()
+
+    def _exit_review_mode(self) -> None:
+        self.remove_class("review-mode")
+        self.query_one("#search", Input).disabled = False
+        self._scan_attention()  # a merge in review may have cleared conflicts
+        self._reload()
+        self._focus_documents()
+
+    @on(ReviewPane.OpenDocument)
+    def _review_open_document(self, event: ReviewPane.OpenDocument) -> None:
+        """Review asked for a document — show it in column 3, review stays up."""
+        event.stop()
+        self._scan_attention()
+        self._reload()
+        doc = self._doc_by_id(event.doc_id)
+        if doc is None:
+            self.notify(f"{event.doc_id}: no such document", severity="warning")
+            return
+        self.open_detail(doc.id)
+        if event.edit:
+            self._detail_pane.start_edit(doc, self._docs)
+
+    @on(ReviewPane.CloseRequested)
+    def _review_close_requested(self, event: ReviewPane.CloseRequested) -> None:
+        """Esc inside review — peel the newest layer, don't collapse the stack."""
+        event.stop()
+        if self._show_detail:
+            self.close_detail()
+        else:
+            self._exit_review_mode()
 
     def action_intake(self) -> None:
         if not self._config.intake_inbox:
@@ -926,10 +1002,13 @@ class HomeScreen(Screen[None]):
         focused = self.app.focused
         if focused is not None and focused.display:
             return
-        for selector in ("#documents", "#detail", "#locations", "#search"):
-            widget = self.query_one(selector)
-            if widget.display:
-                widget.focus()
+        # ReviewPane is mounted lazily, so query (which tolerates a miss) rather
+        # than query_one (which raises) — it simply isn't there until first use.
+        panes = ("ReviewPane", "#documents", "#detail", "#locations", "#search")
+        for selector in panes:
+            hits = self.query(selector)
+            if hits and hits.first().display:
+                hits.first().focus()
                 return
 
     def _current_doc(self) -> Document | None:
@@ -970,22 +1049,6 @@ class HomeScreen(Screen[None]):
             if doc is not None:
                 self.open_detail(doc.id)
 
-    def _after_review(self, result: ReviewResult | None) -> None:
-        # Shares the reload with _after_watch, but tags the detail so Esc lands
-        # back on the review screen (open-match / open-missing / adopt / an
-        # Integrity finding) rather than on the columns. Kept separate from
-        # _after_watch, which WatchScreen also uses and which should close to the
-        # columns as before. ``edit`` opens straight into the editor (adopt fills a
-        # bare new record; the Integrity `e` jumps in to fix what was flagged).
-        self._scan_attention()  # a merge in Review may have cleared conflicts
-        self._reload()
-        if result is not None:
-            doc = self._doc_by_id(result.doc_id)
-            if doc is not None:
-                self.open_detail(doc.id, origin="review")
-                if result.edit:
-                    self._detail_pane.start_edit(doc, self._docs)
-
     def _after_bundles(self, slug: str | None) -> None:
         self._reload()  # a bundle date edit may have landed
         if slug is not None:
@@ -1004,7 +1067,7 @@ class HomeScreen(Screen[None]):
 
     def on_detail_pane_saved(self, event: DetailPane.Saved) -> None:
         self._reload()
-        self.open_detail(event.doc_id, origin=None)  # keep the Esc return target
+        self.open_detail(event.doc_id)
         self._detail_pane.focus()
 
     def on_detail_pane_reload_requested(
