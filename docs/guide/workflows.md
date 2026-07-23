@@ -10,7 +10,18 @@ Browse by physical location in the three-column home, or press `/` to search **r
 name, notes, tags, or bundle — the columns stay put and the documents pane filters in place.
 `Enter` opens the detail pane (edit any field inline); `o` opens the actual soft copy with your
 platform's native app. Tags are hierarchical: searching or filtering `id` also matches
-`id/passport`, `id/driving-license`, and so on.
+`id/passport`, `id/driving-license`, and so on. Search also matches a document's scan reading, so
+you can find a doc by text that only appears *inside* the scan.
+
+From the command line, without opening the TUI:
+
+```bash
+uv run ds open passport            # open the file best matching a query (name / tags / scan)
+uv run ds ask "when does my medical expire"   # retrieval-first answer over the records, no model
+```
+
+`ds ask` answers from the records themselves (no LLM call); `--limit N` widens how many matches it
+weighs.
 
 ## Tracking where the physical copy lives
 
@@ -35,6 +46,18 @@ document turns **red within ~9 months** of expiry. Two things quiet the noise:
 Filter the home to just the expiring set from the documents pane, or open the dedicated
 expiry-watch surface for a soonest-first list with an "N tracked · M red" header.
 
+For use **outside** the TUI — say a scheduled reminder — `ds expiring` prints the same "needs
+attention" list as plain text:
+
+```bash
+uv run ds expiring --days 90       # what lapses within the window (default: the synced threshold)
+uv run ds expiring --bundle travel/india-2024   # just one bundle's members
+```
+
+Validity is **event-aware**: a document isn't judged only against today but against any bundle's
+**event date**. A cert that's valid now but lapses before the trip you've bundled it for shows as
+*expiring-by-event*, so "valid today" never lulls you into missing a renewal you'll need later.
+
 ## Reconciling files against records — `ds reconcile`
 
 Over time the file tree and the document records drift apart. Reconcile (a TUI screen, or the
@@ -50,6 +73,42 @@ Over time the file tree and the document records drift apart. Reconcile (a TUI s
   scanned more than once. dossier perceptual-hashes each page and folds subsets under their
   superset; you review and **fold** a cluster (keep one, mark the rest). Folding is always
   review-only, never automatic.
+
+## Filing unfiled documents — `ds import` / `ds intake`
+
+Reconcile's `a`/`l` file **one** orphan at a time by hand. To bring in **many at once**, the
+intake engine proposes a full document record per file (composing scan + suggestions +
+succession + a canonical name), which you review then apply. Two entry points:
+
+- **`ds import <folder>`** — bulk-import every *unfiled* file in a folder (inside the Syncthing
+  root), renamed in place. Dry-run first, then apply:
+  ```bash
+  uv run ds import "Official Documents/Marine/CDC Scans"            # dry run: the proposals
+  uv run ds import "Official Documents/Marine/CDC Scans" --apply    # file them (--yes skips confirm)
+  ```
+  `--limit N` caps a run. A resumable reading cache (`.dossier/intake.toml`) means a big sweep can
+  be re-run without re-scanning what it already read.
+- **`ds intake`** — the ongoing drop-box flow. Configure an inbox once (`[intake] inbox` in
+  `.dossier/config.toml`), drop files there (e.g. from your phone), then `ds intake --apply`, or
+  press **`I`** in the TUI for the review card and file each proposal with one key (`a` file,
+  `e` file + edit, `n` rename, `k` skip, `x` not a document).
+
+Both lean on the vision scan for their proposals, so they shine with the `scan` extra and a vision
+endpoint configured; per-file scan failures are skipped, not fatal. For a hands-free loop, the
+background [scan service](#background-scan-service) can read (and optionally file) inbox drops.
+
+## Organizing filenames — `ds organize`
+
+`ds organize` gives every *linked* file a **canonical name** derived from its document record
+(and, per the `[organize.folders]` config, an optional category folder). It's a plan-then-apply
+flow like export — dry-run by default, `--apply` to perform the renames (which also update the
+rendition paths, so links never break). Pass a document id to organize just one, or omit it for
+all linked files.
+
+```bash
+uv run ds organize                 # preview canonical renames for every linked file
+uv run ds organize --apply         # perform them (rendition paths updated in lockstep)
+```
 
 ## Reading dates off a scan — `ds scan`
 
@@ -117,6 +176,15 @@ uv run ds export travel/india-2024 --to ./out --dry-run          # preview the p
 Files are named by document id, with problem flags for anything missing or already present;
 `--force` overwrites. The original tree is never touched.
 
+### Readiness — templates
+
+A bundle can be measured against a **template**: a hand-authored checklist of the document types
+that purpose requires (`.dossier/templates.toml`). In the bundles screen, `t` assigns a template
+to a bundle and `c` checks readiness — the row then shows a tally like `4/6 ready`, and a document
+counts as ready only if it's present **and valid at the bundle's event date** (the same event-aware
+validity as the expiry watch). It answers "am I actually ready for this application/trip?", not
+just "have I gathered some files."
+
 ## Settings
 
 Press `,` in the TUI for the **Settings screen** (also reachable from the command palette) — no
@@ -130,6 +198,25 @@ config file editing required:
 
 Changes apply on the next home reload, except the icon set (restart). `ctrl+s` saves, `Esc`
 cancels.
+
+## Background scan service
+
+On a desktop you can let dossier keep the catalogue current without running `ds scan` by hand: an
+opt-in background service reads new scans (and can file inbox drops) on a schedule. It runs
+**only when plugged in and idle**, and exits cleanly when those conditions aren't met.
+
+```bash
+uv run ds service run              # run one pass now (power-gated, single-instance locked)
+uv run ds service install          # PRINT how it would install — registers nothing
+uv run ds service install --yes    # register the Windows Scheduled Task / systemd user timer
+uv run ds service status           # live power decision + registration state
+uv run ds service uninstall        # remove it (prints the plan; --yes to perform)
+```
+
+This is how **phone intake** works without any model on the phone: drop a photo into the synced
+inbox from Android, and the desktop service reads it and writes the reading into the synced
+sidecars, so you file it from the review card (`I`) on either device. Full setup — including the
+Termux share-sheet hook — is in the [project README](../../README.md#background-scan--phone-intake-desktop-service).
 
 ## Keeping the store healthy
 

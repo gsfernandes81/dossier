@@ -362,18 +362,25 @@ dossier/
 ├─ dedup.py          # near-duplicate clustering (containment fold) over…
 ├─ dedup_hash.py     #   …perceptual page dHashes, cached per-device by size+mtime in…
 ├─ dedup_cache.py    #   …the platform cache dir (disposable, never synced)
+├─ organize.py       # `ds organize`: canonical-rename engine (plan + apply) for linked files
+├─ intake.py         # `ds import`/`ds intake`: propose a full record for an unfiled file
+│                    #   (composes scan + suggest + succession + organize); resumable read cache
+├─ preparedness.py   # event-aware validity: is a doc valid at a bundle's event date? + readiness
+├─ answers.py        # `ds ask`: retrieval-first answers over the records (no model)
 ├─ reset.py          # `ds reset`: folder-data reset (.dossier/ only) + `--global` config reset
 └─ tui/              # Textual app: Miller home, editable detail pane, reconcile/bundles/doctor/
-                     #   expiry-watch screens, touch/Termux action bar
+                     #   expiry-watch/readiness/intake screens, touch/Termux action bar
 ```
 
 **Data flow.** `model` is the shared vocabulary; `store` is the only thing that touches disk
 (every sidecar format is (de)serialized there); `query` is a pure read layer over documents
 `store` has loaded. The two front-ends — `cli.py` and `tui/` — read through `store`+`query` and
 write through `store`. Everything else is a **feeder** that produces records or *proposals*:
-`migrate` seeds the store; `scan`/`succession`/`suggest`/`reconcile`/`dedup` propose changes a
-human accepts in the TUI (they never auto-write user data); `doctor`/`reset`/`export` are
-operational commands.
+`migrate` seeds the store; `scan`/`succession`/`suggest`/`reconcile`/`dedup`/`intake` propose
+changes a human accepts (they never auto-write user data — `intake`/`import` file only on
+`--apply`/confirmation); `organize` renames on apply; `preparedness`/`answers`/`doctor`/`reset`/
+`export` are read-only or operational commands. A background desktop `ds service` (power-gated)
+can drive `scan`/`intake` unattended.
 
 **Extension points.**
 - *New suggestion source* → emit `Suggestion`s from `suggest.py` (or feed verbatim dates through

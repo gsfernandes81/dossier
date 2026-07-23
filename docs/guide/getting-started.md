@@ -37,7 +37,9 @@ uv run ds migrate --notion-export path/to/export.json --apply    # actually writ
   trapped in names become **suggestions** you accept later (see
   [workflows.md](workflows.md#accepting-suggestions)), never silent writes.
 
-Starting fresh instead of migrating? Add documents directly in the TUI (`n` for new).
+Starting fresh instead of migrating? Add documents directly in the TUI (`n` for new), or point
+`ds import <folder>` at a tree of existing files to bulk-file them — see
+[workflows.md](workflows.md#filing-unfiled-documents--ds-import--ds-intake).
 
 ## 3. Launch the TUI
 
@@ -63,7 +65,9 @@ Everything dossier owns lives in `<root>/.dossier/`, all flat text, all synced:
 ├─ bundles.toml           # bundles (application/trip sets)
 ├─ reconcile.toml         # your reconcile decisions (dismiss/link/fold/…)
 ├─ suggestions.toml       # dismissed suggestions (suppressions only; never writes a doc)
-└─ scans.toml             # ds scan readings, keyed by document id
+├─ scans.toml             # ds scan readings, keyed by document id
+├─ intake.toml            # resumable reading cache for ds import / ds intake
+└─ templates.toml         # hand-authored bundle-readiness checklists
 ```
 
 Two things live **outside** `.dossier/` and are deliberately **not** synced, one per device:

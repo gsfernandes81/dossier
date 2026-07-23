@@ -8,8 +8,10 @@ for what's shipped see [ROADMAP.md](../../ROADMAP.md); for contributor rules see
   extras, and Syncthing setup.
 - **[getting-started.md](getting-started.md)** — configure a device (`ds init`), import from
   Notion (`ds migrate`), and the `.dossier/` layout.
-- **[workflows.md](workflows.md)** — what each feature is *for*: search, location tracking, the
-  expiry watch, reconcile, `ds scan`, suggestions, and bundles/export.
+- **[workflows.md](workflows.md)** — what each feature is *for*: search + `ds ask`/`ds open`,
+  location tracking, the expiry watch + `ds expiring`, reconcile, filing unfiled docs
+  (`ds import`/`ds intake`), `ds organize`, `ds scan`, suggestions, bundles + readiness/export,
+  and the background scan service.
 - **[sync-conflicts.md](sync-conflicts.md)** — recovering from a Syncthing edit conflict.
 
 Inside the app, press **`?`** for the always-current keybinding reference.
