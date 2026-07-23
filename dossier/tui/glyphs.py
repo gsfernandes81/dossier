@@ -73,6 +73,7 @@ class GlyphSet:
     new: str = ""  # the new-document action
     edit: str = ""  # the edit action
     keyboard: str = ""  # the raise-keyboard action
+    commands: str = ""  # the command-palette action
 
 
 ASCII = GlyphSet(
@@ -106,6 +107,7 @@ NERD = GlyphSet(
     new="",  # nf-fa-plus
     edit="",  # nf-fa-edit (pencil-square)
     keyboard="",  # nf-fa-keyboard_o
+    commands="",  # nf-fa-terminal — the command palette
 )
 
 _BY_STYLE = {GlyphStyle.ASCII: ASCII, GlyphStyle.NERD: NERD}

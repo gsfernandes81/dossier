@@ -97,7 +97,9 @@ async def test_app_loads_and_search_filters(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_footer_trims_to_common_actions_and_help_reveals_rest(tmp_path: Path):
+async def test_footer_is_a_small_core_and_occasional_actions_left_the_keys(
+    tmp_path: Path,
+):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
@@ -107,14 +109,13 @@ async def test_footer_trims_to_common_actions_and_help_reveals_rest(tmp_path: Pa
             for ab in home.active_bindings.values()
             if ab.binding.show
         }
-        # High-frequency actions plus the Help affordance stay on the footer.
+        # The footer is a small everyday core plus the Help affordance.
         assert {"Search", "Open", "Edit", "New", "Bundle", "Help"} <= visible
-        # Low-frequency actions moved off the footer so it can't overflow...
-        assert not ({"Doctor", "Reconcile", "Supersede", "Move"} & visible)
-        # ...but remain bound and dispatchable (show=False, not disabled).
-        assert home.active_bindings["d"].binding.description == "Doctor"
-        assert home.active_bindings["d"].binding.show is False
-        # `?` reveals every binding — Textual's HelpPanel lists show=False too.
+        # The occasional actions no longer own a letter at all — they moved to the
+        # command palette, shrinking what a new user must learn.
+        for gone in ("d", "r", "R", "B", "w", "x", "m", "s", "v", "I", "comma"):
+            assert gone not in home.active_bindings
+        # `?` still reveals the remaining bindings via Textual's HelpPanel.
         assert len(app.screen.query(HelpPanel)) == 0
         await pilot.press("question_mark")
         await pilot.pause()
@@ -1227,7 +1228,7 @@ async def test_command_palette_routes_to_home_actions(tmp_path: Path):
         # Every advertised command names an existing home action, and its runner
         # is that bound method — guards against an action-name typo drifting from
         # the HomeScreen binding it delegates to.
-        for _title, action, _help in provider._commands:
+        for _title, action, _help in provider._commands():
             assert provider._runner(action) == getattr(app.home, f"action_{action}")
         # A fuzzy query surfaces the matching commands as palette hits.
         hits = [hit async for hit in provider.search("scan")]
@@ -1394,7 +1395,7 @@ async def test_resolve_screen_lists_and_merges_conflicts(tmp_path: Path):
 
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        await pilot.press("R")  # open the in-app resolver (shift+R)
+        app.home.action_resolve()  # opened via the palette command now
         await pilot.pause()
         assert isinstance(app.screen, ResolveScreen)
         assert app.screen.query_one("#rvlist", OptionList).option_count == 1
@@ -1512,3 +1513,58 @@ async def test_intake_card_retargets_the_succession_link(
         app.screen.dismiss("coc")  # pick an existing document to renew
         await pilot.pause()
         assert screen._proposal.doc.supersedes == "coc"  # link set by hand
+
+
+def test_palette_covers_the_occasional_actions():
+    from dossier.tui.app import DossierCommands
+    from dossier.tui.home import HomeScreen
+
+    commands = DossierCommands._commands()  # a staticmethod — no instance needed
+    actions = {action for _title, action, _help in commands}
+    # The actions that lost their dedicated letter now live in the palette.
+    assert {
+        "reconcile",
+        "doctor",
+        "resolve",
+        "bundles",
+        "watch",
+        "toggle_expiring",
+        "intake",
+        "move",
+        "supersede",
+        "settings",
+        "toggle_search_content",
+    } <= actions
+    # Every palette command maps to a real HomeScreen action.
+    for action in actions:
+        assert callable(getattr(HomeScreen, f"action_{action}", None))
+
+
+@pytest.mark.asyncio
+async def test_commands_button_opens_the_palette(tmp_path: Path):
+    from textual.command import CommandPalette
+
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY, touch=True)  # touch shows the buttons
+    async with app.run_test() as pilot:
+        assert not isinstance(app.screen, CommandPalette)
+        await pilot.click("#act-commands")
+        await pilot.pause()
+        assert isinstance(app.screen, CommandPalette)
+
+
+@pytest.mark.asyncio
+async def test_opening_palette_on_touch_raises_the_soft_keyboard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY, touch=True)
+    reports: list[bool] = []
+    async with app.run_test() as pilot:
+        monkeypatch.setattr(app, "set_mouse_reporting", reports.append)
+        reports.clear()
+        app.action_command_palette()  # its search box gets focus on mount
+        await pilot.pause()
+        await pilot.pause()
+        # Focusing the palette input dropped mouse reporting so the IME can appear.
+        assert reports and reports[-1] is False

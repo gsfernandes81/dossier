@@ -34,8 +34,10 @@ screen (DESIGN §14):
 ``Enter`` opens the detail pane for a document; ``o`` opens its file from
 anywhere. The search box is docked at the bottom as a thumb-reachable command
 bar (``/`` focuses it); typing filters the documents pane in place (root-wide),
-keeping the columns. Under the touch/Termux UI a bottom action bar (Open / Bundle /
-New / ⌨) replaces the desktop keybind footer.
+keeping the columns. Under the touch/Termux UI a bottom action bar (Open / Edit /
+New / Bundle / Watch / Commands) replaces the desktop keybind footer; **Commands**
+opens the searchable command palette (its search box focusing raises the soft
+keyboard), which is the home for every action not on a button or a core key.
 """
 
 from __future__ import annotations
@@ -86,27 +88,15 @@ _NARROW_COLS = 60
 
 # Home actions suppressed while the detail pane is in edit mode, so a bare letter
 # typed into a form Checkbox/SelectionList (which don't swallow it like an Input
-# does) can't fire a home binding — and the footer stops advertising them.
+# does) can't fire a home binding — and the footer stops advertising them. Only the
+# still-bound letters matter here now (the rest moved to the command palette).
 _EDIT_LOCKED = frozenset(
     {
         "open_file",
-        "toggle_dates",
         "bundle",
         "edit",
         "new",
         "accept_suggestion",
-        "scan_doc",
-        "intake",
-        "toggle_search_content",
-        "settings",
-        "move",
-        "supersede",
-        "watch",
-        "reconcile",
-        "doctor",
-        "resolve",
-        "bundles",
-        "toggle_expiring",
         "focus_search",
         "drill_in",
         "drill_out",
@@ -185,11 +175,12 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.show-detail #detail { width: 1fr; border-left: none; }
     """
 
-    # The Footer advertises only the high-frequency actions so it never overflows
-    # (and silently clips keys) at medium width. The rest stay one keystroke away
-    # and remain fully discoverable: `?` opens Textual's HelpPanel, which lists
-    # `show=False` bindings too. Edit-mode gating (check_action) carries over to
-    # both the footer and the panel automatically.
+    # A deliberately small keybind set — browse (arrows / Enter / Esc), search
+    # (`/`), and the four everyday actions (open / edit / new / bundle). Everything
+    # occasional (reconcile, doctor, resolve, bundles, watch, intake, scan, move,
+    # supersede, settings, the view toggles) lives in the **command palette**
+    # (`ctrl+p`, or the Commands touch button) — searchable by name, so a new user
+    # has almost nothing to memorise. `?` still opens Textual's HelpPanel.
     BINDINGS = [
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "escape", "Back"),
@@ -200,25 +191,9 @@ class HomeScreen(Screen[None]):
         Binding("n", "new", "New"),
         Binding("b", "bundle", "Bundle"),
         Binding("question_mark", "toggle_help_panel", "Help"),
-        # Quick-accept the shown doc's top suggestion; off the footer (the detail
-        # read view already prints "a accept · e review"), so it stays uncrowded.
+        # The one non-footer letter kept: quick-accept the shown doc's top
+        # suggestion, since the detail read view already prints "a accept · e review".
         Binding("a", "accept_suggestion", "Accept", show=False),
-        # Read the current doc with the vision model (off the footer; in the help
-        # panel and the command palette). Bulk scan is palette-only.
-        Binding("v", "scan_doc", "Scan (VLM)", show=False),
-        Binding("I", "intake", "Intake", show=False),
-        Binding("ctrl+t", "toggle_search_content", "Search inside scans", show=False),
-        Binding("comma", "settings", "Settings", show=False),
-        # Kept working, but off the footer — surfaced in the help panel (`?`):
-        Binding("i", "toggle_dates", "Iss/Exp", show=False),
-        Binding("m", "move", "Move", show=False),
-        Binding("s", "supersede", "Supersede", show=False),
-        Binding("w", "watch", "Watch", show=False),
-        Binding("r", "reconcile", "Reconcile", show=False),
-        Binding("d", "doctor", "Doctor", show=False),
-        Binding("R", "resolve", "Resolve conflicts", show=False),
-        Binding("B", "bundles", "Bundles", show=False),
-        Binding("x", "toggle_expiring", "Expiring", show=False),
     ]
 
     # True while the detail pane is editing; drives check_action (and, via
@@ -274,6 +249,10 @@ class HomeScreen(Screen[None]):
                 yield Button(_btn_label(g.new, "New"), id="act-new")
                 yield Button(_btn_label(g.bundle, "Bundle"), id="act-bundle")
                 yield Button(_btn_label(g.calendar, "Watch"), id="act-watch")
+                # The 6th tile is the touch entry to the command palette — the
+                # searchable home for everything not on a button (its search box
+                # focusing raises the soft keyboard via the app's focus handler).
+                yield Button(_btn_label(g.commands, "Commands"), id="act-commands")
             yield Input(placeholder="Search name / tags / notes / scans…", id="search")
             yield Footer(compact=True)
 
@@ -290,14 +269,15 @@ class HomeScreen(Screen[None]):
         """On entry, flag any Syncthing conflict files left to merge.
 
         Discoverability only — a notice, not a blocking modal, so it never gets
-        between the user and their documents. Points at the in-app resolver
-        (shift+R); `ds resolve` does the same from a shell.
+        between the user and their documents. Points at the palette's "Resolve"
+        command; `ds resolve` does the same from a shell.
         """
         count = len(self._store.list_conflicts())
         if count:
             noun = "conflict" if count == 1 else "conflicts"
             self.notify(
-                f"{count} sync {noun} to merge — press shift+R (or run `ds resolve`)",
+                f"{count} sync {noun} to merge — palette (ctrl+p) › Resolve, "
+                "or run `ds resolve`",
                 severity="warning",
                 timeout=10,
             )
@@ -567,6 +547,8 @@ class HomeScreen(Screen[None]):
             self.action_bundle()
         elif event.button.id == "act-watch":
             self.action_watch()
+        elif event.button.id == "act-commands":
+            self.app.action_command_palette()
 
     # -- actions -------------------------------------------------------------
 
