@@ -101,6 +101,27 @@ def test_extract_raises_scanerror_on_transport_failure(
         scan.extract(tmp_path / "coc.pdf", _cfg(tmp_path))
 
 
+def test_transcribe_posts_the_transcript_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(scan, "render_page", lambda path, dpi: b"PNG")
+    seen: dict = {}
+
+    def fake_post(base_url, body, timeout):
+        seen["schema"] = body["response_format"]["json_schema"]["name"]
+        seen["max_tokens"] = body["max_tokens"]
+        seen["has_image"] = any(
+            part.get("type") == "image_url" for part in body["messages"][-1]["content"]
+        )
+        return {"transcript": "  Hi World  ", "keywords": ["Hello", "", " ", "World"]}
+
+    monkeypatch.setattr(scan, "_post", fake_post)
+    transcript, keywords = scan.transcribe(tmp_path / "x.pdf", _cfg(tmp_path))
+    assert transcript == "Hi World"  # stripped
+    assert keywords == ("Hello", "World")  # blanks dropped
+    assert seen == {"schema": "transcript", "max_tokens": 2048, "has_image": True}
+
+
 def test_scans_sidecar_round_trips(tmp_path: Path):
     store = Store(_cfg(tmp_path))
     store.ensure_layout()

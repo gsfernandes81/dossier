@@ -321,3 +321,37 @@ def test_open_cli_dry_run_prints_without_opening(
     # Without -n it invokes the platform opener.
     assert cli.main(["open", "competency"]) == 0
     assert len(opened) == 1
+
+
+def test_scan_transcribe_backfills_and_skips_done(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from dossier import scan as scan_mod
+    from dossier.model import Document, Rendition
+    from dossier.store import Store
+
+    config = _configured_store(tmp_path, monkeypatch)
+    (config.syncthing_root / "a.pdf").write_bytes(b"x")
+    store = Store(config)
+    store.save(Document(id="d", name="Doc", files=[Rendition("f", "a.pdf", True)]))
+    store.save_scans(  # a reading with NO transcript yet
+        {"d": scan_mod.ScanReading.from_payload({"document_type": "Doc"}, "m")}
+    )
+    calls: list[int] = []
+
+    def fake_transcribe(path, cfg):
+        calls.append(1)
+        return "full printed text", ("printed", "text")
+
+    monkeypatch.setattr(scan_mod, "transcribe", fake_transcribe)
+    capsys.readouterr()
+
+    assert cli.main(["scan", "--transcribe"]) == 0
+    reading = store.load_scans()["d"]
+    assert reading.transcript == "full printed text"
+    assert reading.keywords == ("printed", "text")
+    assert len(calls) == 1
+
+    # Second run: the transcript is present, so it's skipped (no VLM call).
+    assert cli.main(["scan", "--transcribe"]) == 0
+    assert len(calls) == 1

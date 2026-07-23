@@ -84,6 +84,27 @@ _SCHEMA: dict[str, object] = {
     ],
 }
 
+# A separate, larger pass for the full-text transcript (Phase 11) — kept apart from
+# the extract schema so it never shares the verbatim-date budget or re-generates the
+# structured fields the store already trusts.
+_TRANSCRIBE_SYSTEM = (
+    "You transcribe scanned documents. Output only what is visibly printed — never "
+    "correct, translate, summarise, or invent."
+)
+_TRANSCRIBE_PROMPT = (
+    "Transcribe every legible printed word in this document, top to bottom, "
+    "verbatim (same spelling, digits, and punctuation). Then list 5-15 keywords: "
+    "names, numbers, reference codes, and organisations that appear on it."
+)
+_TRANSCRIBE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "transcript": {"type": "string"},
+        "keywords": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["transcript", "keywords"],
+}
+
 
 @dataclass(frozen=True)
 class ScanReading:
@@ -168,8 +189,18 @@ def render_page(path: Path, dpi: int) -> bytes:
         pdf.close()
 
 
-def extract(path: Path, config: Config, *, timeout: float = 300.0) -> ScanReading:
-    """Read ``path`` with the configured VLM and return its structured metadata.
+def _vision_call(
+    path: Path,
+    config: Config,
+    *,
+    system: str,
+    prompt: str,
+    schema: dict[str, object],
+    schema_name: str,
+    max_tokens: int,
+    timeout: float,
+) -> dict:
+    """Render ``path`` and post it to the VLM with a JSON-schema response format.
 
     Raises :class:`ScanError` if the file can't be rendered, the endpoint is
     unreachable, or the response isn't the expected JSON object.
@@ -187,24 +218,62 @@ def extract(path: Path, config: Config, *, timeout: float = 300.0) -> ScanReadin
     body = {
         "model": config.scan_model,
         "messages": [
-            {"role": "system", "content": _SYSTEM},
+            {"role": "system", "content": system},
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": _PROMPT},
+                    {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": data_uri}},
                 ],
             },
         ],
         "response_format": {
             "type": "json_schema",
-            "json_schema": {"name": "reading", "schema": _SCHEMA},
+            "json_schema": {"name": schema_name, "schema": schema},
         },
         "temperature": config.scan_temperature,
-        "max_tokens": 512,
+        "max_tokens": max_tokens,
     }
-    payload = _post(config.scan_base_url, body, timeout)
+    return _post(config.scan_base_url, body, timeout)
+
+
+def extract(path: Path, config: Config, *, timeout: float = 300.0) -> ScanReading:
+    """Read ``path`` with the configured VLM and return its structured metadata."""
+    payload = _vision_call(
+        path,
+        config,
+        system=_SYSTEM,
+        prompt=_PROMPT,
+        schema=_SCHEMA,
+        schema_name="reading",
+        max_tokens=512,
+        timeout=timeout,
+    )
     return ScanReading.from_payload(payload, config.scan_model)
+
+
+def transcribe(
+    path: Path, config: Config, *, timeout: float = 300.0
+) -> tuple[str, tuple[str, ...]]:
+    """A second VLM pass: the document's full-text transcript + keywords.
+
+    Kept separate from :func:`extract` so the structured (verbatim-date) reading is
+    never re-generated; ``ds scan --transcribe`` backfills these for content search.
+    """
+    payload = _vision_call(
+        path,
+        config,
+        system=_TRANSCRIBE_SYSTEM,
+        prompt=_TRANSCRIBE_PROMPT,
+        schema=_TRANSCRIBE_SCHEMA,
+        schema_name="transcript",
+        max_tokens=2048,
+        timeout=timeout,
+    )
+    transcript = str(payload.get("transcript") or "").strip()
+    raw = payload.get("keywords") or []
+    keywords = tuple(str(k).strip() for k in raw if str(k).strip())
+    return transcript, keywords
 
 
 @dataclass(frozen=True)
