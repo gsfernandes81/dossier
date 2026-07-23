@@ -20,10 +20,11 @@ from pathlib import Path
 
 import pytest
 
+from dossier import store as store_module
 from dossier.config import Config
 from dossier.errors import DocumentExistsError, StaleWriteError
 from dossier.model import Bundle, Document, Location, ReconcileState, Rendition
-from dossier.store import TEMP_PREFIX, Store
+from dossier.store import TEMP_PREFIX, Store, atomic_write_bytes, unique_id
 
 
 @pytest.fixture
@@ -253,3 +254,41 @@ def test_reconcile_sidecar_write_is_deterministic(store: Store):
     first = store.config.reconcile_path.read_bytes()
     store.save_reconcile(store.load_reconcile())
     assert store.config.reconcile_path.read_bytes() == first  # sorted, stable
+
+
+def test_unique_id_is_case_insensitive(store: Store):
+    """A new id must not collide with an existing one under case-folding.
+
+    On a case-sensitive FS (Linux/Termux) the old exact-match guard let
+    ``passport`` coexist with ``Passport``; Syncthing then delivered that pair as a
+    name collision to a case-insensitive device. The divergence would only surface
+    on the Linux CI leg — that's what this test pins.
+    """
+    store.save(Document(id="Passport", name="Passport"))
+    assert unique_id(store, "passport") == "passport-2"  # folds onto "Passport"
+    assert unique_id(store, "PASSPORT") == "PASSPORT-2"  # still folds, keeps case
+    assert unique_id(store, "licence") == "licence"  # no clash → unchanged
+
+
+def test_atomic_write_uses_a_same_directory_temp(
+    store: Store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The temp file lives in the target's own directory, never ``$TMPDIR``.
+
+    On Termux ``$TMPDIR`` is a separate mount, so a cross-directory ``os.replace``
+    would raise ``EXDEV``; keeping the temp beside the target makes the rename
+    atomic on every platform. Runs identically on each CI leg.
+    """
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "other-mount"))
+    seen: dict[str, str] = {}
+    real_mkstemp = store_module.tempfile.mkstemp
+
+    def recording_mkstemp(*, prefix: str, dir: str) -> tuple[int, str]:
+        seen["dir"] = dir  # atomic_write_bytes only ever passes prefix + dir
+        return real_mkstemp(prefix=prefix, dir=dir)
+
+    monkeypatch.setattr(store_module.tempfile, "mkstemp", recording_mkstemp)
+    target = store.config.meta_dir / "probe.bin"
+    atomic_write_bytes(target, b"data")
+    assert seen["dir"] == str(target.parent)  # same dir as target, not TMPDIR
+    assert target.read_bytes() == b"data"

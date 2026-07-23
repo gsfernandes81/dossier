@@ -357,6 +357,33 @@ def test_scan_transcribe_backfills_and_skips_done(
     assert len(calls) == 1
 
 
+def test_service_subcommands_wire_up():
+    parser = cli.build_parser()
+    assert parser.parse_args(["service", "run"]).func is cli.cmd_service_run
+    assert parser.parse_args(["service", "install"]).func is cli.cmd_service_install
+    assert parser.parse_args(["service", "uninstall"]).func is cli.cmd_service_uninstall
+    assert parser.parse_args(["service", "status"]).func is cli.cmd_service_status
+    assert parser.parse_args(["service"]).func is cli.cmd_service
+
+
+def test_service_install_dry_run_prints_plan_without_registering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    _configured_store(tmp_path, monkeypatch)
+    # Guard the contract: a dry run must never invoke apply().
+    from dossier import service_install
+
+    monkeypatch.setattr(
+        service_install,
+        "apply",
+        lambda *a, **k: pytest.fail("dry run must not register"),
+    )
+    capsys.readouterr()
+    assert cli.main(["service", "install"]) == 0
+    out = capsys.readouterr().out
+    assert "dry run" in out and "service run" in out
+
+
 def test_resolve_cli_reports_nothing_when_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):

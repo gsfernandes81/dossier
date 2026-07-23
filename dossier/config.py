@@ -88,6 +88,14 @@ class Config:
     intake_inbox: str | None = None
     intake_filed: str = "Filed"
     intake_tags: dict[str, str] = field(default_factory=dict)
+    # Background scan service ([service], per-device — it runs on the desktop only).
+    # ``assume_ac`` forces the power gate to "plugged in" for a tower whose firmware
+    # reports no battery; ``intake`` is "propose" (compute + sync a reading, a human
+    # files it) or "file" (unattended); ``transcribe_limit`` caps the per-run
+    # transcript budget so a run stays bounded and resumable.
+    service_assume_ac: bool = False
+    service_intake: str = "propose"
+    service_transcribe_limit: int = 10
 
     @property
     def meta_dir(self) -> Path:
@@ -180,9 +188,24 @@ class Config:
         dpi = device.get("scan_dpi")
         if isinstance(dpi, int) and not isinstance(dpi, bool):
             cfg.scan_dpi = dpi
+        cfg._apply_service_table(device.get("service"))
         cfg.validate()
         cfg.merge_synced()
         return cfg
+
+    def _apply_service_table(self, service: object) -> None:
+        """Overlay the per-device ``[service]`` table (background scan service)."""
+        if not isinstance(service, dict):
+            return
+        assume_ac = service.get("assume_ac")
+        if isinstance(assume_ac, bool):
+            self.service_assume_ac = assume_ac
+        intake_policy = service.get("intake")
+        if intake_policy in ("propose", "file"):
+            self.service_intake = str(intake_policy)
+        limit = service.get("transcribe_limit")
+        if isinstance(limit, int) and not isinstance(limit, bool) and limit >= 0:
+            self.service_transcribe_limit = limit
 
     def merge_synced(self) -> None:
         """Overlay settings from the synced ``.dossier/config.toml`` if present."""

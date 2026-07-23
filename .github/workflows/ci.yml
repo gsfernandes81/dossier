@@ -4,11 +4,14 @@ on:
   push:
   pull_request:
 
-# Least-privilege default token: the check job only reads the repo.
+# Least-privilege default token: every job only reads the repo.
 permissions:
   contents: read
 
 jobs:
+  # Lint + type checks are platform-independent, so run them once (ubuntu).
+  # No extras here on purpose: with pypdfium2 absent, scan.py's
+  # `# ty: ignore[unresolved-import]` is *used*, so ty stays clean.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -34,5 +37,63 @@ jobs:
       - name: Type check (ty)
         run: uv run ty check dossier
 
+  # The unit suite on both supported desktop platforms. NTFS is case-insensitive
+  # and uses different path/atomic-write semantics than ext4, so "pure Python"
+  # is not proof — the matrix is. fail-fast off so one OS failing still reports
+  # the other.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      # The scan extra (native pypdfium2 wheel) is installed on ubuntu only, so
+      # one leg exercises the real rasterize path while the windows leg proves the
+      # graceful-degradation path Termux users live in (the render tests
+      # importorskip pypdfium2, so they simply skip where it is absent).
+      - name: Install dependencies (ubuntu, with scan extra)
+        if: runner.os == 'Linux'
+        run: uv sync --extra scan
+
+      - name: Install dependencies (windows, no extras)
+        if: runner.os == 'Windows'
+        run: uv sync
+
       - name: Test (pytest)
         run: uv run python -m pytest --cov=dossier --cov-report=term-missing
+
+  # The real-PTY driver harness, per OS (ConPTY via pywinpty on windows, stdlib
+  # pty on ubuntu). A separate job so a PTY flake never masks the unit results.
+  driver:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies (with driver group)
+        run: uv sync --group driver
+
+      - name: Driver test (real terminal)
+        run: uv run --group driver python -m pytest tools/test_terminal_integration.py

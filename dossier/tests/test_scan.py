@@ -168,3 +168,25 @@ def test_list_models_wraps_unreachable_router(
     monkeypatch.setattr(scan, "_get", boom)
     with pytest.raises(ScanError):
         scan.list_models(_cfg(tmp_path))
+
+
+# The real rasterize path (the native pypdfium2 wheel) — the rest of the file
+# mocks render_page. Auto-skips where the `scan`/`dedup` extra is absent (the
+# windows test leg, a bare `uv sync`), so the suite still passes without it; the
+# ubuntu extras leg exercises it against a committed fixture.
+
+_TINY_PDF = Path(__file__).parent / "data" / "tiny.pdf"
+
+
+def test_render_page_rasterizes_a_real_pdf():
+    pytest.importorskip("pypdfium2")
+    png = scan.render_page(_TINY_PDF, dpi=72)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"  # a real PNG — pdfium actually ran
+
+
+def test_page_hashes_of_a_real_pdf():
+    pytest.importorskip("pypdfium2")
+    from dossier import dedup_hash
+
+    hashes = dedup_hash.page_hashes(_TINY_PDF)
+    assert len(hashes) == 1 and isinstance(hashes[0], int)

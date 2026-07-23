@@ -31,8 +31,10 @@ templates with a readiness checklist. **Phase 11 (answers) is done** — content
 `ds ask`/`ds open`, and scan transcripts. **Phase 12 (bulletproof sync conflicts) is
 done** — a field-level 2-way merge with mtime last-writer-wins, `ds resolve` + an in-app
 ResolveScreen, every sidecar covered, and fault-injection tests proving no silent loss.
-Only **Phase 13** remains — the **long horizon** — platform hardening and the scan
-service, turning the catalogue into a living system.
+**Phase 13 (platform hardening & the scan service) is done** — a Windows + Linux CI matrix
+with platform-gated tests, and a battery-aware background scan service (`ds service run` +
+a build-but-don't-run installer) that closes the phone sync-back loop. **All roadmap phases
+are complete.**
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -194,14 +196,12 @@ keeps the catalogue accurate in three years, and what makes owning the *whole* t
   fresh read persists immediately, a filed file's entry moves to `scans.toml`. *Verified on
   the real store:* a re-`import` of the same file served from cache in **1s vs 6s cold**, no
   re-scan. (Running the full ~900-file apply is the user's to do — a real-file mutation.)
-- [→] **Phone intake rides sync-back — no on-phone VLM** (S) — **deferred to Phase 13**
-  (the scan service). The plumbing already exists: `[intake]` config and `scans.toml` are
-  synced, and the VLM never runs on the phone by construction — so a **manual** loop works
-  *today* (drop a photo in the synced inbox on the phone → run `ds intake` on the desktop →
-  the filed record + reading sync back). The only missing piece is the **automatic** desktop
-  trigger, which *is* the Phase 13 `ds scan` service — so it lands there, not as separate
-  Phase 9 code. When the desktop is reachable the phone's `ds scan` may instead point at its
-  llama-server (already per-device URL config); vision inference never runs on the phone.
+- [x] **Phone intake rides sync-back — no on-phone VLM** (S) — **closed in Phase 13**.
+  The automatic desktop trigger is now `ds service run`: a photo dropped in the synced inbox
+  on the phone is read by the desktop service and its reading synced back via `intake.toml` /
+  `scans.toml`, filed from either device's review card — the VLM never runs on the phone. See
+  the "Background scan & phone intake" section of the README (config + a `termux-url-opener`
+  snippet). Needed no new phone-side code, only the service + docs.
 
 ## Phase 10 — Preparedness: checklists, event-aware validity, reminders  ✅
 Bundles are the app's real job (gather → check → submit, DESIGN §5) but today they are
@@ -277,18 +277,20 @@ discovers `.sync-conflict-*` files, plans a merge, and applies it crash-safely.
   at each apply step (write fails · unlink fails · a concurrent write races us) and a
   compare-and-swap on the live copy; they *prove* the no-silent-loss guarantee.
 
-## Phase 13 — Platform hardening & the scan service  *(long horizon)*
-- [ ] **Cross-platform test matrix** (M) — CI proves Windows, Linux, and Termux, not
-  just "pure Python so probably fine": platform-gated tests for `platform_open`,
-  path/case handling, atomic writes (`EXDEV`), and the PTY driver on each OS.
-  Investigate desktop Termux testing (qemu / Android emulator / proot-distro) for the
-  Termux leg — **drop it if the maintenance cost outweighs the coverage**; a documented
-  on-device smoke checklist is the fallback.
-- [ ] **`ds scan` service install** (M) — one command installs the auto-scan as a
-  Windows Scheduled Task / systemd user timer that scans new files in the background
-  (what Phase 9's sync-back intake rides on). **Battery-aware by requirement**: never
-  runs on battery or when any low-power/power-saver mode is active — plugged-in and
-  idle only; skips cleanly (exit 0, logged) when gated.
+## Phase 13 — Platform hardening & the scan service  ✅
+- [x] **Cross-platform test matrix** (M) — CI is three jobs: `check` (lint/type, once),
+  `test` and `driver` both over a **Windows + Linux** matrix (macOS dropped — unsupported;
+  Termux CI dropped for an on-device smoke checklist, per the escape hatch). Platform-gated
+  tests: per-OS `platform_open` opener argv + a real Windows `os.startfile` path, the
+  same-directory-temp invariant (the EXDEV defense — `atomic_write_bytes` needs no copy
+  fallback by construction), a real-pypdfium2 rasterize on the extras leg, and the PTY driver
+  per OS. Fixed a real `unique_id` case-fold bug the Linux leg now guards.
+- [x] **`ds scan` service** (M) — `ds service run` performs one power-gated, single-instance
+  pass (scan + transcribe + intake), **never on battery / power-saver / unknown AC** (pure
+  `power.decide` over injectable readings), exit 0 when gated. `ds service install` generates a
+  Windows Scheduled Task / systemd user timer pointing at it and **prints the plan without
+  touching the system** unless `--yes` is given; `status`/`uninstall` round it out. Closes the
+  Phase 9 phone sync-back (config + README docs; no on-phone VLM).
 
 ## Notes
 - **Quick wins:** `ds reset` (S), the `ignore_expiry` toggle (S).

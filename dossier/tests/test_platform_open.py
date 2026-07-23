@@ -15,12 +15,27 @@
 
 """Tests for platform detection and the file opener."""
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from dossier import platform_open
 from dossier.platform_open import OpenError, is_termux, termux_preconditions
+
+
+def _record_opener(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
+    """Capture the argv `_run_opener` would exec, without launching anything."""
+    calls: dict[str, list[str]] = {}
+
+    def fake_run(argv: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+        calls["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(platform_open.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(platform_open.subprocess, "run", fake_run)
+    return calls
 
 
 def test_is_termux_via_prefix(monkeypatch: pytest.MonkeyPatch):
@@ -52,3 +67,44 @@ def test_termux_preconditions_reports_missing_pieces(
     problems = termux_preconditions()
     assert any("termux-open" in p for p in problems)
     assert any("storage" in p for p in problems)
+
+
+# The per-OS opener choice — mock the platform so each branch is provable on any
+# CI leg (the matrix then re-runs the whole file on a real Windows runner too).
+
+
+def test_open_file_execs_termux_open_under_termux(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(platform_open, "is_termux", lambda: True)
+    calls = _record_opener(monkeypatch)
+    platform_open.open_file(tmp_path / "x.pdf")
+    assert calls["argv"] == ["/usr/bin/termux-open", str(tmp_path / "x.pdf")]
+
+
+def test_open_file_execs_xdg_open_on_linux(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(platform_open, "is_termux", lambda: False)
+    monkeypatch.setattr(platform_open.sys, "platform", "linux")
+    calls = _record_opener(monkeypatch)
+    platform_open.open_file(tmp_path / "x.pdf")
+    assert calls["argv"] == ["/usr/bin/xdg-open", str(tmp_path / "x.pdf")]
+
+
+def test_open_file_execs_open_on_macos(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setattr(platform_open, "is_termux", lambda: False)
+    monkeypatch.setattr(platform_open.sys, "platform", "darwin")
+    calls = _record_opener(monkeypatch)
+    platform_open.open_file(tmp_path / "x.pdf")
+    assert calls["argv"] == ["/usr/bin/open", str(tmp_path / "x.pdf")]
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("win"), reason="os.startfile is Windows-only"
+)
+def test_open_file_windows_missing_file_raises(tmp_path: Path):
+    # Real os.startfile on a nonexistent path raises → OpenError. Uses the true
+    # Windows API but never actually opens anything (the file does not exist).
+    with pytest.raises(OpenError):
+        platform_open.open_file(tmp_path / "does-not-exist.pdf")
