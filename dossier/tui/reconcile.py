@@ -85,11 +85,12 @@ class ReconcileScreen(ModalScreen[str | None]):
     """
     BINDINGS = [
         Binding("escape", "close", "Close"),
-        # Textual's Tabs left/right only fire while the tab bar is focused (which
-        # nothing here does), and the orphans Tree needs left/right for its own
-        # expand/collapse — so give tab-switching its own conflict-free keys.
-        Binding("left_square_bracket", "prev_tab", "◂ Tab"),
-        Binding("right_square_bracket", "next_tab", "Tab ▸"),
+        Binding("question_mark", "toggle_help_panel", "Keys"),
+        # Tab / Shift+Tab cycle the tabs. priority=True so they win over Textual's
+        # default focus-traversal (this modal has one widget per tab, so nothing
+        # needs Tab for focus); the orphans Tree keeps left/right for expand/collapse.
+        Binding("tab", "next_tab", "Next tab", priority=True),
+        Binding("shift+tab", "prev_tab", "Prev tab", priority=True),
         Binding("o", "open_file", "Open"),
         Binding("d", "scan_dups", "Find duplicates"),
         Binding("x", "reject", "Dismiss"),
@@ -229,7 +230,8 @@ class ReconcileScreen(ModalScreen[str | None]):
         scope = f"   scope: {len(ignore)} ignore glob(s)" if ignore else ""
         self.query_one("#rsummary", Label).update(
             f"reconcile: {len(report.orphans)} orphans · {len(report.linked)} linked · "
-            f"{len(report.missing)} missing{dup_part}{succ_part}{supp_part}{scope}"
+            f"{len(report.missing)} missing{dup_part}{succ_part}{supp_part}{scope}\n"
+            "Tab/Shift+Tab switch tabs · ? shows all keys · Esc closes"
         )
 
     def _suppressed_count(self) -> int:
@@ -390,6 +392,16 @@ class ReconcileScreen(ModalScreen[str | None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def action_toggle_help_panel(self) -> None:
+        """`?` shows/hides Textual's HelpPanel — the full keybind list (with the
+        tab-gated actions correctly greyed via ``check_action``)."""
+        from textual.widgets import HelpPanel
+
+        if self.query(HelpPanel):
+            self.app.action_hide_help_panel()
+        else:
+            self.app.action_show_help_panel()
 
     def action_open_file(self) -> None:
         """Open the file under the cursor with the platform opener (xdg/termux)."""
