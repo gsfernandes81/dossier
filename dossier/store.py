@@ -38,6 +38,7 @@ import hashlib
 import io
 import os
 import tempfile
+import time
 import tomllib
 from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
@@ -644,7 +645,14 @@ def unique_id(store: Store, base: str) -> str:
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` via a same-directory temp file + ``os.replace``."""
+    """Write ``data`` to ``path`` via a same-directory temp file + ``os.replace``.
+
+    The final rename is retried with a short backoff on ``PermissionError``
+    (Windows ``WinError 5``): on a cloud-sync filesystem (Proton Drive, OneDrive,
+    Dropbox) — or with an indexer / antivirus in the loop — the sync daemon can
+    hold a transient handle on the just-written target, which clears in a moment.
+    A run that saves a growing sidecar after every file would otherwise crash.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=TEMP_PREFIX, dir=str(path.parent))
     tmp = Path(tmp_name)
@@ -653,10 +661,22 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        _replace_with_retry(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def _replace_with_retry(tmp: Path, path: Path, *, attempts: int = 6) -> None:
+    """``os.replace`` with exponential backoff on a transient ``PermissionError``."""
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise  # genuinely locked / no permission — surface it
+            time.sleep(0.1 * (2**attempt))  # 0.1, 0.2, 0.4, 0.8, 1.6 s
 
 
 def _hash(data: bytes) -> str:
