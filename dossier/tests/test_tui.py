@@ -1152,6 +1152,38 @@ async def test_bundles_screen_accepts_folder_suggestion(tmp_path: Path):
     assert "travel/india-2024" in store.load("trip2").bundles
 
 
+@pytest.mark.asyncio
+async def test_bundles_enter_on_suggestion_does_not_accept(tmp_path: Path):
+    # Canon (Phase 3): Enter opens, `a` accepts. Enter on a *suggestion* must be a
+    # no-op — it isn't a bundle until accepted — not a silent create-on-Enter.
+    store, config = _setup(tmp_path)
+    for i in (1, 2):
+        store.save(
+            Document(
+                id=f"trip{i}",
+                name=f"Trip Doc {i}",
+                files=[Rendition("d", f"Travel Documents/India 2024/{i}.pdf", True)],
+            )
+        )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        app.home.action_bundles()
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BundlesScreen)
+        options = screen.query_one("#bundle-list", OptionList)
+        options.focus()
+        options.highlighted = next(
+            i
+            for i in range(options.option_count)
+            if (options.get_option_at_index(i).id or "").startswith(screen._SUGGESTED)
+        )
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "travel/india-2024" not in store.load_bundles()  # NOT created
+        assert app.screen is screen  # still on bundles — Enter did nothing
+
+
 def test_linux_driver_exposes_mouse_toggle():
     # Pin the private methods the keyboard trick relies on, so a Textual rename
     # fails here loudly instead of silently breaking the Termux keyboard. The
@@ -1475,7 +1507,7 @@ async def test_intake_card_detects_and_folds_a_duplicate(
         assert screen._proposal.duplicate is not None
         assert screen._proposal.duplicate.doc_id == "passport"
         body = str(screen.query_one("#ibody", Label).render())
-        assert "duplicate of" in body and "[d folds]" in body  # the card leads with it
+        assert "duplicate of" in body and "[f folds]" in body  # the card leads with it
         screen.action_fold()  # fold instead of filing a new record
         await pilot.pause()
 

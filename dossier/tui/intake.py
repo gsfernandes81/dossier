@@ -39,7 +39,11 @@ from dossier.errors import IntakeError
 from dossier.platform_open import OpenError, open_file
 from dossier.query import resolve_path
 from dossier.store import Store
-from dossier.tui.screens import DocPickerScreen, TextPromptScreen
+from dossier.tui.screens import (
+    DocPickerScreen,
+    TextPromptScreen,
+    toggle_help_panel,
+)
 
 # Sentinel option id for the "clear the succession link" row in the retarget picker.
 _NO_SUCCESSION = "\x00no-succession"
@@ -51,12 +55,13 @@ class IntakeScreen(ModalScreen[str | None]):
     BINDINGS = [
         Binding("a", "accept", "File"),
         Binding("e", "accept_edit", "File + edit"),
-        Binding("d", "fold", "Fold duplicate"),
+        Binding("f", "fold", "Fold duplicate"),
         Binding("n", "rename", "Rename"),
-        Binding("s", "retarget", "Renews"),
+        Binding("r", "retarget", "Renews"),
         Binding("k", "skip", "Skip"),
         Binding("x", "reject", "Not a doc"),
         Binding("o", "open_file", "Open"),
+        Binding("question_mark", "toggle_help_panel", "Keys"),
         Binding("escape", "close", "Close"),
     ]
 
@@ -82,7 +87,7 @@ class IntakeScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="ipanel"):
             yield Label(id="ihead")
-            # markup off: the body is plain text with literal brackets ("[d folds]",
+            # markup off: the body is plain text with literal brackets ("[f folds]",
             # note tags like "[fallback-folder]") that Rich would otherwise eat.
             yield Label(id="ibody", markup=False)
             yield Label(_KEYS, id="ifoot")
@@ -141,7 +146,7 @@ class IntakeScreen(ModalScreen[str | None]):
             kind = "exact duplicate of" if dup.exact else "subset of"
             tail = "" if dup.exact else " — fewer pages"
             lines.append(
-                f"copy    {kind} {dup.doc_name} ({dup.doc_id}){tail}  [d folds]"
+                f"copy    {kind} {dup.doc_name} ({dup.doc_id}){tail}  [f folds]"
             )
         lines.append(f"name    {doc.name}   (id {doc.id})")
         if doc.tags:
@@ -173,7 +178,7 @@ class IntakeScreen(ModalScreen[str | None]):
 
     @staticmethod
     def _succession_line(proposal: intake.IntakeProposal) -> str:
-        """The ``renews …`` line, derived from ``doc.supersedes`` (s retargets it)."""
+        """The ``renews …`` line, derived from ``doc.supersedes`` (r retargets it)."""
         doc = proposal.doc
         proposed = proposal.succession
         if doc.supersedes:
@@ -181,7 +186,7 @@ class IntakeScreen(ModalScreen[str | None]):
                 return f"renews  {doc.supersedes}  (conf {proposed.confidence:.2f})"
             return f"renews  {doc.supersedes}  (manual)"
         if proposed is not None:  # a link was proposed but the user cleared it
-            return f"renews  {proposed.older}  — off (press s)"
+            return f"renews  {proposed.older}  — off (press r)"
         return ""
 
     # -- actions -------------------------------------------------------------
@@ -306,6 +311,9 @@ class IntakeScreen(ModalScreen[str | None]):
     def action_close(self) -> None:
         self.dismiss(None)
 
+    def action_toggle_help_panel(self) -> None:
+        toggle_help_panel(self)
+
     def _advance(self) -> None:
         self._proposal = None
         self._index += 1
@@ -317,5 +325,6 @@ class IntakeScreen(ModalScreen[str | None]):
 
 
 _KEYS = (
-    "a file · d fold · e edit · n rename · s renews · k skip · x not-doc · o open · Esc"
+    "a file · f fold · e edit · n rename · r renews · k skip · "
+    "x not-doc · o open · ? keys · Esc"
 )

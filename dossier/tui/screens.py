@@ -48,6 +48,20 @@ from dossier.tui import (
 )
 
 
+def toggle_help_panel(screen: ModalScreen) -> None:
+    """Show or hide Textual's HelpPanel — the full, tab-aware keybind list.
+
+    Every modal binds ``?`` to a one-line ``action_toggle_help_panel`` that calls
+    this, so the "what keys can I press here?" affordance is identical everywhere.
+    """
+    from textual.widgets import HelpPanel
+
+    if screen.query(HelpPanel):
+        screen.app.action_hide_help_panel()
+    else:
+        screen.app.action_show_help_panel()
+
+
 class SupersedeScreen(ModalScreen[bool]):
     """Pick the document a renewal replaces, setting its ``supersedes`` link."""
 
@@ -229,7 +243,7 @@ class TextPromptScreen(ModalScreen[str | None]):
 class WatchScreen(ModalScreen[str | None]):
     """The expiry watch — tracked documents, soonest expiry first.
 
-    Dismisses with a document id (open it) or ``None``. ``i`` ignores the
+    Dismisses with a document id (open it) or ``None``. ``x`` ignores the
     highlighted document, dropping it from the watch (sets ``ignore_expiry``).
     """
 
@@ -243,7 +257,8 @@ class WatchScreen(ModalScreen[str | None]):
     """
     BINDINGS = [
         Binding("escape", "close", "Close"),
-        Binding("i", "ignore", "Ignore"),
+        Binding("x", "ignore", "Ignore"),
+        Binding("question_mark", "toggle_help_panel", "Keys"),
     ]
 
     def __init__(self, store: Store, config: Config, *, today: date) -> None:
@@ -287,7 +302,7 @@ class WatchScreen(ModalScreen[str | None]):
         )
         summary.update(
             f"Expiry watch — {len(tracked)} tracked · {red} within {threshold}d.  "
-            "Enter opens · i ignores · Esc closes."
+            "Enter opens · x ignores · ? keys · Esc closes."
         )
         for doc in tracked:
             view = query.view(
@@ -311,6 +326,9 @@ class WatchScreen(ModalScreen[str | None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def action_toggle_help_panel(self) -> None:
+        toggle_help_panel(self)
 
     def action_ignore(self) -> None:
         doc = self._highlighted()
@@ -348,7 +366,8 @@ class BundlesScreen(ModalScreen[str | None]):
     Dismisses with a bundle slug (the home filters the documents pane to it) or
     ``None``. ``Enter`` opens a bundle; ``d`` sets its date. A "suggested" section
     lists folder-derived bundle proposals — ``a`` accepts (creates the bundle and
-    assigns its documents), ``i`` dismisses (persists, never reappears).
+    assigns its documents), ``x`` dismisses (persists, never reappears). Enter on a
+    suggestion does nothing — it isn't a bundle until accepted.
     """
 
     _SUGGESTED = "\x00sug:"  # option-id prefix for a folder-bundle suggestion
@@ -367,7 +386,8 @@ class BundlesScreen(ModalScreen[str | None]):
         Binding("t", "set_template", "Template"),
         Binding("c", "check", "Readiness"),
         Binding("a", "accept", "Accept"),
-        Binding("i", "ignore", "Dismiss"),
+        Binding("x", "ignore", "Dismiss"),
+        Binding("question_mark", "toggle_help_panel", "Keys"),
     ]
 
     def __init__(self, store: Store, config: Config, *, today: date) -> None:
@@ -401,7 +421,7 @@ class BundlesScreen(ModalScreen[str | None]):
         summary.update(
             f"{len(bundles)} bundles · {len(self._suggested)} suggested.  "
             "Enter opens · d date · t template · c readiness · "
-            "a accept · i dismiss · Esc closes."
+            "a accept · x dismiss · ? keys · Esc closes."
         )
         templates = self._store.load_templates()
         readings = self._store.load_scans()
@@ -429,7 +449,7 @@ class BundlesScreen(ModalScreen[str | None]):
                 options.add_option(Option(row, id=bundle.slug))
         if self._suggested:
             options.add_option(
-                Option("suggested ▸  (a accepts · i dismisses)", id=None)
+                Option("suggested ▸  (a accepts · x dismisses)", id=None)
             )
             for index, sug in enumerate(self._suggested):
                 label = f"  {sug.slug}   ({len(sug.doc_ids)} docs · {sug.folder})"
@@ -438,14 +458,14 @@ class BundlesScreen(ModalScreen[str | None]):
     def action_close(self) -> None:
         self.dismiss(None)
 
+    def action_toggle_help_panel(self) -> None:
+        toggle_help_panel(self)
+
     @on(OptionList.OptionSelected, "#bundle-list")
     def _open(self, event: OptionList.OptionSelected) -> None:
-        if event.option_id is None:
-            return
-        if event.option_id.startswith(self._SUGGESTED):
-            self.action_accept()  # Enter on a suggestion accepts it
-        else:
-            self.dismiss(event.option_id)
+        if event.option_id is None or event.option_id.startswith(self._SUGGESTED):
+            return  # a suggestion isn't a bundle yet — `a` accepts it, Enter waits
+        self.dismiss(event.option_id)
 
     def action_accept(self) -> None:
         sug = self._highlighted_suggestion()

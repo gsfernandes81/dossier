@@ -19,7 +19,7 @@ The single hub for tidying the collection. Conflicts merges Syncthing
 conflict copies in-app (the TUI face of ``ds resolve``); orphans are a
 per-folder tree (leaves fill lazily on expand) with a "suggested matches" node
 on top; missing is a list where ``Enter`` opens the document; the duplicate scan
-runs in a **thread worker** off ``d`` (rasterizing is blocking), reusing the
+runs in a **thread worker** off ``s`` (rasterizing is blocking), reusing the
 per-device page-hash cache so a warm cache is ~instant. Succession lists renewals
 inferred from ``ds scan`` readings (see :mod:`dossier.succession`).
 
@@ -66,7 +66,11 @@ from dossier.model import Document, ReconcileState, Rendition
 from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import forms
-from dossier.tui.screens import DocPickerScreen, TextPromptScreen
+from dossier.tui.screens import (
+    DocPickerScreen,
+    TextPromptScreen,
+    toggle_help_panel,
+)
 
 if TYPE_CHECKING:
     from textual.widgets.tree import TreeNode
@@ -121,7 +125,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         Binding("tab", "next_tab", "Next tab", priority=True),
         Binding("shift+tab", "prev_tab", "Prev tab", priority=True),
         Binding("o", "open_file", "Open"),
-        Binding("d", "scan_dups", "Find duplicates"),
+        Binding("s", "scan_dups", "Find duplicates"),
         Binding("x", "reject", "Dismiss"),
         Binding("l", "link", "Link"),
         # `a` is the primary accept, dispatched per active tab (see action_accept);
@@ -200,7 +204,7 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         self._populate_succession()
         self._populate_integrity()
         self.query_one("#dups", OptionList).add_option(
-            Option("press  d  to scan for duplicates (cached after the first run)")
+            Option("press  s  to scan for duplicates (cached after the first run)")
         )
         self._update_summary()
         # Open on a tab that actually has something to do — conflicts first (they
@@ -594,14 +598,9 @@ class ReviewScreen(ModalScreen[ReviewResult | None]):
         self.dismiss(None)
 
     def action_toggle_help_panel(self) -> None:
-        """`?` shows/hides Textual's HelpPanel — the full keybind list (with the
-        tab-gated actions correctly greyed via ``check_action``)."""
-        from textual.widgets import HelpPanel
-
-        if self.query(HelpPanel):
-            self.app.action_hide_help_panel()
-        else:
-            self.app.action_show_help_panel()
+        # `?` — the full keybind list, tab-gated actions correctly greyed via
+        # check_action. Shared with the other modals (see tui.screens).
+        toggle_help_panel(self)
 
     def action_open_file(self) -> None:
         """Open the file under the cursor with the platform opener (xdg/termux)."""
