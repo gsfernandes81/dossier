@@ -15,6 +15,7 @@
 
 """Tests for the Textual TUI (driven headlessly via App.run_test)."""
 
+import asyncio
 from datetime import date
 from pathlib import Path
 
@@ -51,6 +52,25 @@ from dossier.tui.screens import (
 )
 
 TODAY = date(2026, 7, 21)
+
+
+async def _await_review_load(pilot) -> ReviewScreen:
+    """Wait for ReviewScreen's on-mount load worker to land; return the screen.
+
+    The load runs in a thread so opening Review never blocks the UI, which means a
+    single ``pause()`` can come back before the worker has even registered — on a
+    slow CI runner that raced the "opens on Orphans" assertion. Poll for the applied
+    report instead of trusting one scheduler turn.
+    """
+    for _ in range(200):
+        await pilot.pause()
+        await pilot.app.workers.wait_for_complete()
+        screen = pilot.app.screen
+        if isinstance(screen, ReviewScreen) and screen._report is not None:
+            await pilot.pause()
+            return screen
+        await asyncio.sleep(0.01)
+    raise AssertionError("ReviewScreen's load worker never completed")
 
 
 def _setup(tmp_path: Path) -> tuple[Store, Config]:
@@ -514,9 +534,7 @@ async def test_review_integrity_tab_lists_findings(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         options = screen.query_one("#integrity", OptionList)
         # Deferred: on mount the tab only shows a placeholder and the check has not
         # run (count still None), so opening Review never pays the doctor cost.
@@ -542,9 +560,7 @@ async def test_review_integrity_edit_opens_the_flagged_doc(tmp_path: Path):
     async with app.run_test() as pilot:
         home = app.home
         home.action_review()
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         screen = app.screen
         assert isinstance(screen, ReviewScreen)
         screen.query_one(TabbedContent).active = "tab-integrity"
@@ -584,9 +600,7 @@ async def test_review_doc_write_invalidates_cached_integrity(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         assert screen._docs is not None  # snapshot loaded once on mount
         # Run integrity so there's a cached result to invalidate.
         screen.query_one(TabbedContent).active = "tab-integrity"
@@ -820,9 +834,7 @@ async def test_reconcile_screen_shows_orphans_and_missing(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         folders = [
             str(node.label) for node in screen.query_one("#orphans", Tree).root.children
         ]
@@ -842,9 +854,7 @@ async def test_reconcile_opens_on_orphans_and_cycles_tabs(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         # Opens on Orphans (actionable) — not the empty, scan-only Duplicates tab.
         tabs = screen.query_one(TabbedContent)
         assert tabs.active == "tab-orphans"
@@ -916,9 +926,7 @@ async def test_reconcile_open_file_opens_orphan_under_cursor(
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         tree = screen.query_one("#orphans", Tree)
         screen.query_one(TabbedContent).active = "tab-orphans"
         folder = next(n for n in tree.root.children if n.data == "Wallpapers")
@@ -941,9 +949,7 @@ async def test_reconcile_dismiss_orphan_persists_and_hides(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         tree = screen.query_one("#orphans", Tree)
         assert screen._report is not None
         assert any(o.path == "Wallpapers/bg.jpg" for o in screen._report.orphans)
@@ -976,9 +982,7 @@ async def test_reconcile_ack_missing_persists(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         screen.query_one(TabbedContent).active = "tab-missing"
         screen.query_one("#missing", OptionList).highlighted = 0
         await pilot.pause()
@@ -1013,9 +1017,7 @@ async def test_reconcile_link_orphan_to_existing_document(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         await _cursor_on_orphan(pilot, screen, "Marine")
         screen.action_link()
         await pilot.pause()
@@ -1043,9 +1045,7 @@ async def test_reconcile_adopt_orphan_creates_document(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         await _cursor_on_orphan(pilot, screen, "Marine")
         screen.action_adopt()  # creates the doc immediately, then dismisses
         await pilot.pause()
@@ -1073,9 +1073,7 @@ async def test_reconcile_unlink_dead_rendition(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         screen.query_one(TabbedContent).active = "tab-missing"
         screen.query_one("#missing", OptionList).highlighted = 0
         await pilot.pause()
@@ -1097,9 +1095,7 @@ async def test_reconcile_fold_cluster_persists_and_suppresses(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         screen.query_one(TabbedContent).active = "tab-dups"
         # Inject a scanned cluster directly (no rasterizing in the test).
         screen._pages = {"keep.pdf": [1, 2, 3], "copy.pdf": [1, 2]}
@@ -1132,9 +1128,7 @@ async def test_reconcile_ignore_glob_adds_and_hides(tmp_path: Path):
     async with app.run_test() as pilot:
         screen = ReviewScreen(store, config)
         app.push_screen(screen)
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         screen.query_one(TabbedContent).active = "tab-orphans"
         tree = screen.query_one("#orphans", Tree)
         folder = next(n for n in tree.root.children if n.data == "Wallpapers")
@@ -1701,9 +1695,7 @@ async def test_review_conflicts_tab_lists_and_merges(tmp_path: Path):
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         app.home.action_review()  # conflicts are a Review tab now
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # the async on-mount load worker
-        await pilot.pause()
+        await _await_review_load(pilot)
         screen = app.screen
         assert isinstance(screen, ReviewScreen)
         # A pending conflict makes Conflicts the default tab.
