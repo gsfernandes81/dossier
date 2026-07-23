@@ -21,9 +21,10 @@ suggestions (the detail pane), and per-run model selection; all verified on the 
 store. **Phase 8 (organize, #4) is done** — `ds organize` gives every linked file a
 canonical name (plan → `--apply`), the first surface that touches the real files;
 verified read-only on the store (55 in-place renames, 2 shared-file flags, nothing
-applied). **Phase 9 (intake, #5) is next** — it reuses `organize` to file new
-documents. Phases 9–13 sketch the **long horizon** — intake, preparedness, answers,
-durability, platform hardening — turning the catalogue into a living system.
+applied). **Phase 9 (intake) is in progress** — the proposal engine + `ds intake` CLI
+have landed (reusing `organize` to file new documents); the TUI review card is next.
+Phases 9–13 sketch the **long horizon** — intake, preparedness, answers, durability,
+platform hardening — turning the catalogue into a living system.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -159,15 +160,24 @@ every field. Every piece needed to automate that already exists — this phase c
 them, and changes the app's economics: near-zero marginal cost per document is what
 keeps the catalogue accurate in three years, and what makes owning the *whole* tree
 (not just the curated 137) affordable.
-- [ ] **Inbox flow** (L) — a configured inbox (a watched folder glob; on the phone,
-  Termux share-to drops into it). A new file triggers the scan engine, which proposes
-  the **entire record** on one review card: name, tags, issue/expiry (via `suggest`),
-  succession link (via `succession`), and — once Phase 8 lands — the canonical
-  filename + destination folder (via `organize`). One accept keystroke files it;
-  reuses adopt / suggest / succession / organize as-is, never auto-applies.
-- [ ] **Scale to the full tree** (M) — with per-doc cost near zero, revive `ds import`
-  (bulk folder ingest, deferred since v1) and grow from the curated 137 docs to the
-  ~900-file `Official Documents/` tree, riding the same propose-review-accept card.
+- [~] **Inbox flow** (L) — *engine + CLI landed; TUI card next.*
+  - [x] **Proposal engine + `ds intake`** — `dossier/intake.py` composes the record for a
+    dropped file: `build_proposal` reads it with the VLM (injectable), names it from the
+    reading's `document_type` (filename fallback), derives issue/expiry via `suggest`
+    (ambiguous dates deferred to the pane as `open_questions`), finds a succession link via
+    `succession`, and picks the canonical destination via `organize` (`--to-folders` with a
+    `fallback_folder` so an untagged scan files into `Filed/`). `apply_proposal` never
+    auto-applies: save record (still at the inbox path) → persist reading → move via
+    `organize`'s rollback-safe rename. `ds intake [--from DIR] [--limit N] [--apply] [--yes]`
+    is dry-run by default. Synced `[intake]` config (inbox / filed / a keyword→tag map —
+    intake is the first surface that sets tags). Enabling touches: `unique_id` lifted to
+    `store.py`; `fallback_folder` added to `organize`.
+  - [ ] **TUI review card** — an `IntakeScreen` (`I`), one proposal at a time, keys to
+    accept / edit-in-the-pane / skip / reject; the VLM read runs in a background worker.
+- [ ] **Scale to the full tree** (M) — with per-doc cost near zero, `ds import` = the same
+  engine over an arbitrary tree (`--from`, in-place), plus a synced path-keyed reading
+  cache (`.dossier/intake.toml`) so a 900-file sweep doesn't re-scan; grow from the curated
+  137 docs to the ~900-file `Official Documents/` tree.
 - [ ] **Phone intake rides sync-back — no on-phone VLM** (S) — a photo taken on the
   phone syncs home via Syncthing; the desktop auto-scans new files (the Phase 13
   service) and the reading syncs back via `scans.toml` within hours — fine for
