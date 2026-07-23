@@ -33,8 +33,9 @@ done** — a field-level 2-way merge with mtime last-writer-wins, `ds resolve` +
 ResolveScreen, every sidecar covered, and fault-injection tests proving no silent loss.
 **Phase 13 (platform hardening & the scan service) is done** — a Windows + Linux CI matrix
 with platform-gated tests, and a battery-aware background scan service (`ds service run` +
-a build-but-don't-run installer) that closes the phone sync-back loop. **All roadmap phases
-are complete.**
+a build-but-don't-run installer) that closes the phone sync-back loop. **Phases 1–13 are
+complete.** Phases 14–15 are next: **find-fast UX** (launch optimized for the urgent
+lookup, undo, init/empty-state polish, typo-tolerant search) and **Syncthing integration**.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -291,6 +292,47 @@ discovers `.sync-conflict-*` files, plans a merge, and applies it crash-safely.
   Windows Scheduled Task / systemd user timer pointing at it and **prints the plan without
   touching the system** unless `--yes` is given; `status`/`uninstall` round it out. Closes the
   Phase 9 phone sync-back (config + README docs; no on-phone VLM).
+
+## Phase 14 — Find-fast UX: launch, undo, first-run, fuzzy search
+This store is write-few read-fewer — but when a find is required (you're looking for a
+document *urgently*), it is required **now**. Launch optimizes for that, and the rest of
+the phase builds confidence: edits are reversible, first contact explains itself, and
+search forgives phone-keyboard typos.
+- [ ] **Find-fast launch** (S/M) — the home opens ready to find: the first printable
+  keystroke (or a tap on the bottom bar) goes straight into search — no mode key first,
+  no focus dance; type → filtered → Enter → open. Target: cold start to opened document
+  in under ~5 keystrokes/taps on both desktop and Termux. Attention info (expiring /
+  intake / conflict counts) may ride quietly in the footer, but it must never sit in
+  front of the find path.
+- [ ] **Undo / history restore** (M) — every save already writes the prior version to the
+  local history dir; surface it. `ctrl+z` in the detail pane restores the last saved
+  version of the current doc; a palette "History…" lists a doc's saved versions to
+  restore from. Restores are themselves saves (history'd), so undo is always undoable.
+- [ ] **First-run & empty states** (S) — `ds init` walks root pick → glyph check → Termux
+  preconditions conversationally; every empty surface (no config, empty store, empty
+  inbox, no matches) says exactly what to do next instead of rendering blank.
+- [ ] **Typo-tolerant search** (M) — `/`, `ds open`, and `ds ask` retrieval forgive small
+  edit distances ("cerificate" → Certificate), rank exact > prefix > fuzzy so precision
+  never suffers, and stay fast on Termux (the corpus is small — no index needed).
+
+## Phase 15 — Syncthing integration: orchestrate, don't own
+Syncthing is the transport (the PC folder also lives in Proton Drive for an opportunistic
+cloud copy — meaning a Proton revert can *propagate* via Syncthing, which makes Syncthing's
+own versioning the recovery net and verifying it non-negotiable). Talk to Syncthing's REST
+API; never bundle, spawn, or reimplement it.
+- [ ] **Doctor checks** (S/M) — via the REST API on localhost: Syncthing reachable · the
+  store's folder shared and not paused · **file versioning enabled** (the net against a
+  propagated Proton revert) · folder marker present (a missing `.stfolder` pauses the
+  folder silently) · device connectivity/last-seen. Degrade gracefully to "Syncthing not
+  reachable — checks skipped" rather than failing doctor.
+- [ ] **Sync-aware service + TUI** (M) — the scan service waits for sync-idle before batch
+  writes (don't race an incoming sync); a footer glyph on the home shows sync state
+  (idle / syncing / conflict / unreachable).
+- [ ] **Termux feasibility investigation** (S, first) — *open question for a future agent:*
+  how to reach the API from Termux. Syncthing-Fork on Android exposes the same REST API on
+  127.0.0.1:8384 (API key in its settings/config.xml) — verify reachability from Termux,
+  where the key can live per-device, and what the Play-vs-F-Droid build differences are.
+  If the phone leg proves brittle, ship desktop-only checks and keep the phone read-only.
 
 ## Notes
 - **Quick wins:** `ds reset` (S), the `ignore_expiry` toggle (S).
