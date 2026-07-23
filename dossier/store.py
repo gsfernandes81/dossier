@@ -340,9 +340,7 @@ class Store:
                 out[key] = ScanReading.from_payload(dict(table), model="")
         return out
 
-    def _save_readings(
-        self, path: Path, readings: Mapping[str, ScanReading]
-    ) -> None:
+    def _save_readings(self, path: Path, readings: Mapping[str, ScanReading]) -> None:
         data: dict[str, object] = {}
         for key in sorted(readings):
             data[key] = {

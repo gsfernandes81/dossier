@@ -25,8 +25,19 @@ EVENT = date(2026, 6, 1)
 TODAY = date(2026, 1, 1)
 
 
-def _passport(expiry: date | None, **kw: object) -> Document:
-    return Document(id="pp", name="Passport", expiry_date=expiry, **kw)
+def _passport(
+    expiry: date | None,
+    *,
+    bundles: list[str] | None = None,
+    ignore_expiry: bool = False,
+) -> Document:
+    return Document(
+        id="pp",
+        name="Passport",
+        expiry_date=expiry,
+        bundles=bundles or [],
+        ignore_expiry=ignore_expiry,
+    )
 
 
 # -- event_status ------------------------------------------------------------
