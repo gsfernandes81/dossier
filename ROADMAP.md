@@ -21,11 +21,13 @@ suggestions (the detail pane), and per-run model selection; all verified on the 
 store. **Phase 8 (organize, #4) is done** — `ds organize` gives every linked file a
 canonical name (plan → `--apply`), the first surface that touches the real files;
 verified read-only on the store (55 in-place renames, 2 shared-file flags, nothing
-applied). **Phase 9 (intake) is in progress** — the **inbox flow is done** (proposal engine +
-`ds intake` CLI + the `IntakeScreen` review card, reusing `organize`/`suggest`/
-`succession`); bulk `ds import` (the ~900-file scale-up) and phone sync-back remain.
-Phases 9–13 sketch the **long horizon** — intake, preparedness, answers, durability,
-platform hardening — turning the catalogue into a living system.
+applied). **Phase 9 (intake) is essentially done** — the **inbox flow** (proposal engine + `ds intake`
+CLI + the `IntakeScreen` review card) and the **full-tree scale-up** (`ds import` + a
+resumable reading cache) have landed, reusing `organize`/`suggest`/`succession`. The one
+remaining item, **phone sync-back, is deferred to Phase 13** — its automatic trigger *is*
+the scan service, and the manual loop already works over synced `scans.toml`. Phases 10–13
+sketch the **long horizon** — preparedness, answers, durability, platform hardening —
+turning the catalogue into a living system.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -180,16 +182,21 @@ keeps the catalogue accurate in three years, and what makes owning the *whole* t
   - *Verified read-only on the real store:* `ds intake --from "…/Official Documents"
     --limit 10` → 7 grounded proposals (name/date/canonical destination) + 3 graceful
     non-document skips (`.txt`/`.xlsx`), images read directly by the VLM, nothing written.
-- [ ] **Scale to the full tree** (M) — with per-doc cost near zero, `ds import` = the same
-  engine over an arbitrary tree (`--from`, in-place), plus a synced path-keyed reading
-  cache (`.dossier/intake.toml`) so a 900-file sweep doesn't re-scan; grow from the curated
-  137 docs to the ~900-file `Official Documents/` tree.
-- [ ] **Phone intake rides sync-back — no on-phone VLM** (S) — a photo taken on the
-  phone syncs home via Syncthing; the desktop auto-scans new files (the Phase 13
-  service) and the reading syncs back via `scans.toml` within hours — fine for
-  documents. When the desktop is reachable, the phone's `ds scan` may instead point
-  at its llama-server (already just per-device URL config). Vision inference never
-  runs on the phone.
+- [x] **Scale to the full tree** (M) — `ds import DIR [--limit N] [--apply]` bulk-imports a
+  folder's unfiled files in place, sharing one loop with `ds intake`. A synced path-keyed
+  reading cache (`.dossier/intake.toml`) reuses an unchanged file's reading (fingerprint
+  match) instead of re-running the VLM, so a 900-file sweep is resumable and cheap — a
+  fresh read persists immediately, a filed file's entry moves to `scans.toml`. *Verified on
+  the real store:* a re-`import` of the same file served from cache in **1s vs 6s cold**, no
+  re-scan. (Running the full ~900-file apply is the user's to do — a real-file mutation.)
+- [→] **Phone intake rides sync-back — no on-phone VLM** (S) — **deferred to Phase 13**
+  (the scan service). The plumbing already exists: `[intake]` config and `scans.toml` are
+  synced, and the VLM never runs on the phone by construction — so a **manual** loop works
+  *today* (drop a photo in the synced inbox on the phone → run `ds intake` on the desktop →
+  the filed record + reading sync back). The only missing piece is the **automatic** desktop
+  trigger, which *is* the Phase 13 `ds scan` service — so it lands there, not as separate
+  Phase 9 code. When the desktop is reachable the phone's `ds scan` may instead point at its
+  llama-server (already per-device URL config); vision inference never runs on the phone.
 
 ## Phase 10 — Preparedness: checklists, event-aware validity, reminders  *(long horizon)*
 Bundles are the app's real job (gather → check → submit, DESIGN §5) but today they are
