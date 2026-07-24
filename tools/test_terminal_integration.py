@@ -146,3 +146,34 @@ def test_review_takes_the_columns_and_keeps_its_place(tmp_path: Path):
         assert term.wait_for_exit(), "app did not quit on ctrl+q"
     finally:
         term.close()
+
+
+def test_ctrl_z_does_not_suspend_the_app(tmp_path: Path):
+    """ctrl+z is bound to undo, and ctrl+z is also SIGTSTP.
+
+    Textual keeps the terminal in raw mode with ISIG off, so the 0x1a byte reaches
+    the app instead of suspending it — but that is a per-platform claim about the
+    line discipline, so the ubuntu CI leg is where it earns its keep (SIGTSTP is a
+    no-op on Windows). If a future change dropped raw mode, ctrl+z would background
+    the process and this asserts it does not.
+    """
+    term = PtyTerm([sys.executable, LAUNCH, str(tmp_path)], cols=100, rows=30)
+    try:
+        assert term.wait_for("dossier"), "home never rendered"
+        assert term.wait_for("Passport"), "documents pane never populated"
+
+        # Open a document so undo has a target (it acts on the shown detail).
+        term.send("down")
+        term.send("right")
+        assert term.wait_for("Location:"), "detail pane did not open"
+
+        term.send("\x1a", settle=0.5)  # ctrl+z — must reach undo, never suspend
+        assert term.alive(), "ctrl+z suspended the app instead of reaching undo"
+        # It reached action_undo: the sample doc has been saved only once, so it has
+        # no archived version — the notice is how we know the key arrived.
+        assert term.wait_for("no earlier version"), "ctrl+z did not reach undo"
+
+        term.send("\x11", settle=0.5)
+        assert term.wait_for_exit(), "app did not quit on ctrl+q"
+    finally:
+        term.close()

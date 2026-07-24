@@ -404,7 +404,11 @@ class DetailPane(VerticalScroll):
         except StoreError as exc:
             self.notify(str(exc), severity="error")
             return
-        self.notify(f"restored the version from {format_saved_at(entry)}")
+        # Tell the user ctrl+z is its own redo — the restore archived what it
+        # replaced, so a second ctrl+z brings it back. There is no separate redo key
+        # (terminals can't tell ctrl+shift+z from ctrl+z without the Kitty protocol,
+        # and Termux never sends it), and this is where that fact is discoverable.
+        self.notify(f"restored {format_saved_at(entry)} — ctrl+z again to redo")
         # Same refresh path as a save: the row list and any open neighbour view are
         # now stale, and the pane must re-read rather than trust its in-memory copy.
         self.post_message(self.Saved(entry.doc_id))
