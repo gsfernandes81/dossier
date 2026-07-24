@@ -27,8 +27,8 @@ from __future__ import annotations
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
-from textual.screen import ModalScreen
+from textual.containers import Vertical, VerticalScroll
+from textual.message import Message
 from textual.widgets import Label
 from textual.widgets.option_list import Option
 from textual.worker import get_current_worker
@@ -49,8 +49,18 @@ from dossier.tui.screens import (
 _NO_SUCCESSION = "\x00no-succession"
 
 
-class IntakeScreen(ModalScreen[str | None]):
-    """Review + file dropped documents, one proposal card at a time."""
+class IntakePane(Vertical):
+    """Review + file dropped documents as a home *mode* (columns 1+2), not a modal.
+
+    One proposal card at a time; a background worker reads each file with the VLM.
+    Filing-with-edit (``e``) posts :class:`OpenDocument` and the host opens the record
+    in the detail pane; Esc / an emptied queue posts :class:`CloseRequested`. Lazily
+    mounted once and *restarted* on each entry (the pending queue is a one-shot
+    session). Its reads run in a private ``intake`` worker group, distinct from the
+    home's ``vision`` scan jobs, so "Cancel vision scan" doesn't dangle over intake.
+    """
+
+    can_focus = True  # keys-only card: the pane itself takes focus so its keys fire
 
     BINDINGS = [
         Binding("a", "accept", "File"),
@@ -66,14 +76,21 @@ class IntakeScreen(ModalScreen[str | None]):
     ]
 
     DEFAULT_CSS = """
-    IntakeScreen { align: center middle; }
-    IntakeScreen #ipanel {
-        width: 90%; max-width: 100; height: auto; max-height: 90%;
-        padding: 1 2; border: round $primary; background: $surface;
-    }
-    IntakeScreen #ihead { text-style: bold; }
-    IntakeScreen #ifoot { color: $text-muted; margin-top: 1; }
+    IntakePane { height: 1fr; }
+    IntakePane #ipanel { height: 1fr; padding: 0 1; }
+    IntakePane #ihead { text-style: bold; }
+    IntakePane #ifoot { color: $text-muted; margin-top: 1; }
     """
+
+    class OpenDocument(Message):
+        """File-and-edit: the host opens this record in the detail pane."""
+
+        def __init__(self, doc_id: str) -> None:
+            super().__init__()
+            self.doc_id = doc_id
+
+    class CloseRequested(Message):
+        """Esc, or the queue drained — the host exits intake mode."""
 
     def __init__(self, store: Store, config: Config) -> None:
         super().__init__()
@@ -93,16 +110,40 @@ class IntakeScreen(ModalScreen[str | None]):
             yield Label(_KEYS, id="ifoot")
 
     def on_mount(self) -> None:
+        self._start_queue()
+        self.focus()
+
+    def refresh_on_enter(self) -> None:
+        """Host calls this on (re)entry: restart the one-shot queue. The first mount's
+        on_mount does the initial start, so this must not run before children exist."""
+        if self.is_mounted:
+            self._start_queue()
+
+    def focus_active_pane(self) -> None:
+        if self.is_mounted:
+            self.focus()
+
+    def cancel_reads(self) -> None:
+        """Cancel any in-flight VLM read (called by the host on exit, so a late read
+        can't paint after the mode is gone)."""
+        self.workers.cancel_group(self, "intake")
+
+    def _start_queue(self) -> None:
         self._pending = intake.pending_files(self._store, self._config)
+        self._index = 0
+        self._filed = 0
+        self._proposal = None
         if not self._pending:
             self.query_one("#ihead", Label).update("Inbox empty — nothing to file.")
+            self.query_one("#ibody", Label).update("")
             self.query_one("#ifoot", Label).update("Esc  close")
             return
+        self.query_one("#ifoot", Label).update(_KEYS)
         self._read_current()
 
     # -- reading (background VLM) --------------------------------------------
 
-    @work(thread=True, group="vision", exclusive=True)
+    @work(thread=True, group="intake", exclusive=True)
     def _read_current(self) -> None:
         """Read the current file with the VLM and render its proposal."""
         worker = get_current_worker()
@@ -212,7 +253,7 @@ class IntakeScreen(ModalScreen[str | None]):
             self.notify(message, severity="warning")
         self._filed += 1
         if edit:
-            self.dismiss(doc.id)  # home opens the detail pane in edit mode
+            self.post_message(self.OpenDocument(doc.id))  # host edits it in the pane
             return
         self.notify(f"filed {doc.id}")
         self._advance()
@@ -309,7 +350,7 @@ class IntakeScreen(ModalScreen[str | None]):
             self.notify(str(exc), severity="error")
 
     def action_close(self) -> None:
-        self.dismiss(None)
+        self.post_message(self.CloseRequested())
 
     def action_toggle_help_panel(self) -> None:
         toggle_help_panel(self)
@@ -319,7 +360,7 @@ class IntakeScreen(ModalScreen[str | None]):
         self._index += 1
         if self._index >= len(self._pending):
             self.notify(f"intake done — filed {self._filed}")
-            self.dismiss(None)
+            self.post_message(self.CloseRequested())
             return
         self._read_current()
 
