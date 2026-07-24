@@ -942,6 +942,34 @@ async def test_reconcile_screen_shows_orphans_and_missing(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_default_tab_applies_even_if_the_load_beats_the_tab_bar(tmp_path: Path):
+    """The load can land before TabbedContent has an active tab, and did on CI.
+
+    Review is mounted lazily into a live screen now, so its worker races the tab
+    bar's own mount. An unsettled TabbedContent reports `active == ""`, which is
+    "untouched" just as much as "tab-conflicts" is — reading only the latter as
+    untouched skipped the re-target and left review on the wrong tab.
+    """
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "loose.pdf").write_bytes(b"x")  # an orphan → Orphans is the default
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        pane = await _open_review(pilot)
+        tabs = pane.query_one(TabbedContent)
+        assert pane._report is not None
+
+        tabs.active = ""  # replay the pre-settle state the worker can observe
+        await pilot.pause()
+        pane._apply_load(
+            pane._state, pane._docs or [], pane._report, pane._readings, pane._plans
+        )
+        await pilot.pause()
+        assert tabs.active == "tab-orphans"
+
+
+@pytest.mark.asyncio
 async def test_reconcile_opens_on_orphans_and_cycles_tabs(tmp_path: Path):
     config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
     store = Store(config)

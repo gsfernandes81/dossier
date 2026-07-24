@@ -277,7 +277,12 @@ class ReviewPane(Vertical):
         # touch real files and block clean sync), then orphans/missing. Only if the
         # user hasn't already navigated during the load, so we never yank the tab.
         tabs = self.query_one(TabbedContent)
-        if tabs.active == "tab-conflicts":
+        # `""` is the not-yet-settled state: a freshly composed TabbedContent has no
+        # active tab until its tabs mount, and since the pane is mounted lazily into
+        # a live screen the load can land inside that window (it did, on CI's slowest
+        # runner). Treating only "tab-conflicts" as "untouched" silently skipped the
+        # re-target there and left review on the wrong tab.
+        if tabs.active in ("", "tab-conflicts"):
             tabs.active = self._default_tab()
         self.focus_active_pane()
 
