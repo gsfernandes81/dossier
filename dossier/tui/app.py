@@ -28,14 +28,7 @@ from textual.widgets import Input, TextArea
 from dossier.config import Config
 from dossier.store import Store
 from dossier.tui.commands import ENTRIES, Entry, Kind
-from dossier.tui.home import HomeScreen
-
-# action -> key, read off the home's own bindings so the two can never disagree.
-_KEYS = {
-    binding.action: binding.key
-    for binding in HomeScreen.BINDINGS
-    if isinstance(binding, Binding)
-}
+from dossier.tui.home import _KEYS, HomeScreen
 
 
 class DossierCommands(Provider):

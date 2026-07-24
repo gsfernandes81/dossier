@@ -2749,6 +2749,125 @@ async def test_quit_command_delegates_to_app_exit(
         assert called, "Quit did not reach app.exit()"
 
 
+def _highlighted_command(home) -> str | None:
+    """The action id highlighted in the `:` command list (None on empty/header)."""
+    commands = home.query_one("#commands", OptionList)
+    idx = commands.highlighted
+    return commands.get_option_at_index(idx).id if idx is not None else None
+
+
+@pytest.mark.asyncio
+async def test_colon_enters_command_mode_filters_and_runs(tmp_path: Path):
+    """`:` turns the persistent bar into a command bar — the palette's replacement.
+
+    A separate list takes the columns, typing fuzzy-filters the catalog and Enter
+    runs the top hit, all without ever engaging the document search.
+    """
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        await pilot.press("colon")  # find-fast router appends ":" and focuses search
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+
+        search = home.query_one("#search", Input)
+        assert app.focused is search and search.value == ":"
+        assert home.query_one("#commands", OptionList).display
+        assert not home.query_one("#documents", OptionList).display
+        # The command branch never touches the document filter.
+        assert home._filter_text == "" and not home.has_class("searching")
+        # Empty query → grouped catalog; the cursor lands on a real entry, not a header.
+        assert _highlighted_command(home) is not None
+
+        for ch in "expiring":
+            await pilot.press(ch)
+        await _settle(pilot, lambda: _highlighted_command(home) == "toggle_expiring")
+        await pilot.press("enter")
+        await _settle(pilot, lambda: home._expiring_only)
+        assert not home.has_class("command-mode") and search.value == ""
+
+
+@pytest.mark.asyncio
+async def test_command_mode_escape_preserves_the_expiring_filter(tmp_path: Path):
+    """A `:` peek must not cost an active filter — Esc from command mode restores it.
+
+    (Esc from a *search* deliberately clears filters so it can't get stuck; command
+    mode gets its own exit that leaves them alone, like vim's Esc-from-`:`.)
+    """
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.action_toggle_expiring()
+        await _settle(pilot, lambda: home.has_class("searching"))
+        assert home._expiring_only
+
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        await pilot.press("colon")
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+        assert not home.has_class("searching")  # dropped while the bar is a command bar
+
+        await pilot.press("escape")
+        await _settle(pilot, lambda: not home.has_class("command-mode"))
+        assert home._expiring_only  # the filter survived the peek…
+        assert home.has_class("searching")  # …and its view is restored
+
+
+@pytest.mark.asyncio
+async def test_command_mode_enter_with_no_match_opens_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`:` + a query matching nothing + Enter must not fall through to find-fast's
+    Enter (which opens a document) — it reports no match and stays put."""
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        opened: list[str] = []
+        monkeypatch.setattr(home, "open_document", lambda doc_id: opened.append(doc_id))
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        await pilot.press("colon")
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+        for ch in "zzzzz":
+            await pilot.press(ch)
+        await _settle(pilot, lambda: _highlighted_command(home) is None)
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not opened, "Enter fell through to open a document"
+        assert not home._show_detail
+        assert any("no matching command" in n.message for n in app._notifications)
+
+
+@pytest.mark.asyncio
+async def test_down_from_command_bar_lands_on_a_real_command(tmp_path: Path):
+    """↓ from the `:` bar steps into the command list (not the documents pane), and
+    the cursor never rests on a header — headers are disabled, not merely id-less."""
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        await pilot.press("colon")
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+
+        commands = home.query_one("#commands", OptionList)
+        await pilot.press("down")
+        await _settle(pilot, lambda: app.focused is commands)
+        assert _highlighted_command(home) is not None  # a runnable entry, not a header
+        for _ in range(6):
+            await pilot.press("down")
+            await pilot.pause()
+            idx = commands.highlighted
+            assert idx is not None
+            assert not commands.get_option_at_index(idx).disabled
+
+
 @pytest.mark.asyncio
 async def test_commands_button_opens_the_palette(tmp_path: Path):
     from textual.command import CommandPalette
