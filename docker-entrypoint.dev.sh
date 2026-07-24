@@ -67,14 +67,15 @@ if entry.get("hasTrustDialogAccepted") is not True:
     os.chmod(path, 0o600)
 PY
 
-# Claude Remote Control: drive this container's sessions from claude.ai/code or the
-# Claude mobile app. Launched in the BACKGROUND so it never blocks container start or
-# Zed's sshd (the resilient foreground process below) — if the supervisor dies, the
-# container and SSH stay up. The supervisor idles until Claude is authenticated, then
-# runs (and health-recycles) `claude remote-control --spawn worktree`. See the script
-# header for the recycle policy — it only ever restarts a wedged daemon at 0/32.
-bash /home/dev/rc-supervisor.sh &
+# In-container sshd (Zed-remote / direct SSH) now runs in the BACKGROUND. -e routes its
+# log to `docker logs`; all work is still also reachable via `docker exec`.
+/usr/sbin/sshd -D -e -f /home/dev/sshd_config &
 
-# sshd becomes the foreground process, keeps the container alive, and serves SSH; -e
-# routes its log to `docker logs`. All work still also reachable via `docker exec`.
-exec /usr/sbin/sshd -D -e -f /home/dev/sshd_config
+# Claude Remote Control: drive this container's sessions from claude.ai/code or the
+# Claude mobile app. Now the FOREGROUND process, so the Claude session is what
+# `docker logs` shows and it's what keeps the container alive. The supervisor idles
+# until Claude is authenticated, then runs (and health-recycles) `claude remote-control
+# --spawn worktree`. It loops forever (re-launching the daemon on exit), so it won't
+# fall out from under the container; see the script header for the recycle policy — it
+# only ever restarts a wedged daemon at 0/32.
+exec bash /home/dev/rc-supervisor.sh

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Claude Remote Control supervisor for the dossier dev container. Baked into the image
-# at /home/dev/rc-supervisor.sh and launched in the BACKGROUND by the entrypoint, so
-# sshd stays the foreground process — Zed's remote-dev is unaffected even if this
-# whole script dies.
+# at /home/dev/rc-supervisor.sh and run as the FOREGROUND process by the entrypoint, so
+# the Claude session is what `docker logs` surfaces (sshd runs in the background). This
+# script loops forever — it re-launches the daemon on exit — so it is itself the process
+# keeping the container alive.
 #
 # It runs `claude remote-control --spawn worktree --no-create-session-in-dir` as a
 # long-lived service so you can drive this container from claude.ai/code or the Claude
@@ -39,12 +40,17 @@ set -u
 LOG="$HOME/.local/share/remote-control.log"
 mkdir -p "$(dirname "$LOG")"
 
+# As the container's foreground process, our stdout/stderr IS `docker logs`. Mirror
+# everything to both there and the persisted logfile (still handy from `docker exec`),
+# so the supervisor's own lines and the daemon's output both show up in `docker logs`.
+exec > >(tee -a "$LOG") 2>&1
+
 RC_POLL_SECS=${RC_POLL_SECS:-30}            # how often to sample the session count
 RC_IDLE_RECYCLE_SECS=${RC_IDLE_RECYCLE_SECS:-300}   # continuous 0/32 before recycle
 RC_REPO=${RC_REPO:-/workspace}              # repo where --spawn worktree operates
 RC_PERMISSION_MODE=${RC_PERMISSION_MODE:-}  # empty => daemon default (keep prompting)
 
-log() { printf '%s [rc-supervisor] %s\n' "$(date -u +%H:%M:%S)" "$*" >>"$LOG"; }
+log() { printf '%s [rc-supervisor] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
 # is_descendant <pid> <ancestor> — walk the PPID chain (bounded) so we only ever count
 # sessions belonging to OUR daemon, never an unrelated `claude` from a `docker exec`.
@@ -109,12 +115,12 @@ perm_args=()
 while true; do
   # Drop admin entries for worktrees whose dirs are already gone — combats the
   # orphaned-environment buildup behind #37321. Safe to run at any time.
-  git -C "$RC_REPO" worktree prune 2>>"$LOG" || true
+  git -C "$RC_REPO" worktree prune || true
 
   # setsid → the daemon leads its own process group (pgid == its pid), so session
   # helpers share that pgid and `kill -TERM -<pid>` reaps the whole tree on recycle.
   setsid claude remote-control --spawn worktree --no-create-session-in-dir \
-    "${perm_args[@]}" >>"$LOG" 2>&1 &
+    "${perm_args[@]}" &
   rc_pid=$!
   log "started remote-control pid=$rc_pid (spawn=worktree, no-create-session-in-dir)"
 

@@ -116,8 +116,9 @@ at `/workspace`; the venv lives at `/home/dev/venv`, outside the mount.
   → Claude). Re-login later with `make dev-login`; tear down with `make dev-down` (add
   `-volumes` to also drop the persisted uv/claude/gh/ssh/history volumes).
 - **Attach:** `docker exec -it ds-dev fish`, or over SSH: `ssh -t <host> 'docker exec -it
-  ds-dev fish'`. Once Claude is logged in, the entrypoint's background supervisor brings up
-  `claude remote-control --spawn worktree` on its own (~10s) — no manual step. The
+  ds-dev fish'`. Once Claude is logged in, the entrypoint's supervisor (the container's
+  foreground process; sshd runs in the background) brings up `claude remote-control
+  --spawn worktree` on its own (~10s) — no manual step. The
   entrypoint pre-seeds Claude's workspace-trust flag for `/workspace` in `~/.claude.json`
   so the headless remote-control daemon never blocks on an un-acceptable "Workspace not
   trusted" dialog.

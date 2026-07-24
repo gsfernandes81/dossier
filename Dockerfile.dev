@@ -104,8 +104,9 @@ EXPOSE 2222
 # `make dev` / `make dev-login`. Idempotent — see the script header.
 COPY --chown=${USER_UID}:${USER_GID} docker-login.dev.sh /home/dev/login.sh
 
-# Background supervisor that runs + health-recycles `claude remote-control`. Launched
-# by the entrypoint; only recycles a wedged daemon at 0/32 — see the script header.
+# Foreground supervisor that runs + health-recycles `claude remote-control`. Launched
+# by the entrypoint (sshd runs in the background); only recycles a wedged daemon at
+# 0/32 — see the script header.
 COPY --chown=${USER_UID}:${USER_GID} docker-rc-supervisor.dev.sh /home/dev/rc-supervisor.sh
 
 COPY --chown=${USER_UID}:${USER_GID} docker-entrypoint.dev.sh /home/dev/entrypoint.sh
