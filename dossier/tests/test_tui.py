@@ -2150,11 +2150,9 @@ async def test_scan_doc_reads_and_persists_the_reading(
 
 
 @pytest.mark.asyncio
-async def test_settings_screen_saves_and_persists(
+async def test_settings_mode_saves_and_persists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    from dossier.tui.screens import SettingsScreen
-
     store, config = _setup(tmp_path)
     device = tmp_path / "device.toml"
     device.write_text(f'syncthing_root = "{tmp_path.as_posix()}"\nglyphs = "nerd"\n')
@@ -2162,13 +2160,16 @@ async def test_settings_screen_saves_and_persists(
     monkeypatch.setattr("dossier.tui.screens.scan.list_models", lambda cfg: [])
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = SettingsScreen(config)
-        app.push_screen(screen)
-        await pilot.pause()
-        screen.query_one("#set-threshold", Input).value = "45"
-        screen.query_one("#set-url", Input).value = "http://box:9000/v1"
-        screen.action_save()
-        await pilot.pause()
+        home = app.home
+        home.action_settings()  # a mode now, not a modal
+        await _settle(pilot, lambda: home.has_class("settings-mode"))
+        pane = home._settings
+        assert pane is not None
+        assert not home.query_one("#documents", OptionList).display
+        pane.query_one("#set-threshold", Input).value = "45"
+        pane.query_one("#set-url", Input).value = "http://box:9000/v1"
+        pane.action_save()  # ctrl+s → save → posts Saved → host exits + reloads
+        await _settle(pilot, lambda: not home.has_class("settings-mode"))
     assert config.expiry_threshold_days == 45  # live config mutated
     assert config.scan_base_url == "http://box:9000/v1"
     import tomllib
@@ -2176,6 +2177,40 @@ async def test_settings_screen_saves_and_persists(
     saved = tomllib.loads(device.read_text())
     assert saved["scan_base_url"] == "http://box:9000/v1"  # persisted per-device
     assert saved["syncthing_root"] == tmp_path.as_posix()  # preserved
+
+
+@pytest.mark.asyncio
+async def test_settings_mode_command_bar_and_cancel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Settings is a form (no list): `/` is gated off, and command entry is via ctrl+p
+    since a focused Input would eat a typed `:`. Esc cancels, discarding edits."""
+    store, config = _setup(tmp_path)
+    monkeypatch.setattr("dossier.tui.screens.scan.list_models", lambda cfg: [])
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.action_settings()
+        await _settle(pilot, lambda: home.has_class("settings-mode"))
+        pane = home._settings
+        assert pane is not None
+        assert home.check_action("focus_search", ()) is False  # no list to filter
+
+        # ctrl+p opens command mode even from the form (settings is on the home screen).
+        await pilot.press("ctrl+p")
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+        assert not pane.display
+        await pilot.press("escape")
+        await _settle(pilot, lambda: not home.has_class("command-mode"))
+        assert home.has_class("settings-mode") and pane.display
+
+        url = pane.query_one("#set-url", Input)
+        url.focus()
+        url.value = "http://discarded/v1"
+        await pilot.pause()
+        await pilot.press("escape")  # Esc from the form cancels — no save
+        await _settle(pilot, lambda: not home.has_class("settings-mode"))
+        assert config.scan_base_url != "http://discarded/v1"  # cancel discarded it
 
 
 @pytest.mark.asyncio

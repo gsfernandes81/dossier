@@ -85,7 +85,7 @@ from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesPane,
     ChoiceScreen,
-    SettingsScreen,
+    SettingsPane,
     SupersedeScreen,
     WatchPane,
     open_doc_file,
@@ -144,6 +144,7 @@ _MODES: tuple[tuple[str, str, bool], ...] = (
     ("watch", "_watch", True),
     ("bundles", "_bundles", True),
     ("intake", "_intake", False),
+    ("settings", "_settings", False),
 )
 
 
@@ -276,6 +277,14 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.intake-mode.show-detail IntakePane { display: none; }
     HomeScreen.-medium.intake-mode.show-detail IntakePane { display: none; }
 
+    /* Settings: same mode shape (a form — no per-surface search). */
+    SettingsPane { display: none; width: 1fr; }
+    HomeScreen.settings-mode SettingsPane { display: block; }
+    HomeScreen.settings-mode #locations { display: none; }
+    HomeScreen.settings-mode #documents { display: none; }
+    HomeScreen.-narrow.settings-mode.show-detail SettingsPane { display: none; }
+    HomeScreen.-medium.settings-mode.show-detail SettingsPane { display: none; }
+
     /* Command mode: the persistent bar's `:`/`>` ex-mode. A *separate* OptionList
        (never #documents — its preserved-highlight logic, the "… and N more" cap row
        and the two-click mouse verb are all wrong for a single-tap command list)
@@ -290,6 +299,7 @@ class HomeScreen(Screen[None]):
     HomeScreen.command-mode WatchPane { display: none; }
     HomeScreen.command-mode BundlesPane { display: none; }
     HomeScreen.command-mode IntakePane { display: none; }
+    HomeScreen.command-mode SettingsPane { display: none; }
     /* No room for both the list and the detail on a phone — the transient mode wins;
        wide keeps the detail in column 3 beside the command list. */
     HomeScreen.-narrow.command-mode #detail { display: none; }
@@ -352,6 +362,7 @@ class HomeScreen(Screen[None]):
         self._watch: WatchPane | None = None  # mounted on first `action_watch`
         self._bundles: BundlesPane | None = None  # mounted on first `action_bundles`
         self._intake: IntakePane | None = None  # mounted on first `action_intake`
+        self._settings: SettingsPane | None = None  # mounted on first `action_settings`
         self._show_issue = False
         self._detail_id: str | None = None
         self._narrow = False
@@ -1354,11 +1365,41 @@ class HomeScreen(Screen[None]):
         self.notify("cancelling vision scan…")
 
     def action_settings(self) -> None:
-        self.app.push_screen(SettingsScreen(self._config), self._after_settings)
+        """Toggle the settings form into columns 1+2 (a mode, like review)."""
+        if self.has_class("settings-mode"):
+            self._exit_settings_mode()
+            return
+        self._leave_current_mode()
+        if self._settings is None:
+            self._settings = SettingsPane(self._config)
+            self.query_one("#panes").mount(self._settings, before=self._detail_pane)
+        self._enter_settings_mode()
 
-    def _after_settings(self, changed: bool | None) -> None:
-        if changed:
-            self._reload()  # expiry threshold + scan_* apply now; glyphs on restart
+    def _enter_settings_mode(self) -> None:
+        self.query_one("#search", Input).value = ""
+        self._filter_text = ""
+        self._bundle_filter = None
+        self._expiring_only = False
+        self.remove_class("searching", "show-documents")
+        self.add_class("settings-mode")
+        if self._settings is not None:
+            self._settings.refresh_on_enter()  # reset fields to the live config
+            self._settings.focus_active_pane()
+
+    def _exit_settings_mode(self) -> None:
+        self.remove_class("settings-mode")
+        self._focus_documents()
+
+    @on(SettingsPane.Saved)
+    def _settings_saved(self, event: SettingsPane.Saved) -> None:
+        event.stop()
+        self._exit_settings_mode()
+        self._reload()  # expiry threshold + scan_* apply now; glyphs on restart
+
+    @on(SettingsPane.CloseRequested)
+    def _settings_close_requested(self, event: SettingsPane.CloseRequested) -> None:
+        event.stop()
+        self._exit_settings_mode()  # cancel: nothing changed, no reload
 
     def _scan_docs(self, docs: list[Document]) -> None:
         """Worker body: read each doc with the VLM, persisting after each success
@@ -1694,6 +1735,7 @@ class HomeScreen(Screen[None]):
             "WatchPane",
             "BundlesPane",
             "IntakePane",
+            "SettingsPane",
             "#documents",
             "#detail",
             "#locations",
