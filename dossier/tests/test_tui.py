@@ -2282,6 +2282,12 @@ async def test_attention_chips_route_to_their_surfaces(tmp_path: Path):
         # All three chips are showing (each count is non-zero).
         for sel in ("#attn-expiring", "#attn-conflicts", "#attn-inbox"):
             assert home.query_one(sel, Static).display, sel
+        # …and actually *on screen*, not stacked at x=0 under the full-width footer
+        # (the bug that hid the attention counts for their whole existence). Docked
+        # right, so the segment ends at the footrow's right edge.
+        seg = home.query_one("#attention")
+        row_w = home.query_one("#footrow").size.width
+        assert seg.region.x > 0 and seg.region.right == row_w
 
         await pilot.click("#attn-conflicts")
         await _await_review_load(pilot)

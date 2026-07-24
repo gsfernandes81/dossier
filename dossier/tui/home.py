@@ -161,7 +161,11 @@ class HomeScreen(Screen[None]):
     #search:focus { border: round $accent; background: $boost; }
     #footrow { height: 1; }
     #footrow Footer { width: 1fr; }
-    #attention { width: auto; height: 1; }
+    /* Dock the chips to the right *over* the footer's blank right end. Laid out as
+       an ordinary Horizontal sibling they landed at x=0 under the full-width footer
+       and were painted over — which is why the attention counts were invisible from
+       the day they were added. */
+    #attention { dock: right; width: auto; height: 1; background: $surface; }
     .attn-chip { width: auto; height: 1; color: $text-muted; padding: 0 1; }
     /* Conflicts block clean sync — the one that most needs acting on — so it reads
        in the warning colour while the others stay muted. */
