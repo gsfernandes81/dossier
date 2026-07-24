@@ -1388,10 +1388,43 @@ async def test_copy_path_and_reveal_act_on_the_home_cursor(
         await pilot.pause()
         home.action_copy_path()
         await pilot.pause()
+        # OSC 52 goes out too, so the path also reaches the *terminal's* clipboard —
+        # the only route to a local clipboard over SSH.
+        assert app.clipboard == str(tmp_path / "passport.pdf")
         home.action_reveal_file()
         await pilot.pause()
     assert copied == [tmp_path / "passport.pdf"]
     assert revealed == [tmp_path / "passport.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_copy_path_still_reports_success_when_no_local_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A missing local clipboard tool is no longer fatal — OSC 52 carried it.
+
+    On a headless or restricted box there may be no xclip/wl-copy, but the OSC 52
+    escape still reaches whatever terminal is on the other end. So a shell-out that
+    can't find a tool must not surface as an error.
+    """
+    from dossier.platform_open import OpenError as _OpenError
+
+    store, config = _setup(tmp_path)
+
+    def _no_tool(_p: Path) -> None:
+        raise _OpenError("no clipboard tool found")
+
+    monkeypatch.setattr(tui_home, "copy_path", _no_tool)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        home.action_copy_path()
+        await pilot.pause()
+        assert app.clipboard == str(tmp_path / "passport.pdf")
+        assert not any(n.severity == "error" for n in app._notifications)
+        assert any("copied" in n.message for n in app._notifications)
 
 
 @pytest.mark.asyncio

@@ -42,6 +42,7 @@ keyboard), which is the home for every action not on a button or a core key.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
@@ -918,12 +919,18 @@ class HomeScreen(Screen[None]):
             self.notify(f"{path.parent.name}: {caveat}", severity="warning")
 
     def _copy_one(self, path: Path) -> None:
-        try:
+        text = str(path)
+        # OSC 52 first: the *terminal emulator* on the user's own machine sets the
+        # clipboard, so this is the only path that reaches a local clipboard over
+        # SSH (where the shell-out below would set the far end's, uselessly). Textual
+        # writes it down the render stream, so unknown-OSC terminals drop it cleanly.
+        self.app.copy_to_clipboard(text)
+        # Keep the local shell-out too, so nothing regresses off-SSH — and it covers
+        # the terminals OSC 52 doesn't (notably macOS Terminal). A missing local tool
+        # is no longer fatal: OSC 52 already carried it.
+        with contextlib.suppress(OpenError):
             copy_path(path)
-        except OpenError as exc:
-            self.notify(str(exc), severity="error")
-        else:
-            self.notify(f"copied {path}")
+        self.notify(f"copied {text}")
 
     def action_history(self) -> None:
         """Pick an earlier version of the current document and restore it.

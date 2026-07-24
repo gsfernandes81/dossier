@@ -22,7 +22,9 @@ and **Copy file path**. Both act on whatever you are looking at: the **open reco
 column is up (which is what you see on a phone, where it replaces everything else), otherwise
 review's cursor, otherwise the documents column. Where review's cursor straddles two files (a
 succession's older and newer sides) they ask which one, since neither revealing nor copying is
-meaningful for a pair.
+meaningful for a pair. **Copy** also writes the path over OSC 52, so it reaches the clipboard on
+*your* machine even when dossier is running over SSH — with the platform tool (pbcopy / xclip /
+termux-clipboard-set) still doing the job locally, including on terminals OSC 52 doesn't cover.
 
 Reveal opens Explorer with the file selected on Windows, Finder on macOS, and the containing
 folder on Linux. On **Android** it asks the system Files app to open the folder (via a
