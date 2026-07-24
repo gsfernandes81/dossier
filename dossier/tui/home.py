@@ -140,7 +140,7 @@ _MODE_LOCKED = frozenset({"focus_search", "drill_in", "drill_out"})
 # HomeScreen marks the active one; one owner at a time. command-mode is NOT here —
 # it's a transient overlay on top of whichever mode owns the columns, not an owner.
 _MODES: tuple[tuple[str, str, bool], ...] = (
-    ("review", "_review", False),
+    ("review", "_review", True),
     ("watch", "_watch", True),
     ("bundles", "_bundles", True),
     ("intake", "_intake", False),
@@ -862,6 +862,15 @@ class HomeScreen(Screen[None]):
         if self._command_mode:
             self._run_highlighted_command()
             return
+        # In a searchable mode the bar filters the *mode's* list; Enter must step into
+        # that pane (like `↓`), never fall through to _activate_doc — which reads the
+        # hidden #documents cursor and would open an unrelated file.
+        mode = self._column_mode()
+        if mode is not None and self._mode_searchable(mode):
+            pane = self._mode_pane(mode)
+            if pane is not None:
+                pane.focus_active_pane()
+            return
         # Enter from search = find-fast: open the top match's file straight away.
         # (`↓` is the way to step into the list keeping the filter; `→` opens detail.)
         doc = self._highlighted_doc()  # _refresh_documents pins the top hit to row 0
@@ -1493,6 +1502,7 @@ class HomeScreen(Screen[None]):
 
     def _exit_watch_mode(self) -> None:
         self.remove_class("watch-mode")
+        self.query_one("#search", Input).value = ""  # no stale filter text in the bar
         if self._watch is not None:
             self._watch.apply_filter("")  # drop the filter for next entry
         self._reload()  # an `x` ignore changed the tracked set + the expiring chip
@@ -1541,22 +1551,24 @@ class HomeScreen(Screen[None]):
         # column underneath review on a narrow screen.
         search = self.query_one("#search", Input)
         search.value = ""
-        # The bar stays *enabled* so `:`/`>` command entry works from inside review
-        # (command entry is universal); only the *search* half is meaningless here
-        # (its target pane is hidden), and on_key + on_input_changed keep a stray
-        # filter out rather than disabling the whole input.
+        # The bar stays enabled and now filters the active review tab (`/` search);
+        # `:`/`>` command entry works from inside review either way (command entry is
+        # universal). on_input_changed routes a plain value to review.apply_filter.
         self._filter_text = ""
         self._bundle_filter = None
         self._expiring_only = False
         self.remove_class("searching", "show-documents")
         self.add_class("review-mode")
         if self._review is not None:
+            self._review.apply_filter("")  # start unfiltered (bar is already empty)
             self._review.reload_if_stale()  # catch up on writes made outside review
             self._review.focus_active_pane()
 
     def _exit_review_mode(self) -> None:
         self.remove_class("review-mode")
-        self.query_one("#search", Input).disabled = False
+        self.query_one("#search", Input).value = ""  # drop any typed review filter
+        if self._review is not None:
+            self._review.apply_filter("")  # restore the folder tree for next entry
         self._scan_attention()  # a merge in review may have cleared conflicts
         self._reload(restale_review=False)
         self._focus_documents()
@@ -1661,6 +1673,7 @@ class HomeScreen(Screen[None]):
 
     def _exit_bundles_mode(self) -> None:
         self.remove_class("bundles-mode")
+        self.query_one("#search", Input).value = ""  # no stale filter text in the bar
         if self._bundles is not None:
             self._bundles.refresh_on_enter()  # drop the filter for next entry
         self._reload()  # a date/template/accept edit may have landed

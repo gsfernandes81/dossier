@@ -1193,6 +1193,134 @@ async def test_reconcile_dismiss_orphan_persists_and_hides(tmp_path: Path):
         assert store.load_reconcile().dismissed == {"Wallpapers/bg.jpg"}
 
 
+def _flat_orphan_paths(tree) -> list[str]:
+    """Paths of the flat orphan leaves under an active filter (skip data-less rows)."""
+    return [n.data.path for n in tree.root.children if hasattr(n.data, "path")]
+
+
+@pytest.mark.asyncio
+async def test_review_search_flattens_orphans_and_adopts(tmp_path: Path):
+    """`/` on Orphans flattens to matching files across folders; ↓ then `a` adopts the
+    top match — the file-adoption workflow, without re-running the load."""
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "Taxes").mkdir()
+    (tmp_path / "Taxes" / "w2-2024.pdf").write_bytes(b"x")
+    (tmp_path / "Misc").mkdir()
+    (tmp_path / "Misc" / "cat.jpg").write_bytes(b"x")  # a non-matching orphan
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _open_review(pilot)
+        pane.query_one(TabbedContent).active = "tab-orphans"
+        await pilot.pause()
+        tree = pane.query_one("#orphans", Tree)
+        loads_before = pane._loads
+
+        home.action_focus_search()  # `/`
+        await pilot.pause()
+        for ch in "w2":
+            await pilot.press(ch)
+        await _settle(pilot, lambda: _flat_orphan_paths(tree) == ["Taxes/w2-2024.pdf"])
+        assert pane._loads == loads_before  # filtering never re-ran the load
+
+        await pilot.press("down")  # bar → the flat list (cursor already on match 1)
+        await _settle(pilot, lambda: pilot.app.focused is tree)
+        await pilot.press("a")  # adopt
+        await _settle(
+            pilot,
+            lambda: any(
+                r.path == "Taxes/w2-2024.pdf" for d in store.load_all() for r in d.files
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_review_search_clear_restores_the_folder_tree(tmp_path: Path):
+    """Clearing the filter restores the folder tree exactly, still in review, and
+    without a reload — `_loads` never changes across the filter/clear cycle."""
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "Taxes").mkdir()
+    (tmp_path / "Taxes" / "w2-2024.pdf").write_bytes(b"x")
+    (tmp_path / "Misc").mkdir()
+    (tmp_path / "Misc" / "cat.jpg").write_bytes(b"x")
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _open_review(pilot)
+        pane.query_one(TabbedContent).active = "tab-orphans"
+        await pilot.pause()
+        tree = pane.query_one("#orphans", Tree)
+        loads_before = pane._loads
+        assert any(n.data == "Taxes" for n in tree.root.children)  # folder grouping
+
+        home.action_focus_search()
+        await pilot.pause()
+        for ch in "w2":
+            await pilot.press(ch)
+        await _settle(pilot, lambda: _flat_orphan_paths(tree) == ["Taxes/w2-2024.pdf"])
+
+        await pilot.press("escape")  # clear the filter → folders back, still in review
+        await _settle(pilot, lambda: any(n.data == "Taxes" for n in tree.root.children))
+        assert home.has_class("review-mode")
+        assert pane._loads == loads_before
+
+
+@pytest.mark.asyncio
+async def test_review_search_filters_missing(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    store.save(
+        Document(id="d1", name="A", files=[Rendition("x", "Marine/gone.pdf", True)])
+    )
+    store.save(
+        Document(id="d2", name="B", files=[Rendition("x", "Wallet/lost.pdf", True)])
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        pane = await _open_review(pilot)
+        pane.query_one(TabbedContent).active = "tab-missing"
+        await pilot.pause()
+        missing = pane.query_one("#missing", OptionList)
+        assert missing.option_count == 2  # both missing files
+        pane.apply_filter("marine")  # host would deliver this from the bar
+        await pilot.pause()
+        ids = [missing.get_option_at_index(i).id for i in range(missing.option_count)]
+        assert ids == ["d1\x00Marine/gone.pdf"]  # only the matching one
+
+
+@pytest.mark.asyncio
+async def test_review_search_esc_clears_then_exits_no_stale_bar(tmp_path: Path):
+    """Esc peels: first clears the review filter (stays in review), second exits the
+    mode — and never leaves stale filter text in the shared bar."""
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "loose.pdf").write_bytes(b"x")  # an orphan
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        search = home.query_one("#search", Input)
+        pane = await _open_review(pilot)
+        home.action_focus_search()
+        await pilot.pause()
+        for ch in "loose":
+            await pilot.press(ch)
+        await _settle(pilot, lambda: pane._filter == "loose")
+
+        await pilot.press("escape")  # clears the filter, stays in review
+        await _settle(pilot, lambda: pane._filter == "")
+        assert home.has_class("review-mode") and search.value == ""
+
+        await pilot.press("escape")  # exits review from the pane
+        await _settle(pilot, lambda: not home.has_class("review-mode"))
+        assert search.value == ""  # no stale filter text
+
+
 @pytest.mark.asyncio
 async def test_reconcile_ack_missing_persists(tmp_path: Path):
     config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
@@ -2644,7 +2772,8 @@ async def test_review_mode_disables_the_home_arrow_drills(tmp_path: Path):
         home.action_review()
         await _await_review_load(pilot)
         assert home.check_action("drill_in", ()) is False
-        assert home.check_action("focus_search", ()) is False
+        # `/` is live now — review is searchable (it filters the active tab).
+        assert home.check_action("focus_search", ()) is True
         assert home.check_action("drill_out", ()) is False
 
         # With a record open, `←` gets its meaning back: close it, back to review.
