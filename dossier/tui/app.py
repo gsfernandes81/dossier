@@ -20,86 +20,66 @@ from __future__ import annotations
 from datetime import date
 
 from textual.app import App
-from textual.command import Hit, Hits, Provider
+from textual.binding import Binding
+from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.events import DescendantFocus
 from textual.widgets import Input, TextArea
 
 from dossier.config import Config
 from dossier.store import Store
+from dossier.tui.commands import ENTRIES, Entry, Kind
 from dossier.tui.home import HomeScreen
 
 
 class DossierCommands(Provider):
-    """Command-palette (ctrl+p) entries for every occasional home action.
+    """Command-palette entries for every occasional home action.
 
-    This is where the low-frequency actions live now, instead of on dedicated
-    letters — searchable by name so a new user has almost nothing to memorise. Each
-    delegates to the matching ``HomeScreen.action_*`` so one implementation backs
-    the palette, the touch Commands button, and any remaining binding.
+    The home binds no letters (find-fast), so this is the app's whole occasional
+    vocabulary — see :mod:`dossier.tui.commands` for the catalog itself, which is
+    deliberately defined once and shared.
+
+    Implements ``discover`` as well as ``search``: without it the palette opens
+    showing only Textual's own Theme/Quit/Screenshot commands and *none* of ours,
+    so you had to already know a command existed in order to find it.
     """
 
-    @staticmethod
-    def _commands() -> list[tuple[str, str, str]]:
-        # (title, home action, help) — the searchable home for every action now
-        # that the home keeps no letter bindings (find-fast: printables go to
-        # search). The everyday four lead; occasional actions follow. Each also has
-        # a touch button and/or a contextual detail-pane key.
-        return [
-            ("Open document file", "open_file", "Open the current doc's file"),
-            ("Edit document", "edit", "Edit the current document's fields"),
-            ("New document", "new", "Create a new document record"),
-            ("Add to bundle", "bundle", "Put the current doc in a bundle"),
-            ("Accept top suggestion", "accept_suggestion", "Apply the shown hint"),
-            (
-                "Review — reconcile the collection",
-                "review",
-                "Conflicts, orphans, missing, dups, integrity",
-            ),
-            (
-                "Show in file manager",
-                "reveal_file",
-                "Reveal the file under the cursor (not on Android)",
-            ),
-            ("Copy file path", "copy_path", "Put the file's path on the clipboard"),
-            (
-                "History — restore an earlier version",
-                "history",
-                "Roll the current document back to a saved version",
-            ),
-            ("Bundles", "bundles", "Browse and edit document bundles"),
-            ("Watch expiry", "watch", "The expiry-watch surface"),
-            ("Toggle expiring-only filter", "toggle_expiring", "Just expiring docs"),
-            ("Intake dropped documents", "intake", "Review + file inbox files"),
-            ("Scan current document (vision)", "scan_doc", "Read the current doc"),
-            ("Scan all linked (vision)", "scan_all", "Read every linked document"),
-            ("Cancel vision scan", "cancel_scan", "Stop a running vision scan"),
-            ("Move document", "move", "Change the current doc's location"),
-            ("Set succession (supersedes)", "supersede", "Link a renewal to older"),
-            ("Toggle issue / expiry dates", "toggle_dates", "Switch the date column"),
-            (
-                "Search inside scan contents",
-                "toggle_search_content",
-                "Match transcripts",
-            ),
-            ("Settings", "settings", "Icons, scan endpoint/model, expiry threshold"),
-        ]
+    def _hit(self, entry: Entry, display: object | None = None):
+        return {
+            "command": self._runner(entry.action),
+            "text": entry.title,
+            "help": f"{entry.kind.value} · {entry.help}",
+        }
+
+    async def discover(self) -> Hits:
+        """Everything, grouped, before a single character is typed."""
+        for entry in sorted(ENTRIES, key=lambda e: (list(Kind).index(e.kind), e.title)):
+            yield DiscoveryHit(entry.title, **self._hit(entry))
 
     async def search(self, query: str) -> Hits:
         matcher = self.matcher(query)
-        for title, action, help_text in self._commands():
-            score = matcher.match(title)
+        for entry in ENTRIES:
+            score = matcher.match(entry.title)
             if score > 0:
-                yield Hit(
-                    score,
-                    matcher.highlight(title),
-                    self._runner(action),
-                    help=help_text,
-                )
+                yield Hit(score, matcher.highlight(entry.title), **self._hit(entry))
 
     def _runner(self, action: str):
         app = self.app
         assert isinstance(app, DossierApp)
-        return getattr(app.home, f"action_{action}")  # bound; called on selection
+
+        def run() -> None:
+            # Respect the same gate the keys do. The palette used to call the bound
+            # action directly, which meant it could do things a keypress was
+            # explicitly forbidden to do — "Edit document" mid-edit silently wiped
+            # the in-progress form, and in review-mode the document verbs acted on
+            # the *hidden* documents cursor. check_action is the app's one answer to
+            # "is this actionable right now", so ask it.
+            home = app.home
+            if home.check_action(action, ()) is not True:
+                home.notify("not available right now", severity="warning")
+                return
+            getattr(home, f"action_{action}")()
+
+        return run
 
 
 class DossierApp(App[None]):
@@ -110,6 +90,10 @@ class DossierApp(App[None]):
     # Textual built-in priority binding) quits, and the palette's system "Quit"
     # command covers touch.
     COMMANDS = App.COMMANDS | {DossierCommands}
+    # Bind ctrl+p ourselves so it *shows*. Textual adds this binding automatically
+    # only if we haven't, and its own copy is `show=False` — which left the app's
+    # entire occasional vocabulary behind a key the UI never mentioned.
+    BINDINGS = [Binding("ctrl+p", "command_palette", "Commands", priority=True)]
 
     def __init__(
         self,

@@ -102,6 +102,12 @@ _NARROW_COLS = 60
 # screens' worth is all anyone scrolls; past that, narrowing beats scrolling.
 _MAX_ROWS = 200
 
+# The search box is always on screen, so it is where the command surface gets to
+# announce itself — the palette was otherwise reachable only by a key the UI never
+# mentioned (Textual's own ctrl+p binding is show=False).
+_SEARCH_HINT = "Search name / tags / notes / scans…  ·  ctrl+p commands"
+_SEARCH_HINT_CONTENT = "Search name / tags / notes / scans + contents…"
+
 # Home actions suppressed while the detail pane is in edit mode, so a bare letter
 # typed into a form Checkbox/SelectionList (which don't swallow it like an Input
 # does) can't fire a home binding — and the footer stops advertising them. Only the
@@ -225,6 +231,10 @@ class HomeScreen(Screen[None]):
         Binding("right", "drill_in", "Detail", show=False),
         Binding("left", "drill_out", "Back", show=False),
         Binding("question_mark", "toggle_help_panel", "Help"),
+        # Advertised by action_toggle_search_content's own notices ("ctrl+t to
+        # toggle off") but bound nowhere — the UI was promising a key that did not
+        # exist. Hidden from the footer: it's a niche toggle, and the notice says it.
+        Binding("ctrl+t", "toggle_search_content", "Search contents", show=False),
     ]
 
     # True while the detail pane is editing; drives check_action (and, via
@@ -286,7 +296,7 @@ class HomeScreen(Screen[None]):
                 # searchable home for everything not on a button (its search box
                 # focusing raises the soft keyboard via the app's focus handler).
                 yield Button(_btn_label(g.commands, "Commands"), id="act-commands")
-            yield Input(placeholder="Search name / tags / notes / scans…", id="search")
+            yield Input(placeholder=_SEARCH_HINT, id="search")
             # Attention counts ride *beside* the footer, dim and non-focusable, so
             # they never sit in front of the find path (they replaced a toast that
             # overlapped the search box).
@@ -711,10 +721,10 @@ class HomeScreen(Screen[None]):
         self._search_content = not self._search_content
         search = self.query_one("#search", Input)
         if self._search_content:
-            search.placeholder = "Search name / tags / notes / scans + contents…"
+            search.placeholder = f"{_SEARCH_HINT_CONTENT}  ·  ctrl+p commands"
             self.notify("searching inside scan contents  (ctrl+t to toggle off)")
         else:
-            search.placeholder = "Search name / tags / notes / scans…"
+            search.placeholder = _SEARCH_HINT
             self.notify("content search off  (ctrl+t to toggle on)")
         self._refresh_documents()
 

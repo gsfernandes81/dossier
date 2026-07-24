@@ -50,6 +50,7 @@ from dossier.tui import (
     DossierApp,
     home as tui_home,
 )
+from dossier.tui.commands import ENTRIES
 from dossier.tui.detail_pane import DetailPane
 from dossier.tui.doclist import DocumentList
 from dossier.tui.review import ReviewPane
@@ -1979,13 +1980,42 @@ async def test_command_palette_routes_to_home_actions(tmp_path: Path):
         # Every advertised command names an existing home action, and its runner
         # is that bound method — guards against an action-name typo drifting from
         # the HomeScreen binding it delegates to.
-        for _title, action, _help in provider._commands():
-            assert provider._runner(action) == getattr(app.home, f"action_{action}")
         # A fuzzy query surfaces the matching commands as palette hits.
         hits = [hit async for hit in provider.search("scan")]
         titles = {hit.text for hit in hits}
+        # …and `discover` offers *everything* before a character is typed. Without
+        # it the palette opened showing only Textual's own Theme/Quit/Screenshot,
+        # so you had to already know a command existed in order to find it.
+        found = {hit.text async for hit in provider.discover()}
+        assert found == {entry.title for entry in ENTRIES}
     assert "Scan current document (vision)" in titles
     assert "Settings" not in titles  # unrelated command doesn't match "scan"
+
+
+@pytest.mark.asyncio
+async def test_palette_respects_the_same_gate_as_the_keys(tmp_path: Path):
+    """The palette used to call actions the keys were forbidden to run.
+
+    `check_action` gates keys, but the provider returned the bound action and
+    called it directly — so mid-edit "Edit document" wiped the in-progress form,
+    and in review-mode the document verbs acted on the *hidden* documents cursor.
+    """
+    from dossier.tui.app import DossierCommands
+
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        provider = DossierCommands(app.screen)
+        pane = await _enter_edit(pilot, home, "passport")
+        pane.query_one("#f-name", Input).value = "Half-typed name"
+        await pilot.pause()
+
+        provider._runner("edit")()  # would have re-populated the form under us
+        await pilot.pause()
+        assert pane.editing, "the edit was torn down"
+        assert pane.query_one("#f-name", Input).value == "Half-typed name"
+        assert any("not available" in n.message for n in app._notifications)
 
 
 def _inbox_setup(tmp_path: Path, name: str) -> tuple[Store, Config]:
@@ -2428,11 +2458,9 @@ async def test_intake_card_retargets_the_succession_link(
 
 
 def test_palette_covers_the_occasional_actions():
-    from dossier.tui.app import DossierCommands
     from dossier.tui.home import HomeScreen
 
-    commands = DossierCommands._commands()  # a staticmethod — no instance needed
-    actions = {action for _title, action, _help in commands}
+    actions = {entry.action for entry in ENTRIES}
     # The actions that lost their dedicated letter now live in the palette.
     assert {
         "review",
