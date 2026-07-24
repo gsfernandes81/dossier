@@ -54,6 +54,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
 from textual.events import Click, DescendantFocus, Key, Resize
+from textual.fuzzy import Matcher
 from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import (
@@ -75,6 +76,7 @@ from dossier.model import Document, ExpiryStatus, Location, SuggestionState
 from dossier.platform_open import OpenError, copy_path, reveal_file
 from dossier.store import Store
 from dossier.tui import glyphs, rows
+from dossier.tui.commands import ENTRIES, Entry, Kind
 from dossier.tui.detail_pane import DetailPane, format_saved_at
 from dossier.tui.doclist import DocumentList
 from dossier.tui.intake import IntakeScreen
@@ -233,6 +235,22 @@ class HomeScreen(Screen[None]):
     HomeScreen.review-mode #documents { display: none; }
     HomeScreen.-narrow.review-mode.show-detail ReviewPane { display: none; }
     HomeScreen.-medium.review-mode.show-detail ReviewPane { display: none; }
+
+    /* Command mode: the persistent bar's `:`/`>` ex-mode. A *separate* OptionList
+       (never #documents — its preserved-highlight logic, the "… and N more" cap row
+       and the two-click mouse verb are all wrong for a single-tap command list)
+       borrows columns 1+2 exactly as review does. Ordered AFTER the review/searching
+       rules so the equal-specificity display toggles resolve to command mode while
+       it is on. display:none is not teardown — the columns keep their state. */
+    #commands { display: none; width: 1fr; }
+    HomeScreen.command-mode #commands { display: block; }
+    HomeScreen.command-mode #locations { display: none; }
+    HomeScreen.command-mode #documents { display: none; }
+    HomeScreen.command-mode ReviewPane { display: none; }
+    /* No room for both the list and the detail on a phone — the transient mode wins;
+       wide keeps the detail in column 3 beside the command list. */
+    HomeScreen.-narrow.command-mode #detail { display: none; }
+    HomeScreen.-medium.command-mode #detail { display: none; }
     """
 
     # Find-fast home: typing anything routes into search (see on_key), so the home
@@ -279,6 +297,7 @@ class HomeScreen(Screen[None]):
         self._selection: str = _ALL
         self._filter_text = ""
         self._expiring_only = False
+        self._command_mode = False  # the `:`/`>` bar owns the columns (find-fast off)
         self._bundle_filter: str | None = None  # scope to one bundle's docs
         # Footer attention counts. Conflicts + inbox need directory I/O (a `.dossier`
         # walk, slow on a synced FS), so they're scanned on mount and after the
@@ -298,6 +317,10 @@ class HomeScreen(Screen[None]):
         with Horizontal(id="panes"):
             yield OptionList(id="locations")
             yield DocumentList(id="documents")
+            # The `:`/`>` command list swaps into columns 1+2 (see the command-mode
+            # CSS). Its own list, not #documents — commands want single-tap and none
+            # of the documents pane's highlight/cap-row machinery.
+            yield OptionList(id="commands")
             yield DetailPane(self._store, glyphs=self._glyphs, id="detail")
         # A fixed-height bottom bar reserves the space for the (touch-only)
         # action row, the command line, and the footer so they stack cleanly
@@ -662,7 +685,11 @@ class HomeScreen(Screen[None]):
         if self.app.focused is search:
             if event.key == "down":
                 event.stop()
-                self._focus_documents()
+                # In command mode ↓ steps into the command list, not the documents.
+                if self._command_mode:
+                    self.query_one("#commands", OptionList).focus()
+                else:
+                    self._focus_documents()
             return  # everything else in search is the Input's own to handle
         if (
             self.editing
@@ -684,16 +711,33 @@ class HomeScreen(Screen[None]):
             search.cursor_position = len(search.value)
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "search":
-            self._filter_text = event.value
-            self._update_searching()
-            self._refresh_documents()
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        # Enter from search = find-fast: open the top match's file straight away.
-        # (`↓` is the way to step into the list keeping the filter; `→` opens detail.)
         if event.input.id != "search":
             return
+        # A leading `:` or `>` makes the bar a command bar; anything else is search.
+        # The command branch never sets _filter_text or engages `searching`, so its
+        # locations-snap side effect can't fire and an expiring filter survives a peek.
+        in_command = event.value.startswith((":", ">"))
+        if in_command and not self._command_mode:
+            self._enter_command_state()
+        elif not in_command and self._command_mode:
+            self._exit_command_state()
+        if in_command:
+            self._refresh_commands(event.value[1:])  # query after the sigil
+            return
+        self._filter_text = event.value
+        self._update_searching()
+        self._refresh_documents()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "search":
+            return
+        # In command mode Enter runs the highlighted/top command — it must never fall
+        # through to _activate_doc, or `:` + Enter would open a PDF.
+        if self._command_mode:
+            self._run_highlighted_command()
+            return
+        # Enter from search = find-fast: open the top match's file straight away.
+        # (`↓` is the way to step into the list keeping the filter; `→` opens detail.)
         doc = self._highlighted_doc()  # _refresh_documents pins the top hit to row 0
         if doc is None:
             self.notify("no matches")
@@ -747,7 +791,10 @@ class HomeScreen(Screen[None]):
         self.open_detail(event.option_id)
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option_list.id == "documents":
+        if event.option_list.id == "commands":
+            if event.option_id is not None:  # headers are disabled + id-less
+                self._run_command(event.option_id)  # Enter on the list / single tap
+        elif event.option_list.id == "documents":
             if self.editing or event.option_id is None:
                 return  # a click mid-edit must not swap the doc being edited
             self._activate_doc(event.option_id)  # Enter/tap opens the file; → = detail
@@ -789,10 +836,128 @@ class HomeScreen(Screen[None]):
             self.notify("content search off  (ctrl+t to toggle on)")
         self._refresh_documents()
 
+    # -- command mode (`:`/`>` on the persistent bar) ------------------------
+
+    def enter_command_mode(self) -> None:
+        """Open command mode from a button / icon / key: focus the bar, insert `:`.
+
+        The single entry point the touch Commands button, the header icon and the
+        ``ctrl+p`` key converge on, so there is one way in however you reach it.
+        No-op while editing — the form owns the keyboard then.
+        """
+        search = self.query_one("#search", Input)
+        if search.disabled:
+            return
+        search.value = ":"  # the posted Changed enters the state; do it now too…
+        self._enter_command_state()  # …so it is set synchronously either way
+        self._refresh_commands("")
+        search.focus()
+        search.cursor_position = 1
+
+    def _enter_command_state(self) -> None:
+        """Switch the bar into command mode (idempotent, synchronous)."""
+        self._command_mode = True
+        # Drop the search-view classes without touching the filter *state* behind
+        # them: a stale two-class `searching`/`show-documents` selector out-ranks the
+        # one-class command-mode rules and would resurrect a hidden column (the trap
+        # _enter_review_mode documents).
+        self.remove_class("searching", "show-documents")
+        self.add_class("command-mode")
+
+    def _exit_command_state(self) -> None:
+        """Leave command mode (idempotent, synchronous); re-derive `searching` from
+        the untouched filter state so an expiring filter reappears as it was."""
+        self._command_mode = False
+        self.remove_class("command-mode")
+        self._update_searching()
+
+    def _refresh_commands(self, query: str) -> None:
+        """Render the command list for the bar.
+
+        Empty query → the whole catalog, grouped under disabled headers the cursor
+        skips; a query → fuzzy hits over each entry's haystack (title + keywords),
+        best first. Entries the ``check_action`` gate would refuse right now are
+        dropped, so the list shows only what can actually run.
+        """
+        options = self.query_one("#commands", OptionList)
+        options.clear_options()
+        entries = [e for e in ENTRIES if self.check_action(e.action, ()) is not False]
+        query = query.strip()
+        if not query:
+            first_landable: int | None = None
+            row = 0
+            for kind in Kind:
+                group = sorted(
+                    (e for e in entries if e.kind is kind), key=lambda e: e.title
+                )
+                if not group:
+                    continue
+                # disabled=True (not merely id=None) is what makes the cursor skip it.
+                options.add_option(
+                    Option(Text(kind.value, style="bold dim"), disabled=True)
+                )
+                row += 1
+                for entry in group:
+                    options.add_option(
+                        Option(self._command_row(entry), id=entry.action)
+                    )
+                    if first_landable is None:
+                        first_landable = row
+                    row += 1
+            if first_landable is not None:
+                options.highlighted = first_landable
+            return
+        matcher = Matcher(query)
+        scored = [(matcher.match(e.haystack), e) for e in entries]
+        hits = sorted(
+            ((s, e) for s, e in scored if s > 0), key=lambda se: se[0], reverse=True
+        )
+        for _, entry in hits:
+            options.add_option(Option(self._command_row(entry), id=entry.action))
+        if hits:
+            options.highlighted = 0
+
+    def _command_row(self, entry: Entry) -> Text:
+        """A two-line option: the title, then a dim ``kind · help [key]`` line (the
+        key when the action has a home binding, so the bar doubles as key docs)."""
+        key = _KEYS.get(entry.action)
+        suffix = f"  [{key}]" if key else ""
+        row = Text(entry.title)
+        row.append(f"\n{entry.kind.value} · {entry.help}{suffix}", style="dim")
+        return row
+
+    def _run_highlighted_command(self) -> None:
+        option_id = _highlighted_id(self.query_one("#commands", OptionList))
+        if option_id is None:
+            self.notify("no matching command")
+            return
+        self._run_command(option_id)
+
+    def _run_command(self, action: str) -> None:
+        """Dispatch a command chosen in the bar, through the same gate the keys use —
+        so it can never do what a keypress is forbidden to do right now. Exit the mode
+        first (synchronously): the action may itself toggle `searching`/mode classes."""
+        self._exit_command_state()
+        self.query_one("#search", Input).value = ""
+        if self.check_action(action, ()) is not True:
+            self.notify("not available right now", severity="warning")
+            return
+        getattr(self, f"action_{action}")()
+
     def action_escape(self) -> None:
         pane = self._detail_pane
         if pane.editing:
             pane.action_cancel_edit()  # covers focus having left the pane mid-edit
+            return
+        # A dedicated command-mode exit, *before* the search-clearing branch below:
+        # that branch drops the expiring/bundle filters ("or Esc gets stuck"), but a
+        # `:` peek must leave them exactly as they were — vim's Esc-from-`:`. Clearing
+        # the value re-derives `searching` (via on_input_changed) from the untouched
+        # filter state, so an expiring filter reappears on its own.
+        if self._command_mode:
+            self._exit_command_state()
+            self.query_one("#search", Input).value = ""
+            self._focus_documents()
             return
         search = self.query_one("#search", Input)
         if search.value or self.has_class("searching") or self.app.focused is search:
@@ -1198,8 +1363,10 @@ class HomeScreen(Screen[None]):
     def _update_searching(self) -> None:
         searching = self._is_searching()
         was = self.has_class("searching")
-        self.set_class(searching, "searching")
-        if searching and not was:
+        # Never wear `searching` while the command bar owns the columns — its two-class
+        # selectors would out-rank the command-mode display rules.
+        self.set_class(searching and not self._command_mode, "searching")
+        if searching and not was and not self._command_mode:
             # Root-wide results: snap the locations pane to "All" so the left
             # column reflects what the middle now shows (set both the state and
             # the highlight — an unchanged highlight wouldn't fire select_location).
@@ -1311,6 +1478,11 @@ class HomeScreen(Screen[None]):
         # `e` in the read view. Route through action_edit so the edit starts with
         # the home's fresh neighbour list (a location move shifts slots around it).
         self.action_edit()
+
+
+# action -> key, read off the home's own bindings so the command list's key hints
+# and the (soon-retired) palette can never disagree with the actual shortcuts.
+_KEYS = {b.action: b.key for b in HomeScreen.BINDINGS if isinstance(b, Binding)}
 
 
 def _highlighted_id(options: OptionList) -> str | None:
