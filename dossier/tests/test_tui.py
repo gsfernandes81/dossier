@@ -47,6 +47,7 @@ from dossier.tui.review import ReviewPane
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
+    ChoiceScreen,
     DocPickerScreen,
     SupersedeScreen,
     TextPromptScreen,
@@ -1288,6 +1289,83 @@ async def test_succession_o_opens_both_sides_older_first(
         pane.action_open_file()
         await pilot.pause()
         assert opened == [tmp_path / "new.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_copy_path_and_reveal_act_on_the_home_cursor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store, config = _setup(tmp_path)
+    copied: list[Path] = []
+    revealed: list[Path] = []
+    monkeypatch.setattr(tui_home, "copy_path", lambda p: copied.append(p))
+    monkeypatch.setattr(tui_home, "reveal_file", lambda p: revealed.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        home.action_copy_path()
+        await pilot.pause()
+        home.action_reveal_file()
+        await pilot.pause()
+    assert copied == [tmp_path / "passport.pdf"]
+    assert revealed == [tmp_path / "passport.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_copy_path_in_review_asks_which_side_of_a_succession(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Two files under one cursor: opening both is meaningful, copying both isn't.
+
+    Succession rows straddle the older and newer documents, so `o` opens the pair —
+    but a path can only go on the clipboard one at a time, hence the ask.
+    """
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    for doc_id, rel in (("old-coc", "old.pdf"), ("new-coc", "new.pdf")):
+        store.save(
+            Document(
+                id=doc_id,
+                name=doc_id,
+                has_digital=True,
+                files=[Rendition(label="d", path=rel, primary=True)],
+            )
+        )
+        (tmp_path / rel).write_bytes(b"x")
+    copied: list[Path] = []
+    monkeypatch.setattr(tui_home, "copy_path", lambda p: copied.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 32)) as pilot:
+        home = app.home
+        home.action_review()
+        pane = await _await_review_load(pilot)
+        proposal = succession.Succession(
+            newer="new-coc",
+            older="old-coc",
+            document_type="CoC",
+            confidence=0.9,
+            rationale="test",
+        )
+        monkeypatch.setattr(pane, "_highlighted_succession", lambda: proposal)
+        pane.query_one(TabbedContent).active = "tab-succession"
+        await pilot.pause()
+
+        home.action_copy_path()
+        await pilot.pause()
+        assert isinstance(app.screen, ChoiceScreen), "two files should prompt"
+        assert copied == [], "nothing copied before the user chose"
+
+        choices = app.screen.query_one("#cchoices", OptionList)
+        labels = [str(choices.get_option_at_index(i).prompt) for i in range(2)]
+        assert labels[0].startswith("older") and labels[1].startswith("newer")
+
+        choices.highlighted = 1  # the newer side
+        await pilot.press("enter")
+        await pilot.pause()
+        assert copied == [tmp_path / "new.pdf"]
 
 
 @pytest.mark.asyncio

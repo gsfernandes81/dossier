@@ -42,8 +42,10 @@ keyboard), which is the home for every action not on a button or a core key.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
+from pathlib import Path
 
 from rich.text import Text
 from textual import on, work
@@ -69,6 +71,7 @@ from dossier import query, scan, suggest
 from dossier.config import Config
 from dossier.errors import ScanError
 from dossier.model import Document, ExpiryStatus, Location, SuggestionState
+from dossier.platform_open import OpenError, copy_path, reveal_file
 from dossier.store import Store
 from dossier.tui import glyphs, rows
 from dossier.tui.detail_pane import DetailPane
@@ -78,6 +81,7 @@ from dossier.tui.review import ReviewPane
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     BundlesScreen,
+    ChoiceScreen,
     SettingsScreen,
     SupersedeScreen,
     WatchScreen,
@@ -752,6 +756,72 @@ class HomeScreen(Screen[None]):
             self.open_detail(doc.id)  # documents → detail (third column)
             return
         self.open_document(doc.id)  # detail already up → open the file
+
+    # -- "where does this live?" ---------------------------------------------
+    #
+    # Two commands rather than one that changes meaning per platform: revealing
+    # and copying are different intents, and a verb that silently becomes another
+    # verb on another machine is exactly what the rest of the key map avoids.
+    # Palette-only — occasional, and review's footer is full.
+
+    def action_reveal_file(self) -> None:
+        """Show the file under the cursor in the platform's file manager."""
+        self._with_cursor_path("Reveal which file?", self._reveal_one)
+
+    def action_copy_path(self) -> None:
+        """Copy the path of the file under the cursor to the clipboard."""
+        self._with_cursor_path("Copy which path?", self._copy_one)
+
+    def _with_cursor_path(self, prompt: str, then: Callable[[Path], None]) -> None:
+        """Resolve what the cursor points at, asking when it points at two things.
+
+        Review is the reason for the ask: its Succession rows straddle *two*
+        documents, and while opening both is meaningful ("does this replace that?"),
+        revealing or copying both is not.
+        """
+        choices = (
+            self._review.path_labels()
+            if self.has_class("review-mode") and self._review is not None
+            else self._current_doc_path_labels()
+        )
+        if not choices:
+            self.notify("no file under the cursor", severity="warning")
+            return
+        if len(choices) == 1:
+            then(query.resolve_path(self._config.syncthing_root, choices[0][0]))
+            return
+        self.app.push_screen(
+            ChoiceScreen(prompt, choices),
+            lambda rel: (
+                then(query.resolve_path(self._config.syncthing_root, rel))
+                if rel
+                else None
+            ),
+        )
+
+    def _current_doc_path_labels(self) -> list[tuple[str, str]]:
+        doc = self._current_doc()
+        rendition = doc.primary_rendition() if doc is not None else None
+        return [(rendition.path, rendition.path)] if rendition is not None else []
+
+    def _reveal_one(self, path: Path) -> None:
+        if not path.exists():
+            self.notify(f"file not found: {path}", severity="error")
+            return
+        try:
+            reveal_file(path)
+        except OpenError as exc:
+            self.notify(str(exc), severity="error")
+        else:
+            self.notify(f"revealed {path.name}")
+
+    def _copy_one(self, path: Path) -> None:
+        try:
+            copy_path(path)
+        except OpenError as exc:
+            self.notify(str(exc), severity="error")
+        else:
+            self.notify(f"copied {path}")
 
     def action_toggle_dates(self) -> None:
         self._show_issue = not self._show_issue

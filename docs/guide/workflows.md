@@ -17,6 +17,14 @@ filtering `id` also matches
 `id/passport`, `id/driving-license`, and so on. Search also matches a document's scan reading, so
 you can find a doc by text that only appears *inside* the scan.
 
+Two more palette commands answer "where does this actually live?" — **Show in file manager**
+and **Copy file path**. Both act on whatever the cursor is on, in the columns *or* in review;
+where review's cursor straddles two files (a succession's older and newer sides) they ask which
+one, since neither revealing nor copying is meaningful for a pair. Reveal opens Explorer with the
+file selected on Windows, Finder on macOS, and the containing folder on Linux. **On Android it is
+unavailable** — scoped storage leaves no dependable "show this file" intent — so copy the path
+there instead; that works everywhere, and is the primary answer on the phone.
+
 From the command line, without opening the TUI:
 
 ```bash

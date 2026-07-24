@@ -792,24 +792,40 @@ class ReviewPane(Vertical):
         # check_action. Shared with the other modals (see tui.screens).
         toggle_help_panel(self)
 
-    def action_open_file(self) -> None:
-        """Open what the cursor points at with the platform opener (xdg/termux).
+    def cursor_paths(self) -> list[str]:
+        """Relative paths the cursor points at on the active tab — 0, 1 or 2.
 
-        Usually one file; on Succession, *both* — "does this renewal really replace
-        that one?" is a comparison, and one file cannot answer it.
+        Public and single-sourced: opening, revealing and copying a path all mean
+        "whatever is under the cursor", and they must never disagree about what that
+        is. Only Succession yields two (the older and newer sides).
         """
         active = self._active_tab()
         if active == "tab-orphans":
             leaf = self._cursor_leaf()
-            rels = [leaf.path] if leaf is not None else []
-        elif active == "tab-dups":
-            rels = [rel for rel in (self._cursor_dup_path(),) if rel]
-        elif active == "tab-succession":
-            rels = self._succession_rendition_paths()
-        elif active == "tab-integrity":
-            rels = [rel for rel in (self._integrity_rendition_path(),) if rel]
-        else:
-            rels = []
+            return [leaf.path] if leaf is not None else []
+        if active == "tab-dups":
+            return [rel for rel in (self._cursor_dup_path(),) if rel]
+        if active == "tab-succession":
+            return self._succession_rendition_paths()
+        if active == "tab-integrity":
+            return [rel for rel in (self._integrity_rendition_path(),) if rel]
+        return []
+
+    def path_labels(self) -> list[tuple[str, str]]:
+        """``(relpath, label)`` for each cursor path, for a "which one?" prompt."""
+        rels = self.cursor_paths()
+        if self._active_tab() == "tab-succession" and len(rels) == 2:
+            return [(rels[0], f"older — {rels[0]}"), (rels[1], f"newer — {rels[1]}")]
+        return [(rel, rel) for rel in rels]
+
+    def action_open_file(self) -> None:
+        """Open what the cursor points at with the platform opener (xdg/termux).
+
+        Usually one file; on Succession, *both* — "does this renewal really replace
+        that one?" is a comparison, and one file cannot answer it. (Revealing or
+        copying instead asks which, since neither is meaningful for two at once.)
+        """
+        rels = self.cursor_paths()
         if not rels:
             self.notify("no file under the cursor")
             return

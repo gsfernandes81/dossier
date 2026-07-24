@@ -218,6 +218,49 @@ class DocPickerScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class ChoiceScreen(ModalScreen[str | None]):
+    """Pick one of a handful of labelled choices. Dismisses the id, or ``None``.
+
+    Deliberately unfiltered, unlike :class:`DocPickerScreen`: this asks "which of
+    these two?", so a search box would be furniture. Used where a surface has more
+    than one candidate file — a succession's older and newer sides, say — and the
+    action can only sensibly take one.
+    """
+
+    CSS = """
+    ChoiceScreen { align: center middle; }
+    #cpanel {
+        width: 80%; max-width: 90; height: auto; max-height: 80%;
+        padding: 1 2; background: $panel; border: round $primary;
+    }
+    #cchoices { height: auto; max-height: 20; margin-top: 1; }
+    """
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, prompt: str, choices: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self._prompt = prompt
+        self._choices = choices  # (id, label)
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="cpanel"):
+            yield Label(self._prompt)
+            yield OptionList(
+                *[Option(label, id=key) for key, label in self._choices],
+                id="cchoices",
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#cchoices", OptionList).focus()
+
+    @on(OptionList.OptionSelected, "#cchoices")
+    def _pick(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option_id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class TextPromptScreen(ModalScreen[str | None]):
     """A one-line text prompt. Dismisses the entered text, or ``None`` on cancel."""
 
