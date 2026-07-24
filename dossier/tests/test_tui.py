@@ -2869,6 +2869,38 @@ async def test_down_from_command_bar_lands_on_a_real_command(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_review_shares_the_command_bar(tmp_path: Path):
+    """Command entry is universal: `:` opens command mode from *inside* review too,
+    hiding the pane; Esc returns to review exactly where it was. Search stays
+    per-surface, though — a plain letter in review reaches review, not the bar."""
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.action_review()
+        review = await _await_review_load(pilot)
+        assert home.has_class("review-mode")
+        search = home.query_one("#search", Input)
+
+        # A plain printable stays with review — it does not leak into the search bar.
+        await pilot.press("s")
+        await pilot.pause()
+        assert search.value == "" and not home.has_class("command-mode")
+
+        # `:` opens command mode from within the pane; the pane hides for the list.
+        await pilot.press("colon")
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+        assert app.focused is search and search.value == ":"
+        assert not review.display  # ReviewPane hidden while the command list is up
+        assert home.query_one("#commands", OptionList).display
+
+        # Esc leaves command mode back to review (not the home columns), tab intact.
+        await pilot.press("escape")
+        await _settle(pilot, lambda: not home.has_class("command-mode"))
+        assert home.has_class("review-mode") and review.display
+
+
+@pytest.mark.asyncio
 async def test_commands_button_opens_the_palette(tmp_path: Path):
     from textual.command import CommandPalette
 

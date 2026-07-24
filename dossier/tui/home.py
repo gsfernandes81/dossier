@@ -699,6 +699,20 @@ class HomeScreen(Screen[None]):
             or event.character in ("/", "?")
         ):
             return
+        # Review owns the columns and every printable *except* the two command sigils:
+        # `:`/`>` must still open command mode from inside the pane (command entry is
+        # universal), so route only those to the bar — never while a text field there
+        # holds focus — and let review keep the rest (search is per-surface).
+        if self.has_class("review-mode"):
+            if event.character in (":", ">") and not isinstance(
+                self.app.focused, (Input, TextArea)
+            ):
+                event.stop()
+                event.prevent_default()
+                search.value += event.character
+                search.focus()
+                search.cursor_position = len(search.value)
+            return
         lists = (self.query_one("#documents", OptionList), self.query_one("#locations"))
         if self.app.focused in lists:
             event.stop()
@@ -723,6 +737,11 @@ class HomeScreen(Screen[None]):
             self._exit_command_state()
         if in_command:
             self._refresh_commands(event.value[1:])  # query after the sigil
+            return
+        # In review mode the documents pane is hidden, so a stray filter (only
+        # reachable by clicking into the bar and typing) would target something
+        # invisible — treat a non-command value as inert. _exit_review_mode clears it.
+        if self.has_class("review-mode"):
             return
         self._filter_text = event.value
         self._update_searching()
@@ -957,7 +976,10 @@ class HomeScreen(Screen[None]):
         if self._command_mode:
             self._exit_command_state()
             self.query_one("#search", Input).value = ""
-            self._focus_documents()
+            if self.has_class("review-mode") and self._review is not None:
+                self._review.focus_active_pane()  # back to review's tab/cursor, intact
+            else:
+                self._focus_documents()
             return
         search = self.query_one("#search", Input)
         if search.value or self.has_class("searching") or self.app.focused is search:
@@ -1292,7 +1314,10 @@ class HomeScreen(Screen[None]):
         # column underneath review on a narrow screen.
         search = self.query_one("#search", Input)
         search.value = ""
-        search.disabled = True  # the filter targets a hidden pane while review is up
+        # The bar stays *enabled* so `:`/`>` command entry works from inside review
+        # (command entry is universal); only the *search* half is meaningless here
+        # (its target pane is hidden), and on_key + on_input_changed keep a stray
+        # filter out rather than disabling the whole input.
         self._filter_text = ""
         self._bundle_filter = None
         self._expiring_only = False
