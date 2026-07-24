@@ -87,7 +87,7 @@ from dossier.tui.screens import (
     ChoiceScreen,
     SettingsScreen,
     SupersedeScreen,
-    WatchScreen,
+    WatchPane,
     open_doc_file,
     toggle_help_panel,
 )
@@ -139,7 +139,10 @@ _MODE_LOCKED = frozenset({"focus_search", "drill_in", "drill_out"})
 # mounted pane, whether it offers a per-surface search). The `<name>-mode` class on
 # HomeScreen marks the active one; one owner at a time. command-mode is NOT here —
 # it's a transient overlay on top of whichever mode owns the columns, not an owner.
-_MODES: tuple[tuple[str, str, bool], ...] = (("review", "_review", False),)
+_MODES: tuple[tuple[str, str, bool], ...] = (
+    ("review", "_review", False),
+    ("watch", "_watch", True),
+)
 
 
 class HomeScreen(Screen[None]):
@@ -244,6 +247,17 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.review-mode.show-detail ReviewPane { display: none; }
     HomeScreen.-medium.review-mode.show-detail ReviewPane { display: none; }
 
+    /* Watch is a mode exactly like review: it takes columns 1+2, leaving the detail
+       as column 3, and swaps to the detail on a phone. Same shape as the review
+       rules above (a shared `.mode-pane` marker was considered and deferred — four
+       near-identical blocks is clearer than one clever selector for now). */
+    WatchPane { display: none; width: 1fr; }
+    HomeScreen.watch-mode WatchPane { display: block; }
+    HomeScreen.watch-mode #locations { display: none; }
+    HomeScreen.watch-mode #documents { display: none; }
+    HomeScreen.-narrow.watch-mode.show-detail WatchPane { display: none; }
+    HomeScreen.-medium.watch-mode.show-detail WatchPane { display: none; }
+
     /* Command mode: the persistent bar's `:`/`>` ex-mode. A *separate* OptionList
        (never #documents — its preserved-highlight logic, the "… and N more" cap row
        and the two-click mouse verb are all wrong for a single-tap command list)
@@ -255,6 +269,7 @@ class HomeScreen(Screen[None]):
     HomeScreen.command-mode #locations { display: none; }
     HomeScreen.command-mode #documents { display: none; }
     HomeScreen.command-mode ReviewPane { display: none; }
+    HomeScreen.command-mode WatchPane { display: none; }
     /* No room for both the list and the detail on a phone — the transient mode wins;
        wide keeps the detail in column 3 beside the command list. */
     HomeScreen.-narrow.command-mode #detail { display: none; }
@@ -314,6 +329,7 @@ class HomeScreen(Screen[None]):
         self._inbox_count = 0
         self._show_detail = False
         self._review: ReviewPane | None = None  # mounted on first `action_review`
+        self._watch: WatchPane | None = None  # mounted on first `action_watch`
         self._show_issue = False
         self._detail_id: str | None = None
         self._narrow = False
@@ -672,10 +688,11 @@ class HomeScreen(Screen[None]):
         first_open = not self._show_detail
         self._show_detail = True
         self.set_class(True, "show-detail")
-        if first_open and not self.has_class("review-mode"):
+        in_mode = self._column_mode() is not None
+        if first_open and not in_mode:
             self._refresh_documents()  # rows collapse to their compact shape
         self._update_detail()
-        if self._narrow or self.has_class("review-mode"):
+        if self._narrow or in_mode:
             self._detail_pane.focus()
 
     def close_detail(self) -> None:
@@ -685,11 +702,14 @@ class HomeScreen(Screen[None]):
             return  # an edit in progress owns Esc; don't fall through to close
         self._show_detail = False
         self.set_class(False, "show-detail")
-        if self.has_class("review-mode") and self._review is not None:
-            # An edit made in column 3 belongs in review's lists; an untouched
-            # record costs nothing, which is the point of the flag.
-            self._review.reload_if_stale()
-            self._review.focus_active_pane()  # tab and cursor exactly as left
+        pane = self._mode_pane(self._column_mode())
+        if pane is not None:
+            # An edit made in column 3 belongs in the mode's list; refresh (cheap /
+            # stale-gated) and hand focus back exactly as left.
+            reload = getattr(pane, "reload_if_stale", None)
+            if callable(reload):
+                reload()
+            (getattr(pane, "focus_active_pane", pane.focus))()
             return
         self._refresh_documents()
         self._focus_documents()
@@ -727,9 +747,16 @@ class HomeScreen(Screen[None]):
         if self.app.focused is search:
             if event.key == "down":
                 event.stop()
-                # In command mode ↓ steps into the command list, not the documents.
+                # ↓ steps from the bar into whatever list it is filtering: the command
+                # list in command mode, a searchable mode's list while it owns the
+                # columns, else the documents pane.
+                mode = self._column_mode()
                 if self._command_mode:
                     self.query_one("#commands", OptionList).focus()
+                elif mode is not None and self._mode_searchable(mode):
+                    pane = self._mode_pane(mode)
+                    if pane is not None:
+                        pane.focus_active_pane()
                 else:
                     self._focus_documents()
             return  # everything else in search is the Input's own to handle
@@ -1032,6 +1059,19 @@ class HomeScreen(Screen[None]):
                 self._focus_documents()
             return
         search = self.query_one("#search", Input)
+        # Esc from the bar *inside a mode* (only a searchable mode's bar is ever
+        # focused with intent): clear the per-surface filter and hand focus back to
+        # the pane — never the home search-clear below (it targets the hidden
+        # documents pane). A second Esc from the pane then peels the mode. Detail-open
+        # is left to the show_detail branch, so guard on the bar actually being focused.
+        mode = self._column_mode()
+        if mode is not None and self.app.focused is search:
+            if self._mode_searchable(mode) and search.value:
+                search.value = ""  # → on_input_changed → pane.apply_filter("")
+            pane = self._mode_pane(mode)
+            if pane is not None:
+                (getattr(pane, "focus_active_pane", pane.focus))()
+            return
         if search.value or self.has_class("searching") or self.app.focused is search:
             self._set_mouse_reporting(True)
             search.value = ""
@@ -1351,10 +1391,69 @@ class HomeScreen(Screen[None]):
     def action_move(self) -> None:
         self._open_and_edit(focus="f-perm")
 
+    def _leave_current_mode(self) -> None:
+        """Exit whatever mode owns the columns — the single-owner invariant, so
+        switching modes (e.g. `:watch` from inside review) tears the old one down
+        through its proper exit path (which carries side effects like a reload)."""
+        mode = self._column_mode()
+        if mode is not None:
+            getattr(self, f"_exit_{mode}_mode")()
+
     def action_watch(self) -> None:
-        self.app.push_screen(
-            WatchScreen(self._store, self._config, today=self._today), self._after_watch
-        )
+        """Toggle the expiry watch into columns 1+2 (a mode, like review).
+
+        Mounted once and never torn down; the `#attn-expiring` chip and the touch
+        Watch button also route here, so a second trigger exits.
+        """
+        if self.has_class("watch-mode"):
+            self._exit_watch_mode()
+            return
+        self._leave_current_mode()
+        if self._watch is None:
+            self._watch = WatchPane(self._store, self._config, today=self._today)
+            self.query_one("#panes").mount(self._watch, before=self._detail_pane)
+        self._enter_watch_mode()
+
+    def _enter_watch_mode(self) -> None:
+        # Normalise the bar/filter state, same as review — a stale two-class
+        # `searching`/`show-documents` selector would out-rank the one-class
+        # watch-mode rules and resurrect a hidden column.
+        self.query_one("#search", Input).value = ""
+        self._filter_text = ""
+        self._bundle_filter = None
+        self._expiring_only = False
+        self.remove_class("searching", "show-documents")
+        self.add_class("watch-mode")
+        if self._watch is not None:
+            self._watch.refresh_on_enter()  # fresh list, no stale filter
+            self._watch.focus_active_pane()  # tolerant; on_mount focuses on 1st entry
+
+    def _exit_watch_mode(self) -> None:
+        self.remove_class("watch-mode")
+        if self._watch is not None:
+            self._watch.apply_filter("")  # drop the filter for next entry
+        self._reload()  # an `x` ignore changed the tracked set + the expiring chip
+        self._focus_documents()
+
+    @on(WatchPane.OpenDocument)
+    def _watch_open_document(self, event: WatchPane.OpenDocument) -> None:
+        """Watch asked to show a record — column 3, watch stays up."""
+        event.stop()
+        self._reload()  # the record (and _docs) fresh for the detail pane
+        doc = self._doc_by_id(event.doc_id)
+        if doc is None:
+            self.notify(f"{event.doc_id}: no such document", severity="warning")
+            return
+        self.open_detail(doc.id)
+
+    @on(WatchPane.CloseRequested)
+    def _watch_close_requested(self, event: WatchPane.CloseRequested) -> None:
+        """Esc inside watch — peel the detail first, then the mode."""
+        event.stop()
+        if self._show_detail:
+            self.close_detail()
+        else:
+            self._exit_watch_mode()
 
     def action_review(self) -> None:
         """Toggle review into columns 1+2. Mounted once, then shown and hidden.
@@ -1366,6 +1465,7 @@ class HomeScreen(Screen[None]):
         if self.has_class("review-mode"):
             self._exit_review_mode()
             return
+        self._leave_current_mode()
         if self._review is None:
             self._review = ReviewPane(self._store, self._config)
             self.query_one("#panes").mount(self._review, before=self._detail_pane)
@@ -1490,9 +1590,16 @@ class HomeScreen(Screen[None]):
         focused = self.app.focused
         if focused is not None and focused.display:
             return
-        # ReviewPane is mounted lazily, so query (which tolerates a miss) rather
-        # than query_one (which raises) — it simply isn't there until first use.
-        panes = ("ReviewPane", "#documents", "#detail", "#locations", "#search")
+        # Mode panes are mounted lazily, so query (which tolerates a miss) rather
+        # than query_one (which raises) — they simply aren't there until first use.
+        panes = (
+            "ReviewPane",
+            "WatchPane",
+            "#documents",
+            "#detail",
+            "#locations",
+            "#search",
+        )
         for selector in panes:
             hits = self.query(selector)
             if hits and hits.first().display:
@@ -1529,13 +1636,6 @@ class HomeScreen(Screen[None]):
     def _after_edit(self, saved: bool | None) -> None:
         if saved:
             self._reload()
-
-    def _after_watch(self, doc_id: str | None) -> None:
-        self._reload()  # an ignore-expiry change in the watch may have landed
-        if doc_id is not None:
-            doc = self._doc_by_id(doc_id)
-            if doc is not None:
-                self.open_detail(doc.id)
 
     def _after_bundles(self, slug: str | None) -> None:
         self._reload()  # a bundle date edit may have landed
