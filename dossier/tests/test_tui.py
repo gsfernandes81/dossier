@@ -2715,6 +2715,7 @@ def test_palette_covers_the_occasional_actions():
         "supersede",
         "settings",
         "toggle_search_content",
+        "quit",  # Quit is a catalog command now, delegating to app.exit()
     } <= actions
     # Every palette command maps to a real HomeScreen action.
     for action in actions:
@@ -2726,6 +2727,26 @@ def test_palette_covers_the_occasional_actions():
     haystacks = {entry.haystack.lower() for entry in ENTRIES}
     for word in ("move", "bundle", "rename"):
         assert any(word in hay for hay in haystacks), word
+
+
+@pytest.mark.asyncio
+async def test_quit_command_delegates_to_app_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Quit is a catalog command backed by a thin ``action_quit`` → ``app.exit()``.
+
+    It stands in for the system Quit that retiring Textual's modal palette removes;
+    ``ctrl+q`` still quits too. Asserting the delegate directly keeps this valid once
+    the palette (and its provider) is gone.
+    """
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        called: list[bool] = []
+        monkeypatch.setattr(app, "exit", lambda *a, **k: called.append(True))
+        app.home.action_quit()
+        await pilot.pause()
+        assert called, "Quit did not reach app.exit()"
 
 
 @pytest.mark.asyncio
