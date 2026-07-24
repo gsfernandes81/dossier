@@ -129,9 +129,17 @@ _EDIT_LOCKED = frozenset(
     }
 )
 
-# Home actions review takes over while it holds columns 1+2. `drill_out` stays live
-# whenever the detail is open, so `←` still means "close detail, back to review".
-_REVIEW_LOCKED = frozenset({"focus_search", "drill_in", "drill_out"})
+# Home actions any column-owning mode (review/watch/…) takes over while it holds
+# columns 1+2. `drill_out` stays live whenever the detail is open, so `←` still means
+# "close detail, back to the mode"; `focus_search` is live in a mode that *has* a
+# list to filter (see HomeScreen._mode_searchable).
+_MODE_LOCKED = frozenset({"focus_search", "drill_in", "drill_out"})
+
+# The column-owning modes: (mode name, the instance attribute holding its lazily
+# mounted pane, whether it offers a per-surface search). The `<name>-mode` class on
+# HomeScreen marks the active one; one owner at a time. command-mode is NOT here —
+# it's a transient overlay on top of whichever mode owns the columns, not an owner.
+_MODES: tuple[tuple[str, str, bool], ...] = (("review", "_review", False),)
 
 
 class HomeScreen(Screen[None]):
@@ -456,11 +464,40 @@ class HomeScreen(Screen[None]):
             )
         if action == "accept_suggestion":
             return self._show_detail and self._detail_pane.has_pending_suggestion()
-        return not (
-            self.has_class("review-mode")
-            and action in _REVIEW_LOCKED
-            and not (action == "drill_out" and self._show_detail)
+        # A column-owning mode (review/watch/…) holds the panes these act on. Unlike a
+        # modal, a widget lets unhandled keys bubble up here — `→` would otherwise open
+        # the detail for whatever the *hidden* documents cursor sits on. False, not
+        # None: dead as a key AND absent from the footer/`?`/`:` list, the honest
+        # reading. `drill_out` survives while the detail is open (`←` closes it, back
+        # to the mode); `/` (focus_search) is live where the mode has a list to filter.
+        mode = self._column_mode()
+        if mode is not None and action in _MODE_LOCKED:
+            if action == "drill_out" and self._show_detail:
+                return True  # `←` closes the detail, back to the mode
+            # `/` is live only where the mode has a list to filter.
+            return action == "focus_search" and self._mode_searchable(mode)
+        return True
+
+    # -- column-owning modes (review/watch/…) --------------------------------
+
+    def _column_mode(self) -> str | None:
+        """The mode currently owning columns 1+2, or None on the plain home.
+
+        command-mode is an overlay on top of whatever owns the columns, so it is not
+        a mode here — the `:` bar can open over any surface without displacing it.
+        """
+        return next(
+            (name for name, _, _ in _MODES if self.has_class(f"{name}-mode")), None
         )
+
+    def _mode_pane(self, name: str | None):
+        """The lazily-mounted pane for a mode (None before first entry / unknown)."""
+        attr = next((a for n, a, _ in _MODES if n == name), None)
+        return getattr(self, attr, None) if attr else None
+
+    def _mode_searchable(self, name: str | None) -> bool:
+        """Whether a mode offers a per-surface search (has a list to filter)."""
+        return any(n == name and s for n, _, s in _MODES)
 
     # -- data ----------------------------------------------------------------
 
@@ -704,11 +741,11 @@ class HomeScreen(Screen[None]):
             or event.character in ("/", "?")
         ):
             return
-        # Review owns the columns and every printable *except* the two command sigils:
+        # A column-owning mode owns every printable *except* the two command sigils:
         # `:`/`>` must still open command mode from inside the pane (command entry is
         # universal), so route only those to the bar — never while a text field there
-        # holds focus — and let review keep the rest (search is per-surface).
-        if self.has_class("review-mode"):
+        # holds focus — and let the mode keep the rest (search is per-surface).
+        if self._column_mode() is not None:
             if event.character in (":", ">") and not isinstance(
                 self.app.focused, (Input, TextArea)
             ):
@@ -743,10 +780,15 @@ class HomeScreen(Screen[None]):
         if in_command:
             self._refresh_commands(event.value[1:])  # query after the sigil
             return
-        # In review mode the documents pane is hidden, so a stray filter (only
-        # reachable by clicking into the bar and typing) would target something
-        # invisible — treat a non-command value as inert. _exit_review_mode clears it.
-        if self.has_class("review-mode"):
+        # A column-owning mode hides the documents pane, so this value filters the
+        # *mode's* list where it has one, and is inert otherwise (a stray filter would
+        # target something invisible). Either way it never touches _filter_text or the
+        # `searching` class; _exit_<mode>_mode clears the bar.
+        mode = self._column_mode()
+        if mode is not None:
+            pane = self._mode_pane(mode)
+            if pane is not None and self._mode_searchable(mode):
+                pane.apply_filter(event.value)
             return
         self._filter_text = event.value
         self._update_searching()
@@ -981,8 +1023,11 @@ class HomeScreen(Screen[None]):
         if self._command_mode:
             self._exit_command_state()
             self.query_one("#search", Input).value = ""
-            if self.has_class("review-mode") and self._review is not None:
-                self._review.focus_active_pane()  # back to review's tab/cursor, intact
+            pane = self._mode_pane(self._column_mode())
+            if pane is not None:
+                # Back to the mode's own focus (its tab/cursor), intact.
+                focus = getattr(pane, "focus_active_pane", pane.focus)
+                focus()
             else:
                 self._focus_documents()
             return
