@@ -56,7 +56,6 @@ from dossier.tui.doclist import DocumentList
 from dossier.tui.review import ReviewPane
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
-    BundlesScreen,
     ChoiceScreen,
     DocPickerScreen,
     SupersedeScreen,
@@ -1972,8 +1971,17 @@ async def test_suggestion_dismiss_persists_without_writing_the_doc(tmp_path: Pat
     assert store.load("dated").issue_date is None  # dismiss never wrote the doc
 
 
+async def _enter_bundles(pilot, home):
+    """Enter bundles-mode and return the (mounted) pane."""
+    home.action_bundles()
+    await _settle(pilot, lambda: home.has_class("bundles-mode"))
+    pane = home._bundles
+    assert pane is not None
+    return pane
+
+
 @pytest.mark.asyncio
-async def test_bundles_screen_filters_home_to_a_bundle(tmp_path: Path):
+async def test_bundles_mode_filters_home_to_a_bundle(tmp_path: Path):
     store, config = _setup(tmp_path)  # passport, coc
     store.save_bundles(
         {"travel/india-2024": Bundle(slug="travel/india-2024", title="India 2024")}
@@ -1984,19 +1992,18 @@ async def test_bundles_screen_filters_home_to_a_bundle(tmp_path: Path):
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         home = app.home
-        home.action_bundles()
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, BundlesScreen)
-        # a group header (travel ▸) plus the bundle row
-        options = screen.query_one("#bundle-list", OptionList)
-        assert any(
-            options.get_option_at_index(i).id == "travel/india-2024"
+        pane = await _enter_bundles(pilot, home)
+        assert pane.display and not home.query_one("#documents", OptionList).display
+        options = pane.query_one("#bundle-list", OptionList)
+        options.focus()
+        options.highlighted = next(
+            i
             for i in range(options.option_count)
+            if options.get_option_at_index(i).id == "travel/india-2024"
         )
-        screen.dismiss("travel/india-2024")  # Enter on the bundle
-        await pilot.pause()
-        assert home._bundle_filter == "travel/india-2024"
+        await pilot.press("enter")  # open the bundle → exit mode, scope the documents
+        await _settle(pilot, lambda: home._bundle_filter == "travel/india-2024")
+        assert not home.has_class("bundles-mode")
         assert [d.id for d in home.documents_in_view()] == ["coc"]  # scoped
         home.action_escape()
         await pilot.pause()
@@ -2004,7 +2011,7 @@ async def test_bundles_screen_filters_home_to_a_bundle(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_bundles_screen_accepts_folder_suggestion(tmp_path: Path):
+async def test_bundles_mode_accepts_folder_suggestion(tmp_path: Path):
     store, config = _setup(tmp_path)
     # two docs sharing a hint folder → one folder-bundle suggestion
     for i in (1, 2):
@@ -2018,19 +2025,15 @@ async def test_bundles_screen_accepts_folder_suggestion(tmp_path: Path):
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         home = app.home
-        home.action_bundles()
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, BundlesScreen)
-        assert len(screen._suggested) == 1
-        assert screen._suggested[0].slug == "travel/india-2024"
-        # land the cursor on the suggestion row and accept it
-        options = screen.query_one("#bundle-list", OptionList)
+        pane = await _enter_bundles(pilot, home)
+        assert len(pane._suggested) == 1
+        assert pane._suggested[0].slug == "travel/india-2024"
+        options = pane.query_one("#bundle-list", OptionList)
         for i in range(options.option_count):
-            if (options.get_option_at_index(i).id or "").startswith(screen._SUGGESTED):
+            if (options.get_option_at_index(i).id or "").startswith(pane._SUGGESTED):
                 options.highlighted = i
                 break
-        screen.action_accept()
+        pane.action_accept()
         await pilot.pause()
     assert "travel/india-2024" in store.load_bundles()  # bundle created
     assert "travel/india-2024" in store.load("trip1").bundles  # members assigned
@@ -2052,21 +2055,57 @@ async def test_bundles_enter_on_suggestion_does_not_accept(tmp_path: Path):
         )
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.home.action_bundles()
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, BundlesScreen)
-        options = screen.query_one("#bundle-list", OptionList)
+        home = app.home
+        pane = await _enter_bundles(pilot, home)
+        options = pane.query_one("#bundle-list", OptionList)
         options.focus()
         options.highlighted = next(
             i
             for i in range(options.option_count)
-            if (options.get_option_at_index(i).id or "").startswith(screen._SUGGESTED)
+            if (options.get_option_at_index(i).id or "").startswith(pane._SUGGESTED)
         )
         await pilot.press("enter")
         await pilot.pause()
         assert "travel/india-2024" not in store.load_bundles()  # NOT created
-        assert app.screen is screen  # still on bundles — Enter did nothing
+        assert home.has_class("bundles-mode")  # still in bundles — Enter did nothing
+
+
+@pytest.mark.asyncio
+async def test_bundles_mode_search_filters_the_list(tmp_path: Path):
+    """Bundles has a list, so its bar half is live: `/` filters by slug/title without
+    touching the home document filter, and `:` still opens command mode over it."""
+    store, config = _setup(tmp_path)
+    store.save_bundles(
+        {
+            "travel/india-2024": Bundle(slug="travel/india-2024", title="India 2024"),
+            "work/onboarding": Bundle(slug="work/onboarding", title="Onboarding"),
+        }
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_bundles(pilot, home)
+        options = pane.query_one("#bundle-list", OptionList)
+
+        def bundle_ids():
+            return {
+                options.get_option_at_index(i).id
+                for i in range(options.option_count)
+                if options.get_option_at_index(i).id
+            }
+
+        await _settle(pilot, lambda: "work/onboarding" in bundle_ids())
+        assert home.check_action("focus_search", ()) is True
+        home.action_focus_search()
+        await pilot.pause()
+        for ch in "india":
+            await pilot.press(ch)
+        await _settle(pilot, lambda: bundle_ids() == {"travel/india-2024"})
+        assert home._filter_text == "" and not home.has_class("searching")
+
+        await pilot.press("escape")  # clear the filter, back to the pane
+        await _settle(pilot, lambda: "work/onboarding" in bundle_ids())
+        assert home.has_class("bundles-mode")
 
 
 def test_linux_driver_exposes_mouse_toggle():
