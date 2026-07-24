@@ -941,30 +941,34 @@ def _loc_label(doc: Document, locations: dict[str, Location]) -> str | None:
     return title
 
 
-class SettingsScreen(ModalScreen[bool]):
-    """Edit device + synced settings; dismisses True when something changed.
+class SettingsPane(Vertical):
+    """Edit device + synced settings as a home *mode* (columns 1+2), not a modal.
 
     Device settings (icons, scan endpoint / model / temperature / DPI) write to the
-    per-device config; the expiry threshold is synced. Changes apply on the next
-    home reload — except the icon set, baked into composed widgets, which takes
-    effect on restart.
+    per-device config; the expiry threshold is synced. ``ctrl+s`` saves and posts
+    :class:`Saved` (the host reloads); Esc posts :class:`CloseRequested` (a cancel —
+    unsaved edits are discarded). No per-surface search: it's a form, not a list.
+    Lazily mounted once; entry resets the fields to the live config.
     """
 
-    CSS = """
-    SettingsScreen { align: center middle; }
-    #setpanel {
-        width: 80%; max-width: 84; height: 85%;
-        padding: 1 2; background: $panel; border: round $primary;
-    }
-    SettingsScreen .section { color: $accent; margin-top: 1; }
-    SettingsScreen .hint { color: $text-muted; }
-    SettingsScreen Input, SettingsScreen Select { width: 1fr; margin-bottom: 1; }
-    SettingsScreen RadioSet { margin-bottom: 1; }
+    DEFAULT_CSS = """
+    SettingsPane { height: 1fr; }
+    SettingsPane #setpanel { height: 1fr; padding: 0 1; }
+    SettingsPane .section { color: $accent; margin-top: 1; }
+    SettingsPane .hint { color: $text-muted; }
+    SettingsPane Input, SettingsPane Select { width: 1fr; margin-bottom: 1; }
+    SettingsPane RadioSet { margin-bottom: 1; }
     """
     BINDINGS = [
         Binding("ctrl+s", "save", "Save"),
         Binding("escape", "cancel", "Cancel"),
     ]
+
+    class Saved(Message):
+        """Settings changed — the host reloads (threshold/scan apply now)."""
+
+    class CloseRequested(Message):
+        """Esc — cancel, discarding unsaved edits; the host exits the mode."""
 
     def __init__(self, config: Config) -> None:
         super().__init__()
@@ -977,7 +981,9 @@ class SettingsScreen(ModalScreen[bool]):
             yield Label("— This device —", classes="section")
             yield Label("Icons  (takes effect on restart)", classes="hint")
             with RadioSet(id="set-glyphs"):
-                yield RadioButton("Nerd Font", value=cfg.glyphs != "ascii")
+                yield RadioButton(
+                    "Nerd Font", value=cfg.glyphs != "ascii", id="glyph-nerd"
+                )
                 yield RadioButton(
                     "ASCII", value=cfg.glyphs == "ascii", id="glyph-ascii"
                 )
@@ -1000,8 +1006,29 @@ class SettingsScreen(ModalScreen[bool]):
 
     def on_mount(self) -> None:
         self._load_models()
+        self.focus_active_pane()
 
-    @work(thread=True, exclusive=True)
+    def refresh_on_enter(self) -> None:
+        """Reset the fields to the live config on (re)entry — a resident form would
+        otherwise show the previous visit's half-typed, cancelled edits."""
+        if not self.is_mounted:
+            return  # first mount: compose() already seeded from config
+        cfg = self._config
+        self.query_one("#set-url", Input).value = cfg.scan_base_url
+        self.query_one("#set-temp", Input).value = str(cfg.scan_temperature)
+        self.query_one("#set-dpi", Input).value = str(cfg.scan_dpi)
+        self.query_one("#set-threshold", Input).value = str(cfg.expiry_threshold_days)
+        ascii_on = cfg.glyphs == "ascii"
+        self.query_one("#glyph-ascii", RadioButton).value = ascii_on
+        self.query_one("#glyph-nerd", RadioButton).value = not ascii_on
+        self._load_models()  # refresh the model options + selection
+
+    def focus_active_pane(self) -> None:
+        fields = self.query("#set-url")  # tolerant: absent until the pane mounts
+        if fields:
+            fields.first().focus()
+
+    @work(thread=True, exclusive=True, group="settings-models")
     def _load_models(self) -> None:
         try:  # a network call — never block compose
             models = scan.list_models(self._config)
@@ -1018,7 +1045,7 @@ class SettingsScreen(ModalScreen[bool]):
         select.value = self._config.scan_model
 
     def action_cancel(self) -> None:
-        self.dismiss(False)
+        self.post_message(self.CloseRequested())
 
     def action_save(self) -> None:
         cfg = self._config
@@ -1050,4 +1077,4 @@ class SettingsScreen(ModalScreen[bool]):
         ) = (glyphs, url, model, temperature, dpi, threshold)
         update_per_device(device)
         update_synced(cfg, {"expiry_threshold_days": threshold})
-        self.dismiss(True)
+        self.post_message(self.Saved())
