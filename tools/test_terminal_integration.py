@@ -64,15 +64,18 @@ def test_drives_real_app_in_a_real_terminal(tmp_path: Path):
         assert term.wait_for("Location:"), "detail pane did not open"
 
         # The expiring filter narrows the list (2 of the 5 sample docs expire soon).
-        # It's a command-palette entry now (Phase 1 dropped the `x` keybind), so
-        # drive it there — which also exercises the palette in a real terminal.
-        term.send("\x10")  # Ctrl+P opens the command palette
-        # Wait for it to actually be open before typing: until it is, the home's
-        # type-to-search router owns the keystrokes and would swallow "expiring"
-        # into the document filter — a fixed sleep here is a bet on machine load.
-        assert term.wait_for("Search for commands"), "palette never opened"
+        # It's a command now (no keybind), driven through the persistent bar's `:`
+        # command mode — which also exercises that mode in a real terminal.
+        term.send("\x10")  # Ctrl+P now opens the `:` command bar (the modal is retired)
+        # Wait for the command list to render before typing: until it is up, the
+        # home's type-to-search router owns the keystrokes and would swallow
+        # "expiring" into the document filter — a fixed sleep is a bet on load. The
+        # "Current document" group heading tops the (empty-query) command list, so
+        # it's an unambiguous "the list is up" marker that is always on screen (later
+        # groups scroll off), and it never appears on the home screen.
+        assert term.wait_for("Current document"), "command mode never opened"
         term.send("expiring")
-        assert term.wait_for("Toggle expiring", timeout=6), "palette command missing"
+        assert term.wait_for("Toggle expiring", timeout=6), "command missing"
         term.send("enter", settle=0.5)
         assert term.wait_for("2 / 5"), "expiring filter did not apply"
 
@@ -113,10 +116,10 @@ def test_review_takes_the_columns_and_keeps_its_place(tmp_path: Path):
         assert term.wait_for("dossier"), "home never rendered"
         assert term.wait_for("Passport"), "documents pane never populated"
 
-        term.send("\x10")  # ctrl+p
-        assert term.wait_for("Search for commands"), "palette never opened"
+        term.send("\x10")  # ctrl+p → the `:` command bar (the modal palette is retired)
+        assert term.wait_for("Current document"), "command mode never opened"
         term.send("review")
-        assert term.wait_for("Review —", timeout=6), "palette command missing"
+        assert term.wait_for("Review —", timeout=6), "command missing"
         term.send("enter")
         assert term.wait_for("Conflicts", timeout=10), "review never opened"
         assert term.wait_for("Duplicates"), "the tab bar is missing"

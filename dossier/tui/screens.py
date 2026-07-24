@@ -119,8 +119,8 @@ def _command_index_text() -> Text:
     keybindings alone already fill most of it — measured, the two together
     overflow a 34-row terminal — so listing every command here would push out the
     keys the panel exists to show. What it can honestly do in three lines is
-    answer "how much else is there, and roughly what kind": the palette answers
-    "which one", and is one keystroke away.
+    answer "how much else is there, and roughly what kind": the `:` command bar
+    answers "which one", and is one keystroke away.
     """
     from dossier.tui.commands import ENTRIES, Kind
 
@@ -131,7 +131,7 @@ def _command_index_text() -> Text:
     ]
     text = Text()
     text.append(f"\n {len(ENTRIES)} commands  ", style="bold")
-    text.append("ctrl+p\n", style="dim")
+    text.append(":  or  ctrl+p\n", style="dim")
     for kind, count in counts:
         text.append(f"   {kind.value} {count}\n", style="dim")
     return text

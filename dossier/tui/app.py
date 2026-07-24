@@ -21,88 +21,27 @@ from datetime import date
 
 from textual.app import App
 from textual.binding import Binding
-from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.events import DescendantFocus
 from textual.widgets import Input, TextArea
 
 from dossier.config import Config
 from dossier.store import Store
-from dossier.tui.commands import ENTRIES, Entry, Kind
-from dossier.tui.home import _KEYS, HomeScreen
-
-
-class DossierCommands(Provider):
-    """Command-palette entries for every occasional home action.
-
-    The home binds no letters (find-fast), so this is the app's whole occasional
-    vocabulary — see :mod:`dossier.tui.commands` for the catalog itself, which is
-    deliberately defined once and shared.
-
-    Implements ``discover`` as well as ``search``: without it the palette opens
-    showing only Textual's own Theme/Quit/Screenshot commands and *none* of ours,
-    so you had to already know a command existed in order to find it.
-    """
-
-    def _hit(self, entry: Entry, display: object | None = None):
-        # The key, when the action has one, so the palette doubles as keybinding
-        # documentation — you learn the shortcut by using the long way round.
-        key = _KEYS.get(entry.action)
-        suffix = f"  [{key}]" if key else ""
-        return {
-            "command": self._runner(entry.action),
-            "text": entry.title,
-            "help": f"{entry.kind.value} · {entry.help}{suffix}",
-        }
-
-    async def discover(self) -> Hits:
-        """Everything, grouped, before a single character is typed."""
-        for entry in sorted(ENTRIES, key=lambda e: (list(Kind).index(e.kind), e.title)):
-            yield DiscoveryHit(entry.title, **self._hit(entry))
-
-    async def search(self, query: str) -> Hits:
-        matcher = self.matcher(query)
-        for entry in ENTRIES:
-            # Match the keywords too, then highlight the title: one entry can
-            # answer to several intents ("move" finds Edit document) without the
-            # list growing an entry per synonym.
-            if matcher.match(entry.haystack) > 0:
-                yield Hit(
-                    matcher.match(entry.haystack),
-                    matcher.highlight(entry.title),
-                    **self._hit(entry),
-                )
-
-    def _runner(self, action: str):
-        app = self.app
-        assert isinstance(app, DossierApp)
-
-        def run() -> None:
-            # Respect the same gate the keys do. The palette used to call the bound
-            # action directly, which meant it could do things a keypress was
-            # explicitly forbidden to do — "Edit document" mid-edit silently wiped
-            # the in-progress form, and in review-mode the document verbs acted on
-            # the *hidden* documents cursor. check_action is the app's one answer to
-            # "is this actionable right now", so ask it.
-            home = app.home
-            if home.check_action(action, ()) is not True:
-                home.notify("not available right now", severity="warning")
-                return
-            getattr(home, f"action_{action}")()
-
-        return run
+from dossier.tui.home import HomeScreen
 
 
 class DossierApp(App[None]):
     """Hosts the Miller-columns home screen; a thin shell around it."""
 
     TITLE = "dossier"
+    # Textual's modal command palette is retired: the persistent bar's `:`/`>`
+    # command mode replaces it (see HomeScreen). Disabling it drops the system
+    # providers and Textual's auto ctrl+p; our own ctrl+p below stays and is
+    # repointed at command mode via action_command_palette. The whole occasional
+    # vocabulary now lives in dossier.tui.commands, surfaced by the bar.
+    ENABLE_COMMAND_PALETTE = False
     # No bare `q` — a printable belongs to search now (find-fast). `ctrl+q` (a
-    # Textual built-in priority binding) quits, and the palette's system "Quit"
-    # command covers touch.
-    COMMANDS = App.COMMANDS | {DossierCommands}
-    # Bind ctrl+p ourselves so it *shows*. Textual adds this binding automatically
-    # only if we haven't, and its own copy is `show=False` — which left the app's
-    # entire occasional vocabulary behind a key the UI never mentioned.
+    # Textual built-in priority binding) quits; "Quit" is also a command now. ctrl+p
+    # keeps its footer label but opens the `:` bar rather than a modal.
     BINDINGS = [Binding("ctrl+p", "command_palette", "Commands", priority=True)]
 
     def __init__(
@@ -126,12 +65,31 @@ class DossierApp(App[None]):
         )
         return self._home
 
+    def action_command_palette(self) -> None:
+        """Open the home's `:` command mode.
+
+        Named ``command_palette`` on purpose: the header ⭘ icon hard-codes that
+        action string and our ctrl+p binding names it, so the key, the icon and the
+        touch Commands button all converge here. Only on the home screen — a modal
+        has no command bar to open (its footer won't advertise the key either; see
+        :meth:`check_action`).
+        """
+        if self._home is not None and self.screen is self._home:
+            self._home.enter_command_mode()
+
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         # A bare `q` from a focused Checkbox/Button in the edit form would quit
         # mid-edit (an Input swallows it, other widgets don't) — suppress it.
         if action == "quit" and self._home is not None and self._home.editing:
             return None
-        return True
+        # ctrl+p opens command mode, which only exists on the home screen. False
+        # (not None) so a modal's footer doesn't advertise a dead key; ctrl+q still
+        # quits everywhere. (Watch/Bundles/Intake/Settings regain command access
+        # when Phase B folds them into home modes.)
+        return not (
+            action == "command_palette"
+            and (self._home is None or self.screen is not self._home)
+        )
 
     @property
     def home(self) -> HomeScreen:
