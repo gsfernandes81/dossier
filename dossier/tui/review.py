@@ -125,8 +125,11 @@ class ReviewPane(Vertical):
         # default focus-traversal (one widget per tab, so nothing here needs Tab for
         # focus). The priority pass walks the whole binding chain, so these still win
         # from a mid-chain widget — but only while focus is *inside* the pane.
-        Binding("tab", "next_tab", "Next tab", priority=True),
-        Binding("shift+tab", "prev_tab", "Prev tab", priority=True),
+        # One footer hint for the pair: "tab Next tab · shift+tab Prev tab" ate ~28
+        # columns and truncated the tab's real verbs mid-word. The summary line
+        # spells out both directions, so shift+tab stays bound but hidden.
+        Binding("tab", "next_tab", "Switch tab", priority=True),
+        Binding("shift+tab", "prev_tab", "Prev tab", priority=True, show=False),
         Binding("o", "open_file", "Open"),
         Binding("right", "detail", "Details"),
         Binding("s", "scan_dups", "Find duplicates"),
