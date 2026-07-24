@@ -108,7 +108,10 @@ at `/workspace`; the venv lives at `/home/dev/venv`, outside the mount.
   `docker-login.dev.sh`, `docker-rc-supervisor.dev.sh`, `sshd_config.dev`, `Makefile`,
   `.dockerignore`, `.env-example`.
 - **One-time host setup:** `cp .env-example .env` and set `DEV_SSH_AUTHORIZED_KEYS` to the
-  host user's `.ssh/` dir (its `authorized_keys` gates the in-container sshd on port 2222).
+  host user's `.ssh/` dir (its `authorized_keys` gates the in-container sshd). Optionally set
+  `DEV_SSH_PORT` to change the **host-side** port mapped to the container's sshd (defaults to
+  `2222`; the container side stays `2222`) — bump it when `2222` is taken or you run more than
+  one dev container, then point Zed / SSH / the Cloudflare tunnel at the port you chose.
 - **Bring up:** `make dev` (build + start + idempotent login walkthrough: git SSH → GitHub
   → Claude). Re-login later with `make dev-login`; tear down with `make dev-down` (add
   `-volumes` to also drop the persisted uv/claude/gh/ssh/history volumes).

@@ -34,7 +34,7 @@ services:
       - ds-zed-server:/home/dev/.zed_server    # persist Zed's remote server binary (no re-download per rebuild)
       - ds-local-share:/home/dev/.local/share  # persist fish history + bash history (HISTFILE points here)
     ports:
-      - "2222:2222"   # host 2222 -> container sshd; point a Cloudflare tunnel here for remote access
+      - "${DEV_SSH_PORT:-2222}:2222"   # host ${DEV_SSH_PORT} (default 2222) -> container sshd; point a Cloudflare tunnel here for remote access
     # Do NOT mount over /home/dev/venv or all of /home/dev — it would erase the
     # pre-built venv.
 volumes:
