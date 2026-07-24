@@ -36,7 +36,7 @@ anywhere. The search box is docked at the bottom as a thumb-reachable command
 bar (``/`` focuses it); typing filters the documents pane in place (root-wide),
 keeping the columns. Under the touch/Termux UI a bottom action bar (Open / Edit /
 New / Bundle / Watch / Commands) replaces the desktop keybind footer; **Commands**
-opens the searchable command palette (its search box focusing raises the soft
+opens the persistent bar's ``:`` command mode (focusing the bar raises the soft
 keyboard), which is the home for every action not on a button or a core key.
 """
 
@@ -109,7 +109,7 @@ _MAX_ROWS = 200
 # The search box is always on screen, so it is where the command surface gets to
 # announce itself — the palette was otherwise reachable only by a key the UI never
 # mentioned (Textual's own ctrl+p binding is show=False).
-_SEARCH_HINT = "Search name / tags / notes / scans…  ·  ctrl+p commands"
+_SEARCH_HINT = "Search name / tags / notes / scans…  ·  : commands"
 _SEARCH_HINT_CONTENT = "Search name / tags / notes / scans + contents…"
 
 # Home actions suppressed while the detail pane is in edit mode, so a bare letter
@@ -256,10 +256,10 @@ class HomeScreen(Screen[None]):
     # Find-fast home: typing anything routes into search (see on_key), so the home
     # keeps no letter bindings at all — browse is arrows / Enter (open the file) / →
     # (detail) / Esc, search is any printable or `/`, and every action (open, edit,
-    # new, bundle, accept, plus the occasional ones) lives in the **command palette**
-    # (`ctrl+p` / the Commands touch button) and on the touch button bar. `?` opens
-    # the HelpPanel; `ctrl+q` quits (Textual built-in). Letters own nothing here so
-    # the first keystroke can always be the start of a find.
+    # new, bundle, accept, plus the occasional ones) lives in the **command bar**
+    # (`:`/`>`, or `ctrl+p` / the Commands touch button) and on the touch button bar.
+    # `?` opens the HelpPanel; `ctrl+q` quits (Textual built-in). Letters own nothing
+    # here so the first keystroke can always be the start of a find.
     BINDINGS = [
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "escape", "Back"),
@@ -333,9 +333,9 @@ class HomeScreen(Screen[None]):
                 yield Button(_btn_label(g.new, "New"), id="act-new")
                 yield Button(_btn_label(g.bundle, "Bundle"), id="act-bundle")
                 yield Button(_btn_label(g.calendar, "Watch"), id="act-watch")
-                # The 6th tile is the touch entry to the command palette — the
-                # searchable home for everything not on a button (its search box
-                # focusing raises the soft keyboard via the app's focus handler).
+                # The 6th tile is the touch entry to `:` command mode — the
+                # searchable home for everything not on a button (focusing the
+                # bar raises the soft keyboard via the app's focus handler).
                 yield Button(_btn_label(g.commands, "Commands"), id="act-commands")
             yield Input(placeholder=_SEARCH_HINT, id="search")
             # Attention counts ride *beside* the footer, dim and non-focusable, so
@@ -358,6 +358,11 @@ class HomeScreen(Screen[None]):
         # Composed once in compose() and never remounted, so cache it instead of
         # re-querying the DOM on every arrow-key detail refresh.
         self._detail_pane = self.query_one("#detail", DetailPane)
+        # Textual disables the header ⭘ icon when ENABLE_COMMAND_PALETTE is False;
+        # re-enable it (after the icon's own on_mount has run) so it isn't a dead
+        # affordance — its click runs `app.command_palette`, which we override to
+        # open the `:` command bar.
+        self.call_after_refresh(self._reenable_command_icon)
         self.set_class(self._touch, "touch")
         # Desktop: taps always land (mouse reporting is always on). Touch starts
         # type-first (search focused → reporting off), so it earns the class only
@@ -440,8 +445,8 @@ class HomeScreen(Screen[None]):
         # whatever the *hidden* documents cursor sits on. False, not None: dead as a
         # key AND absent from the footer, which is the honest reading. `drill_out`
         # survives while the detail is open, so `←` means "close detail, to review".
-        # Contextual commands: hidden (not greyed) when they cannot act. The
-        # palette respects check_action now, so gating here is what keeps
+        # Contextual commands: hidden (not greyed) when they cannot act. The `:`
+        # command list filters on check_action, so gating here is what keeps
         # "Cancel vision scan" out of the list when nothing is scanning — the
         # list shrinks to what is actually actionable instead of listing verbs
         # that would no-op.
@@ -848,7 +853,7 @@ class HomeScreen(Screen[None]):
         self._search_content = not self._search_content
         search = self.query_one("#search", Input)
         if self._search_content:
-            search.placeholder = f"{_SEARCH_HINT_CONTENT}  ·  ctrl+p commands"
+            search.placeholder = f"{_SEARCH_HINT_CONTENT}  ·  : commands"
             self.notify("searching inside scan contents  (ctrl+t to toggle off)")
         else:
             search.placeholder = _SEARCH_HINT
@@ -1190,6 +1195,15 @@ class HomeScreen(Screen[None]):
         if self._show_detail:
             self._detail_pane.action_undo()
 
+    def _reenable_command_icon(self) -> None:
+        """Undo Textual's disabling of the header ⭘ (done because the modal palette
+        is off). Its click runs ``app.command_palette``, overridden to open the bar."""
+        icons = self.query("HeaderIcon")
+        if icons:
+            icon = icons.first()
+            icon.disabled = False
+            icon.tooltip = "Commands  (:)"
+
     def action_quit(self) -> None:
         """Exit the app — the command-surface twin of ``ctrl+q``.
 
@@ -1198,6 +1212,11 @@ class HomeScreen(Screen[None]):
         a ``HomeScreen.action_*``, rather than needing a special-cased dispatch.
         """
         self.app.exit()
+
+    def action_toggle_dark(self) -> None:
+        """Flip between the light and dark theme — the appearance toggle Textual's
+        retired palette used to carry. Delegates to the app's built-in."""
+        self.app.action_toggle_dark()
 
     def action_toggle_help_panel(self) -> None:
         # The shared helper every modal uses — the home had its own copy, which is
@@ -1219,7 +1238,7 @@ class HomeScreen(Screen[None]):
 
     @work(thread=True, group="vision", exclusive=True)
     def action_scan_all(self) -> None:
-        """Read every linked document (minutes); cancellable via the palette."""
+        """Read every linked document (minutes); cancellable via a command."""
         linked = [d for d in self._docs if d.primary_rendition() is not None]
         self._scan_docs(linked)
 

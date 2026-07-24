@@ -2089,48 +2089,57 @@ async def test_settings_screen_saves_and_persists(
 
 
 @pytest.mark.asyncio
-async def test_command_palette_routes_to_home_actions(tmp_path: Path):
-    from dossier.tui.app import DossierCommands
+async def test_command_mode_lists_the_whole_catalog_and_filters(tmp_path: Path):
+    """The `:` list offers every runnable catalog entry (grouped) with an empty
+    query and fuzzy-filters as you type — the palette's discover + search, in place.
 
-    store, config = _setup(tmp_path)
-    app = DossierApp(store, config, today=TODAY)
-    async with app.run_test():
-        provider = DossierCommands(app.screen)
-        # Every advertised command names an existing home action, and its runner
-        # is that bound method — guards against an action-name typo drifting from
-        # the HomeScreen binding it delegates to.
-        # A fuzzy query surfaces the matching commands as palette hits.
-        hits = [hit async for hit in provider.search("scan")]
-        titles = {hit.text for hit in hits}
-        # …and `discover` offers *everything* before a character is typed. Without
-        # it the palette opened showing only Textual's own Theme/Quit/Screenshot,
-        # so you had to already know a command existed in order to find it.
-        found = {hit.text async for hit in provider.discover()}
-        assert found == {entry.title for entry in ENTRIES}
-    assert "Scan current document (vision)" in titles
-    assert "Settings" not in titles  # unrelated command doesn't match "scan"
-
-
-@pytest.mark.asyncio
-async def test_palette_respects_the_same_gate_as_the_keys(tmp_path: Path):
-    """The palette used to call actions the keys were forbidden to run.
-
-    `check_action` gates keys, but the provider returned the bound action and
-    called it directly — so mid-edit "Edit document" wiped the in-progress form,
-    and in review-mode the document verbs acted on the *hidden* documents cursor.
+    Entries the check_action gate would refuse right now (nothing scanning, no detail
+    open) are dropped, and each row maps to a real HomeScreen action.
     """
-    from dossier.tui.app import DossierCommands
-
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         home = app.home
-        provider = DossierCommands(app.screen)
+        commands = home.query_one("#commands", OptionList)
+        home.enter_command_mode()
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+
+        ids = {
+            commands.get_option_at_index(i).id
+            for i in range(commands.option_count)
+            if commands.get_option_at_index(i).id is not None  # skip disabled headers
+        }
+        expected = {
+            e.action for e in ENTRIES if home.check_action(e.action, ()) is not False
+        }
+        assert ids == expected  # the whole catalog, minus what can't run now
+        assert "cancel_scan" not in ids and "accept_suggestion" not in ids  # gated off
+        for action in ids:
+            assert callable(getattr(home, f"action_{action}", None))
+
+        home._refresh_commands("scan")  # a query narrows to the matches
+        await pilot.pause()
+        titles = {
+            str(commands.get_option_at_index(i).prompt).split("\n")[0]
+            for i in range(commands.option_count)
+        }
+        assert any("Scan current document" in t for t in titles)
+        assert not any("Settings" in t for t in titles)
+
+
+@pytest.mark.asyncio
+async def test_command_mode_respects_the_same_gate_as_the_keys(tmp_path: Path):
+    """Command dispatch runs through check_action, so it can't do what a keypress is
+    forbidden to do: mid-edit "Edit document" must not wipe the in-progress form."""
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
         pane = await _enter_edit(pilot, home, "passport")
         pane.query_one("#f-name", Input).value = "Half-typed name"
         await pilot.pause()
 
-        provider._runner("edit")()  # would have re-populated the form under us
+        home._run_command("edit")  # would have re-populated the form under us
         await pilot.pause()
         assert pane.editing, "the edit was torn down"
         assert pane.query_one("#f-name", Input).value == "Half-typed name"
@@ -2901,30 +2910,91 @@ async def test_review_shares_the_command_bar(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_commands_button_opens_the_palette(tmp_path: Path):
-    from textual.command import CommandPalette
-
+async def test_commands_button_opens_command_mode(tmp_path: Path):
+    """The touch Commands button opens the `:` bar in place — no modal screen."""
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY, touch=True)  # touch shows the buttons
     async with app.run_test() as pilot:
-        assert not isinstance(app.screen, CommandPalette)
+        home = app.home
         await pilot.click("#act-commands")
-        await pilot.pause()
-        assert isinstance(app.screen, CommandPalette)
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+        assert app.screen is home  # stayed on the home screen — no palette modal
+        assert home.query_one("#search", Input).value == ":"
+        assert home.query_one("#commands", OptionList).display
 
 
 @pytest.mark.asyncio
-async def test_opening_palette_on_touch_raises_the_soft_keyboard(
+async def test_opening_command_mode_on_touch_raises_the_soft_keyboard(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    """Opening command mode focuses the bar (a text field), which on Termux drops
+    mouse reporting so the soft keyboard can appear. Touch opens with the bar already
+    focused, so start from a list to make focusing it a real change."""
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY, touch=True)
-    reports: list[bool] = []
     async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        reports: list[bool] = []
         monkeypatch.setattr(app, "set_mouse_reporting", reports.append)
-        reports.clear()
-        app.action_command_palette()  # its search box gets focus on mount
+        app.action_command_palette()  # → enter_command_mode → focuses the bar
         await pilot.pause()
         await pilot.pause()
-        # Focusing the palette input dropped mouse reporting so the IME can appear.
         assert reports and reports[-1] is False
+
+
+@pytest.mark.asyncio
+async def test_modal_palette_retired_and_ctrl_p_opens_command_mode(tmp_path: Path):
+    """Textual's modal command palette is off. ctrl+p opens the `:` bar on home, and
+    is gated off (hidden) on a modal screen so its footer never advertises a dead
+    key — ctrl+q still quits there."""
+    from textual.screen import Screen
+
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        assert app.ENABLE_COMMAND_PALETTE is False
+        await pilot.press("ctrl+p")
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+        assert app.screen is home  # opened in place, not a modal
+        assert home.query_one("#search", Input).value == ":"
+
+        home.action_escape()
+        await pilot.pause()
+        app.push_screen(Screen())  # any non-home screen
+        await pilot.pause()
+        assert app.check_action("command_palette", ()) is False
+
+
+@pytest.mark.asyncio
+async def test_header_command_icon_is_live(tmp_path: Path):
+    """Turning the modal palette off leaves Textual's header ⭘ disabled; we re-enable
+    it (no dead affordances) and its click opens the `:` command bar."""
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+
+        def icon_live() -> bool:
+            icons = home.query("HeaderIcon")
+            return bool(icons) and not icons.first().disabled
+
+        await _settle(pilot, icon_live)
+        await pilot.click("HeaderIcon")
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+        assert home.query_one("#search", Input).value == ":"
+
+
+@pytest.mark.asyncio
+async def test_toggle_dark_command_flips_the_theme(tmp_path: Path):
+    """The light/dark toggle survives the palette's retirement as a catalog command."""
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        before = app.theme
+        app.home.action_toggle_dark()
+        await pilot.pause()
+        assert app.theme != before
+        assert app.theme in ("textual-light", "textual-dark")

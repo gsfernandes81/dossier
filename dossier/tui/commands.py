@@ -21,7 +21,7 @@ whole discoverable vocabulary — which is exactly why it must have *one*
 definition. Any second copy is a copy that drifts.
 
 Each entry names a :class:`~dossier.tui.home.HomeScreen` ``action_*``, so the
-palette, a keybinding and a touch button can all reach the same implementation.
+command bar, a keybinding and a touch button can all reach the same implementation.
 :class:`Kind` groups them because they are not one kind of thing: a verb on the
 document under the cursor, a door to another surface, a change to how you are
 looking, and a long-running job read very differently, and a flat list of 21
@@ -145,15 +145,22 @@ ENTRIES: tuple[Entry, ...] = (
     ),
     Entry("Cancel vision scan", "cancel_scan", "Stop a running vision scan", Kind.OPS),
     # -- the application itself ----------------------------------------------
-    # Quit lives in the catalog (not special-cased at dispatch) so the command
-    # surface stays the one vocabulary: it maps to HomeScreen.action_quit, a thin
-    # delegate to app.exit(). Kept here so retiring Textual's modal palette (which
-    # carried the system "Quit") doesn't lose it — ctrl+q still quits too.
+    # These map to thin HomeScreen.action_* delegates (app.exit /
+    # app.action_toggle_dark) so the command surface stays the one vocabulary — no
+    # special-cased dispatch. They preserve what Textual's retired modal palette
+    # carried: the system "Quit" (ctrl+q still quits too) and a light/dark toggle.
     Entry(
         "Quit dossier",
         "quit",
         "Exit the app (ctrl+q)",
         Kind.APP,
         keywords=("exit", "q"),
+    ),
+    Entry(
+        "Toggle light / dark",
+        "toggle_dark",
+        "Switch between the light and dark theme",
+        Kind.APP,
+        keywords=("theme", "dark", "light", "appearance"),
     ),
 )
