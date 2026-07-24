@@ -7,6 +7,14 @@ Markdown files. Full design in **`DESIGN.md`** — **read it before writing feat
 Python 3.11+, mostly synchronous; the TUI layer (Textual) is async. Data is flat
 Markdown + YAML files (one per document) plus a couple of TOML files; there is no database.
 
+> **Working *on* dossier?** [`docs/dev/`](docs/dev/) is the "why is it like this" context —
+> project constraints and performance decisions that must not be undone
+> ([project-context.md](docs/dev/project-context.md)), how to verify CI honestly
+> ([ci-gate.md](docs/dev/ci-gate.md)), and testing the TUI without flakes
+> ([testing.md](docs/dev/testing.md)). Design each substantial phase with a **Fable
+> advisor** first (Agent tool, `model:"fable"`, `subagent_type:"Plan"`, run in background),
+> then build in independently shippable, CI-green slices.
+
 > **Tooling is mirrored from the sibling project `destiny-director`** (same ruff/ty/pytest
 > setup), minus everything Railway/Atlas/DB/Discord-specific, which does not apply here.
 > The one Docker/Makefile piece we DO mirror is the **remote dev container**
@@ -39,6 +47,12 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 - Filesystem tests use pytest's `tmp_path`; never touch a real Syncthing folder or the
   user's `.dossier/` data.
 - Run: `uv run python -m pytest` (add `--cov=dossier --cov-report=term-missing` for coverage).
+- **TUI tests: never sleep-then-assert — poll for the effect.** `wait_for_complete()`
+  returns before a worker has registered, so `trigger; pause(); assert` passes on
+  scheduling luck and flakes only on CI's slow runner. Use `_settle(pilot, lambda: …)`.
+  A real-terminal PTY driver lives in `tools/` for seeing the TUI as text + colours. Full
+  guidance (plus the Textual `DEFAULT_CSS`/`SCOPED_CSS` screen-styling gotcha) in
+  [`docs/dev/testing.md`](docs/dev/testing.md).
 
 ## Linting, formatting & type checking
 
@@ -56,13 +70,35 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
   suppress it in a **`ty.toml` `[[overrides]]` block with an explanatory comment** — avoid
   bare inline `# type: ignore` (and if unavoidable, include the error code).
 
-## CI
+## CI — mirror it exactly, and read the conclusion
 
-- `.github/workflows/ci.yml` runs on every push/PR: `ruff check` → `ruff format --check` →
-  `ty check` → `pytest --cov`, all via `uv`. Run those four locally before pushing.
+`.github/workflows/ci.yml` is a **Windows + Linux matrix** with `check` / `test` /
+`driver` jobs. **Full details and the why in [`docs/dev/ci-gate.md`](docs/dev/ci-gate.md)
+— read it before your first push.** The essentials, non-negotiable:
+
+- **The local gate must mirror CI's environment or it lies.** Run, in order:
+  ```bash
+  uv sync                                             # no extras = CI's check job
+  uv run --no-sync ruff check dossier
+  uv run --no-sync ruff format --check dossier
+  uv run --no-sync ty check --python-platform linux dossier   # linux/no-extras is authoritative
+  uv sync --extra scan --extra dedup --group driver   # restore for the test jobs
+  uv run --no-sync python -m pytest
+  uv run --no-sync --group driver python -m pytest tools/test_terminal_integration.py
+  ```
+- **ty must run `--python-platform linux` with no extras** — a plain Windows-with-extras
+  run misses Linux-only errors that fail CI.
+- **The driver test is outside `testpaths`** — plain `pytest` never runs it. Run it
+  explicitly on any TUI change.
+- **Read the run *conclusion* per job — never infer it.** `gh run watch --exit-status`
+  has exited 0 on a failed run; a trailing `; echo` masks the real code. After the watch,
+  query it and `git fetch` to confirm the run is for your HEAD:
+  ```bash
+  gh run view <id> --json conclusion,jobs \
+    --jq '{overall: .conclusion, jobs: [.jobs[] | {name, conclusion}]}'
+  ```
 - The `Makefile` holds **only** the remote-dev-container targets (`make dev`, `dev-up`,
-  `dev-login`, `dev-down`, `dev-down-volumes`). It is not part of lint/test/build — use the
-  `uv run` commands above for those.
+  `dev-login`, `dev-down`, `dev-down-volumes`) — not part of lint/test/build.
 
 ## License headers
 
