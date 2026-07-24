@@ -2252,9 +2252,76 @@ async def test_sync_conflicts_show_in_the_footer_not_a_toast(tmp_path: Path):
         from textual.widgets import Static
 
         assert app.home._conflict_count == 1
-        assert "1 conflict" in str(app.home.query_one("#attention", Static).render())
+        chip = app.home.query_one("#attn-conflicts", Static)
+        assert chip.display and "1 conflict" in str(chip.render())
         # …and no conflict toast was raised over the search box.
         assert not any("sync conflict" in n.message for n in app._notifications)
+
+
+@pytest.mark.asyncio
+async def test_attention_chips_route_to_their_surfaces(tmp_path: Path):
+    """Each attention count is a shortcut to the surface it summarises.
+
+    The app's top actionable signal used to be pure text; a click on it now jumps
+    to where you act on it — conflicts → Review, inbox → Intake, expiring → Watch.
+    """
+    from textual.widgets import Static
+
+    store, config = _setup(tmp_path)  # coc expires soon → an expiring count
+    config.intake_inbox = "Inbox"
+    (tmp_path / "Inbox").mkdir()
+    (tmp_path / "Inbox" / "drop.pdf").write_bytes(b"x")
+    conflict = store.document_path("passport").with_name(
+        "passport.sync-conflict-20260101-120000-AAAAAAA.md"
+    )
+    conflict.write_bytes(store.serialize(Document(id="passport", name="X")).encode())
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        await pilot.pause()
+        # All three chips are showing (each count is non-zero).
+        for sel in ("#attn-expiring", "#attn-conflicts", "#attn-inbox"):
+            assert home.query_one(sel, Static).display, sel
+
+        await pilot.click("#attn-conflicts")
+        await _await_review_load(pilot)
+        assert home.has_class("review-mode"), "conflicts chip did not open review"
+        await pilot.press("escape")
+        await pilot.pause()
+
+        from dossier.tui.intake import IntakeScreen
+
+        await pilot.click("#attn-inbox")
+        await pilot.pause()
+        assert isinstance(app.screen, IntakeScreen), "inbox chip did not open intake"
+
+
+@pytest.mark.asyncio
+async def test_attention_chips_look_tappable_only_when_taps_land(tmp_path: Path):
+    """The interactive cue tracks mouse reporting, so it never lies on Termux.
+
+    On the desktop taps always land, so the `taps-land` class is always on. On
+    touch it toggles with focus (the search box drops reporting for the keyboard),
+    and the chips must fall back to plain text when a tap would do nothing.
+    """
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY, touch=True)
+    async with app.run_test() as pilot:
+        home = app.home
+        await pilot.pause()
+        home._set_mouse_reporting(False)  # search-focused on a phone
+        await pilot.pause()
+        assert not home.has_class("taps-land"), "chips would look tappable when dead"
+        home._set_mouse_reporting(True)  # a list took focus
+        await pilot.pause()
+        assert home.has_class("taps-land")
+
+    # Desktop: taps always land, so the cue is on from the start.
+    store2, config2 = _setup(tmp_path / "d")
+    app2 = DossierApp(store2, config2, today=TODAY)
+    async with app2.run_test() as pilot:
+        await pilot.pause()
+        assert app2.home.has_class("taps-land")
 
 
 @pytest.mark.asyncio

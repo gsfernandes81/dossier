@@ -52,7 +52,7 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
-from textual.events import DescendantFocus, Key, Resize
+from textual.events import Click, DescendantFocus, Key, Resize
 from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import (
@@ -161,7 +161,18 @@ class HomeScreen(Screen[None]):
     #search:focus { border: round $accent; background: $boost; }
     #footrow { height: 1; }
     #footrow Footer { width: 1fr; }
-    #attention { width: auto; color: $text-muted; padding: 0 1; text-align: right; }
+    #attention { width: auto; height: 1; }
+    .attn-chip { width: auto; height: 1; color: $text-muted; padding: 0 1; }
+    /* Conflicts block clean sync — the one that most needs acting on — so it reads
+       in the warning colour while the others stay muted. */
+    #attn-conflicts { color: $warning; }
+    /* The "these are shortcuts" cue rides the *mouse-reporting* state, not the
+       platform: it shows only when a tap/click would actually land. On the desktop
+       that is always; on Termux it is only while a list holds focus (focusing the
+       search box drops reporting so the soft keyboard can appear). So when a tap
+       would do nothing, the chips are honest plain text — never a dead affordance. */
+    HomeScreen.taps-land .attn-chip { text-style: underline; }
+    HomeScreen.taps-land .attn-chip:hover { color: $text; background: $boost; }
     #panes { height: 1fr; }
 
     /* Touch (Termux): a tap-action grid above the command bar — big thumb
@@ -307,13 +318,23 @@ class HomeScreen(Screen[None]):
                 # order with a plainer label, so suppress Textual's built-in
                 # right-hand palette key — it was showing the same thing twice.
                 yield Footer(compact=True, show_command_palette=False)
-                yield Static("", id="attention")
+                # Each count is its own chip so it can route to its own surface:
+                # expiring → Watch, conflicts → Review, inbox → Intake. The whole
+                # segment reads as "what needs attention" and each part is a shortcut.
+                with Horizontal(id="attention"):
+                    yield Static("", id="attn-expiring", classes="attn-chip")
+                    yield Static("", id="attn-conflicts", classes="attn-chip")
+                    yield Static("", id="attn-inbox", classes="attn-chip")
 
     def on_mount(self) -> None:
         # Composed once in compose() and never remounted, so cache it instead of
         # re-querying the DOM on every arrow-key detail refresh.
         self._detail_pane = self.query_one("#detail", DetailPane)
         self.set_class(self._touch, "touch")
+        # Desktop: taps always land (mouse reporting is always on). Touch starts
+        # type-first (search focused → reporting off), so it earns the class only
+        # once a list takes focus, via _set_mouse_reporting.
+        self.set_class(not self._touch, "taps-land")
         # Never select-all on focus: `/` and the type-to-search router should let
         # you keep refining the filter, not replace it with the next keystroke.
         self.query_one("#search", Input).select_on_focus = False
@@ -354,15 +375,34 @@ class HomeScreen(Screen[None]):
             if d.expiry_status(self._today, threshold)
             in (ExpiryStatus.EXPIRED, ExpiryStatus.EXPIRING)
         )
-        parts: list[str] = []
-        if expiring:
-            parts.append(f"{expiring} expiring")
-        if self._conflict_count:
-            noun = "conflict" if self._conflict_count == 1 else "conflicts"
-            parts.append(f"{self._conflict_count} {noun}")
-        if self._inbox_count:
-            parts.append(f"{self._inbox_count} inbox")
-        self.query_one("#attention", Static).update("  ·  ".join(parts))
+        conflicts = self._conflict_count
+        self._set_chip("#attn-expiring", expiring, "expiring")
+        self._set_chip(
+            "#attn-conflicts", conflicts, "conflict" if conflicts == 1 else "conflicts"
+        )
+        self._set_chip("#attn-inbox", self._inbox_count, "inbox")
+
+    def _set_chip(self, selector: str, count: int, label: str) -> None:
+        """Show ``N label`` in an attention chip, or hide it when the count is 0."""
+        chip = self.query_one(selector, Static)
+        chip.display = count > 0
+        if count:
+            chip.update(f"{count} {label}")
+
+    @on(Click, "#attn-expiring")
+    def _attn_expiring(self, event: Click) -> None:
+        event.stop()
+        self.action_watch()
+
+    @on(Click, "#attn-conflicts")
+    def _attn_conflicts(self, event: Click) -> None:
+        event.stop()
+        self.action_review()
+
+    @on(Click, "#attn-inbox")
+    def _attn_inbox(self, event: Click) -> None:
+        event.stop()
+        self.action_intake()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if self.editing and action in _EDIT_LOCKED:
@@ -1150,6 +1190,10 @@ class HomeScreen(Screen[None]):
         setter = getattr(self.app, "set_mouse_reporting", None)
         if callable(setter):
             setter(enabled)
+        # Mirror it into a class so the attention chips only *look* tappable when a
+        # tap would land (see the .taps-land CSS). Only ever called on touch; the
+        # desktop sets the class once at mount, where reporting is always on.
+        self.set_class(enabled, "taps-land")
 
     def _focus_documents(self) -> None:
         self.query_one("#documents", OptionList).focus()

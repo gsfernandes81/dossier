@@ -53,6 +53,14 @@ wins wholesale, and the document sorts and displays under *that* location until 
 This mirrors the old Notion "effective location" behavior — set the temp location when you take
 something out, clear it when it's back home.
 
+The dim counts beside the footer — **expiring · conflicts · inbox** — are the app's
+"needs attention" line, and each one is a shortcut to where you act on it: tap or click
+**expiring** for the watch, **conflicts** (shown in a warning colour, since they block clean
+sync) for review, **inbox** for intake. The keyboard path is the same command palette. On
+Termux the chips only *look* tappable while a list holds focus — focusing the search box drops
+mouse reporting for the soft keyboard, and a tap would not land then, so they fall back to plain
+text rather than pretend.
+
 ## The expiry watch
 
 Documents with an expiry date are tracked automatically — it's **opt-out**, not opt-in, so a
