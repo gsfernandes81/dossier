@@ -1,0 +1,32 @@
+# Build-context excludes for `docker build` (Dockerfile.dev). The dev image only
+# COPYs pyproject.toml + uv.lock + the dev scripts; the source is bind-mounted at
+# runtime, so this mainly keeps the context small and secrets/personal data out.
+
+.git
+.claude/
+.dev-ssh/
+.venv
+
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.ropeproject
+htmlcov
+.coverage
+.coverage.*
+
+*.env
+
+# dossier: never pull personal data, local config, or scratch into the build context.
+.dossier/
+scratch/
+*.local.toml
+config.local.toml
+notion-export*.json
+
+# Syncthing bookkeeping.
+.stfolder/
+.stignore
+
+docs/

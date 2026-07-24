@@ -1,0 +1,23 @@
+# In-container sshd for Zed-remote / direct SSH. Runs as the non-root `dev` user
+# on an unprivileged port; only `dev` can authenticate (non-root sshd only serves
+# its own account). Host 2222 -> here (see docker-compose.dev.yml + Cloudflare).
+Port 2222
+ListenAddress 0.0.0.0
+
+# Persisted in the ds-ssh-host volume so Zed's known_hosts survives rebuilds.
+HostKey /home/dev/.ssh-host/ssh_host_ed25519_key
+PidFile /home/dev/.ssh-host/sshd.pid
+
+# Key-only auth; the host user's .ssh dir is bind-mounted read-only at .host-ssh.
+AuthorizedKeysFile /home/dev/.host-ssh/authorized_keys
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+UsePAM no                 # PAM needs root; non-root sshd must disable it
+
+# Let SSH/Zed sessions inherit the env the entrypoint writes (~/.ssh/environment).
+PermitUserEnvironment yes
+
+Subsystem sftp internal-sftp
+StrictModes yes

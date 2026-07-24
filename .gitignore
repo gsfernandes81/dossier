@@ -34,6 +34,13 @@ coverage.xml
 .pyre/
 .ruff_cache/
 
+# Git worktrees created under the repo (e.g. by the Claude Code harness) — these are
+# separate checkouts, not content to commit into the main tree.
+.claude/worktrees/
+
+# Dev-container git-identity keys + ssh config (see docker-*.dev.sh). Never commit.
+.dev-ssh/
+
 # Environments (uv.lock IS committed — do not ignore it)
 .venv/
 venv/

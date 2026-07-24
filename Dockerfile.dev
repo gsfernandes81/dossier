@@ -1,0 +1,112 @@
+# syntax=docker/dockerfile:1
+
+# Remote dev environment for dossier. Adapted from the sibling project
+# destiny-director's Dockerfile.dev, minus everything DB/Railway/Atlas-specific
+# (dossier is a local, file-backed TUI — no MySQL, no migrations, no Railway deploy).
+#
+# The toolchain is baked into the image; the app source is bind-mounted at
+# /workspace at runtime (see docker-compose.dev.yml), so it is NOT copied in. The
+# container runs an in-container sshd on port 2222 for Zed-remote / direct SSH, and
+# is also reachable via `docker exec` from the host.
+FROM python:3.13-slim-bookworm AS dev
+ARG USERNAME=dev
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# fish is the interactive shell; bash stays the dev account's login shell for Claude
+# Code + entrypoint/make tooling. openssh-client is required for git push over
+# git@github.com (Debian's git does not pull an ssh client under --no-install-recommends).
+# openssh-server runs the in-container sshd (port 2222, non-root) so Zed can remote
+# directly in (see sshd_config.dev). build-essential/make cover any source builds Claude
+# Code or the TUI driver need.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git make fish openssh-client openssh-server curl gnupg ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node 22 LTS + Claude Code.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code
+
+# GitHub CLI (`gh`): install the release tarball directly (Debian's apt repo lags).
+# GitHub publishes linux arm64 + amd64 assets whose names match
+# `dpkg --print-architecture` verbatim, so no arch remapping is needed. Bump
+# GH_VERSION to upgrade.
+ARG GH_VERSION=2.96.0
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      arm64|amd64) : ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" \
+      | tar -xz -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_${arch}/bin/gh"; \
+    gh --version
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Create the dev user at the host owner's uid/gid (passed as build args — see
+# Makefile `dev-up`). Guard against an already-present gid/uid so the build won't
+# hard-fail if the host owner collides with a base-image account.
+RUN if ! getent group "${USER_GID}" >/dev/null; then \
+        groupadd --gid "${USER_GID}" "${USERNAME}"; \
+    fi \
+    && if ! getent passwd "${USER_UID}" >/dev/null; then \
+        useradd --uid "${USER_UID}" --gid "${USER_GID}" --shell /bin/bash -m "${USERNAME}"; \
+    fi \
+    && mkdir -p /workspace && chown "${USER_UID}:${USER_GID}" /workspace
+
+# Venv lives OUTSIDE /workspace so the bind-mount can't shadow the pre-built venv.
+# VIRTUAL_ENV mirrors UV_PROJECT_ENVIRONMENT so ty/ruff/Zed toolchain detection find
+# the venv over SSH (they key off VIRTUAL_ENV, and this repo has no project-local .venv).
+# CLAUDE_CONFIG_DIR moves ~/.claude.json INTO the persisted .claude volume (below) so
+# Claude's onboarding/trust survives `make dev-up` rebuilds. GH_CONFIG_DIR does the same
+# for `gh auth login` (gh writes hosts.yml/config.yml there — with no keyring in this slim
+# image it falls back to storing the token in that file), persisted via the ds-gh volume.
+# HISTFILE points bash history into the persisted .local/share volume. The entrypoint
+# publishes all of these to SSH sessions via ~/.ssh/environment (it dumps `env`), so no
+# entrypoint edit is needed.
+ENV TZ=Etc/UTC \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0 \
+    UV_PROJECT_ENVIRONMENT=/home/dev/venv \
+    VIRTUAL_ENV=/home/dev/venv \
+    CLAUDE_CONFIG_DIR=/home/dev/.claude \
+    GH_CONFIG_DIR=/home/dev/.config/gh \
+    HISTFILE=/home/dev/.local/share/.bash_history
+
+USER ${USERNAME}
+WORKDIR /workspace
+
+# Pre-create the dirs that compose mounts named volumes onto, as the dev user, so
+# the (initially empty) volumes inherit uid-1000 ownership instead of root:root —
+# otherwise uv/claude/gh can't write to them. .ssh-host holds the persisted sshd
+# host key (ds-ssh-host volume). .host-ssh needs no pre-create — it's a directory
+# bind mount that inherits the mounted .ssh dir's ownership.
+RUN mkdir -p /home/dev/.cache/uv /home/dev/.claude /home/dev/.config/gh \
+    /home/dev/.ssh-host /home/dev/.zed_server /home/dev/.local/share
+
+# Pre-build the full dependency set into /home/dev/venv: the dev group (default),
+# all extras (dedup + scan), and the opt-in `driver` group for the real-terminal
+# TUI harness in tools/. The editable project is added at container start once
+# /workspace is mounted. Keep these flags in sync with docker-entrypoint.dev.sh.
+COPY --chown=${USER_UID}:${USER_GID} pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/home/dev/.cache/uv,uid=${USER_UID},gid=${USER_GID} \
+    uv sync --frozen --no-install-project --all-extras --group driver
+
+# In-container sshd config (Zed-remote / direct SSH on port 2222, non-root `dev`).
+COPY --chown=${USER_UID}:${USER_GID} sshd_config.dev /home/dev/sshd_config
+EXPOSE 2222
+
+# Interactive login walkthrough (git SSH / GitHub / Claude), driven from the host by
+# `make dev` / `make dev-login`. Idempotent — see the script header.
+COPY --chown=${USER_UID}:${USER_GID} docker-login.dev.sh /home/dev/login.sh
+
+# Background supervisor that runs + health-recycles `claude remote-control`. Launched
+# by the entrypoint; only recycles a wedged daemon at 0/32 — see the script header.
+COPY --chown=${USER_UID}:${USER_GID} docker-rc-supervisor.dev.sh /home/dev/rc-supervisor.sh
+
+COPY --chown=${USER_UID}:${USER_GID} docker-entrypoint.dev.sh /home/dev/entrypoint.sh
+CMD ["bash", "/home/dev/entrypoint.sh"]
