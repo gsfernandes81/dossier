@@ -1009,8 +1009,12 @@ async def test_default_tab_applies_even_if_the_load_beats_the_tab_bar(tmp_path: 
         tabs = pane.query_one(TabbedContent)
         assert pane._report is not None
 
-        tabs.active = ""  # replay the pre-settle state the worker can observe
-        await pilot.pause()
+        # Replay the pre-settle state the worker can observe, then re-apply in the
+        # same breath. No pause in between: an empty active tab is a transient the
+        # TabbedContent never settles into on its own, so awaiting it (rather than
+        # letting _apply_load correct it synchronously) times the screen out — which
+        # is a test artifact, not the behaviour under test.
+        tabs.active = ""
         pane._apply_load(
             pane._state, pane._docs or [], pane._report, pane._readings, pane._plans
         )
