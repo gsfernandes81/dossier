@@ -97,6 +97,11 @@ _UNLOCATED = "\x00none"
 # ``-narrow`` breakpoint so pane collapse and row density agree.
 _NARROW_COLS = 60
 
+# Rows rendered into the documents pane at once. Textual measures every option it
+# holds on each refresh, so an unbounded list makes every keystroke O(store). A few
+# screens' worth is all anyone scrolls; past that, narrowing beats scrolling.
+_MAX_ROWS = 200
+
 # Home actions suppressed while the detail pane is in edit mode, so a bare letter
 # typed into a form Checkbox/SelectionList (which don't swallow it like an Input
 # does) can't fire a home binding — and the footer stops advertising them. Only the
@@ -450,13 +455,15 @@ class HomeScreen(Screen[None]):
         superseded = query.superseded_ids(self._docs)
         mode = self._row_mode()
         self._last_mode = mode
-        ids: list[str] = []
-        for doc in docs:
-            view = self._view(doc)
-            options.add_option(
+        # One `add_options`, never a loop of `add_option`: each singular call ends in
+        # `refresh()` + `_update_lines()`, so adding N rows re-lays-out the list N
+        # times. At ~950 documents that alone was 429 ms of a 632 ms keystroke.
+        shown = docs[:_MAX_ROWS]
+        options.add_options(
+            [
                 Option(
                     rows.doc_row(
-                        view,
+                        self._view(doc),
                         mode=mode,
                         superseded=doc.id in superseded,
                         show_issue=self._show_issue,
@@ -464,8 +471,18 @@ class HomeScreen(Screen[None]):
                     ),
                     id=doc.id,
                 )
+                for doc in shown
+            ]
+        )
+        if len(docs) > len(shown):
+            # Even batched, Textual measures every option it holds, so a full store
+            # costs ~260 ms a keystroke for rows no one can see. Cap the render and
+            # say so: with this many matches the answer is to type, not to scroll.
+            hidden = len(docs) - len(shown)
+            options.add_option(
+                Option(Text(f"  … and {hidden} more — keep typing", style="dim italic"))
             )
-            ids.append(doc.id)
+        ids = [doc.id for doc in shown]
         if previous is not None and previous in ids:
             options.highlighted = ids.index(previous)
         elif self._is_searching() and ids:

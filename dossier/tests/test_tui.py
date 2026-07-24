@@ -147,6 +147,34 @@ def _setup(tmp_path: Path) -> tuple[Store, Config]:
 
 
 @pytest.mark.asyncio
+async def test_documents_pane_caps_its_rows_and_says_so(tmp_path: Path):
+    """Typing must not cost O(store).
+
+    Textual measures every option a list holds on each refresh, so rendering a full
+    store made each keystroke ~630 ms at ~950 documents — the cost is in rows nobody
+    can see. Cap the render and tell the user, rather than quietly truncating.
+    """
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    total = tui_home._MAX_ROWS + 25
+    for i in range(total):
+        store.save(Document(id=f"doc-{i:04d}", name=f"Document {i}"))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        await pilot.pause()
+        options = home.query_one("#documents", OptionList)
+        # The capped rows, plus one row that owns up to the rest.
+        assert options.option_count == tui_home._MAX_ROWS + 1
+        last = str(options.get_option_at_index(options.option_count - 1).prompt)
+        assert "25 more" in last
+        assert options.get_option_at_index(options.option_count - 1).id is None
+        # The count stays honest about the whole store, not just what is drawn.
+        assert app.sub_title.startswith(f"{total} / {total}")
+
+
+@pytest.mark.asyncio
 async def test_app_loads_and_search_filters(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
