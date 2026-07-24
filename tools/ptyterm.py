@@ -169,6 +169,22 @@ class PtyTerm:
             time.sleep(0.04)
         return False
 
+    def wait_until(self, predicate, timeout=6.0, settle=0.12):
+        """Block until ``predicate()`` is true; True, or False on timeout.
+
+        For conditions no substring captures — a cell's colour, a footer's contents.
+        Prefer this to a fixed ``settle``: sleeping a guessed number of milliseconds
+        and then asserting is a bet on the machine's load, and it is the bet the
+        driver tests kept losing.
+        """
+        end = time.time() + timeout
+        while time.time() < end:
+            if predicate():
+                time.sleep(settle)
+                return True
+            time.sleep(0.04)
+        return False
+
     def wait_for_exit(self, timeout=6.0):
         """Block until the child process exits; True, or False on timeout.
 

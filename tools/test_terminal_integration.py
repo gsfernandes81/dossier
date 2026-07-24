@@ -66,8 +66,12 @@ def test_drives_real_app_in_a_real_terminal(tmp_path: Path):
         # The expiring filter narrows the list (2 of the 5 sample docs expire soon).
         # It's a command-palette entry now (Phase 1 dropped the `x` keybind), so
         # drive it there — which also exercises the palette in a real terminal.
-        term.send("\x10", settle=0.4)  # Ctrl+P opens the command palette
-        term.send("expiring", settle=0.4)
+        term.send("\x10")  # Ctrl+P opens the command palette
+        # Wait for it to actually be open before typing: until it is, the home's
+        # type-to-search router owns the keystrokes and would swallow "expiring"
+        # into the document filter — a fixed sleep here is a bet on machine load.
+        assert term.wait_for("Search for commands"), "palette never opened"
+        term.send("expiring")
         assert term.wait_for("Toggle expiring", timeout=6), "palette command missing"
         term.send("enter", settle=0.5)
         assert term.wait_for("2 / 5"), "expiring filter did not apply"
@@ -83,9 +87,12 @@ def test_drives_real_app_in_a_real_terminal(tmp_path: Path):
         )
         unfocused = term.cell(row - 1, 1)[1]  # fg of the ╭── border, unfocused
         term.send("/")
-        term.wait_for("Search name")
-        focused = term.cell(row - 1, 1)[1]
-        assert focused != unfocused, "search border colour did not change on focus"
+        # Poll the colour itself. Waiting on "Search name" proved nothing — the
+        # placeholder is on screen focused or not, so that wait returned instantly
+        # and the cell could be sampled before the focus repaint.
+        assert term.wait_until(lambda: term.cell(row - 1, 1)[1] != unfocused), (
+            "search border colour did not change on focus"
+        )
 
         term.send("esc", settle=0.4)  # leave the search box
         term.send("\x11", settle=0.5)  # ctrl+q quits (bare `q` is a search char now)
@@ -106,21 +113,28 @@ def test_review_takes_the_columns_and_keeps_its_place(tmp_path: Path):
         assert term.wait_for("dossier"), "home never rendered"
         assert term.wait_for("Passport"), "documents pane never populated"
 
-        term.send("\x10", settle=0.4)  # ctrl+p
-        term.send("review", settle=0.4)
-        term.send("enter", settle=1.0)
+        term.send("\x10")  # ctrl+p
+        assert term.wait_for("Search for commands"), "palette never opened"
+        term.send("review")
+        assert term.wait_for("Review —", timeout=6), "palette command missing"
+        term.send("enter")
         assert term.wait_for("Conflicts", timeout=10), "review never opened"
         assert term.wait_for("Duplicates"), "the tab bar is missing"
 
         # Tab belongs to review while focus is inside it — not to focus-traversal.
-        term.send("tab", settle=0.5)
-        term.send("tab", settle=0.5)
+        term.send("tab")
+        assert term.wait_for("Missing", timeout=6), "Tab did not cycle tabs"
+        term.send("tab")
         assert term.wait_for("press  s  to scan", timeout=6), "Tab did not cycle tabs"
 
         # The footer follows the active tab, offering this tab's verbs and no other
-        # tab's. (It still truncates at the right edge, so assert on an early entry.)
+        # tab's. It repaints on refresh_bindings, not on the tab switch, so poll for
+        # it rather than reading whatever happens to be on screen this instant.
+        # (It still truncates at the right edge, so assert on an early entry.)
+        assert term.wait_until(
+            lambda: "Find duplicates" in term.text().splitlines()[-1]
+        ), f"Duplicates lost its verb: {term.text().splitlines()[-1]!r}"
         footer = term.text().splitlines()[-1]
-        assert "Find duplicates" in footer, f"Duplicates lost its verb: {footer!r}"
         assert "Unlink" not in footer, f"footer shows another tab's verb: {footer!r}"
         assert "Link" not in footer, f"footer shows another tab's verb: {footer!r}"
 

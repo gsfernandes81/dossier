@@ -13,7 +13,16 @@
 # You should have received a copy of the GNU Affero General Public License along with
 # dossier. If not, see <https://www.gnu.org/licenses/>.
 
-"""Tests for the Textual TUI (driven headlessly via App.run_test)."""
+"""Tests for the Textual TUI (driven headlessly via App.run_test).
+
+**Wait for the effect, never for a duration.** Anything the app does off the
+message pump — a thread worker, an async ``remove_children`` — lands after an
+unknown number of scheduler turns, so `pause()`-and-assert (or `pause()` twice,
+which is the same guess with more rope) passes or fails on machine load. Use
+:func:`_settle` with a predicate; it drains workers until the condition holds and
+fails with a name instead of an assertion mystery. ``wait_for_complete()`` is not
+a substitute: it returns immediately when the worker has not registered yet.
+"""
 
 import asyncio
 from dataclasses import replace
@@ -71,32 +80,40 @@ async def _open_review_tab(pilot, tab: str) -> ReviewPane:
     """Open review, switch to `tab`, and settle any work that tab defers."""
     pane = await _await_review_load(pilot)
     pane.query_one(TabbedContent).active = tab
-    await pilot.pause()
-    await pilot.app.workers.wait_for_complete()  # e.g. Integrity's deferred check
-    await pilot.pause()
+    await _settle(pilot)
     return pane
 
 
-async def _await_review_load(pilot) -> ReviewPane:
-    """Wait for the review pane's load worker to land; return the pane.
+async def _settle(pilot, until=None, *, what: str = "the app to settle") -> None:
+    """Drain background work, optionally polling until ``until()`` holds.
 
-    The load runs in a thread so opening review never blocks the UI, which means a
-    single ``pause()`` can come back before the worker has even registered — on a
-    slow CI runner that raced the "opens on Orphans" assertion. Poll for the applied
-    report instead of trusting one scheduler turn.
-
-    Queries for the pane rather than the screen, so it finds it whether review is a
-    pushed modal (today) or columns of the home (where this is heading).
+    The pattern this replaces — start work, ``pause()``, ``wait_for_complete()``,
+    assert — looks synchronous but is not: ``wait_for_complete`` returns *immediately*
+    when the worker has not registered yet, and one ``pause()`` does not guarantee it
+    has. The assert then runs against the pre-work state and passes or fails on
+    scheduling luck. Twice this session that cost a red CI run, once masking a real
+    bug. Polling for the effect is both faster (returns as soon as it is true) and
+    honest (fails with a message instead of a mystery).
     """
-    for _ in range(200):
+    for _ in range(300):
         await pilot.pause()
         await pilot.app.workers.wait_for_complete()
-        panes = pilot.app.screen.query(ReviewPane)
-        if panes and panes.first()._report is not None:
-            await pilot.pause()
-            return panes.first()
+        await pilot.pause()
+        if until is None or until():
+            return
         await asyncio.sleep(0.01)
-    raise AssertionError("the review pane's load worker never completed")
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+async def _await_review_load(pilot) -> ReviewPane:
+    """Wait for the review pane's load worker to land; return the pane."""
+
+    def loaded() -> bool:
+        panes = pilot.app.screen.query(ReviewPane)
+        return bool(panes) and panes.first()._report is not None
+
+    await _settle(pilot, loaded, what="review's load worker")
+    return pilot.app.screen.query(ReviewPane).first()
 
 
 def _setup(tmp_path: Path) -> tuple[Store, Config]:
@@ -646,9 +663,9 @@ async def test_review_integrity_tab_lists_findings(tmp_path: Path):
         assert screen._integrity_count is None
         # Activating the tab runs the check in a worker; wait for it, then assert.
         screen.query_one(TabbedContent).active = "tab-integrity"
-        await pilot.pause()
-        await app.workers.wait_for_complete()
-        await pilot.pause()
+        await _settle(
+            pilot, lambda: options.option_count > 1, what="integrity findings"
+        )
         # An ambiguous-date finding for "amb" is listed (with a group header row).
         assert options.option_count > 1
         assert any("amb" in str(o.prompt) for o in options.options)
@@ -665,9 +682,9 @@ async def test_review_integrity_edit_opens_the_flagged_doc(tmp_path: Path):
         home.action_review()
         pane = await _await_review_load(pilot)
         pane.query_one(TabbedContent).active = "tab-integrity"
-        await pilot.pause()
-        await app.workers.wait_for_complete()  # deferred integrity check runs here
-        await pilot.pause()
+        await _settle(
+            pilot, lambda: pane._integrity_count is not None, what="the integrity check"
+        )
         options = pane.query_one("#integrity", OptionList)
         # Highlight the finding row (skip the group-header row, which has no id).
         options.highlighted = next(
@@ -703,9 +720,11 @@ async def test_review_doc_write_invalidates_cached_integrity(tmp_path: Path):
         assert screen._docs is not None  # snapshot loaded once on mount
         # Run integrity so there's a cached result to invalidate.
         screen.query_one(TabbedContent).active = "tab-integrity"
-        await pilot.pause()
-        await app.workers.wait_for_complete()
-        await pilot.pause()
+        await _settle(
+            pilot,
+            lambda: screen._integrity_count is not None,
+            what="the integrity check",
+        )
         assert screen._integrity_count is not None
         # Unlink the dead rendition — a document write.
         screen.query_one(TabbedContent).active = "tab-missing"
@@ -1528,14 +1547,14 @@ async def test_edit_close_edit_remounts_without_duplicate_ids(tmp_path: Path):
         home = app.home
         pane = await _enter_edit(pilot, home, "passport")
         assert len(list(pane.query(".df-rend-row"))) == 1
+        # Poll rather than pausing twice: `remove_children` is async, and "two
+        # pumps" is a guess at how many turns it needs — one that holds on an idle
+        # machine and not on a loaded one. This test was seen to fail exactly once,
+        # early in the session, and pass on retry.
         pane.action_cancel_edit()
-        await pilot.pause()
-        await pilot.pause()
-        assert not pane.editing
+        await _settle(pilot, lambda: not pane.editing, what="the edit to close")
         home.action_edit()  # second edit — must not raise
-        await pilot.pause()
-        await pilot.pause()
-        assert pane.editing
+        await _settle(pilot, lambda: pane.editing, what="the edit to reopen")
         assert len(list(pane.query(".df-rend-row"))) == 1  # exactly one, not two
 
 
@@ -1819,8 +1838,7 @@ async def test_scan_doc_reads_and_persists_the_reading(
         home.open_detail("passport")
         await pilot.pause()
         home.action_scan_doc()  # starts the @work(thread=True) vision worker
-        await app.workers.wait_for_complete()
-        await pilot.pause()
+        await _settle(pilot, lambda: "passport" in store.load_scans(), what="the scan")
     saved = store.load_scans()
     assert "passport" in saved  # the reading was persisted
     assert saved["passport"].expiry_date_text == "01 Jan 2030"
@@ -1900,7 +1918,7 @@ async def test_intake_screen_reads_and_files_a_dropped_document(
     async with app.run_test() as pilot:
         app.push_screen(IntakeScreen(store, config))
         await pilot.pause()
-        await app.workers.wait_for_complete()  # the background VLM read
+        await _settle(pilot)  # the background VLM read
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, IntakeScreen)
@@ -1932,7 +1950,7 @@ async def test_intake_screen_reject_dismisses_without_filing(
     async with app.run_test() as pilot:
         app.push_screen(IntakeScreen(store, config))
         await pilot.pause()
-        await app.workers.wait_for_complete()
+        await _settle(pilot)
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, IntakeScreen)
@@ -2258,7 +2276,7 @@ async def test_intake_card_detects_and_folds_a_duplicate(
     async with app.run_test() as pilot:
         app.push_screen(IntakeScreen(store, config))
         await pilot.pause()
-        await app.workers.wait_for_complete()  # the background read + hash
+        await _settle(pilot)  # the background read + hash
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, IntakeScreen)
@@ -2300,7 +2318,7 @@ async def test_intake_card_retargets_the_succession_link(
     async with app.run_test() as pilot:
         app.push_screen(IntakeScreen(store, config))
         await pilot.pause()
-        await app.workers.wait_for_complete()
+        await _settle(pilot)
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, IntakeScreen)
