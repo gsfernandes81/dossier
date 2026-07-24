@@ -1243,6 +1243,11 @@ class HomeScreen(Screen[None]):
     ) -> None:
         self._reload()  # resync the list; _update_detail no-ops while editing
 
+    def on_detail_pane_edit_requested(self, event: DetailPane.EditRequested) -> None:
+        # `e` in the read view. Route through action_edit so the edit starts with
+        # the home's fresh neighbour list (a location move shifts slots around it).
+        self.action_edit()
+
 
 def _highlighted_id(options: OptionList) -> str | None:
     index = options.highlighted

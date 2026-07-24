@@ -39,6 +39,12 @@ uv run ds ask "when does my medical expire"   # retrieval-first answer over the 
 `ds ask` answers from the records themselves (no LLM call); `--limit N` widens how many matches it
 weighs.
 
+When the **detail pane holds focus** — which is the whole flow on a phone, where `→` drills
+into a document and focuses it — single letters become verbs again: **`e`** edits, **`o`** opens
+the file, **`u`** undoes. The find-fast router only claims letters while a *column* is focused, so
+these cost nothing there; the footer shows them whenever the pane is focused, and on a desktop
+they also work after you Tab or click into the pane.
+
 ## Tracking where the physical copy lives
 
 Every document has a **permanent** location (its home) and an optional **temporary** override

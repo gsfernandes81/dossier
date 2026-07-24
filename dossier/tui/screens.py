@@ -25,7 +25,7 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
-from textual.screen import ModalScreen, Screen
+from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
     Button,
@@ -53,7 +53,7 @@ from dossier.tui import (
 from dossier.tui.doclist import DocumentList
 
 
-def open_doc_file(screen: Screen, config: Config, doc: Document) -> None:
+def open_doc_file(node: Widget, config: Config, doc: Document) -> None:
     """Open a document's primary rendition with the platform opener.
 
     The app-wide **activate** verb (Enter/tap opens the file; ``→`` shows detail),
@@ -62,18 +62,18 @@ def open_doc_file(screen: Screen, config: Config, doc: Document) -> None:
     """
     rendition = doc.primary_rendition()
     if rendition is None:
-        screen.notify(f"{doc.name}: no digital file linked", severity="warning")
+        node.notify(f"{doc.name}: no digital file linked", severity="warning")
         return
     path = query.resolve_path(config.syncthing_root, rendition.path)
     if not path.exists():
-        screen.notify(f"file not found: {path}", severity="error")
+        node.notify(f"file not found: {path}", severity="error")
         return
     try:
         open_file(path)
     except OpenError as exc:
-        screen.notify(str(exc), severity="error")
+        node.notify(str(exc), severity="error")
     else:
-        screen.notify(f"opened {doc.name}")
+        node.notify(f"opened {doc.name}")
 
 
 def toggle_help_panel(node: Widget) -> None:

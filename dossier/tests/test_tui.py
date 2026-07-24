@@ -1681,6 +1681,61 @@ async def test_history_picker_restores_the_chosen_version(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_focused_detail_pane_takes_single_key_verbs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """When the detail pane holds focus, letters are verbs again.
+
+    That is the phone flow: `→` drills in and focuses the pane, and the find-fast
+    router only claims letters while a *column* is focused — so on the pane they
+    are free to mean edit / open / undo, recovering the one-key ergonomics the home
+    gave up without touching its type-to-search contract.
+    """
+    store, config = _setup(tmp_path)
+    opened: list[Path] = []
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(50, 24)) as pilot:  # narrow: drilling focuses pane
+        home = app.home
+        home.query_one("#documents", DocumentList).focus()
+        home.query_one("#documents", DocumentList).highlighted = 0  # passport
+        await pilot.pause()
+        await pilot.press("right")  # drill into detail
+        await pilot.pause()
+        pane = home.query_one("#detail", DetailPane)
+        assert app.focused is pane, "drilling in should focus the pane on narrow"
+
+        await pilot.press("o")  # open the file
+        await pilot.pause()
+        assert opened == [tmp_path / "passport.pdf"]
+
+        await pilot.press("e")  # edit
+        await pilot.pause()
+        assert pane.editing, "`e` did not start an edit"
+
+
+@pytest.mark.asyncio
+async def test_document_list_letters_stay_search_not_verbs(tmp_path: Path):
+    """The mirror: while a column is focused, `e` is search, never edit.
+
+    The single-key verbs live only on the focused pane; letting them fire from the
+    list too would break find-fast — the whole point of which is that the first
+    keystroke is always the start of a find.
+    """
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:  # wide: list keeps focus
+        home = app.home
+        home.query_one("#documents", DocumentList).focus()
+        await pilot.pause()
+        assert "e" not in home.active_bindings, "the list must not expose `e` as a verb"
+        await pilot.press("e")
+        await pilot.pause()
+        assert app.query_one("#search", Input).value == "e", "`e` should be search text"
+        assert not home.query_one("#detail", DetailPane).editing
+
+
+@pytest.mark.asyncio
 async def test_edit_mode_suppresses_home_bindings(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)

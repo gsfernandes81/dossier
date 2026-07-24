@@ -96,6 +96,8 @@ _NOTES = "f-notes"
 _EDIT_ACTIONS = frozenset(
     {"save", "cancel_edit", "reload_base", "focus_next_field", "focus_prev_field"}
 )
+# The mirror image: single-key verbs that live only in the *read* view.
+_READ_ACTIONS = frozenset({"edit_current", "open_current", "undo"})
 
 
 class DetailPane(VerticalScroll):
@@ -138,9 +140,15 @@ class DetailPane(VerticalScroll):
         ("ctrl+s", "save", "Save"),
         ("escape", "cancel_edit", "Discard"),
         ("ctrl+r", "reload_base", "Reload on-disk"),
-        ("ctrl+z", "undo", "Undo last save"),
         ("tab", "focus_next_field", "Next"),
         ("shift+tab", "focus_prev_field", "Prev"),
+        # Single-key verbs for the read view: when the pane holds focus (after `→`
+        # drills in — the whole flow on a phone) the find-fast router is dormant, so
+        # letters are free to mean something. Recovers the one-key ergonomics the
+        # home gave up, without touching the home's type-to-search contract.
+        ("e", "edit_current", "Edit"),
+        ("o", "open_current", "Open"),
+        ("u", "undo", "Undo"),
     ]
 
     editing: reactive[bool] = reactive(False)
@@ -161,6 +169,9 @@ class DetailPane(VerticalScroll):
 
     class ReloadRequested(Message):
         """Posted after a ctrl+r reload, so the home screen resyncs its list."""
+
+    class EditRequested(Message):
+        """`e` in the read view — the host starts the edit with its fresh doc list."""
 
     def __init__(
         self, store: Store, *, glyphs: GlyphSet, id: str | None = None
@@ -378,6 +389,18 @@ class DetailPane(VerticalScroll):
         self._discard_armed = False
         self.editing = False
 
+    def action_edit_current(self) -> None:
+        """`e` — edit the shown document. The host owns the fresh neighbour list."""
+        if not self.editing and self._doc.id:
+            self.post_message(self.EditRequested())
+
+    def action_open_current(self) -> None:
+        """`o` — open the shown document's file with the platform opener."""
+        if not self.editing and self._doc.id:
+            from dossier.tui.screens import open_doc_file
+
+            open_doc_file(self, self._store.config, self._doc)
+
     def action_undo(self) -> None:
         """``ctrl+z`` — put back the version this document had before the last save.
 
@@ -436,7 +459,12 @@ class DetailPane(VerticalScroll):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in _EDIT_ACTIONS:
-            return True if self.editing else None  # None → bubble to the home screen
+            # False, not None, off-mode: the key still bubbles to the home (Esc
+            # closing the detail relies on it), but the footer drops the greyed
+            # edit keys instead of showing five that do nothing in the read view.
+            return self.editing or False
+        if action in _READ_ACTIONS:
+            return not self.editing  # read-view only; hidden (False) while editing
         return True
 
     def has_pending_suggestion(self) -> bool:
