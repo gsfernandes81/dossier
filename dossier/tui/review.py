@@ -83,6 +83,9 @@ if TYPE_CHECKING:
 
 _SUGGESTED = "\x00suggested"  # data sentinel for the suggested-matches node
 _MISSING_SEP = "\x00"  # composite missing-row id: f"{doc_id}{sep}{path}"
+# Cap the flat orphan list under a filter (Textual measures every option it holds);
+# past this the answer is to narrow the search, as the home documents pane does.
+_FLAT_ORPHAN_CAP = 200
 
 
 @dataclass(frozen=True)
@@ -201,6 +204,15 @@ class ReviewPane(Vertical):
         # until first opened: count is None until checked, then the finding total.
         self._integrity_count: int | None = None
         self._integrity_started = False
+        self._integrity_report: doctor.Report | None = None  # retained, for re-filter
+        # The persistent bar's per-surface search, applied to the *active* tab. Pure
+        # in-memory: every populate method renders from cached state, never the store
+        # (the _snapshot() perf rule), so a keystroke costs no load_all.
+        self._filter = ""
+        self._dirty_tabs: set[str] = set()  # tabs whose render predates _filter
+        self._orphan_expanded: set[str] = (
+            set()
+        )  # folders open before a filter flattened
 
     def compose(self) -> ComposeResult:
         yield Label(id="rsummary")
@@ -318,15 +330,22 @@ class ReviewPane(Vertical):
         if not proposals:
             options.add_option(Option("no successions proposed"))
             return
+        shown = 0
         for proposal in proposals:
+            newer_name = names.get(proposal.newer, proposal.newer)
+            older_name = names.get(proposal.older, proposal.older)
+            if not self._match(newer_name, older_name, proposal.newer, proposal.older):
+                continue
             row_id = f"{proposal.newer}{self._SUCC_SEP}{proposal.older}"
             self._successions[row_id] = proposal
             label = (
-                f"{names.get(proposal.newer, proposal.newer)}  supersedes  "
-                f"{names.get(proposal.older, proposal.older)}"
+                f"{newer_name}  supersedes  {older_name}"
                 f"   ({proposal.rationale}, conf {proposal.confidence:.2f})"
             )
             options.add_option(Option(label, id=row_id))
+            shown += 1
+        if not shown:
+            options.add_option(Option("no successions match."))
 
     def _highlighted_succession(self) -> succession.Succession | None:
         options = self.query_one("#succession", OptionList)
@@ -468,26 +487,37 @@ class ReviewPane(Vertical):
         options.add_option(Option("checking integrity…"))
 
     def _populate_integrity_results(self, report: doctor.Report) -> None:
+        self._integrity_report = report  # retained so a filter can re-render it
         self._integrity_count = len(report.findings)
         options = self.query_one("#integrity", OptionList)
         options.clear_options()
         if not report.findings:
             options.add_option(Option("integrity: all clear."))
-        else:
-            index = 0
-            for check, items in sorted(report.by_check().items()):
-                options.add_option(Option(f"— {check} ({len(items)}) —", id=None))
-                hint = doctor.CHECK_HINTS.get(check)
-                if hint:
-                    options.add_option(Option(f"  → {hint}", id=None))
-                for finding in items:
+            self._update_summary()
+            return
+        index = 0
+        shown = 0
+        for check, items in sorted(report.by_check().items()):
+            matched = [f for f in items if self._match(f.subject, f.detail)]
+            if not matched:
+                index += len(items)  # keep composite ids stable across the filter
+                continue
+            options.add_option(Option(f"— {check} ({len(matched)}) —", id=None))
+            hint = doctor.CHECK_HINTS.get(check)
+            if hint:
+                options.add_option(Option(f"  → {hint}", id=None))
+            for finding in items:
+                if self._match(finding.subject, finding.detail):
                     # A doc can appear in several findings; a composite id keeps
                     # them unique (else OptionList raises DuplicateID).
                     oid = f"{finding.subject}{self._INTEG_SEP}{index}"
                     options.add_option(
                         Option(f"  {finding.subject}: {finding.detail}", id=oid)
                     )
-                    index += 1
+                    shown += 1
+                index += 1
+        if not shown:
+            options.add_option(Option("integrity: no findings match."))
         self._update_summary()
 
     def _invalidate_integrity(self) -> None:
@@ -499,6 +529,7 @@ class ReviewPane(Vertical):
         """
         self._integrity_started = False
         self._integrity_count = None
+        self._integrity_report = None
         self._seed_integrity_placeholder()
 
     def _snapshot(self) -> list[Document]:
@@ -605,6 +636,9 @@ class ReviewPane(Vertical):
         tree = self.query_one("#orphans", Tree)
         tree.clear()
         tree.root.expand()
+        if self._filter.strip():
+            self._populate_orphans_flat(tree, report)
+            return
         suggested = sorted(
             (o for o in report.orphans if o.suggestion), key=lambda o: -o.score
         )
@@ -627,6 +661,34 @@ class ReviewPane(Vertical):
             if expanded and folder in expanded:
                 branch.expand()  # re-trigger the lazy fill
 
+    def _populate_orphans_flat(
+        self, tree: Tree, report: reconcile.ReconcileReport
+    ) -> None:
+        """Under an active filter the folder grouping is noise — show a flat list of
+        matching orphan leaves (best match first), each carrying its ``_Leaf`` so
+        adopt/link/dismiss keep working. Full path as the label (folder context is
+        otherwise lost). Capped like the home documents pane: Textual re-measures
+        every option it holds, so an unbounded flat list is where a keystroke could
+        get slow on a big store."""
+        matches = [o for o in report.orphans if self._match(o.path, o.suggestion)]
+        # Suggested (highest-scoring) first, then the rest by path — so the top row
+        # is the likeliest adopt/link target.
+        matches.sort(key=lambda o: (o.suggestion is None, -o.score, o.path))
+        if not matches:
+            tree.root.add_leaf("no orphans match.")  # data-less: a/x/l no-op on it
+            return
+        shown = matches[:_FLAT_ORPHAN_CAP]
+        for orphan in shown:
+            label = orphan.path
+            if orphan.suggestion:
+                label = f"{orphan.path}  →  {orphan.suggestion}"
+            leaf = tree.root.add_leaf(label)
+            leaf.data = _Leaf(orphan.path, orphan.suggestion)
+        if len(matches) > len(shown):
+            hidden = len(matches) - len(shown)
+            tree.root.add_leaf(f"… and {hidden} more — keep typing")
+        tree.cursor_line = 1  # the first match, so `/` → type → ↓ → a adopts
+
     def _populate_missing(self) -> None:
         report = self._report
         assert report is not None
@@ -635,9 +697,15 @@ class ReviewPane(Vertical):
         if not report.missing:
             options.add_option(Option("no missing files."))
             return
+        shown = 0
         for miss in report.missing:
+            if not self._match(miss.doc_id, miss.path):
+                continue
             oid = f"{miss.doc_id}{_MISSING_SEP}{miss.path}"
             options.add_option(Option(f"{miss.doc_id}: {miss.path}", id=oid))
+            shown += 1
+        if not shown:
+            options.add_option(Option("no missing files match."))
 
     def _populate_dups(self, groups: list[dedup.DupGroup]) -> None:
         options = self.query_one("#dups", OptionList)
@@ -668,6 +736,11 @@ class ReviewPane(Vertical):
     @on(TabbedContent.TabActivated)
     def _tab_changed(self) -> None:
         self.refresh_bindings()  # footer shows only the active tab's actions
+        # A filter typed on one tab applies to the next you open — but only re-render
+        # when the tab's contents predate the current filter, so unfiltered tab
+        # switching keeps each list's cursor/scroll exactly as today.
+        if self._report is not None and self._active_tab() in self._dirty_tabs:
+            self._render_tab(self._active_tab())
         self.focus_active_pane()  # so its list/tree is immediately navigable
         # Integrity runs lazily on first open (never the default tab, so this is
         # always user-driven and post-mount — _report is set by then).
@@ -704,6 +777,50 @@ class ReviewPane(Vertical):
             hits = self.query(pane)
             if hits:
                 hits.first().focus()
+
+    # -- per-surface search (the persistent bar's `/`) -----------------------
+
+    def apply_filter(self, text: str) -> None:
+        """Filter the active tab by ``text`` — the host delivers the bar value here.
+
+        Pure in-memory: re-renders from cached state, never the store. Records the
+        filter unconditionally; if the first load hasn't landed the render is skipped
+        and ``_apply_load`` renders *through* ``self._filter`` when it does.
+        """
+        going_flat = bool(text.strip()) and not self._filter.strip()
+        self._filter = text
+        if self._report is None:
+            return
+        # Snapshot orphan expansion the moment a filter first flattens the tree, so
+        # clearing it can restore the folders exactly as they were.
+        if going_flat:
+            tree = self.query_one("#orphans", Tree)
+            self._orphan_expanded = self._expanded_folders(tree)
+        self._dirty_tabs = set(self._TAB_ORDER)
+        self._render_tab(self._active_tab())
+
+    def _render_tab(self, tab: str) -> None:
+        """Re-render one tab under the current filter (searchable tabs only).
+
+        Conflicts and Duplicates are intentionally left unfiltered — their lists are
+        short / cluster-shaped and filtering them buys little (Duplicates would also
+        risk `f`/`x` folding the wrong cluster).
+        """
+        self._dirty_tabs.discard(tab)
+        if tab == "tab-orphans":
+            self._populate_orphans(expanded=self._orphan_expanded)
+        elif tab == "tab-missing":
+            self._populate_missing()
+        elif tab == "tab-succession":
+            self._populate_succession()
+        elif tab == "tab-integrity" and self._integrity_report is not None:
+            self._populate_integrity_results(self._integrity_report)
+
+    def _match(self, *fields: str | None) -> bool:
+        """Whether any field contains the (casefolded) search term. Substring, not
+        fuzzy: these are paths and ids, not prose."""
+        term = self._filter.strip().casefold()
+        return not term or any(term in f.casefold() for f in fields if f)
 
     def action_next_tab(self) -> None:
         self._cycle_tab(1)
