@@ -546,25 +546,24 @@ class WatchPane(Vertical):
             self.post_message(self.OpenDocument(doc.id))
 
 
-class BundlesScreen(ModalScreen[str | None]):
-    """The bundles surface — grouped by category, sorted chronologically.
+class BundlesPane(Vertical):
+    """The bundles surface as a home *mode* (columns 1+2), not a modal.
 
-    Dismisses with a bundle slug (the home filters the documents pane to it) or
-    ``None``. ``Enter`` opens a bundle; ``d`` sets its date. A "suggested" section
-    lists folder-derived bundle proposals — ``a`` accepts (creates the bundle and
-    assigns its documents), ``x`` dismisses (persists, never reappears). Enter on a
-    suggestion does nothing — it isn't a bundle until accepted.
+    Grouped by category, sorted chronologically. Opening a bundle posts
+    ``OpenBundle`` (the host exits the mode and scopes the documents pane to it);
+    ``d`` sets its date, ``t`` a template, ``c`` shows a readiness report (all via
+    helper modals pushed from here — transient questions, not surfaces). A
+    "suggested" section lists folder-derived proposals — ``a`` accepts, ``x``
+    dismisses. The persistent bar filters the list via :meth:`apply_filter`. Lazily
+    mounted once and never torn down.
     """
 
     _SUGGESTED = "\x00sug:"  # option-id prefix for a folder-bundle suggestion
 
-    CSS = """
-    BundlesScreen { align: center middle; }
-    #blpanel {
-        width: 85%; height: 80%; padding: 1 2;
-        background: $panel; border: round $primary;
-    }
-    #bundle-list { height: 1fr; }
+    DEFAULT_CSS = """
+    BundlesPane { height: 1fr; }
+    BundlesPane #blsummary { margin-bottom: 1; }
+    BundlesPane #bundle-list { height: 1fr; }
     """
     BINDINGS = [
         Binding("escape", "close", "Close"),
@@ -576,6 +575,16 @@ class BundlesScreen(ModalScreen[str | None]):
         Binding("question_mark", "toggle_help_panel", "Keys"),
     ]
 
+    class OpenBundle(Message):
+        """Scope the home's documents to this bundle — the host exits the mode."""
+
+        def __init__(self, slug: str) -> None:
+            super().__init__()
+            self.slug = slug
+
+    class CloseRequested(Message):
+        """Esc — the host peels the newest layer."""
+
     def __init__(self, store: Store, config: Config, *, today: date) -> None:
         super().__init__()
         self._store = store
@@ -583,38 +592,64 @@ class BundlesScreen(ModalScreen[str | None]):
         self._today = today
         self._glyphs = glyphset.resolve(config.glyphs)
         self._suggested: list[suggest.BundleSuggestion] = []
+        self._filter = ""  # the persistent bar's per-surface search
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="blpanel"):
-            yield Label(id="blsummary")
-            yield OptionList(id="bundle-list")
+        yield Label(id="blsummary")
+        yield OptionList(id="bundle-list")
 
     def on_mount(self) -> None:
-        self._refresh()
+        self.refresh_bundles()
+        self.focus_active_pane()
 
-    def _refresh(self) -> None:
+    def apply_filter(self, text: str) -> None:
+        """Filter bundles by slug/title (the bar's per-surface search); the suggested
+        section drops out under a query."""
+        self._filter = text
+        self.refresh_bundles()
+
+    def refresh_on_enter(self) -> None:
+        self._filter = ""
+        if self.is_mounted:
+            self.refresh_bundles()
+
+    def reload_if_stale(self) -> None:
+        if self.is_mounted:
+            self.refresh_bundles()
+
+    def focus_active_pane(self) -> None:
+        lists = self.query("#bundle-list")  # tolerant: absent until the pane mounts
+        if lists:
+            lists.first().focus()
+
+    def refresh_bundles(self) -> None:
+        term = self._filter.strip().lower()
         bundles = self._store.load_bundles()
         docs = self._store.load_all()
         counts = Counter(slug for doc in docs for slug in doc.bundles)
         state = self._store.load_suggestions()
-        self._suggested = suggest.live_bundles(docs, bundles, state)
+        self._suggested = [] if term else suggest.live_bundles(docs, bundles, state)
         summary = self.query_one("#blsummary", Label)
         options = self.query_one("#bundle-list", OptionList)
         options.clear_options()
         if not bundles and not self._suggested:
-            summary.update("No bundles yet.  (Esc to close)")
+            note = "no bundles match." if term else "No bundles yet."
+            summary.update(f"{note}  (/ search · Esc closes)")
             return
         summary.update(
             f"{len(bundles)} bundles · {len(self._suggested)} suggested.  "
             "Enter opens · d date · t template · c readiness · "
-            "a accept · x dismiss · ? keys · Esc closes."
+            "a accept · x dismiss · / search · Esc closes."
         )
         templates = self._store.load_templates()
         readings = self._store.load_scans()
         for category, group in query.group_bundles(bundles.values()):
+            shown = [b for b in group if self._matches(b, term)]
+            if not shown:
+                continue
             header = f"{category} ▸" if category else "— other —"
             options.add_option(Option(header, id=None))
-            for bundle in group:
+            for bundle in shown:
                 readiness = ""
                 template = templates.get(bundle.template) if bundle.template else None
                 if template is not None:
@@ -641,17 +676,26 @@ class BundlesScreen(ModalScreen[str | None]):
                 label = f"  {sug.slug}   ({len(sug.doc_ids)} docs · {sug.folder})"
                 options.add_option(Option(label, id=f"{self._SUGGESTED}{index}"))
 
+    @staticmethod
+    def _matches(bundle: Bundle, term: str) -> bool:
+        return (
+            not term
+            or term in bundle.slug.lower()
+            or term in (bundle.title or "").lower()
+        )
+
     def action_close(self) -> None:
-        self.dismiss(None)
+        self.post_message(self.CloseRequested())
 
     def action_toggle_help_panel(self) -> None:
         toggle_help_panel(self)
 
     @on(OptionList.OptionSelected, "#bundle-list")
     def _open(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
         if event.option_id is None or event.option_id.startswith(self._SUGGESTED):
             return  # a suggestion isn't a bundle yet — `a` accepts it, Enter waits
-        self.dismiss(event.option_id)
+        self.post_message(self.OpenBundle(event.option_id))
 
     def action_accept(self) -> None:
         sug = self._highlighted_suggestion()
@@ -672,7 +716,7 @@ class BundlesScreen(ModalScreen[str | None]):
             except StoreError as exc:
                 self.notify(str(exc), severity="error")
         self.notify(f"created bundle {sug.slug}")
-        self._refresh()
+        self.refresh_bundles()
 
     def action_ignore(self) -> None:
         sug = self._highlighted_suggestion()
@@ -681,7 +725,7 @@ class BundlesScreen(ModalScreen[str | None]):
         state = self._store.load_suggestions()
         state.dismiss_key(sug.key)
         self._store.save_suggestions(state)
-        self._refresh()
+        self.refresh_bundles()
 
     def _highlighted_suggestion(self) -> suggest.BundleSuggestion | None:
         option_id = _highlighted_id(self.query_one("#bundle-list", OptionList))
@@ -717,7 +761,7 @@ class BundlesScreen(ModalScreen[str | None]):
             return
         bundles[slug].date = new_date
         self._store.save_bundles(bundles)
-        self._refresh()
+        self.refresh_bundles()
 
     def action_set_template(self) -> None:
         bundle = self._highlighted()
@@ -740,7 +784,7 @@ class BundlesScreen(ModalScreen[str | None]):
             return
         bundles[slug].template = value.strip() or None
         self._store.save_bundles(bundles)
-        self._refresh()
+        self.refresh_bundles()
 
     def action_check(self) -> None:
         bundle = self._highlighted()

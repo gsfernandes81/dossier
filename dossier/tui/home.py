@@ -83,7 +83,7 @@ from dossier.tui.intake import IntakeScreen
 from dossier.tui.review import ReviewPane
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
-    BundlesScreen,
+    BundlesPane,
     ChoiceScreen,
     SettingsScreen,
     SupersedeScreen,
@@ -142,6 +142,7 @@ _MODE_LOCKED = frozenset({"focus_search", "drill_in", "drill_out"})
 _MODES: tuple[tuple[str, str, bool], ...] = (
     ("review", "_review", False),
     ("watch", "_watch", True),
+    ("bundles", "_bundles", True),
 )
 
 
@@ -258,6 +259,14 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.watch-mode.show-detail WatchPane { display: none; }
     HomeScreen.-medium.watch-mode.show-detail WatchPane { display: none; }
 
+    /* Bundles: same mode shape as review/watch. */
+    BundlesPane { display: none; width: 1fr; }
+    HomeScreen.bundles-mode BundlesPane { display: block; }
+    HomeScreen.bundles-mode #locations { display: none; }
+    HomeScreen.bundles-mode #documents { display: none; }
+    HomeScreen.-narrow.bundles-mode.show-detail BundlesPane { display: none; }
+    HomeScreen.-medium.bundles-mode.show-detail BundlesPane { display: none; }
+
     /* Command mode: the persistent bar's `:`/`>` ex-mode. A *separate* OptionList
        (never #documents — its preserved-highlight logic, the "… and N more" cap row
        and the two-click mouse verb are all wrong for a single-tap command list)
@@ -270,6 +279,7 @@ class HomeScreen(Screen[None]):
     HomeScreen.command-mode #documents { display: none; }
     HomeScreen.command-mode ReviewPane { display: none; }
     HomeScreen.command-mode WatchPane { display: none; }
+    HomeScreen.command-mode BundlesPane { display: none; }
     /* No room for both the list and the detail on a phone — the transient mode wins;
        wide keeps the detail in column 3 beside the command list. */
     HomeScreen.-narrow.command-mode #detail { display: none; }
@@ -330,6 +340,7 @@ class HomeScreen(Screen[None]):
         self._show_detail = False
         self._review: ReviewPane | None = None  # mounted on first `action_review`
         self._watch: WatchPane | None = None  # mounted on first `action_watch`
+        self._bundles: BundlesPane | None = None  # mounted on first `action_bundles`
         self._show_issue = False
         self._detail_id: str | None = None
         self._narrow = False
@@ -1542,10 +1553,52 @@ class HomeScreen(Screen[None]):
                 self._detail_pane.start_edit(doc, self._docs)
 
     def action_bundles(self) -> None:
-        self.app.push_screen(
-            BundlesScreen(self._store, self._config, today=self._today),
-            self._after_bundles,
-        )
+        """Toggle the bundles surface into columns 1+2 (a mode, like review)."""
+        if self.has_class("bundles-mode"):
+            self._exit_bundles_mode()
+            return
+        self._leave_current_mode()
+        if self._bundles is None:
+            self._bundles = BundlesPane(self._store, self._config, today=self._today)
+            self.query_one("#panes").mount(self._bundles, before=self._detail_pane)
+        self._enter_bundles_mode()
+
+    def _enter_bundles_mode(self) -> None:
+        self.query_one("#search", Input).value = ""
+        self._filter_text = ""
+        self._bundle_filter = None
+        self._expiring_only = False
+        self.remove_class("searching", "show-documents")
+        self.add_class("bundles-mode")
+        if self._bundles is not None:
+            self._bundles.refresh_on_enter()
+            self._bundles.focus_active_pane()
+
+    def _exit_bundles_mode(self) -> None:
+        self.remove_class("bundles-mode")
+        if self._bundles is not None:
+            self._bundles.refresh_on_enter()  # drop the filter for next entry
+        self._reload()  # a date/template/accept edit may have landed
+        self._focus_documents()
+
+    @on(BundlesPane.OpenBundle)
+    def _bundles_open_bundle(self, event: BundlesPane.OpenBundle) -> None:
+        """Scope the documents pane to a bundle. Exit the mode *first* — the filter
+        targets #documents, which is hidden while bundles-mode owns the columns."""
+        event.stop()
+        self._exit_bundles_mode()
+        self._bundle_filter = event.slug
+        self._update_searching()
+        self._refresh_documents()
+        self.notify(f"showing bundle {event.slug} — Esc clears")
+
+    @on(BundlesPane.CloseRequested)
+    def _bundles_close_requested(self, event: BundlesPane.CloseRequested) -> None:
+        event.stop()
+        if self._show_detail:
+            self.close_detail()
+        else:
+            self._exit_bundles_mode()
 
     # -- helpers -------------------------------------------------------------
 
@@ -1595,6 +1648,7 @@ class HomeScreen(Screen[None]):
         panes = (
             "ReviewPane",
             "WatchPane",
+            "BundlesPane",
             "#documents",
             "#detail",
             "#locations",
@@ -1636,14 +1690,6 @@ class HomeScreen(Screen[None]):
     def _after_edit(self, saved: bool | None) -> None:
         if saved:
             self._reload()
-
-    def _after_bundles(self, slug: str | None) -> None:
-        self._reload()  # a bundle date edit may have landed
-        if slug is not None:
-            self._bundle_filter = slug  # scope the documents pane to this bundle
-            self._update_searching()
-            self._refresh_documents()
-            self.notify(f"showing bundle {slug} — Esc clears")
 
     # -- detail-pane edit messages -------------------------------------------
 
