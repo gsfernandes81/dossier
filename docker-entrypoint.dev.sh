@@ -35,15 +35,20 @@ mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
 } > "$HOME/.ssh/environment"
 chmod 600 "$HOME/.ssh/environment"
 
-# Claude Code records workspace trust per-project in ~/.claude.json (moved into the
-# persisted ds-claude volume via CLAUDE_CONFIG_DIR) as
-# projects["<dir>"].hasTrustDialogAccepted. On a FRESH volume that record is absent, so
-# the remote-control supervisor's `claude remote-control --spawn worktree` aborts with
-# "Workspace not trusted" — a dialog nobody can accept in a headless container. Pre-seed
-# the trust flag for /workspace (which also covers the worktrees spawned beneath it),
-# idempotently and merging into any existing config. Runs BEFORE the supervisor starts,
-# while no claude process is writing the file. /workspace is not $HOME, so unlike
-# home-directory trust this record is actually persisted.
+# Pre-seed two headless-hostile first-run flags in ~/.claude.json (moved into the
+# persisted ds-claude volume via CLAUDE_CONFIG_DIR). Both default to "unset" on a FRESH
+# volume, where each blocks the supervisor with a dialog nobody can answer in a headless
+# container. Done idempotently, merging into any existing config, BEFORE the supervisor
+# starts (while no claude process is writing the file):
+#
+#   1. projects["<dir>"].hasTrustDialogAccepted — workspace trust. Absent → `claude
+#      remote-control --spawn worktree` aborts with "Workspace not trusted". We seed it
+#      for /workspace (which also covers the worktrees spawned beneath it). /workspace is
+#      not $HOME, so unlike home-directory trust this record is actually persisted.
+#   2. remoteDialogSeen (top-level) — the one-time "Enable Remote Control? [y/N]" consent.
+#      When falsy, `claude remote-control` opens a readline prompt on stdin; with no
+#      interactive stdin the supervisor's daemon can never answer it and re-prompts on
+#      every restart. Seeding it true skips the prompt outright.
 python3 - "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.claude.json" /workspace <<'PY' || true
 import json, os, sys
 
@@ -56,9 +61,18 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     cfg = {}
 
+dirty = False
+
 entry = cfg.setdefault("projects", {}).setdefault(project, {})
 if entry.get("hasTrustDialogAccepted") is not True:
     entry["hasTrustDialogAccepted"] = True
+    dirty = True
+
+if cfg.get("remoteDialogSeen") is not True:
+    cfg["remoteDialogSeen"] = True
+    dirty = True
+
+if dirty:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
