@@ -450,3 +450,76 @@ def test_atomic_write_raises_after_a_persistent_permission_error(
         atomic_write_bytes(tmp_path / "probe.bin", b"data")
     # the temp file is cleaned up, not left behind
     assert not list(tmp_path.glob(f"{TEMP_PREFIX}*"))
+
+
+# -- history / restore -------------------------------------------------------
+
+
+def _save_notes(store: Store, doc_id: str, notes: str) -> None:
+    """Save a document with new notes, reading it fresh so the hash check passes."""
+    doc = store.load(doc_id)
+    doc.notes = notes
+    store.save(doc)
+
+
+def test_history_lists_prior_versions_newest_first(store: Store):
+    store.save(Document(id="passport", name="Passport", notes="v1"))
+    assert store.history("passport") == []  # a first save overwrites nothing
+
+    _save_notes(store, "passport", "v2")
+    _save_notes(store, "passport", "v3")
+    entries = store.history("passport")
+    assert [e.doc_id for e in entries] == ["passport", "passport"]
+    assert entries[0].saved_at > entries[1].saved_at  # newest first
+    # Each archive holds the content it *replaced*, not the content that replaced it.
+    assert "v2" in entries[0].path.read_text(encoding="utf-8")
+    assert "v1" in entries[1].path.read_text(encoding="utf-8")
+
+
+def test_restore_brings_back_a_version_and_archives_the_one_it_replaced(store: Store):
+    # "Undo is always undoable": restoring is an ordinary save, so the version it
+    # displaces is archived in turn and nothing is ever lost.
+    store.save(Document(id="passport", name="Passport", notes="v1"))
+    _save_notes(store, "passport", "v2")
+
+    restored = store.restore(store.history("passport")[0])
+    assert restored.notes == "v1"
+    assert store.load("passport").notes == "v1"
+
+    entries = store.history("passport")
+    assert "v2" in entries[0].path.read_text(encoding="utf-8"), "the undo is undoable"
+    again = store.restore(entries[0])
+    assert again.notes == "v2"
+
+
+def test_restore_takes_only_content_from_the_archive(store: Store):
+    # The id comes from the live filename and the stale-write hash from the live
+    # file, so a restore can't resurrect a stale id or trip its own hash check.
+    store.save(Document(id="passport", name="Passport", notes="v1"))
+    _save_notes(store, "passport", "v2")
+    entry = store.history("passport")[0]
+    entry.path.write_text(
+        entry.path.read_text(encoding="utf-8").replace('id: "passport"', 'id: "bogus"'),
+        encoding="utf-8",
+    )
+    assert store.restore(entry).id == "passport"
+
+
+def test_restore_recreates_a_document_deleted_since(store: Store):
+    store.save(Document(id="passport", name="Passport", notes="v1"))
+    _save_notes(store, "passport", "v2")
+    entry = store.history("passport")[0]
+    store.document_path("passport").unlink()
+    assert store.restore(entry).notes == "v1"
+    assert store.load("passport").notes == "v1"
+
+
+def test_history_ignores_files_that_are_not_stamps(store: Store):
+    store.save(Document(id="passport", name="Passport", notes="v1"))
+    _save_notes(store, "passport", "v2")
+    (store.config.history_dir / "passport" / "notes-to-self.md").write_text("hi")
+    assert len(store.history("passport")) == 1  # the stray file is skipped, not fatal
+
+
+def test_history_is_empty_for_an_unknown_document(store: Store):
+    assert store.history("nope") == []

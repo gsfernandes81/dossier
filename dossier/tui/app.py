@@ -61,6 +61,11 @@ class DossierCommands(Provider):
                 "Reveal the file under the cursor (not on Android)",
             ),
             ("Copy file path", "copy_path", "Put the file's path on the clipboard"),
+            (
+                "History — restore an earlier version",
+                "history",
+                "Roll the current document back to a saved version",
+            ),
             ("Bundles", "bundles", "Browse and edit document bundles"),
             ("Watch expiry", "watch", "The expiry-watch surface"),
             ("Toggle expiring-only filter", "toggle_expiring", "Just expiring docs"),

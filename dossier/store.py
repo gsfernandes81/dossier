@@ -41,6 +41,7 @@ import time
 import tomllib
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -152,6 +153,19 @@ def libyaml_hint() -> str | None:
         "YAML is running pure-Python (~10x slower parsing). Reinstall dossier so "
         "PyYAML picks up a libyaml-backed build (see docs/guide/install.md)."
     )
+
+
+@dataclass(frozen=True)
+class HistoryEntry:
+    """One archived version of a document: when it was replaced, and where it sits.
+
+    Written by every overwriting save (see :meth:`Store._backup`) into the *local*
+    history dir, so versions never sync and can't start a sync round of their own.
+    """
+
+    doc_id: str
+    saved_at: datetime  # UTC — when this version was superseded
+    path: Path
 
 
 class Store:
@@ -277,6 +291,41 @@ class Store:
         atomic_write_bytes(target, payload)
         doc.source_hash = _hash(payload)
         return doc
+
+    _STAMP = "%Y%m%dT%H%M%S%fZ"
+
+    def history(self, doc_id: str) -> list[HistoryEntry]:
+        """Archived prior versions of a document, **newest first**.
+
+        Every overwriting save already writes one; this only surfaces what is there.
+        Files whose name isn't a stamp are ignored rather than fatal — the history
+        dir is a plain folder a human may have poked at.
+        """
+        entries: list[HistoryEntry] = []
+        for path in (self.config.history_dir / doc_id).glob("*.md"):
+            try:
+                saved_at = datetime.strptime(path.stem, self._STAMP).replace(tzinfo=UTC)
+            except ValueError:
+                continue
+            entries.append(HistoryEntry(doc_id, saved_at, path))
+        return sorted(entries, key=lambda e: e.saved_at, reverse=True)
+
+    def restore(self, entry: HistoryEntry) -> Document:
+        """Write an archived version back as the current one.
+
+        The restore is an ordinary save, so the version it replaces is archived in
+        turn — undoing is itself undoable, and nothing is ever lost. Only the
+        *content* comes from the archive: the id is the live document's (it is the
+        filename), and the stale-write hash is the live file's, so the check still
+        compares against what is on disk now rather than against the archive.
+        """
+        target = self.document_path(entry.doc_id)
+        doc = self._parse(target, self._read_bytes(entry.path))
+        try:
+            doc.source_hash = self.load(entry.doc_id).source_hash
+        except StoreError:
+            doc.source_hash = None  # deleted since it was archived — recreate it
+        return self.save(doc)
 
     def _backup(self, target: Path, data: bytes) -> None:
         # A pre-overwrite history backup is best-effort: write ``data`` (the prior

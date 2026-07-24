@@ -74,7 +74,7 @@ from dossier.model import Document, ExpiryStatus, Location, SuggestionState
 from dossier.platform_open import OpenError, copy_path, reveal_file
 from dossier.store import Store
 from dossier.tui import glyphs, rows
-from dossier.tui.detail_pane import DetailPane
+from dossier.tui.detail_pane import DetailPane, format_saved_at
 from dossier.tui.doclist import DocumentList
 from dossier.tui.intake import IntakeScreen
 from dossier.tui.review import ReviewPane
@@ -837,6 +837,32 @@ class HomeScreen(Screen[None]):
             self.notify(str(exc), severity="error")
         else:
             self.notify(f"copied {path}")
+
+    def action_history(self) -> None:
+        """Pick an earlier version of the current document and restore it.
+
+        The arbitrary-depth companion to the detail pane's ``ctrl+z``, which only
+        toggles the most recent version. Reuses the same restore path, so a pick
+        from here is archived and undoable exactly as a ctrl+z is.
+        """
+        doc = self._current_doc()
+        if doc is None:
+            self.notify("no document selected", severity="warning")
+            return
+        entries = {str(e.saved_at.timestamp()): e for e in self._store.history(doc.id)}
+        if not entries:
+            self.notify(f"{doc.name}: no earlier version saved")
+            return
+        choices = [(key, format_saved_at(e)) for key, e in entries.items()]
+
+        def restore(key: str | None) -> None:
+            if key is not None:
+                self.open_detail(doc.id)  # show what changed, wherever we were
+                self._detail_pane.restore_version(entries[key])
+
+        self.app.push_screen(
+            ChoiceScreen(f"Restore which version of {doc.name}?", choices), restore
+        )
 
     def action_toggle_dates(self) -> None:
         self._show_issue = not self._show_issue

@@ -76,6 +76,22 @@ Validity is **event-aware**: a document isn't judged only against today but agai
 **event date**. A cert that's valid now but lapses before the trip you've bundled it for shows as
 *expiring-by-event*, so "valid today" never lulls you into missing a renewal you'll need later.
 
+## Undoing an edit
+
+Every save already archives the version it replaces, in a **local** history dir that never
+syncs (so a rollback can't start a sync round of its own), keeping the last 10 per document.
+Two ways to reach it:
+
+- **`ctrl+z`** in the detail pane puts back the version from before the last save. It is a
+  *toggle*, not a stack: the restore is itself a save, so pressing it again brings back what
+  you just undid. Nothing is ever lost, in either direction.
+- **History — restore an earlier version** in the command palette lists a document's archived
+  versions by timestamp, for when you want to go further back than one step.
+
+A restore only takes the *content* from the archive. The id stays the live document's, and the
+stale-write check still compares against what is on disk now — so restoring can't resurrect a
+stale id or trample a change another device just synced in.
+
 ## Reconciling files against records — `ds reconcile`
 
 Over time the file tree and the document records drift apart. The TUI's **Review** surface (or

@@ -1559,6 +1559,72 @@ async def test_edit_close_edit_remounts_without_duplicate_ids(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_ctrl_z_restores_the_previous_save_and_toggles_back(tmp_path: Path):
+    """`ctrl+z` is a toggle, not a stack — and that is the honest reading.
+
+    A restore is itself a save, so the version it displaces is archived in turn;
+    pressing again therefore brings back what was just undone. Arbitrary depth is
+    the History picker's job, not hidden per-session state.
+    """
+    store, config = _setup(tmp_path)
+    doc = store.load("passport")
+    doc.notes = "second"
+    store.save(doc)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        pane = home.query_one("#detail", DetailPane)
+        pane.focus()
+        await pilot.pause()
+
+        await pilot.press("ctrl+z")
+        await _settle(pilot, lambda: store.load("passport").notes != "second")
+        assert store.load("passport").notes == ""  # back to the original
+
+        await pilot.press("ctrl+z")  # undoing the undo
+        await _settle(pilot, lambda: store.load("passport").notes == "second")
+
+
+@pytest.mark.asyncio
+async def test_ctrl_z_says_so_when_there_is_nothing_to_undo(tmp_path: Path):
+    store, config = _setup(tmp_path)  # passport saved once — nothing displaced yet
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        pane = home.query_one("#detail", DetailPane)
+        pane.action_undo()
+        await pilot.pause()
+        assert any("no earlier version" in n.message for n in app._notifications)
+
+
+@pytest.mark.asyncio
+async def test_history_picker_restores_the_chosen_version(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    for note in ("second", "third"):
+        doc = store.load("passport")
+        doc.notes = note
+        store.save(doc)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        home.action_history()
+        await pilot.pause()
+        assert isinstance(app.screen, ChoiceScreen)
+
+        choices = app.screen.query_one("#cchoices", OptionList)
+        assert choices.option_count == 2  # two versions were displaced
+        choices.highlighted = 1  # the older of the two: the original, empty notes
+        await pilot.press("enter")
+        await _settle(pilot, lambda: store.load("passport").notes == "")
+
+
+@pytest.mark.asyncio
 async def test_edit_mode_suppresses_home_bindings(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)

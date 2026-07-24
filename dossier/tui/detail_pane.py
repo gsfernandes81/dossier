@@ -56,9 +56,15 @@ from dossier.errors import StaleWriteError, StoreError
 from dossier.migrate import slugify, slugify_path
 from dossier.model import Bundle, Document, Rendition, SuggestedField, Suggestion
 from dossier.query import DocumentView, plan_move
-from dossier.store import Store
+from dossier.store import HistoryEntry, Store
 from dossier.tui import detail, forms
 from dossier.tui.glyphs import GlyphSet
+
+
+def format_saved_at(entry: HistoryEntry) -> str:
+    """A label for an archived version, in local time (the stamp itself is UTC)."""
+    return entry.saved_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
 
 _READ = "detail-body"
 _FORM = "detail-form"
@@ -132,6 +138,7 @@ class DetailPane(VerticalScroll):
         ("ctrl+s", "save", "Save"),
         ("escape", "cancel_edit", "Discard"),
         ("ctrl+r", "reload_base", "Reload on-disk"),
+        ("ctrl+z", "undo", "Undo last save"),
         ("tab", "focus_next_field", "Next"),
         ("shift+tab", "focus_prev_field", "Prev"),
     ]
@@ -370,6 +377,37 @@ class DetailPane(VerticalScroll):
             return
         self._discard_armed = False
         self.editing = False
+
+    def action_undo(self) -> None:
+        """``ctrl+z`` — put back the version this document had before the last save.
+
+        A *toggle*, not an undo stack: the restore is itself a save, so pressing it
+        again brings back what you just undid. That is the honest reading of "undo
+        is always undoable", and arbitrary depth lives in the History picker rather
+        than in hidden per-session state that a reload would silently invalidate.
+        """
+        if self._is_new or not self._doc.id or self.editing:
+            return  # an unsaved draft has no history; a live edit owns ctrl+z
+        entries = self._store.history(self._doc.id)
+        if not entries:
+            self.notify("no earlier version saved for this document")
+            return
+        self.restore_version(entries[0])
+
+    def restore_version(self, entry: HistoryEntry) -> None:
+        """Restore one archived version and re-render.
+
+        Shared by ``ctrl+z`` and the History picker.
+        """
+        try:
+            self._store.restore(entry)
+        except StoreError as exc:
+            self.notify(str(exc), severity="error")
+            return
+        self.notify(f"restored the version from {format_saved_at(entry)}")
+        # Same refresh path as a save: the row list and any open neighbour view are
+        # now stale, and the pane must re-read rather than trust its in-memory copy.
+        self.post_message(self.Saved(entry.doc_id))
 
     def action_reload_base(self) -> None:
         if self._is_new or not self._doc.id:

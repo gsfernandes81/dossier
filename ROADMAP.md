@@ -37,9 +37,8 @@ a build-but-don't-run installer) that closes the phone sync-back loop. **Phases 
 complete.** Phases 14–15 are next: **find-fast UX** (launch optimized for the urgent
 lookup, undo, init/empty-state polish, typo-tolerant search) and **Syncthing integration**.
 
-**Next up:** the rest of Phase 14 — **undo / history restore**, then first-run & empty
-states and typo-tolerant search. ("Review in the miller view" landed, with its four
-carried fixes.)
+**Next up:** the rest of Phase 14 — **first-run & empty states**, then typo-tolerant
+search. (Review-in-the-miller-view and undo/history restore have landed.)
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -344,10 +343,17 @@ search forgives phone-keyboard typos.
     sidecar problems), `Enter` falls through to the record rather than doing nothing.
   - [x] **Open both sides of a succession** — `o` opens older then newer so the renewal
     lands frontmost, and opens whichever side exists when the other is paper-only.
-- [ ] **Undo / history restore** (M) — every save already writes the prior version to the
-  local history dir; surface it. `ctrl+z` in the detail pane restores the last saved
-  version of the current doc; a palette "History…" lists a doc's saved versions to
-  restore from. Restores are themselves saves (history'd), so undo is always undoable.
+- [x] **Undo / history restore** (M) — **done.** Every save already archived the version
+  it replaced (10 deep, in the non-synced local history dir); this surfaces it.
+  `Store.history(doc_id)` lists versions newest-first and `Store.restore(entry)` writes one
+  back *as an ordinary save*, so the version it displaces is archived in turn — undo is
+  always undoable, in both directions. A restore takes only the **content** from the
+  archive: the id is the live filename's and the stale-write hash is the live file's, so it
+  can neither resurrect a stale id nor trample a change synced in meanwhile. `ctrl+z` in the
+  detail pane is deliberately a **toggle** rather than a stack (pressing again re-does),
+  because with restores being saves a naive "restore the newest archive" walks into a
+  ping-pong; arbitrary depth lives in the palette's **History** picker, which reuses the
+  ChoiceScreen added for the reveal/copy verbs.
 - [ ] **First-run & empty states** (S) — `ds init` walks root pick → glyph check → Termux
   preconditions conversationally; every empty surface (no config, empty store, empty
   inbox, no matches) says exactly what to do next instead of rendering blank.
