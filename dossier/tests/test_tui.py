@@ -2244,12 +2244,21 @@ def _inbox_setup(tmp_path: Path, name: str) -> tuple[Store, Config]:
     return store, config
 
 
+async def _enter_intake(pilot, home):
+    """Enter intake-mode and wait for the first card's background read to land."""
+    home.action_intake()
+    await _settle(pilot, lambda: home.has_class("intake-mode"))
+    pane = home._intake
+    assert pane is not None
+    await _settle(pilot, lambda: pane._proposal is not None or not pane._pending)
+    return pane
+
+
 @pytest.mark.asyncio
-async def test_intake_screen_reads_and_files_a_dropped_document(
+async def test_intake_mode_reads_and_files_a_dropped_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     from dossier import scan as scan_mod
-    from dossier.tui.intake import IntakeScreen
 
     store, config = _inbox_setup(tmp_path, "new.pdf")
     reading = scan_mod.ScanReading.from_payload(
@@ -2258,15 +2267,12 @@ async def test_intake_screen_reads_and_files_a_dropped_document(
     monkeypatch.setattr(scan_mod, "extract", lambda p, c: reading)  # no VLM
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.push_screen(IntakeScreen(store, config))
-        await pilot.pause()
-        await _settle(pilot)  # the background VLM read
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, IntakeScreen)
-        assert screen._proposal is not None
-        assert screen._proposal.doc.name == "Driving Licence"
-        screen.action_accept()  # apply is synchronous
+        home = app.home
+        pane = await _enter_intake(pilot, home)
+        assert not home.query_one("#documents", OptionList).display
+        assert pane._proposal is not None
+        assert pane._proposal.doc.name == "Driving Licence"
+        pane.action_accept()  # apply is synchronous
         await pilot.pause()
 
     filed = [d for d in store.load_all() if d.name == "Driving Licence"]
@@ -2276,27 +2282,22 @@ async def test_intake_screen_reads_and_files_a_dropped_document(
 
 
 @pytest.mark.asyncio
-async def test_intake_screen_reject_dismisses_without_filing(
+async def test_intake_mode_reject_dismisses_without_filing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     from dossier import (
         intake,
         scan as scan_mod,
     )
-    from dossier.tui.intake import IntakeScreen
 
     store, config = _inbox_setup(tmp_path, "junk.pdf")
     reading = scan_mod.ScanReading.from_payload({"document_type": "X"}, model="m")
     monkeypatch.setattr(scan_mod, "extract", lambda p, c: reading)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.push_screen(IntakeScreen(store, config))
-        await pilot.pause()
-        await _settle(pilot)
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, IntakeScreen)
-        screen.action_reject()
+        home = app.home
+        pane = await _enter_intake(pilot, home)
+        pane.action_reject()
         await pilot.pause()
 
     assert "Inbox/junk.pdf" in store.load_reconcile().dismissed  # marked not-a-doc
@@ -2427,11 +2428,9 @@ async def test_attention_chips_route_to_their_surfaces(tmp_path: Path):
         await pilot.press("escape")
         await pilot.pause()
 
-        from dossier.tui.intake import IntakeScreen
-
         await pilot.click("#attn-inbox")
-        await pilot.pause()
-        assert isinstance(app.screen, IntakeScreen), "inbox chip did not open intake"
+        await _settle(pilot, lambda: home.has_class("intake-mode"))
+        assert home.has_class("intake-mode"), "inbox chip did not open intake"
 
 
 @pytest.mark.asyncio
@@ -2674,7 +2673,6 @@ async def test_intake_card_detects_and_folds_a_duplicate(
         intake,
         scan as scan_mod,
     )
-    from dossier.tui.intake import IntakeScreen
 
     store, config = _inbox_setup(tmp_path, "dup.pdf")  # passport.pdf is already linked
     reading = scan_mod.ScanReading.from_payload(
@@ -2689,18 +2687,14 @@ async def test_intake_card_detects_and_folds_a_duplicate(
     )
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.push_screen(IntakeScreen(store, config))
-        await pilot.pause()
-        await _settle(pilot)  # the background read + hash
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, IntakeScreen)
-        assert screen._proposal is not None
-        assert screen._proposal.duplicate is not None
-        assert screen._proposal.duplicate.doc_id == "passport"
-        body = str(screen.query_one("#ibody", Label).render())
+        home = app.home
+        pane = await _enter_intake(pilot, home)
+        assert pane._proposal is not None
+        assert pane._proposal.duplicate is not None
+        assert pane._proposal.duplicate.doc_id == "passport"
+        body = str(pane.query_one("#ibody", Label).render())
         assert "duplicate of" in body and "[f folds]" in body  # the card leads with it
-        screen.action_fold()  # fold instead of filing a new record
+        pane.action_fold()  # fold instead of filing a new record
         await pilot.pause()
 
     # No second Passport record; the copy became a rendition; the inbox is emptied.
@@ -2718,7 +2712,6 @@ async def test_intake_card_retargets_the_succession_link(
         intake,
         scan as scan_mod,
     )
-    from dossier.tui.intake import IntakeScreen
     from dossier.tui.screens import DocPickerScreen
 
     store, config = _inbox_setup(tmp_path, "new.pdf")
@@ -2731,21 +2724,49 @@ async def test_intake_card_retargets_the_succession_link(
     )
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        app.push_screen(IntakeScreen(store, config))
-        await pilot.pause()
-        await _settle(pilot)
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, IntakeScreen)
-        assert screen._proposal is not None
-        assert screen._proposal.doc.supersedes is None  # nothing auto-proposed
+        home = app.home
+        pane = await _enter_intake(pilot, home)
+        assert pane._proposal is not None
+        assert pane._proposal.doc.supersedes is None  # nothing auto-proposed
 
-        screen.action_retarget()  # open the picker
+        pane.action_retarget()  # open the picker (a transient modal, still pushed)
         await pilot.pause()
         assert isinstance(app.screen, DocPickerScreen)
         app.screen.dismiss("coc")  # pick an existing document to renew
         await pilot.pause()
-        assert screen._proposal.doc.supersedes == "coc"  # link set by hand
+        assert pane._proposal.doc.supersedes == "coc"  # link set by hand
+
+
+@pytest.mark.asyncio
+async def test_intake_mode_command_bar_and_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`:` opens command mode over intake (a non-searchable mode); Esc returns to the
+    card, and Esc from the card exits intake. Search stays gated off (no list)."""
+    from dossier import scan as scan_mod
+
+    store, config = _inbox_setup(tmp_path, "new.pdf")
+    reading = scan_mod.ScanReading.from_payload(
+        {"document_type": "Driving Licence", "confidence": 0.9}, model="m"
+    )
+    monkeypatch.setattr(scan_mod, "extract", lambda p, c: reading)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        pane = await _enter_intake(pilot, home)
+        assert home.check_action("focus_search", ()) is False  # no list to filter
+
+        pane.focus()
+        await pilot.pause()
+        await pilot.press("colon")  # command mode over intake
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+        assert not pane.display
+        await pilot.press("escape")
+        await _settle(pilot, lambda: not home.has_class("command-mode"))
+        assert home.has_class("intake-mode") and pane.display
+
+        await pilot.press("escape")  # Esc from the card exits intake
+        await _settle(pilot, lambda: not home.has_class("intake-mode"))
 
 
 @pytest.mark.asyncio

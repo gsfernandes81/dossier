@@ -79,7 +79,7 @@ from dossier.tui import glyphs, rows
 from dossier.tui.commands import ENTRIES, Entry, Kind
 from dossier.tui.detail_pane import DetailPane, format_saved_at
 from dossier.tui.doclist import DocumentList
-from dossier.tui.intake import IntakeScreen
+from dossier.tui.intake import IntakePane
 from dossier.tui.review import ReviewPane
 from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
@@ -143,6 +143,7 @@ _MODES: tuple[tuple[str, str, bool], ...] = (
     ("review", "_review", False),
     ("watch", "_watch", True),
     ("bundles", "_bundles", True),
+    ("intake", "_intake", False),
 )
 
 
@@ -267,6 +268,14 @@ class HomeScreen(Screen[None]):
     HomeScreen.-narrow.bundles-mode.show-detail BundlesPane { display: none; }
     HomeScreen.-medium.bundles-mode.show-detail BundlesPane { display: none; }
 
+    /* Intake: same mode shape (no per-surface search — it's a one-card queue). */
+    IntakePane { display: none; width: 1fr; }
+    HomeScreen.intake-mode IntakePane { display: block; }
+    HomeScreen.intake-mode #locations { display: none; }
+    HomeScreen.intake-mode #documents { display: none; }
+    HomeScreen.-narrow.intake-mode.show-detail IntakePane { display: none; }
+    HomeScreen.-medium.intake-mode.show-detail IntakePane { display: none; }
+
     /* Command mode: the persistent bar's `:`/`>` ex-mode. A *separate* OptionList
        (never #documents — its preserved-highlight logic, the "… and N more" cap row
        and the two-click mouse verb are all wrong for a single-tap command list)
@@ -280,6 +289,7 @@ class HomeScreen(Screen[None]):
     HomeScreen.command-mode ReviewPane { display: none; }
     HomeScreen.command-mode WatchPane { display: none; }
     HomeScreen.command-mode BundlesPane { display: none; }
+    HomeScreen.command-mode IntakePane { display: none; }
     /* No room for both the list and the detail on a phone — the transient mode wins;
        wide keeps the detail in column 3 beside the command list. */
     HomeScreen.-narrow.command-mode #detail { display: none; }
@@ -341,6 +351,7 @@ class HomeScreen(Screen[None]):
         self._review: ReviewPane | None = None  # mounted on first `action_review`
         self._watch: WatchPane | None = None  # mounted on first `action_watch`
         self._bundles: BundlesPane | None = None  # mounted on first `action_bundles`
+        self._intake: IntakePane | None = None  # mounted on first `action_intake`
         self._show_issue = False
         self._detail_id: str | None = None
         self._narrow = False
@@ -1533,24 +1544,57 @@ class HomeScreen(Screen[None]):
             self._exit_review_mode()
 
     def action_intake(self) -> None:
+        """Toggle the intake queue into columns 1+2 (a mode, like review)."""
+        if self.has_class("intake-mode"):
+            self._exit_intake_mode()
+            return
         if not self._config.intake_inbox:
             self.notify(
                 "no inbox configured — set [intake] inbox in .dossier/config.toml",
                 severity="warning",
             )
             return
-        self.app.push_screen(
-            IntakeScreen(self._store, self._config), self._after_intake
-        )
+        self._leave_current_mode()
+        if self._intake is None:
+            self._intake = IntakePane(self._store, self._config)
+            self.query_one("#panes").mount(self._intake, before=self._detail_pane)
+        self._enter_intake_mode()
 
-    def _after_intake(self, doc_id: str | None) -> None:
+    def _enter_intake_mode(self) -> None:
+        self.query_one("#search", Input).value = ""
+        self._filter_text = ""
+        self._bundle_filter = None
+        self._expiring_only = False
+        self.remove_class("searching", "show-documents")
+        self.add_class("intake-mode")
+        if self._intake is not None:
+            self._intake.refresh_on_enter()  # restart the one-shot queue
+            self._intake.focus_active_pane()
+
+    def _exit_intake_mode(self) -> None:
+        self.remove_class("intake-mode")
+        if self._intake is not None:
+            self._intake.cancel_reads()  # no late VLM read after the mode is gone
         self._scan_attention()  # inbox drained (and a fold can clear a conflict)
         self._reload()  # documents were filed (new records, moved files)
-        if doc_id is not None:
-            doc = self._doc_by_id(doc_id)
-            if doc is not None:
-                self.open_detail(doc.id)
-                self._detail_pane.start_edit(doc, self._docs)
+        self._focus_documents()
+
+    @on(IntakePane.OpenDocument)
+    def _intake_open_document(self, event: IntakePane.OpenDocument) -> None:
+        """File + edit: leave intake, then open the freshly-filed record in the pane."""
+        event.stop()
+        self._exit_intake_mode()
+        doc = self._doc_by_id(event.doc_id)
+        if doc is None:
+            self.notify(f"{event.doc_id}: no such document", severity="warning")
+            return
+        self.open_detail(doc.id)
+        self._detail_pane.start_edit(doc, self._docs)
+
+    @on(IntakePane.CloseRequested)
+    def _intake_close_requested(self, event: IntakePane.CloseRequested) -> None:
+        event.stop()
+        self._exit_intake_mode()
 
     def action_bundles(self) -> None:
         """Toggle the bundles surface into columns 1+2 (a mode, like review)."""
@@ -1649,6 +1693,7 @@ class HomeScreen(Screen[None]):
             "ReviewPane",
             "WatchPane",
             "BundlesPane",
+            "IntakePane",
             "#documents",
             "#detail",
             "#locations",
