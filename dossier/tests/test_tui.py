@@ -62,6 +62,7 @@ from dossier.tui.screens import (
     SupersedeScreen,
     TextPromptScreen,
     WatchScreen,
+    _command_index_text,
 )
 
 TODAY = date(2026, 7, 21)
@@ -2457,6 +2458,58 @@ async def test_intake_card_retargets_the_succession_link(
         assert screen._proposal.doc.supersedes == "coc"  # link set by hand
 
 
+@pytest.mark.asyncio
+async def test_contextual_commands_hide_when_they_cannot_act(tmp_path: Path):
+    """A command that would no-op should not be offered.
+
+    Both of these used to sit in the list permanently: "Cancel vision scan"
+    cheerfully notified "cancelling…" with nothing running, and "Accept top
+    suggestion" returned silently with no detail pane open. check_action gates the
+    palette now, so gating them here removes them from the list itself.
+    """
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        await pilot.pause()
+        assert home.check_action("cancel_scan", ()) is False, "nothing is scanning"
+        assert home.check_action("accept_suggestion", ()) is False, "no detail open"
+        # A command with no precondition is unaffected.
+        assert home.check_action("review", ()) is True
+
+
+@pytest.mark.asyncio
+async def test_help_panel_indexes_the_commands_without_burying_the_keys(tmp_path: Path):
+    """`?` gains the *shape* of the command surface, not its contents.
+
+    Textual's panel is a 30–60 column split and the keybindings already fill most
+    of it — listing all 19 commands there would push out the keys the panel exists
+    to show. Counts per group answer "how much else is there"; ctrl+p answers
+    "which one".
+    """
+    from textual.widgets import HelpPanel, KeyPanel
+
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(110, 34)) as pilot:
+        await pilot.press("question_mark")
+        await _settle(pilot, lambda: bool(app.screen.query("#help-commands")))
+        panel = app.screen.query_one(HelpPanel)
+        index = panel.query_one("#help-commands")
+        # It sits *above* the key list, which is `height: 1fr` and would otherwise
+        # leave it no room at all — mounting it after was why it never appeared.
+        children = list(panel.children)
+        assert children.index(index) < children.index(panel.query_one(KeyPanel))
+
+    # The content itself is a pure function, so assert on that rather than on
+    # widget internals (Static exposes no stable `.renderable` here).
+    rendered = _command_index_text().plain
+    assert f"{len(ENTRIES)} commands" in rendered
+    assert "Current document" in rendered
+    # Counts, never the titles — that is what keeps it from crowding out the keys.
+    assert "Settings" not in rendered
+
+
 def test_palette_covers_the_occasional_actions():
     from dossier.tui.home import HomeScreen
 
@@ -2468,7 +2521,6 @@ def test_palette_covers_the_occasional_actions():
         "watch",
         "toggle_expiring",
         "intake",
-        "move",
         "supersede",
         "settings",
         "toggle_search_content",
@@ -2476,6 +2528,13 @@ def test_palette_covers_the_occasional_actions():
     # Every palette command maps to a real HomeScreen action.
     for action in actions:
         assert callable(getattr(HomeScreen, f"action_{action}", None))
+    # "Move" and "Add to bundle" were the same _open_and_edit call as "Edit" with a
+    # different starting field, so they are one entry now — but still findable by
+    # the words people think in, which is what keeps the merge from costing anything.
+    assert "move" not in actions
+    haystacks = {entry.haystack.lower() for entry in ENTRIES}
+    for word in ("move", "bundle", "rename"):
+        assert any(word in hay for hay in haystacks), word
 
 
 @pytest.mark.asyncio

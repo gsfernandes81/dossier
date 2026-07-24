@@ -86,6 +86,7 @@ from dossier.tui.screens import (
     SupersedeScreen,
     WatchScreen,
     open_doc_file,
+    toggle_help_panel,
 )
 
 # Sentinel option ids for the two synthetic locations-pane rows (real location
@@ -367,6 +368,17 @@ class HomeScreen(Screen[None]):
         # whatever the *hidden* documents cursor sits on. False, not None: dead as a
         # key AND absent from the footer, which is the honest reading. `drill_out`
         # survives while the detail is open, so `←` means "close detail, to review".
+        # Contextual commands: hidden (not greyed) when they cannot act. The
+        # palette respects check_action now, so gating here is what keeps
+        # "Cancel vision scan" out of the list when nothing is scanning — the
+        # list shrinks to what is actually actionable instead of listing verbs
+        # that would no-op.
+        if action == "cancel_scan":
+            return bool(self.workers._workers) and any(
+                w.group == "vision" and w.is_running for w in self.workers._workers
+            )
+        if action == "accept_suggestion":
+            return self._show_detail and self._detail_pane.has_pending_suggestion()
         return not (
             self.has_class("review-mode")
             and action in _REVIEW_LOCKED
@@ -930,14 +942,9 @@ class HomeScreen(Screen[None]):
             self._detail_pane.action_accept_suggestion()
 
     def action_toggle_help_panel(self) -> None:
-        # `?` toggles — Textual only offers separate show/hide actions, so binding
-        # the built-in show action left no way to dismiss it with the same key.
-        from textual.widgets import HelpPanel
-
-        if self.query(HelpPanel):
-            self.app.action_hide_help_panel()
-        else:
-            self.app.action_show_help_panel()
+        # The shared helper every modal uses — the home had its own copy, which is
+        # why the command index it appends never showed up here.
+        toggle_help_panel(self)
 
     # -- vision scan (ds scan, from the TUI) ---------------------------------
 

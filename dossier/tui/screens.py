@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import date
 
+from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -34,6 +35,7 @@ from textual.widgets import (
     RadioButton,
     RadioSet,
     Select,
+    Static,
 )
 from textual.widgets.option_list import Option
 
@@ -88,8 +90,51 @@ def toggle_help_panel(node: Widget) -> None:
 
     if node.screen.query(HelpPanel):
         node.app.action_hide_help_panel()
-    else:
-        node.app.action_show_help_panel()
+        return
+    node.app.action_show_help_panel()
+    # Textual's panel lists *keys*, and the occasional commands have none — so on
+    # its own it never mentions the larger half of what the app can do. Append a
+    # compact index of them, grouped, after the panel mounts.
+    node.app.call_after_refresh(_append_command_index, node)
+
+
+def _append_command_index(node: Widget) -> None:
+    from textual.widgets import HelpPanel, KeyPanel
+
+    panels = node.screen.query(HelpPanel)
+    if not panels or panels.first().query("#help-commands"):
+        return
+    panel = panels.first()
+    keys = panel.query(KeyPanel)
+    summary = Static(_command_index_text(), id="help-commands")
+    # *Before* the key list, not after: KeyPanel is `height: 1fr`, so anything
+    # mounted below it is allotted no space at all and never appears.
+    panel.mount(summary, before=keys.first()) if keys else panel.mount(summary)
+
+
+def _command_index_text() -> Text:
+    """A count-per-group index of the commands, for the ``?`` panel.
+
+    Deliberately *not* the full list. The panel is a 30–60 column split and the
+    keybindings alone already fill most of it — measured, the two together
+    overflow a 34-row terminal — so listing every command here would push out the
+    keys the panel exists to show. What it can honestly do in three lines is
+    answer "how much else is there, and roughly what kind": the palette answers
+    "which one", and is one keystroke away.
+    """
+    from dossier.tui.commands import ENTRIES, Kind
+
+    counts = [
+        (kind, sum(1 for e in ENTRIES if e.kind is kind))
+        for kind in Kind
+        if any(e.kind is kind for e in ENTRIES)
+    ]
+    text = Text()
+    text.append(f"\n {len(ENTRIES)} commands  ", style="bold")
+    text.append("ctrl+p\n", style="dim")
+    for kind, count in counts:
+        text.append(f"   {kind.value} {count}\n", style="dim")
+    return text
 
 
 class SupersedeScreen(ModalScreen[bool]):

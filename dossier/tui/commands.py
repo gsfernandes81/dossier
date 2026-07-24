@@ -51,20 +51,42 @@ class Entry:
     action: str  # a HomeScreen.action_* name
     help: str
     kind: Kind
+    # Extra words this entry should match. Lets one entry absorb several intents
+    # without the list growing an entry per synonym: "move" and "add to bundle"
+    # were separate commands until it turned out all three called _open_and_edit
+    # with a different starting field.
+    keywords: tuple[str, ...] = ()
+
+    @property
+    def haystack(self) -> str:
+        """Title plus keywords — what a fuzzy query is matched against."""
+        return " ".join((self.title, *self.keywords))
 
 
 ENTRIES: tuple[Entry, ...] = (
     # -- verbs on the document under the cursor ------------------------------
     Entry("Open document file", "open_file", "Open the current doc's file", Kind.DOC),
-    Entry("Edit document", "edit", "Edit the current document's fields", Kind.DOC),
+    # One entry, not three: "Add to bundle" and "Move document" were the same
+    # `_open_and_edit` call with a different starting field — leftovers from the
+    # BundleScreen/MoveScreen modals Phase 4 retired. The keywords keep them
+    # findable by the words people actually think in.
+    Entry(
+        "Edit document",
+        "edit",
+        "Edit any field — location, bundles, dates, tags, notes",
+        Kind.DOC,
+        keywords=("move", "location", "slot", "bundle", "rename", "tags", "notes"),
+    ),
     Entry("New document", "new", "Create a new document record", Kind.DOC),
-    Entry("Add to bundle", "bundle", "Put the current doc in a bundle", Kind.DOC),
     Entry(
         "Accept top suggestion", "accept_suggestion", "Apply the shown hint", Kind.DOC
     ),
-    Entry("Move document", "move", "Change the current doc's location", Kind.DOC),
     Entry(
-        "Set succession (supersedes)", "supersede", "Link a renewal to older", Kind.DOC
+        "Set succession (supersedes)",
+        "supersede",
+        "Link a renewal to the document it replaces",
+        Kind.DOC,
+        keywords=("renewal", "replaces", "supersedes"),
     ),
     Entry(
         "History — restore an earlier version",

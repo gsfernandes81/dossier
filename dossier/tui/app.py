@@ -30,6 +30,13 @@ from dossier.store import Store
 from dossier.tui.commands import ENTRIES, Entry, Kind
 from dossier.tui.home import HomeScreen
 
+# action -> key, read off the home's own bindings so the two can never disagree.
+_KEYS = {
+    binding.action: binding.key
+    for binding in HomeScreen.BINDINGS
+    if isinstance(binding, Binding)
+}
+
 
 class DossierCommands(Provider):
     """Command-palette entries for every occasional home action.
@@ -44,10 +51,14 @@ class DossierCommands(Provider):
     """
 
     def _hit(self, entry: Entry, display: object | None = None):
+        # The key, when the action has one, so the palette doubles as keybinding
+        # documentation — you learn the shortcut by using the long way round.
+        key = _KEYS.get(entry.action)
+        suffix = f"  [{key}]" if key else ""
         return {
             "command": self._runner(entry.action),
             "text": entry.title,
-            "help": f"{entry.kind.value} · {entry.help}",
+            "help": f"{entry.kind.value} · {entry.help}{suffix}",
         }
 
     async def discover(self) -> Hits:
@@ -58,9 +69,15 @@ class DossierCommands(Provider):
     async def search(self, query: str) -> Hits:
         matcher = self.matcher(query)
         for entry in ENTRIES:
-            score = matcher.match(entry.title)
-            if score > 0:
-                yield Hit(score, matcher.highlight(entry.title), **self._hit(entry))
+            # Match the keywords too, then highlight the title: one entry can
+            # answer to several intents ("move" finds Edit document) without the
+            # list growing an entry per synonym.
+            if matcher.match(entry.haystack) > 0:
+                yield Hit(
+                    matcher.match(entry.haystack),
+                    matcher.highlight(entry.title),
+                    **self._hit(entry),
+                )
 
     def _runner(self, action: str):
         app = self.app
