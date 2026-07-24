@@ -1003,6 +1003,15 @@ class HomeScreen(Screen[None]):
         if self._show_detail:
             self._detail_pane.action_undo()
 
+    def action_quit(self) -> None:
+        """Exit the app — the command-surface twin of ``ctrl+q``.
+
+        A thin delegate to ``app.exit()`` so "Quit" can live in the shared command
+        catalog (:mod:`dossier.tui.commands`) like every other entry, which maps to
+        a ``HomeScreen.action_*``, rather than needing a special-cased dispatch.
+        """
+        self.app.exit()
+
     def action_toggle_help_panel(self) -> None:
         # The shared helper every modal uses — the home had its own copy, which is
         # why the command index it appends never showed up here.

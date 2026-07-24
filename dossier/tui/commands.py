@@ -41,6 +41,7 @@ class Kind(Enum):
     GO = "Go to"
     VIEW = "View"
     OPS = "Maintenance"
+    APP = "Application"
 
 
 @dataclass(frozen=True)
@@ -143,4 +144,16 @@ ENTRIES: tuple[Entry, ...] = (
         "Scan all linked (vision)", "scan_all", "Read every linked document", Kind.OPS
     ),
     Entry("Cancel vision scan", "cancel_scan", "Stop a running vision scan", Kind.OPS),
+    # -- the application itself ----------------------------------------------
+    # Quit lives in the catalog (not special-cased at dispatch) so the command
+    # surface stays the one vocabulary: it maps to HomeScreen.action_quit, a thin
+    # delegate to app.exit(). Kept here so retiring Textual's modal palette (which
+    # carried the system "Quit") doesn't lose it — ctrl+q still quits too.
+    Entry(
+        "Quit dossier",
+        "quit",
+        "Exit the app (ctrl+q)",
+        Kind.APP,
+        keywords=("exit", "q"),
+    ),
 )
