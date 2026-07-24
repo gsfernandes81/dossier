@@ -120,23 +120,49 @@ def test_review_takes_the_columns_and_keeps_its_place(tmp_path: Path):
         term.send("enter")
         assert term.wait_for("Conflicts", timeout=10), "review never opened"
         assert term.wait_for("Duplicates"), "the tab bar is missing"
+        # Wait for the threaded load to settle before pressing Tab. review re-targets
+        # to its default tab *after* the load lands, and that re-target only fires
+        # while the tab is still the freshly-composed Conflicts — so a Tab pressed
+        # first (as this test used to) moves off Conflicts, the re-target is skipped,
+        # and every later tab-count is off by one: green on a fast runner, red on a
+        # slow one. The two-line summary appears only once the load is applied, so it
+        # is the signal that the default tab has settled.
+        assert term.wait_for("Tab/Shift+Tab switch tabs", timeout=10), (
+            "review load never settled"
+        )
 
         # Tab belongs to review while focus is inside it — not to focus-traversal.
-        term.send("tab")
-        assert term.wait_for("Missing", timeout=6), "Tab did not cycle tabs"
-        term.send("tab")
-        assert term.wait_for("press  s  to scan", timeout=6), "Tab did not cycle tabs"
+        # Cycle to Duplicates by its *body*, never a fixed tab count: the default tab
+        # depends on what the store has pending, so counting from it is fragile.
+        # "press s to scan" renders only while Duplicates is the active tab
+        # (TabbedContent shows just the active pane), making it an unambiguous "we're
+        # on Duplicates" marker — the tab-bar titles are always on screen and prove
+        # nothing about which tab is active. Reaching it proves Tab cycled (the
+        # default tab is never Duplicates).
+        def on_dups() -> bool:
+            return "press  s  to scan" in term.text()
+
+        for _ in range(8):  # more than the six tabs — one full cycle always suffices
+            if on_dups():
+                break
+            term.send("tab")
+            term.wait_until(on_dups, timeout=2)  # let the switch land, then re-check
+        assert on_dups(), f"Tab never reached the Duplicates tab:\n{term.text()}"
 
         # The footer follows the active tab, offering this tab's verbs and no other
         # tab's. It repaints on refresh_bindings, not on the tab switch, so poll for
-        # it rather than reading whatever happens to be on screen this instant.
-        # (It still truncates at the right edge, so assert on an early entry.)
-        assert term.wait_until(
-            lambda: "Find duplicates" in term.text().splitlines()[-1]
-        ), f"Duplicates lost its verb: {term.text().splitlines()[-1]!r}"
-        footer = term.text().splitlines()[-1]
-        assert "Unlink" not in footer, f"footer shows another tab's verb: {footer!r}"
-        assert "Link" not in footer, f"footer shows another tab's verb: {footer!r}"
+        # the effect. Assert on the whole screen, not a fixed line: the app renders at
+        # whatever size Textual perceives (80×24 under pytest on some hosts, 100×30 on
+        # CI), so the footer's row isn't fixed. "Find duplicates" (capitalised) is a
+        # footer verb label only — the tab's body says lowercase "scan for duplicates"
+        # — so a screen-wide match still pins it to the footer. Likewise the
+        # capitalised "Link"/"Unlink" (the summary's "1 linked" is lowercase).
+        assert term.wait_until(lambda: "Find duplicates" in term.text()), (
+            f"Duplicates' footer verb never appeared:\n{term.text()}"
+        )
+        screen = term.text()
+        assert "Unlink" not in screen, "footer shows Missing's verb on Duplicates"
+        assert "Link" not in screen, "footer shows Orphans' verb on Duplicates"
 
         # Esc leaves review and gives the columns back.
         term.send("esc", settle=0.6)
