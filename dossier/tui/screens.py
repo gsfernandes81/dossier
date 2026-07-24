@@ -24,7 +24,8 @@ from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
@@ -358,22 +359,21 @@ class TextPromptScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class WatchScreen(ModalScreen[str | None]):
-    """The expiry watch — tracked documents, soonest expiry first.
+class WatchPane(Vertical):
+    """The expiry watch as a home *mode* (columns 1+2), not a modal.
 
-    Follows the app-wide verb: **Enter opens the document's file**, **``→`` opens its
-    detail** (dismissing with the document id so the home shows the record). ``x``
-    ignores the highlighted document, dropping it from the watch
-    (sets ``ignore_expiry``). Dismisses with a document id or ``None``.
+    Follows the app-wide verb: **Enter opens the file**, a first click / ``→`` shows
+    the record in column 3 *beside* the list (an ``OpenDocument`` message the host
+    honours), ``x`` ignores the highlighted document (drops it from the watch by
+    setting ``ignore_expiry``). Talks to the host only by message; the persistent bar
+    filters the list via :meth:`apply_filter`. Lazily mounted once and never torn
+    down, so its cursor/scroll survive being hidden.
     """
 
-    CSS = """
-    WatchScreen { align: center middle; }
-    #wpanel {
-        width: 85%; height: 80%; padding: 1 2;
-        background: $panel; border: round $primary;
-    }
-    #watch { height: 1fr; }
+    DEFAULT_CSS = """
+    WatchPane { height: 1fr; }
+    WatchPane #wsummary { margin-bottom: 1; }
+    WatchPane #watch { height: 1fr; }
     """
     BINDINGS = [
         Binding("escape", "close", "Close"),
@@ -382,24 +382,68 @@ class WatchScreen(ModalScreen[str | None]):
         Binding("question_mark", "toggle_help_panel", "Keys"),
     ]
 
+    class OpenDocument(Message):
+        """Show this document beside the watch — the host opens column 3."""
+
+        def __init__(self, doc_id: str) -> None:
+            super().__init__()
+            self.doc_id = doc_id
+
+    class CloseRequested(Message):
+        """Esc — the host peels the newest layer (detail, then the mode)."""
+
     def __init__(self, store: Store, config: Config, *, today: date) -> None:
         super().__init__()
         self._store = store
         self._config = config
         self._today = today
         self._glyphs = glyphset.resolve(config.glyphs)
+        self._filter = ""  # the persistent bar's per-surface search
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="wpanel"):
-            yield Label(id="wsummary")
-            yield DocumentList(id="watch")
+        yield Label(id="wsummary")
+        yield DocumentList(id="watch")
 
     def on_mount(self) -> None:
-        self._refresh()
+        # First mount: load + take focus here (the host's _enter_watch_mode focus is
+        # a tolerant no-op until the children exist — same as ReviewPane).
+        self.refresh_watch()
+        self.focus_active_pane()
 
-    def _refresh(self) -> None:
+    def apply_filter(self, text: str) -> None:
+        """Filter the tracked list by name/tags (the bar's per-surface search)."""
+        self._filter = text
+        self.refresh_watch()
+
+    def refresh_on_enter(self) -> None:
+        """Host calls this on (re)entry: drop any stale filter and reload if already
+        mounted. The first mount's on_mount does the initial load, so this must not
+        query children before they exist."""
+        self._filter = ""
+        if self.is_mounted:
+            self.refresh_watch()
+
+    def reload_if_stale(self) -> None:
+        # No cheap staleness flag here (unlike review): a returned-from-detail edit
+        # just reloads — one load_all, and the watch is entered rarely.
+        if self.is_mounted:
+            self.refresh_watch()
+
+    def focus_active_pane(self) -> None:
+        lists = self.query("#watch")  # tolerant: absent until the pane mounts
+        if lists:
+            lists.first().focus()
+
+    def refresh_watch(self) -> None:
         docs = self._store.load_all()
         tracked = query.tracked(docs, today=self._today)
+        if self._filter:
+            tracked = query.search(
+                tracked,
+                query.Filter(text=self._filter),
+                today=self._today,
+                threshold_days=self._config.expiry_threshold_days,
+            )
         locations = self._store.load_locations()
         threshold = self._config.expiry_threshold_days
         # Flag members that lapse before a dated bundle needs them (Phase 10).
@@ -413,7 +457,8 @@ class WatchScreen(ModalScreen[str | None]):
         options = self.query_one("#watch", OptionList)
         options.clear_options()
         if not tracked:
-            summary.update("Expiry watch: nothing tracked.  (Esc to close)")
+            note = "nothing matches." if self._filter else "nothing tracked."
+            summary.update(f"Expiry watch: {note}  (/ search · Esc closes)")
             return
         red = sum(
             1
@@ -423,7 +468,7 @@ class WatchScreen(ModalScreen[str | None]):
         )
         summary.update(
             f"Expiry watch — {len(tracked)} tracked · {red} within {threshold}d.  "
-            "Enter opens the file · → details · x ignores · ? keys · Esc closes."
+            "Enter opens the file · → details · x ignores · / search · Esc closes."
         )
         for doc in tracked:
             view = query.view(
@@ -446,7 +491,7 @@ class WatchScreen(ModalScreen[str | None]):
             options.add_option(Option(row, id=doc.id))
 
     def action_close(self) -> None:
-        self.dismiss(None)
+        self.post_message(self.CloseRequested())
 
     def action_toggle_help_panel(self) -> None:
         toggle_help_panel(self)
@@ -467,7 +512,7 @@ class WatchScreen(ModalScreen[str | None]):
             self.notify(str(exc), severity="error")
             return
         self.notify(f"ignoring {doc.name}")
-        self._refresh()
+        self.refresh_watch()
 
     def _highlighted(self) -> Document | None:
         option_id = _highlighted_id(self.query_one("#watch", OptionList))
@@ -478,18 +523,27 @@ class WatchScreen(ModalScreen[str | None]):
         except StoreError:
             return None
 
+    @on(DocumentList.Previewed, "#watch")
+    def _previewed(self, event: DocumentList.Previewed) -> None:
+        """First click shows the record beside the list (stop it here so the host's
+        #documents Previewed handler never sees this pane's clicks)."""
+        event.stop()
+        if event.option_id is not None:
+            self.post_message(self.OpenDocument(event.option_id))
+
     @on(OptionList.OptionSelected, "#watch")
     def _activate(self, event: OptionList.OptionSelected) -> None:
-        """Enter/tap opens the document's file — the app-wide activate verb."""
+        """Enter / second tap opens the document's file — the app-wide activate verb."""
+        event.stop()
         doc = self._highlighted()
         if doc is not None:
             open_doc_file(self, self._config, doc)
 
     def action_detail(self) -> None:
-        """`→` — hand the id back so the home opens the document's detail pane."""
+        """`→` — ask the host to show the document's record in column 3."""
         doc = self._highlighted()
         if doc is not None:
-            self.dismiss(doc.id)
+            self.post_message(self.OpenDocument(doc.id))
 
 
 class BundlesScreen(ModalScreen[str | None]):

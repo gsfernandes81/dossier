@@ -61,7 +61,6 @@ from dossier.tui.screens import (
     DocPickerScreen,
     SupersedeScreen,
     TextPromptScreen,
-    WatchScreen,
     _command_index_text,
 )
 
@@ -910,32 +909,34 @@ async def test_action_bar_hidden_without_touch(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_watch_screen_lists_tracked_and_ignores(tmp_path: Path):
+async def test_watch_mode_lists_tracked_and_ignores(tmp_path: Path):
     store, config = _setup(tmp_path)  # coc has an expiry (tracked); passport does not
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = WatchScreen(store, config, today=TODAY)
-        app.push_screen(screen)
-        await pilot.pause()
-        watch = screen.query_one("#watch", OptionList)
-        assert watch.option_count == 1  # only the doc with an expiry is tracked
+        home = app.home
+        home.action_watch()  # a mode now, not a modal
+        await _settle(pilot, lambda: home.has_class("watch-mode"))
+        pane = home._watch
+        assert pane is not None and pane.display
+        assert not home.query_one("#documents", OptionList).display
+        watch = pane.query_one("#watch", OptionList)
+        await _settle(pilot, lambda: watch.option_count == 1)  # only the dated doc
         assert watch.get_option_at_index(0).id == "coc"
 
         watch.highlighted = 0
         await pilot.pause()
-        screen.action_ignore()  # drop it from the watch
-        await pilot.pause()
-        assert watch.option_count == 0
+        pane.action_ignore()  # drop it from the watch
+        await _settle(pilot, lambda: watch.option_count == 0)
 
     assert store.load("coc").ignore_expiry is True
 
 
 @pytest.mark.asyncio
-async def test_watch_enter_opens_file_and_right_opens_detail(
+async def test_watch_mode_enter_opens_file_and_right_opens_detail_beside(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # The app-wide verb reaches the watch too: Enter opens the document's file,
-    # `→` hands the id back so the home shows its detail record.
+    # The app-wide verb reaches the watch too: Enter opens the file; `→` shows the
+    # record in column 3 *beside* the watch (which stays up — no lossy round-trip).
     store, config = _setup(tmp_path)
     tracked = store.load("passport")  # has a digital file; give it an expiry
     tracked.expiry_date = date(2026, 9, 1)
@@ -944,26 +945,76 @@ async def test_watch_enter_opens_file_and_right_opens_detail(
     monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        screen = WatchScreen(store, config, today=TODAY)
-        dismissed: list[str | None] = []
-        app.push_screen(screen, dismissed.append)
-        await pilot.pause()
-        options = screen.query_one("#watch", OptionList)
+        home = app.home
+        home.action_watch()
+        await _settle(pilot, lambda: home.has_class("watch-mode"))
+        pane = home._watch
+        assert pane is not None
+        options = pane.query_one("#watch", OptionList)
         options.focus()
+        await _settle(
+            pilot,
+            lambda: any(
+                options.get_option_at_index(i).id == "passport"
+                for i in range(options.option_count)
+            ),
+        )
         options.highlighted = next(
             i
             for i in range(options.option_count)
             if options.get_option_at_index(i).id == "passport"
         )
         await pilot.pause()
-        await pilot.press("enter")  # activate → open the file, screen stays up
-        await pilot.pause()
-        assert opened == [tmp_path / "passport.pdf"]
-        assert dismissed == []
+        await pilot.press("enter")  # activate → open the file, watch stays up
+        await _settle(pilot, lambda: opened == [tmp_path / "passport.pdf"])
+        assert not home._show_detail
 
-        await pilot.press("right")  # → hands the doc to the home for its detail
+        await pilot.press("right")  # → shows the record beside the watch
+        await _settle(pilot, lambda: home._show_detail)
+        assert home._detail_id == "passport"
+        assert home.has_class("watch-mode")  # watch still owns columns 1+2
+
+
+@pytest.mark.asyncio
+async def test_watch_mode_search_and_command_bar(tmp_path: Path):
+    """Watch has a list, so its bar half is live: `/` filters the tracked list (never
+    the home documents), Esc clears it, and `:` still opens command mode over it."""
+    store, config = _setup(tmp_path)
+    passport = store.load("passport")
+    passport.expiry_date = date(2026, 9, 1)  # now coc + passport are both tracked
+    store.save(passport)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.action_watch()
+        await _settle(pilot, lambda: home.has_class("watch-mode"))
+        pane = home._watch
+        assert pane is not None
+        watch = pane.query_one("#watch", OptionList)
+        await _settle(pilot, lambda: watch.option_count == 2)
+
+        assert home.check_action("focus_search", ()) is True  # live: watch has a list
+        home.action_focus_search()
         await pilot.pause()
-        assert dismissed == ["passport"]
+        for ch in "passport":
+            await pilot.press(ch)
+        await _settle(pilot, lambda: watch.option_count == 1)
+        assert watch.get_option_at_index(0).id == "passport"
+        # per-surface: the home document filter never engaged
+        assert home._filter_text == "" and not home.has_class("searching")
+
+        await pilot.press("escape")  # clear the pane filter, back to the list
+        await _settle(pilot, lambda: watch.option_count == 2)
+        assert home.has_class("watch-mode")
+
+        pane.focus_active_pane()
+        await pilot.pause()
+        await pilot.press("colon")  # `:` opens command mode over watch
+        await _settle(pilot, lambda: home.has_class("command-mode"))
+        assert not pane.display
+        await pilot.press("escape")
+        await _settle(pilot, lambda: not home.has_class("command-mode"))
+        assert home.has_class("watch-mode") and pane.display
 
 
 @pytest.mark.asyncio
