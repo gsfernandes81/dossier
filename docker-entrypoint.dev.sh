@@ -35,6 +35,38 @@ mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
 } > "$HOME/.ssh/environment"
 chmod 600 "$HOME/.ssh/environment"
 
+# Claude Code records workspace trust per-project in ~/.claude.json (moved into the
+# persisted ds-claude volume via CLAUDE_CONFIG_DIR) as
+# projects["<dir>"].hasTrustDialogAccepted. On a FRESH volume that record is absent, so
+# the remote-control supervisor's `claude remote-control --spawn worktree` aborts with
+# "Workspace not trusted" — a dialog nobody can accept in a headless container. Pre-seed
+# the trust flag for /workspace (which also covers the worktrees spawned beneath it),
+# idempotently and merging into any existing config. Runs BEFORE the supervisor starts,
+# while no claude process is writing the file. /workspace is not $HOME, so unlike
+# home-directory trust this record is actually persisted.
+python3 - "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.claude.json" /workspace <<'PY' || true
+import json, os, sys
+
+path, project = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f:
+        cfg = json.load(f)
+    if not isinstance(cfg, dict):
+        cfg = {}
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+
+entry = cfg.setdefault("projects", {}).setdefault(project, {})
+if entry.get("hasTrustDialogAccepted") is not True:
+    entry["hasTrustDialogAccepted"] = True
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f, indent=2)
+    os.replace(tmp, path)
+    os.chmod(path, 0o600)
+PY
+
 # Claude Remote Control: drive this container's sessions from claude.ai/code or the
 # Claude mobile app. Launched in the BACKGROUND so it never blocks container start or
 # Zed's sshd (the resilient foreground process below) — if the supervisor dies, the
