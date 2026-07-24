@@ -405,5 +405,11 @@ API; never bundle, spawn, or reimplement it.
   down". Related: `open_doc_file()` in `tui/screens.py` is already the shared open-the-file
   seam; once review is a column, the home's `open_detail()` is the matching seam for `→`,
   and the "dismiss with a doc id" protocol it replaces goes away.
+- **Review legibility polish** *(deferred, cosmetic)* — two things the miller-view work
+  surfaced but left alone. The footer still truncates mid-word at 100 cols (`f Fo▏`)
+  because `tab Next tab shift+tab Prev tab` eats the space before the active tab's own
+  verbs — those two could show a single combined hint, or hide once discovered. And the six
+  tab titles clip at 50 cols ("…Successi"), so `-narrow` wants shorter titles. Neither is a
+  correctness problem; both are "can you read what you can press".
 - **Someday:** `createdTime` year-plausibility + "issued X expires Y" range parsing
   (fold into suggestions quality), slug finalization, Obsidian-vault confirmation.
