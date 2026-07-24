@@ -1618,6 +1618,32 @@ async def test_ctrl_z_restores_the_previous_save_and_toggles_back(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_ctrl_z_reaches_undo_while_browsing(tmp_path: Path):
+    """Undo must work from the documents list, which is where focus actually sits.
+
+    The binding lived only on DetailPane, but in the wide layout the pane is *shown*
+    without being *focused* — so ctrl+z reached nothing. Caught by driving the real
+    key in a terminal; the unit test had called pane.focus() first and so set up a
+    condition that does not hold in practice.
+    """
+    store, config = _setup(tmp_path)
+    doc = store.load("passport")
+    doc.notes = "second"
+    store.save(doc)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(110, 34)) as pilot:  # wide: pane shown, not focused
+        home = app.home
+        home.open_detail("passport")
+        await pilot.pause()
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        assert app.focused is home.query_one("#documents", OptionList)
+
+        await pilot.press("ctrl+z")
+        await _settle(pilot, lambda: store.load("passport").notes == "")
+
+
+@pytest.mark.asyncio
 async def test_ctrl_z_says_so_when_there_is_nothing_to_undo(tmp_path: Path):
     store, config = _setup(tmp_path)  # passport saved once — nothing displaced yet
     app = DossierApp(store, config, today=TODAY)

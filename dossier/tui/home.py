@@ -236,6 +236,7 @@ class HomeScreen(Screen[None]):
         # toggle off") but bound nowhere — the UI was promising a key that did not
         # exist. Hidden from the footer: it's a niche toggle, and the notice says it.
         Binding("ctrl+t", "toggle_search_content", "Search contents", show=False),
+        Binding("ctrl+z", "undo", "Undo last save", show=False),
     ]
 
     # True while the detail pane is editing; drives check_action (and, via
@@ -302,7 +303,10 @@ class HomeScreen(Screen[None]):
             # they never sit in front of the find path (they replaced a toast that
             # overlapped the search box).
             with Horizontal(id="footrow"):
-                yield Footer(compact=True)
+                # Our own ctrl+p binding already reads in the footer's natural
+                # order with a plainer label, so suppress Textual's built-in
+                # right-hand palette key — it was showing the same thing twice.
+                yield Footer(compact=True, show_command_palette=False)
                 yield Static("", id="attention")
 
     def on_mount(self) -> None:
@@ -940,6 +944,13 @@ class HomeScreen(Screen[None]):
         # focused in the wide layout, so the accept lives here and delegates.
         if self._show_detail:
             self._detail_pane.action_accept_suggestion()
+
+    def action_undo(self) -> None:
+        # Same reason as accept_suggestion above: the pane owns ctrl+z, but in the
+        # wide layout focus sits on the documents list, so the key never reached it
+        # — undo was unreachable exactly where you browse.
+        if self._show_detail:
+            self._detail_pane.action_undo()
 
     def action_toggle_help_panel(self) -> None:
         # The shared helper every modal uses — the home had its own copy, which is
