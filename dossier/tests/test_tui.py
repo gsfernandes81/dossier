@@ -1314,6 +1314,33 @@ async def test_copy_path_and_reveal_act_on_the_home_cursor(
 
 
 @pytest.mark.asyncio
+async def test_reveal_targets_the_open_record_not_reviews_cursor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """An open record wins over review's list — it is what's being looked at.
+
+    Matters most on a phone, where the record *replaces* review: acting on the
+    hidden list's cursor would act on something the user cannot see.
+    """
+    store, config = _setup(tmp_path)
+    (tmp_path / "loose.pdf").write_bytes(b"x")  # an orphan, so review's cursor differs
+    revealed: list[Path] = []
+    monkeypatch.setattr(tui_home, "reveal_file", lambda p: revealed.append(p) or None)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 32)) as pilot:
+        home = app.home
+        home.action_review()
+        await _await_review_load(pilot)
+        home.open_detail("passport")  # a record from a finding
+        await pilot.pause()
+        assert home.has_class("review-mode") and home.has_class("show-detail")
+
+        home.action_reveal_file()
+        await pilot.pause()
+    assert revealed == [tmp_path / "passport.pdf"]
+
+
+@pytest.mark.asyncio
 async def test_copy_path_in_review_asks_which_side_of_a_succession(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

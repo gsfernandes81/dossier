@@ -124,11 +124,59 @@ def _record_clipboard(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     return calls
 
 
-def test_reveal_is_honestly_unavailable_on_android(monkeypatch: pytest.MonkeyPatch):
-    # Scoped storage gives Android no dependable "show this file" intent, so say so
-    # rather than firing an intent that silently does nothing on some devices.
+def test_android_folder_uri_encodes_the_document_id_whole():
+    # Android addresses files by URI, not path: the document id "primary:<rel>" is
+    # percent-encoded entire, colon and slashes included.
+    uri = platform_open.android_folder_uri(
+        Path("/storage/emulated/0/Documents/Off Docs")
+    )
+    assert uri == (
+        "content://com.android.externalstorage.documents/document/"
+        "primary%3ADocuments%2FOff%20Docs"
+    )
+
+
+def test_android_folder_uri_none_outside_shared_storage():
+    assert platform_open.android_folder_uri(Path("/data/data/com.termux/files")) is None
+
+
+def test_reveal_asks_android_to_open_the_folder(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(platform_open, "is_termux", lambda: True)
-    with pytest.raises(OpenError, match="copy the path"):
+    calls: dict[str, list[str]] = {}
+
+    def fake_run(argv: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+        calls["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, "Starting: Intent { ... }", "")
+
+    monkeypatch.setattr(platform_open.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(platform_open.subprocess, "run", fake_run)
+    caveat = platform_open.reveal_file(Path("/storage/emulated/0/Documents/x.pdf"))
+    assert calls["argv"][:4] == [
+        "/usr/bin/am",
+        "start",
+        "-a",
+        "android.intent.action.VIEW",
+    ]
+    assert calls["argv"][-1] == "vnd.android.document/directory"
+    # Accepted is not the same as handled — the caller says so rather than claiming
+    # success, because what happens next is the OEM file manager's call.
+    assert caveat == platform_open.ANDROID_REVEAL_CAVEAT
+
+
+def test_reveal_on_android_reports_when_nothing_handled_the_intent(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # `am` exits 0 even when no activity matched; it only says so on stdout.
+    monkeypatch.setattr(platform_open, "is_termux", lambda: True)
+    monkeypatch.setattr(platform_open.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        platform_open.subprocess,
+        "run",
+        lambda argv, **_kw: subprocess.CompletedProcess(
+            argv, 0, "Error: Activity not started, unable to resolve Intent", ""
+        ),
+    )
+    with pytest.raises(OpenError, match="no file manager handled"):
         platform_open.reveal_file(Path("/storage/emulated/0/Documents/x.pdf"))
 
 

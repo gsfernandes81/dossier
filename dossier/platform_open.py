@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -62,38 +63,98 @@ def open_file(path: Path) -> None:
     _run_opener(opener, target, missing_hint=f"no '{opener}' on PATH")
 
 
-def reveal_file(path: Path) -> None:
+ANDROID_REVEAL_CAVEAT = (
+    "asked Android to open the folder — some OEM file managers ignore this intent"
+)
+
+# Android shared storage, where the store lives. Termux reaches it through
+# ~/storage/shared, a symlink, so resolve() before mapping a path to a URI.
+_ANDROID_ROOTS = ("/storage/emulated/0", "/sdcard")
+
+
+def android_folder_uri(folder: Path) -> str | None:
+    """The DocumentsUI ``content://`` URI for a shared-storage folder, or ``None``.
+
+    Android addresses files by URI, not path, so revealing means handing the system
+    Files app a document id — ``primary:<path under shared storage>`` — percent-encoded
+    whole (the colon and the slashes included).
+    """
+    from urllib.parse import quote  # lazy: this module is on the startup path
+
+    # Compare as POSIX *text*, not as Path objects: these are Android paths, and on
+    # Windows (where these tests also run) Path treats them as drive-relative and
+    # resolve() grafts a drive letter on. Resolved candidate first, so Termux's
+    # ~/storage/shared symlink maps to the real /storage/emulated/0 path.
+    candidates = []
+    with contextlib.suppress(OSError):
+        candidates.append(folder.resolve().as_posix())
+    candidates.append(folder.as_posix())
+    for text in candidates:
+        for root in _ANDROID_ROOTS:
+            if text != root and not text.startswith(f"{root}/"):
+                continue
+            rel = text[len(root) :].strip("/")
+            return "content://com.android.externalstorage.documents/document/" + quote(
+                f"primary:{rel}", safe=""
+            )
+    return None
+
+
+def reveal_file(path: Path) -> str | None:
     """Show ``path`` in the platform's file manager.
 
-    Raises :class:`OpenError` where the platform has no answer — notably Android,
-    where scoped storage means apps address files by ``content://`` URI and there is
-    no reliable "show this file" intent; the caller should offer :func:`copy_path`
-    instead of pretending.
+    Returns a caveat worth showing the user, or ``None`` when the reveal is
+    dependable. Raises :class:`OpenError` when it plainly could not work.
     """
     if is_termux():
-        raise OpenError(
-            "Android has no reliable reveal-in-file-manager — copy the path instead"
+        uri = android_folder_uri(path.parent)
+        if uri is None:
+            raise OpenError(f"{path.parent} is not under Android shared storage")
+        exe = shutil.which("am")
+        if exe is None:
+            raise OpenError("am not found — it ships with termux-tools")
+        result = subprocess.run(
+            [
+                exe,
+                "start",
+                "-a",
+                "android.intent.action.VIEW",
+                "-d",
+                uri,
+                "-t",
+                "vnd.android.document/directory",
+            ],
+            capture_output=True,
+            text=True,
         )
+        # `am` exits 0 even when nothing handled the intent; it says so on stdout.
+        output = f"{result.stdout}{result.stderr}"
+        if result.returncode != 0 or "Error:" in output:
+            detail = output.strip().splitlines()[-1] if output.strip() else "no detail"
+            raise OpenError(f"no file manager handled the folder: {detail}")
+        return ANDROID_REVEAL_CAVEAT
     if sys.platform.startswith("win"):
         exe = shutil.which("explorer") or "explorer"
         # `/select,` with no space, and never check the exit code: explorer.exe
         # returns 1 even when it worked.
         subprocess.run([exe, f"/select,{path}"], capture_output=True)
-        return
+        return None
     if sys.platform == "darwin":
         _run_opener("open", str(path), missing_hint="no 'open' on PATH", args=["-R"])
-        return
+        return None
     # Freedesktop has no portable "select this file", so open its folder. (A
     # FileManager1 D-Bus call would highlight the file itself, on the desktops
     # that implement it — worth adding only if opening the folder proves too blunt.)
     _run_opener("xdg-open", str(path.parent), missing_hint="no 'xdg-open' on PATH")
+    return None
 
 
 def copy_path(path: Path) -> None:
     """Put ``path`` on the system clipboard.
 
-    The one action that works everywhere, and the *primary* answer on Android where
-    revealing cannot work.
+    The one action that works on every platform. Of limited use on Android, where
+    few file managers offer anywhere to paste a path — reveal is the better verb
+    there — but harmless to keep uniform.
     """
     text = str(path)
     if is_termux():

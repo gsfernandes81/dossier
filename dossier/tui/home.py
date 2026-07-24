@@ -775,13 +775,23 @@ class HomeScreen(Screen[None]):
     def _with_cursor_path(self, prompt: str, then: Callable[[Path], None]) -> None:
         """Resolve what the cursor points at, asking when it points at two things.
 
-        Review is the reason for the ask: its Succession rows straddle *two*
+        **An open record wins**, review's list or not: it is the thing being looked
+        at, and on a narrow screen (a phone) the record *replaces* review entirely —
+        acting on a hidden list's cursor would be acting on something invisible.
+        Otherwise review's cursor, else the documents column.
+
+        Review is why the ask exists at all: its Succession rows straddle *two*
         documents, and while opening both is meaningful ("does this replace that?"),
         revealing or copying both is not.
         """
+        in_review = (
+            self.has_class("review-mode")
+            and self._review is not None
+            and not self._show_detail
+        )
         choices = (
             self._review.path_labels()
-            if self.has_class("review-mode") and self._review is not None
+            if in_review and self._review is not None
             else self._current_doc_path_labels()
         )
         if not choices:
@@ -809,11 +819,16 @@ class HomeScreen(Screen[None]):
             self.notify(f"file not found: {path}", severity="error")
             return
         try:
-            reveal_file(path)
+            caveat = reveal_file(path)
         except OpenError as exc:
             self.notify(str(exc), severity="error")
-        else:
+            return
+        # Android can only *ask* — the intent is accepted but what happens next is
+        # the OEM file manager's call, so say so rather than claiming success.
+        if caveat is None:
             self.notify(f"revealed {path.name}")
+        else:
+            self.notify(f"{path.parent.name}: {caveat}", severity="warning")
 
     def _copy_one(self, path: Path) -> None:
         try:

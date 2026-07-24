@@ -169,6 +169,20 @@ class PtyTerm:
             time.sleep(0.04)
         return False
 
+    def wait_for_exit(self, timeout=6.0):
+        """Block until the child process exits; True, or False on timeout.
+
+        Sampling :meth:`alive` once right after sending a quit key is a race: the
+        app may still be finishing whatever the *previous* keystroke started (a
+        store reload, say), so the quit is merely queued rather than refused.
+        """
+        end = time.time() + timeout
+        while time.time() < end:
+            if not self.alive():
+                return True
+            time.sleep(0.05)
+        return False
+
     def text(self):
         with self._lock:
             return "\n".join(self.screen.display)

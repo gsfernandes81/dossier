@@ -18,12 +18,16 @@ filtering `id` also matches
 you can find a doc by text that only appears *inside* the scan.
 
 Two more palette commands answer "where does this actually live?" — **Show in file manager**
-and **Copy file path**. Both act on whatever the cursor is on, in the columns *or* in review;
-where review's cursor straddles two files (a succession's older and newer sides) they ask which
-one, since neither revealing nor copying is meaningful for a pair. Reveal opens Explorer with the
-file selected on Windows, Finder on macOS, and the containing folder on Linux. **On Android it is
-unavailable** — scoped storage leaves no dependable "show this file" intent — so copy the path
-there instead; that works everywhere, and is the primary answer on the phone.
+and **Copy file path**. Both act on whatever you are looking at: the **open record** if the detail
+column is up (which is what you see on a phone, where it replaces everything else), otherwise
+review's cursor, otherwise the documents column. Where review's cursor straddles two files (a
+succession's older and newer sides) they ask which one, since neither revealing nor copying is
+meaningful for a pair.
+
+Reveal opens Explorer with the file selected on Windows, Finder on macOS, and the containing
+folder on Linux. On **Android** it asks the system Files app to open the folder (via a
+`content://` intent) — this works on the phones we've tried, but OEM file managers vary, so it
+reports that it *asked* rather than claiming it worked.
 
 From the command line, without opening the TUI:
 

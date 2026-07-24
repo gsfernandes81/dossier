@@ -89,7 +89,7 @@ def test_drives_real_app_in_a_real_terminal(tmp_path: Path):
 
         term.send("esc", settle=0.4)  # leave the search box
         term.send("\x11", settle=0.5)  # ctrl+q quits (bare `q` is a search char now)
-        assert not term.alive(), "app did not quit on ctrl+q"
+        assert term.wait_for_exit(), "app did not quit on ctrl+q"
     finally:
         term.close()
 
@@ -129,6 +129,6 @@ def test_review_takes_the_columns_and_keeps_its_place(tmp_path: Path):
         assert term.wait_for("Passport"), "Esc did not return to the columns"
 
         term.send("\x11", settle=0.5)
-        assert not term.alive(), "app did not quit on ctrl+q"
+        assert term.wait_for_exit(), "app did not quit on ctrl+q"
     finally:
         term.close()
