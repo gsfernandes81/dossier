@@ -15,11 +15,12 @@
 
 """The intake review card — file dropped documents one at a time.
 
-A modal over the home screen: for each unfiled inbox file it reads the document
-with the VLM in a background worker (:mod:`dossier.intake`), shows the whole
-proposed record, and files it on one keystroke. Editing hands off to the home
-detail pane (the card never grows its own form). Dismisses with a filed doc id
-when the user chose to edit it, else ``None``.
+A home mode (columns 1+2, like review): for each unfiled inbox file it reads the
+document with the VLM in a background worker (:mod:`dossier.intake`), shows the
+whole proposed record, and files it on one keystroke. Editing hands off to the
+home detail pane (the card never grows its own form); it asks the host for
+everything by message (:class:`IntakePane.OpenDocument` /
+:class:`IntakePane.CloseRequested`) and never dismisses like a modal.
 """
 
 from __future__ import annotations
@@ -36,12 +37,11 @@ from textual.worker import get_current_worker
 from dossier import intake
 from dossier.config import Config
 from dossier.errors import IntakeError
-from dossier.platform_open import OpenError, open_file
-from dossier.query import resolve_path
 from dossier.store import Store
 from dossier.tui.screens import (
     DocPickerScreen,
     TextPromptScreen,
+    open_rel_path,
     toggle_help_panel,
 )
 
@@ -347,10 +347,9 @@ class IntakePane(Vertical):
         if self._index >= len(self._pending):
             return
         rel = self._pending[self._index]
-        try:
-            open_file(resolve_path(self._config.syncthing_root, rel))
-        except OpenError as exc:
-            self.notify(str(exc), severity="error")
+        # The shared seam adds the missing-file check + uniform feedback a raw
+        # open_file lacked (an inbox file can vanish or sync away mid-review).
+        open_rel_path(self, self._config, rel)
 
     def action_close(self) -> None:
         self.post_message(self.CloseRequested())
