@@ -163,11 +163,11 @@ class HomeScreen(Screen[None]):
     DEFAULT_CSS = """
     #bottombar { dock: bottom; height: 4; }
     #actionbar {
-        display: none; layout: grid; grid-rows: 5; grid-gutter: 0 1;
+        display: none; layout: grid; grid-rows: 4; grid-gutter: 0 1;
         height: auto; width: 1fr;
     }
     #actionbar Button {
-        width: 1fr; min-width: 6; height: 5; content-align: center middle;
+        width: 1fr; min-width: 6; height: 4; content-align: center middle;
     }
     /* The search box reads as its own little command panel: a soft rounded
        edge at rest that brightens distinctly when focused (so it's obvious
@@ -199,8 +199,8 @@ class HomeScreen(Screen[None]):
     /* Touch (Termux): a tap-action grid above the command bar — big thumb
        targets. Landscape lays the six actions 3-wide (2 rows); a tall portrait
        phone gets them 2-wide (3 rows). */
-    HomeScreen.touch #bottombar { height: 14; }
-    HomeScreen.touch.-portrait #bottombar { height: 19; }
+    HomeScreen.touch #bottombar { height: 12; }
+    HomeScreen.touch.-portrait #bottombar { height: 16; }
     HomeScreen.touch #actionbar { display: block; grid-size: 3; }
     HomeScreen.touch.-portrait #actionbar { grid-size: 2; }
     /* Two-line location rows on touch: a bigger tap target per category and a
@@ -291,8 +291,13 @@ class HomeScreen(Screen[None]):
        borrows columns 1+2 exactly as review does. Ordered AFTER the review/searching
        rules so the equal-specificity display toggles resolve to command mode while
        it is on. display:none is not teardown — the columns keep their state. */
-    #commands { display: none; width: 1fr; }
+    /* height:auto + a bottom-aligned #panes make the list hug the search bar and
+       grow upward: with few matches they sit right above the bar instead of
+       floating at the top of the region. Paired with _refresh_commands' ordering,
+       the closest match ends up next to the bar and the furthest at the top. */
+    #commands { display: none; width: 1fr; height: auto; max-height: 100%; }
     HomeScreen.command-mode #commands { display: block; }
+    HomeScreen.command-mode #panes { align-vertical: bottom; }
     HomeScreen.command-mode #locations { display: none; }
     HomeScreen.command-mode #documents { display: none; }
     HomeScreen.command-mode ReviewPane { display: none; }
@@ -1038,6 +1043,9 @@ class HomeScreen(Screen[None]):
         entries = [e for e in ENTRIES if self.check_action(e.action, ()) is not False]
         query = query.strip()
         if not query:
+            # The browse catalog keeps its natural top-down grouping (headers precede
+            # their entries); with few commands it still hugs the bar (bottom-anchored
+            # CSS), but a long catalog reads from the top. Reordering is for *matches*.
             first_landable: int | None = None
             row = 0
             for kind in Kind:
@@ -1063,13 +1071,14 @@ class HomeScreen(Screen[None]):
             return
         matcher = Matcher(query)
         scored = [(matcher.match(e.haystack), e) for e in entries]
-        hits = sorted(
-            ((s, e) for s, e in scored if s > 0), key=lambda se: se[0], reverse=True
-        )
+        # Ascending, so the list reads worst→best top to bottom: the closest match
+        # lands at the *bottom*, right next to the search bar (the list is
+        # bottom-anchored — see the command-mode CSS), the furthest at the top.
+        hits = sorted(((s, e) for s, e in scored if s > 0), key=lambda se: se[0])
         for _, entry in hits:
             options.add_option(Option(self._command_row(entry), id=entry.action))
         if hits:
-            options.highlighted = 0
+            options.highlighted = len(hits) - 1  # the best match, nearest the bar
 
     def _command_row(self, entry: Entry) -> Text:
         """A two-line option: the title, then a dim ``kind · help [key]`` line (the
