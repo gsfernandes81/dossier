@@ -59,7 +59,6 @@ from dossier import (
     dedup_cache,
     dedup_hash,
     doctor,
-    query,
     reconcile,
     resolve,
     scan,
@@ -69,12 +68,12 @@ from dossier.config import Config
 from dossier.errors import ResolveBusyError, StaleWriteError, StoreError
 from dossier.migrate import slugify
 from dossier.model import Document, ReconcileState, Rendition
-from dossier.platform_open import OpenError, open_file
 from dossier.store import Store
 from dossier.tui import forms
 from dossier.tui.screens import (
     DocPickerScreen,
     TextPromptScreen,
+    open_rel_path,
     toggle_help_panel,
 )
 
@@ -961,17 +960,10 @@ class ReviewPane(Vertical):
             self.notify(f"opened {' + '.join(opened)}")
 
     def _open_one(self, rel: str) -> bool:
-        """Open one relative path, reporting rather than raising. True if it opened."""
-        path = query.resolve_path(self._config.syncthing_root, rel)
-        if not path.exists():
-            self.notify(f"file not found: {path}", severity="error")
-            return False
-        try:
-            open_file(path)
-        except OpenError as exc:
-            self.notify(str(exc), severity="error")
-            return False
-        return True
+        """Open one relative path, reporting rather than raising. True if it opened.
+        Delegates to the shared path-level seam so review reports misses exactly as
+        the rest of the app does."""
+        return open_rel_path(self, self._config, rel)
 
     def _cursor_dup_path(self) -> str | None:
         options = self.query_one("#dups", OptionList)

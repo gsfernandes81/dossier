@@ -1217,15 +1217,13 @@ async def test_help_panel_toggles_with_question_mark(tmp_path: Path):
 async def test_reconcile_open_file_opens_orphan_under_cursor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    import dossier.tui.review as tui_review
-
     config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
     store = Store(config)
     store.ensure_layout()
     (tmp_path / "Wallpapers").mkdir()
     (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")
     opened: list[Path] = []
-    monkeypatch.setattr(tui_review, "open_file", opened.append)
+    monkeypatch.setattr("dossier.tui.screens.open_file", opened.append)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         screen = await _open_review(pilot)
@@ -1554,7 +1552,7 @@ async def test_integrity_enter_opens_the_file_and_right_opens_the_record(
     )
     (tmp_path / "passport.pdf").write_bytes(b"x")
     opened: list[Path] = []
-    monkeypatch.setattr("dossier.tui.review.open_file", lambda p: opened.append(p))
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test(size=(120, 32)) as pilot:
         home = app.home
@@ -1599,7 +1597,7 @@ async def test_succession_o_opens_both_sides_older_first(
         )
         (tmp_path / rel).write_bytes(b"x")
     opened: list[Path] = []
-    monkeypatch.setattr("dossier.tui.review.open_file", lambda p: opened.append(p))
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
         pane = await _open_review(pilot)
@@ -3616,3 +3614,47 @@ async def test_touch_escape_from_search_never_quits(tmp_path: Path, monkeypatch)
         home.action_escape()  # leaving the IME/bar is a peel, never an arm
         await pilot.pause()
         assert not home._quit_armed and not exited
+
+
+@pytest.mark.asyncio
+async def test_watch_enter_falls_through_to_detail_for_physical_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A physical-only tracked doc (a paper cert with an expiry but no scan) has no
+    # file to open, so Enter falls through to its record instead of only warning.
+    store, config = _setup(tmp_path)
+    store.save(
+        Document(
+            id="paper",
+            name="Paper Cert",
+            has_physical=True,
+            expiry_date=date(2026, 9, 1),
+        )
+    )
+    opened: list[Path] = []
+    monkeypatch.setattr("dossier.tui.screens.open_file", lambda p: opened.append(p))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.action_watch()
+        await _settle(pilot, lambda: home.has_class("watch-mode"))
+        options = home._watch.query_one("#watch", OptionList)
+        options.focus()
+        await _settle(
+            pilot,
+            lambda: any(
+                options.get_option_at_index(i).id == "paper"
+                for i in range(options.option_count)
+            ),
+        )
+        options.highlighted = next(
+            i
+            for i in range(options.option_count)
+            if options.get_option_at_index(i).id == "paper"
+        )
+        await pilot.pause()
+        await pilot.press("enter")  # no file → fall through to the record
+        await _settle(pilot, lambda: home._show_detail)
+        assert home._detail_id == "paper"
+        assert not opened  # nothing was opened
+        assert home.has_class("watch-mode")  # watch stayed up

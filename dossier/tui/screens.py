@@ -54,27 +54,43 @@ from dossier.tui import (
 from dossier.tui.doclist import DocumentList
 
 
-def open_doc_file(node: Widget, config: Config, doc: Document) -> None:
-    """Open a document's primary rendition with the platform opener.
+def open_rel_path(node: Widget, config: Config, rel: str) -> bool:
+    """Open one Syncthing-relative path with the platform opener, reporting rather
+    than raising. Returns whether it opened.
 
-    The app-wide **activate** verb (Enter/tap opens the file; ``→`` shows detail),
-    shared by the home and every modal so all of them report the same misses the
-    same way instead of each raising or notifying differently.
+    The shared **path-level** open seam: :func:`open_doc_file` uses it for a
+    document's rendition, and the reconcile rows use it for bare files that have no
+    document yet (orphans, duplicate copies) — one error-reporting shape for all.
     """
-    rendition = doc.primary_rendition()
-    if rendition is None:
-        node.notify(f"{doc.name}: no digital file linked", severity="warning")
-        return
-    path = query.resolve_path(config.syncthing_root, rendition.path)
+    path = query.resolve_path(config.syncthing_root, rel)
     if not path.exists():
         node.notify(f"file not found: {path}", severity="error")
-        return
+        return False
     try:
         open_file(path)
     except OpenError as exc:
         node.notify(str(exc), severity="error")
-    else:
+        return False
+    return True
+
+
+def open_doc_file(node: Widget, config: Config, doc: Document) -> bool:
+    """Open a document's primary rendition with the platform opener.
+
+    The app-wide **activate** verb (Enter/tap opens the file; ``→`` shows detail),
+    shared by the home and every modal so all of them report the same misses the
+    same way instead of each raising or notifying differently. Returns whether a
+    file opened; ``False`` means there was no digital rendition, so a caller can
+    fall through to the record (a physical-only tracked doc has one but no file).
+    """
+    rendition = doc.primary_rendition()
+    if rendition is None:
+        node.notify(f"{doc.name}: no digital file linked", severity="warning")
+        return False
+    if open_rel_path(node, config, rendition.path):
         node.notify(f"opened {doc.name}")
+        return True
+    return False
 
 
 def toggle_help_panel(node: Widget) -> None:
@@ -533,11 +549,13 @@ class WatchPane(Vertical):
 
     @on(OptionList.OptionSelected, "#watch")
     def _activate(self, event: OptionList.OptionSelected) -> None:
-        """Enter / second tap opens the document's file — the app-wide activate verb."""
+        """Enter / second tap opens the document's file — the app-wide activate verb.
+        A physical-only tracked doc (a paper cert with no scan) has no file, so fall
+        through to its record, where the physical copy lives."""
         event.stop()
         doc = self._highlighted()
-        if doc is not None:
-            open_doc_file(self, self._config, doc)
+        if doc is not None and not open_doc_file(self, self._config, doc):
+            self.post_message(self.OpenDocument(doc.id))
 
     def action_detail(self) -> None:
         """`→` — ask the host to show the document's record in column 3."""
