@@ -361,6 +361,9 @@ class HomeScreen(Screen[None]):
         self._docs: list[Document] = []
         self._locations: dict[str, Location] = {}
         self._by_location: dict[str | None, list[Document]] = {}
+        # Derived from _docs, so cached per reload (like _by_location) rather than
+        # recomputed on every keystroke's document-pane refresh.
+        self._superseded_ids: set[str] = set()
         self._suggestion_state = SuggestionState()  # cached; refreshed on reload
         self._readings: dict[str, scan.ScanReading] = {}  # ds scan, refreshed on reload
         self._search_content = (
@@ -666,6 +669,7 @@ class HomeScreen(Screen[None]):
         self._docs = self._store.load_all()
         self._locations = self._store.load_locations()
         self._by_location = dict(query.group_by_location(self._docs))
+        self._superseded_ids = query.superseded_ids(self._docs)
         self._suggestion_state = self._store.load_suggestions()
         self._readings = self._store.load_scans()
         self._refresh_locations()
@@ -741,7 +745,7 @@ class HomeScreen(Screen[None]):
         previous = _highlighted_id(options)
         options.clear_options()
         docs = self.documents_in_view()
-        superseded = query.superseded_ids(self._docs)
+        superseded = self._superseded_ids
         mode = self._row_mode()
         self._last_mode = mode
         # One `add_options`, never a loop of `add_option`: each singular call ends in
