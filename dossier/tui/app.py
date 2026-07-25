@@ -78,8 +78,9 @@ class DossierApp(App[None]):
             self._home.enter_command_mode()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        # A bare `q` from a focused Checkbox/Button in the edit form would quit
-        # mid-edit (an Input swallows it, other widgets don't) — suppress it.
+        # Don't offer "quit" mid-edit: an in-progress edit form shouldn't be lost to a
+        # stray ctrl+q or the command bar's Quit. Esc cancels the edit first, so quit
+        # is one keypress away regardless. (None = shown-but-disabled, not hidden.)
         if action == "quit" and self._home is not None and self._home.editing:
             return None
         # ctrl+p opens command mode, which only exists on the home screen. False
