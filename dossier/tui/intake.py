@@ -134,8 +134,11 @@ class IntakePane(Vertical):
         self._filed = 0
         self._proposal = None
         if not self._pending:
+            inbox = self._config.intake_inbox or "the configured inbox"
             self.query_one("#ihead", Label).update("Inbox empty — nothing to file.")
-            self.query_one("#ibody", Label).update("")
+            self.query_one("#ibody", Label).update(
+                f"Drop files into  {inbox}  and they appear here."
+            )
             self.query_one("#ifoot", Label).update("Esc  close")
             return
         self.query_one("#ifoot", Label).update(_KEYS)

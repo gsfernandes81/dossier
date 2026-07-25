@@ -667,6 +667,10 @@ class HomeScreen(Screen[None]):
             options.add_option(
                 Option(Text(f"  … and {hidden} more — keep typing", style="dim italic"))
             )
+        elif not shown:
+            # Never a blank pane: say why it's empty and what to do next (disabled so
+            # the cursor skips it) — an empty store vs a search that matched nothing.
+            options.add_option(Option(self._empty_message(), disabled=True))
         ids = [doc.id for doc in shown]
         if previous is not None and previous in ids:
             options.highlighted = ids.index(previous)
@@ -676,6 +680,21 @@ class HomeScreen(Screen[None]):
         # mid-word), and use the short "docs" otherwise.
         noun = "" if self._narrow else " docs"
         self.app.sub_title = f"{len(docs)} / {len(self._docs)}{noun}"
+
+    def _empty_message(self) -> Text:
+        """The dim placeholder for an empty documents pane — what to do next."""
+        if self._is_searching():
+            hint = "nothing matches — Esc clears"
+            if not self._search_content:
+                hint += "  ·  ctrl+t searches scan contents"
+            return Text(hint, style="dim italic")
+        if not self._docs:
+            return Text(
+                "no documents yet — `ds import <folder>` sweeps a folder in, "
+                "`ds migrate` imports Notion, or type `:` → New document",
+                style="dim italic",
+            )
+        return Text("nothing here", style="dim italic")  # an empty location scope
 
     def _update_detail(self) -> None:
         pane = self._detail_pane

@@ -900,6 +900,41 @@ async def test_touch_focus_drives_soft_keyboard_no_kbd_button(
 
 
 @pytest.mark.asyncio
+async def test_home_empty_store_shows_a_pointer(tmp_path: Path):
+    """A brand-new store is never a blank pane — it says what to do next."""
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()  # empty store, no documents
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        docs = app.home.query_one("#documents", OptionList)
+        await _settle(pilot, lambda: docs.option_count == 1)
+        assert "no documents yet" in str(docs.get_option_at_index(0).prompt)
+
+
+@pytest.mark.asyncio
+async def test_home_no_search_match_shows_a_pointer(tmp_path: Path):
+    """A search that matches nothing explains itself (and points at ctrl+t)."""
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        for ch in "zzzzzz":
+            await pilot.press(ch)
+        docs = home.query_one("#documents", OptionList)
+        await _settle(
+            pilot,
+            lambda: (
+                docs.option_count == 1
+                and "nothing matches" in str(docs.get_option_at_index(0).prompt)
+            ),
+        )
+        assert "ctrl+t" in str(docs.get_option_at_index(0).prompt)
+
+
+@pytest.mark.asyncio
 async def test_action_bar_hidden_without_touch(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)

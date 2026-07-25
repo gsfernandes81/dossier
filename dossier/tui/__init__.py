@@ -15,6 +15,20 @@
 
 """The Textual TUI."""
 
-from dossier.tui.app import DossierApp
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dossier.tui.app import DossierApp
 
 __all__ = ["DossierApp"]
+
+
+def __getattr__(name: str) -> object:
+    # Lazy so importing a leaf module (e.g. `from dossier.tui import glyphs` in
+    # `ds init`) doesn't drag in Textual just to read a glyph set. Accessing
+    # `dossier.tui.DossierApp` still works — it imports the app on first use.
+    if name == "DossierApp":
+        from dossier.tui.app import DossierApp
+
+        return DossierApp
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
