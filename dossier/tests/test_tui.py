@@ -3480,3 +3480,58 @@ async def test_sync_compute_unconfigured_never_queries(tmp_path: Path, monkeypat
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test():
         assert app.home._compute_sync_status().state is SyncState.UNCONFIGURED
+
+
+# -- Esc peel chain (unified _peel_once) --------------------------------------
+@pytest.mark.asyncio
+async def test_escape_peels_one_layer_per_press(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:  # wide: detail sits beside review
+        home = app.home
+        home.action_review()
+        await _await_review_load(pilot)
+        assert home.has_class("review-mode")
+        home.open_detail("passport")  # detail over review (column 3)
+        await _settle(pilot, lambda: home._show_detail)
+
+        home.action_escape()  # peel #1: the detail
+        await _settle(pilot, lambda: not home._show_detail)
+        assert home.has_class("review-mode")  # the mode is still up — one layer only
+
+        home.action_escape()  # peel #2: the mode
+        await _settle(pilot, lambda: not home.has_class("review-mode"))
+
+
+@pytest.mark.asyncio
+async def test_peel_mode_close_peels_detail_before_mode(tmp_path: Path):
+    # S2: a mode must not be torn out from under an open detail — peel detail first.
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        home.action_settings()
+        await _settle(pilot, lambda: home.has_class("settings-mode"))
+        home.open_detail("passport")
+        await _settle(pilot, lambda: home._show_detail)
+
+        home._peel_mode_close(home._exit_settings_mode)  # first close: peel the detail
+        await _settle(pilot, lambda: not home._show_detail)
+        assert home.has_class("settings-mode")  # mode survived
+
+        home._peel_mode_close(home._exit_settings_mode)  # second: now exit the mode
+        await _settle(pilot, lambda: not home.has_class("settings-mode"))
+
+
+@pytest.mark.asyncio
+async def test_help_panel_is_an_escape_layer(tmp_path: Path):
+    # S5: the `?` help overlay is peelable by Esc, not invisible to it.
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        home.action_toggle_help_panel()
+        await _settle(pilot, lambda: bool(home.query("HelpPanel")))
+        home.action_escape()
+        await _settle(pilot, lambda: not home.query("HelpPanel"))
+        assert not home._show_detail  # nothing else peeled with it

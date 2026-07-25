@@ -847,6 +847,16 @@ class HomeScreen(Screen[None]):
         if self._narrow or in_mode:
             self._detail_pane.focus()
 
+    def _peel_mode_close(self, exit_mode: Callable[[], None]) -> None:
+        """Esc/close inside a column-owning mode: peel an open detail first, else exit
+        the mode. One shape for all five modes, so settings/intake peel their detail
+        before the mode just like review/watch/bundles (never tear the mode out from
+        under an open detail on wide)."""
+        if self._show_detail:
+            self.close_detail()
+        else:
+            exit_mode()
+
     def close_detail(self) -> None:
         if not self._show_detail:
             return
@@ -1223,40 +1233,59 @@ class HomeScreen(Screen[None]):
         getattr(self, f"action_{action}")()
 
     def action_escape(self) -> None:
+        self._peel_once()
+
+    def _peel_once(self) -> bool:
+        """Peel exactly one Esc layer, outermost transient first; return whether one
+        was peeled (``False`` == the miller base state, nothing left to back out of).
+
+        The whole Esc contract in one place — one press, one layer:
+
+        1. cancel an in-progress edit (focus may have wandered off the pane);
+        2. exit command mode (``:``/``>``) — the expiring/bundle filters deliberately
+           survive, vim's Esc-from-``:``;
+        3. close the Help panel;
+        4. leave a mode's ``/`` search bar, clearing any bar text (inert or live);
+        5. clear the home **search layer** — text + bundle scope + expiring together,
+           one compound layer on purpose (else Esc gets stuck mid-filter);
+        6. close the detail pane;
+        7. exit a column-owning mode (normally reached via the pane's
+           ``CloseRequested``; here as a defensive total-function fallback);
+        8. narrow: drill documents → locations.
+
+        A focused pane's own ``escape`` binding consumes the key before the screen
+        sees it, so most peels for a mode arrive via ``CloseRequested``, not here.
+        """
         pane = self._detail_pane
         if pane.editing:
             pane.action_cancel_edit()  # covers focus having left the pane mid-edit
-            return
-        # A dedicated command-mode exit, *before* the search-clearing branch below:
-        # that branch drops the expiring/bundle filters ("or Esc gets stuck"), but a
-        # `:` peek must leave them exactly as they were — vim's Esc-from-`:`. Clearing
-        # the value re-derives `searching` (via on_input_changed) from the untouched
-        # filter state, so an expiring filter reappears on its own.
+            return True
         if self._command_mode:
             self._exit_command_state()
             self.query_one("#search", Input).value = ""
-            pane = self._mode_pane(self._column_mode())
-            if pane is not None:
+            mode_pane = self._mode_pane(self._column_mode())
+            if mode_pane is not None:
                 # Back to the mode's own focus (its tab/cursor), intact.
-                focus = getattr(pane, "focus_active_pane", pane.focus)
-                focus()
+                (getattr(mode_pane, "focus_active_pane", mode_pane.focus))()
             else:
                 self._focus_documents()
-            return
+            return True
+        if self.query("HelpPanel"):  # the `?` overlay is a peelable layer of its own
+            self.app.action_hide_help_panel()
+            return True
         search = self.query_one("#search", Input)
-        # Esc from the bar *inside a mode* (only a searchable mode's bar is ever
-        # focused with intent): clear the per-surface filter and hand focus back to
-        # the pane — never the home search-clear below (it targets the hidden
-        # documents pane). A second Esc from the pane then peels the mode. Detail-open
-        # is left to the show_detail branch, so guard on the bar actually being focused.
+        # Esc from the bar *inside a mode*: clear the per-surface filter and hand focus
+        # back to the pane — never the home search-clear below (it targets the hidden
+        # documents pane). Clear the bar even in a non-searchable mode so stray typed
+        # text never survives. Detail-open is left to step 6, so guard on the bar.
         mode = self._column_mode()
         if mode is not None and self.app.focused is search:
-            if self._mode_searchable(mode) and search.value:
-                search.value = ""  # → on_input_changed → pane.apply_filter("")
-            pane = self._mode_pane(mode)
-            if pane is not None:
-                (getattr(pane, "focus_active_pane", pane.focus))()
-            return
+            if search.value:  # → on_input_changed → apply_filter("") when searchable
+                search.value = ""
+            mode_pane = self._mode_pane(mode)
+            if mode_pane is not None:
+                (getattr(mode_pane, "focus_active_pane", mode_pane.focus))()
+            return True
         if search.value or self.has_class("searching") or self.app.focused is search:
             self._set_mouse_reporting(True)
             search.value = ""
@@ -1266,10 +1295,17 @@ class HomeScreen(Screen[None]):
             self._update_searching()
             self._refresh_documents()
             self._focus_documents()
-        elif self._show_detail:
+            return True
+        if self._show_detail:
             self.close_detail()
-        elif self._narrow and self.has_class("show-documents"):
+            return True
+        if mode is not None:  # defensive: a mode with focus off its pane (rarely hit)
+            getattr(self, f"_exit_{mode}_mode")()
+            return True
+        if self._narrow and self.has_class("show-documents"):
             self.action_drill_out()
+            return True
+        return False
 
     def action_drill_in(self) -> None:
         locations = self.query_one("#locations", OptionList)
@@ -1287,6 +1323,14 @@ class HomeScreen(Screen[None]):
             self.close_detail()
         elif self._narrow and self.has_class("show-documents"):
             self.remove_class("show-documents")
+            self.query_one("#locations", OptionList).focus()
+        # Wide/medium: `←` from the documents column steps focus back to locations
+        # (there's no layer to peel, so Esc leaves this focus hop to `←`).
+        elif (
+            not self._narrow
+            and self._column_mode() is None
+            and self.app.focused is self.query_one("#documents", DocumentList)
+        ):
             self.query_one("#locations", OptionList).focus()
 
     def action_open_file(self) -> None:
@@ -1551,7 +1595,7 @@ class HomeScreen(Screen[None]):
     @on(SettingsPane.CloseRequested)
     def _settings_close_requested(self, event: SettingsPane.CloseRequested) -> None:
         event.stop()
-        self._exit_settings_mode()  # cancel: nothing changed, no reload
+        self._peel_mode_close(self._exit_settings_mode)  # cancel: no changes, no reload
 
     def _scan_docs(self, docs: list[Document]) -> None:
         """Worker body: read each doc with the VLM, persisting after each success
@@ -1666,10 +1710,7 @@ class HomeScreen(Screen[None]):
     def _watch_close_requested(self, event: WatchPane.CloseRequested) -> None:
         """Esc inside watch — peel the detail first, then the mode."""
         event.stop()
-        if self._show_detail:
-            self.close_detail()
-        else:
-            self._exit_watch_mode()
+        self._peel_mode_close(self._exit_watch_mode)
 
     def action_review(self) -> None:
         """Toggle review into columns 1+2. Mounted once, then shown and hidden.
@@ -1734,10 +1775,7 @@ class HomeScreen(Screen[None]):
     def _review_close_requested(self, event: ReviewPane.CloseRequested) -> None:
         """Esc inside review — peel the newest layer, don't collapse the stack."""
         event.stop()
-        if self._show_detail:
-            self.close_detail()
-        else:
-            self._exit_review_mode()
+        self._peel_mode_close(self._exit_review_mode)
 
     def action_intake(self) -> None:
         """Toggle the intake queue into columns 1+2 (a mode, like review)."""
@@ -1790,7 +1828,7 @@ class HomeScreen(Screen[None]):
     @on(IntakePane.CloseRequested)
     def _intake_close_requested(self, event: IntakePane.CloseRequested) -> None:
         event.stop()
-        self._exit_intake_mode()
+        self._peel_mode_close(self._exit_intake_mode)
 
     def action_bundles(self) -> None:
         """Toggle the bundles surface into columns 1+2 (a mode, like review)."""
@@ -1836,10 +1874,7 @@ class HomeScreen(Screen[None]):
     @on(BundlesPane.CloseRequested)
     def _bundles_close_requested(self, event: BundlesPane.CloseRequested) -> None:
         event.stop()
-        if self._show_detail:
-            self.close_detail()
-        else:
-            self._exit_bundles_mode()
+        self._peel_mode_close(self._exit_bundles_mode)
 
     # -- helpers -------------------------------------------------------------
 
