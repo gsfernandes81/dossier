@@ -436,24 +436,16 @@ built on one reusable `syncthing.query_status`.
   second consecutive Esc exits; any other input disarms (an app-level hook, so keys a
   focused widget consumes still cancel the arm), and Termux's IME-dismiss Esc is
   always a peel so it can't quit spuriously.
-- **Finish the Enter/→ verb sweep** *(deferred — come back to this)* — Phase 14.1 settled
-  the app-wide verb (**Enter opens the file, `→` opens detail**) and applied it to the home
-  and the expiry watch, the two surfaces that list *documents*. **Bundles** and **review**
-  were left alone on purpose, not forgotten: bundles lists bundles (its `Enter` scopes the
-  home to one — already the right activate for that object, and there is no file), and
-  review lists reconciliation *records*, keeping the Phase-3 map (`o` = file, `Enter` =
-  record) — on its Missing tab the file is gone by definition, so Enter-opens-file would be
-  dead on the tab that most needs a verb. Worth revisiting both, because the rows are not
-  all the same kind of thing: review's **duplicates** and **succession** rows *are*
-  documents and could take the verb, while **orphans** rows are files with no document yet;
-  bundles could plausibly use `→` for "show me what's in it". Do it as one deliberate pass
-  (fable-advisor first) rather than per-surface drift — the point of the verb is that it is
-  predictable. **Partly settled:** *Integrity* adopts the verb as part of "Review in the
-  miller view" above, which is also what makes `→` cheap everywhere else in review — with
-  the detail pane sitting in column 3, "show the record" stops meaning "tear the screen
-  down". Related: `open_doc_file()` in `tui/screens.py` is already the shared open-the-file
-  seam; once review is a column, the home's `open_detail()` is the matching seam for `→`,
-  and the "dismiss with a doc id" protocol it replaces goes away.
+- **Finish the Enter/→ verb sweep** — **done.** The app-wide verb (**Enter opens the file,
+  `→` opens the record's detail**) now applies **by row-kind** across home, watch, and every
+  review tab, so `→` always means "detail" and Enter is never a dead key. A row that *is* a
+  document → Enter=file / →=record; a **file with no document** (orphan) → Enter=file /
+  →=suggested match; a **two-document** row (succession) → Enter opens both files (older
+  first) / →=newer record; **another object** (a bundle, a conflict plan) → Enter *activates*
+  it non-destructively (scope to the bundle; show the conflicted record) and →=its detail
+  (bundle members). Enter never mutates — accept/merge/fold stay on `a`/`A`/`f`. The review
+  `o` verb is retired (Enter covers it). Shared seams: `open_rel_path`/`open_doc_file` in
+  `tui/screens.py` for the file verb, `open_detail()` (column 3) for `→`. Rules in DESIGN §8.
 - **Review legibility polish** — **done.** The footer truncated mid-word at 100 cols
   (`g Igno`) because `tab Next tab · shift+tab Prev tab` ate ~28 columns before the active
   tab's own verbs; collapsed to one hint (`tab Switch tab`, shift+tab bound-but-hidden), so

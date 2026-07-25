@@ -3712,3 +3712,40 @@ async def test_orphan_right_shows_suggested_record(
         pane.action_detail()
         await _settle(pilot, lambda: home._show_detail)
         assert home._detail_id == "passport"
+
+
+@pytest.mark.asyncio
+async def test_bundles_right_opens_a_member_record(tmp_path: Path):
+    # A bundle is an object: Enter scopes the home to it, `→` shows what's in it —
+    # a picker of members, and picking one opens its record beside bundles.
+    store, config = _setup(tmp_path)
+    store.save_bundles({"trip": Bundle(slug="trip", title="Trip")})
+    passport = store.load("passport")
+    passport.bundles = ["trip"]
+    store.save(passport)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        home.action_bundles()
+        await _settle(pilot, lambda: home.has_class("bundles-mode"))
+        pane = home._bundles
+        assert pane is not None
+        blist = pane.query_one("#bundle-list", OptionList)
+        await _settle(
+            pilot,
+            lambda: any(
+                blist.get_option_at_index(i).id == "trip"
+                for i in range(blist.option_count)
+            ),
+        )
+        blist.highlighted = next(
+            i
+            for i in range(blist.option_count)
+            if blist.get_option_at_index(i).id == "trip"
+        )
+        pane.action_detail()  # → pushes the member picker
+        await _settle(pilot, lambda: isinstance(app.screen, DocPickerScreen))
+        pane._open_member("passport")  # simulate picking a member
+        await _settle(pilot, lambda: home._show_detail)
+        assert home._detail_id == "passport"
+        assert home.has_class("bundles-mode")  # bundles stayed up beside the record

@@ -1894,6 +1894,17 @@ class HomeScreen(Screen[None]):
         event.stop()
         self._peel_mode_close(self._exit_bundles_mode)
 
+    @on(BundlesPane.OpenDocument)
+    def _bundles_open_document(self, event: BundlesPane.OpenDocument) -> None:
+        """Bundles asked to show a member's record — column 3, bundles stays up."""
+        event.stop()
+        self._reload()  # the record (and _docs) fresh for the detail pane
+        doc = self._doc_by_id(event.doc_id)
+        if doc is None:
+            self.notify(f"{event.doc_id}: no such document", severity="warning")
+            return
+        self.open_detail(doc.id)
+
     # -- helpers -------------------------------------------------------------
 
     def _update_searching(self) -> None:

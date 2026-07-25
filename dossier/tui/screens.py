@@ -585,6 +585,7 @@ class BundlesPane(Vertical):
     """
     BINDINGS = [
         Binding("escape", "close", "Close"),
+        Binding("right", "detail", "Members"),
         Binding("d", "set_date", "Set date"),
         Binding("t", "set_template", "Template"),
         Binding("c", "check", "Readiness"),
@@ -599,6 +600,13 @@ class BundlesPane(Vertical):
         def __init__(self, slug: str) -> None:
             super().__init__()
             self.slug = slug
+
+    class OpenDocument(Message):
+        """Show a member's record — the host opens it in column 3, bundles stays up."""
+
+        def __init__(self, doc_id: str) -> None:
+            super().__init__()
+            self.doc_id = doc_id
 
     class CloseRequested(Message):
         """Esc — the host peels the newest layer."""
@@ -714,6 +722,26 @@ class BundlesPane(Vertical):
         if event.option_id is None or event.option_id.startswith(self._SUGGESTED):
             return  # a suggestion isn't a bundle yet — `a` accepts it, Enter waits
         self.post_message(self.OpenBundle(event.option_id))
+
+    def action_detail(self) -> None:
+        """`→` — "show me what's in it": pick a member and open its record (column
+        3, bundles stays up). A bundle is an object; Enter *activates* it (scopes the
+        home), `→` is its detail — its members."""
+        bundle = self._highlighted()
+        if bundle is None:
+            return
+        members = [d for d in self._store.load_all() if bundle.slug in d.bundles]
+        if not members:
+            self.notify(f"{bundle.title}: no members yet")
+            return
+        self.app.push_screen(
+            DocPickerScreen(members, prompt=f"{bundle.title} — open which member?"),
+            self._open_member,
+        )
+
+    def _open_member(self, doc_id: str | None) -> None:
+        if doc_id is not None:
+            self.post_message(self.OpenDocument(doc_id))
 
     def action_accept(self) -> None:
         sug = self._highlighted_suggestion()
