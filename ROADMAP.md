@@ -1,6 +1,6 @@
 # dossier roadmap
 
-**Where we are (2026-07-22).** The Miller-columns home shipped (PRs #15–#31):
+**Where we are (2026-07-25).** The Miller-columns home shipped (PRs #15–#31):
 browse · detail pane · bottom-bar search · the full action set · touch/Termux ·
 Nerd-Font icons · spacing/gutter polish. **Expiries now come from the Notion
 _Marine Documents_ table** (#32). Since then: `ds reset` (#38), the **real
@@ -37,8 +37,17 @@ a build-but-don't-run installer) that closes the phone sync-back loop. **Phases 
 complete.** Phases 14–15 are next: **find-fast UX** (launch optimized for the urgent
 lookup, undo, init/empty-state polish, typo-tolerant search) and **Syncthing integration**.
 
+**Since then (the command-surface overhaul, PRs #71–#72):** Textual's modal `ctrl+p`
+palette is **retired** for an always-visible **persistent command line** — plain typing
+searches, `:`/`>` runs commands. Watch / Bundles / Intake / Settings are no longer
+modals but **home modes** (columns 1+2, like review), so the bar and per-surface `/`
+search are present on every surface; **reconcile search** followed (Orphans flatten to a
+matching-files list for fast adoption). *This supersedes the "command palette /
+`DossierCommands` provider" and modal `IntakeScreen`/`SettingsScreen` descriptions still
+worded below in Phases 7/9/13.*
+
 **Next up:** the rest of Phase 14 — **first-run & empty states**, then typo-tolerant
-search. (Review-in-the-miller-view and undo/history restore have landed.)
+search.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -354,6 +363,15 @@ search forgives phone-keyboard typos.
   because with restores being saves a naive "restore the newest archive" walks into a
   ping-pong; arbitrary depth lives in the palette's **History** picker, which reuses the
   ChoiceScreen added for the reveal/copy verbs.
+- [x] **Persistent command line + every surface a home mode** (L) — **done (PRs #71–#72).**
+  Retired Textual's modal `ctrl+p` palette for an always-visible bar: plain typing
+  searches, `:`/`>` opens command mode (Quit and a light/dark toggle among the commands);
+  the header ⭘, the touch Commands button and `ctrl+p` all converge on it. Watch, Bundles,
+  Intake and Settings became **home modes** (columns 1+2, mounted-once, message-based, like
+  review) rather than modals, so the bar is present everywhere and per-surface `/` search
+  appears where a list exists (Watch, Bundles, and the **reconcile tabs** — Orphans flatten
+  to a matching-files list, `/` → type → `↓` → `a` adopts). Transient pickers/prompts stay
+  modal. Same one-screen, CSS-class-toggle idiom as the miller view.
 - [ ] **First-run & empty states** (S) — `ds init` walks root pick → glyph check → Termux
   preconditions conversationally; every empty surface (no config, empty store, empty
   inbox, no matches) says exactly what to do next instead of rendering blank.
@@ -393,6 +411,14 @@ API; never bundle, spawn, or reimplement it.
   that links a *folded* duplicate copy and for stale sidecar entries (a `dismissed`
   path or `folded` keep that no longer exists on disk); a "show dismissed (N)" toggle
   to review/undo suppressions from the TUI (undo today = hand-edit `reconcile.toml`).
+- **Esc behaviour review** *(backlog)* — the Esc stack has grown layered (cancel edit →
+  exit command mode → clear a per-surface search → close detail → exit the mode →
+  drill-out), spread across the shared `action_escape` chain and each pane's own `escape`
+  binding. Audit it as one deliberate pass for consistency and surprises. **Candidate
+  change: Esc-Esc to quit** from the miller base state — a second Esc at column 1
+  (locations focused, nothing left to peel) exits the app, so "keep pressing Esc to back
+  all the way out" ends in quit rather than a dead key. Fable-advisor first; mind the
+  Termux path (Esc also returns from IME/tap mode there).
 - **Finish the Enter/→ verb sweep** *(deferred — come back to this)* — Phase 14.1 settled
   the app-wide verb (**Enter opens the file, `→` opens detail**) and applied it to the home
   and the expiry watch, the two surfaces that list *documents*. **Bundles** and **review**
