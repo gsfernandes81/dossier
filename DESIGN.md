@@ -467,6 +467,8 @@ Renewals *replace* rather than accumulate — a new passport / MOT / cert supers
   button is needed on this surface).
 - **Actions, in priority order:** `⏎` open (most common) · `b` add-to-bundle · `n` new / `s` supersede.
   Keys are consistent across widths: `←`/`→` move panes, `Esc` closes detail / clears search.
+  `Esc` backs out exactly one layer per press (edit → command mode → help → search → detail →
+  mode → drill); at the base state it arms, and a second consecutive `Esc` quits.
 - **Touch / Termux (researched, 2026).** Textual enables SGR mouse reporting, and Termux's
   `onSingleTapUp` only raises the soft-keyboard when mouse tracking is *off* — so with mouse mode on,
   **taps arrive as clicks and the keyboard stays down automatically**, no config needed. That makes

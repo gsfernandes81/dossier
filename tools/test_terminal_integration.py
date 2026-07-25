@@ -206,3 +206,19 @@ def test_ctrl_z_does_not_suspend_the_app(tmp_path: Path):
         assert term.wait_for_exit(), "app did not quit on ctrl+q"
     finally:
         term.close()
+
+
+def test_escape_escape_quits_from_the_base_state(tmp_path: Path):
+    """The real key path for Esc-Esc-quit: at the miller base (a list focused on
+    desktop) the first Esc arms with a toast, a second consecutive Esc exits."""
+    term = PtyTerm([sys.executable, LAUNCH, str(tmp_path)], cols=100, rows=30)
+    try:
+        assert term.wait_for("dossier"), "home never rendered"
+        assert term.wait_for("Passport"), "documents pane never populated"
+
+        term.send("esc")  # nothing to peel → arm + toast
+        assert term.wait_for("press Esc again to quit"), "first Esc did not arm quit"
+        term.send("esc")  # second consecutive Esc → exit
+        assert term.wait_for_exit(), "second Esc did not quit the app"
+    finally:
+        term.close()

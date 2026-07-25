@@ -3535,3 +3535,84 @@ async def test_help_panel_is_an_escape_layer(tmp_path: Path):
         home.action_escape()
         await _settle(pilot, lambda: not home.query("HelpPanel"))
         assert not home._show_detail  # nothing else peeled with it
+
+
+# -- Esc-Esc-to-quit ----------------------------------------------------------
+@pytest.mark.asyncio
+async def test_escape_escape_quits_from_base(tmp_path: Path, monkeypatch):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        exited: list[bool] = []
+        monkeypatch.setattr(app, "exit", lambda *a, **k: exited.append(True))
+        home.query_one("#documents", OptionList).focus()  # base state, not the bar
+        await pilot.pause()
+
+        home.action_escape()  # nothing to peel → arm (with a toast), don't quit
+        await _settle(pilot, lambda: home._quit_armed)
+        assert any("Esc again" in n.message for n in app._notifications)
+        assert not exited
+
+        home.action_escape()  # second consecutive Esc → quit
+        await _settle(pilot, lambda: bool(exited))
+
+
+@pytest.mark.asyncio
+async def test_other_key_disarms_quit(tmp_path: Path, monkeypatch):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        exited: list[bool] = []
+        monkeypatch.setattr(app, "exit", lambda *a, **k: exited.append(True))
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+
+        home.action_escape()  # arm
+        await _settle(pilot, lambda: home._quit_armed)
+        # a key the focused OptionList consumes — proves the disarm hook is app-level,
+        # not a screen on_key (which would never see this key).
+        await pilot.press("down")
+        await _settle(pilot, lambda: not home._quit_armed)
+
+        home.action_escape()  # re-arms rather than quitting (the run was disarmed)
+        await _settle(pilot, lambda: home._quit_armed)
+        assert not exited
+
+
+@pytest.mark.asyncio
+async def test_escape_that_peels_a_layer_never_quits(tmp_path: Path, monkeypatch):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        exited: list[bool] = []
+        monkeypatch.setattr(app, "exit", lambda *a, **k: exited.append(True))
+        home.open_detail("passport")
+        await _settle(pilot, lambda: home._show_detail)
+
+        home.action_escape()  # peels the detail (and disarms) — never a quit
+        await _settle(pilot, lambda: not home._show_detail)
+        assert not home._quit_armed and not exited
+
+        home.action_escape()  # base → arm
+        await _settle(pilot, lambda: home._quit_armed)
+        home.action_escape()  # → quit
+        await _settle(pilot, lambda: bool(exited))
+
+
+@pytest.mark.asyncio
+async def test_touch_escape_from_search_never_quits(tmp_path: Path, monkeypatch):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY, touch=True)
+    async with app.run_test(size=(50, 80)) as pilot:  # portrait phone: type-first
+        home = app.home
+        exited: list[bool] = []
+        monkeypatch.setattr(app, "exit", lambda *a, **k: exited.append(True))
+        search = home.query_one("#search", Input)
+        await _settle(pilot, lambda: app.focused is search)
+
+        home.action_escape()  # leaving the IME/bar is a peel, never an arm
+        await pilot.pause()
+        assert not home._quit_armed and not exited

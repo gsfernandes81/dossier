@@ -21,7 +21,7 @@ from datetime import date
 
 from textual.app import App
 from textual.binding import Binding
-from textual.events import DescendantFocus
+from textual.events import DescendantFocus, Event, Key, MouseDown
 from textual.widgets import Input, TextArea
 
 from dossier.config import Config
@@ -97,6 +97,21 @@ class DossierApp(App[None]):
         if self._home is None:
             raise RuntimeError("home screen not created yet")
         return self._home
+
+    async def on_event(self, event: Event) -> None:
+        # Any input that isn't Esc cancels a pending Esc-Esc quit, so the two Escs
+        # must be consecutive. Hooked at the app (not the screen) because a focused
+        # widget's own bindings consume keys before they'd ever reach the screen —
+        # e.g. the ↓ that steps into a list, or a pane's letter verb. MouseDown
+        # covers taps and the touch buttons; MouseMove deliberately doesn't (noise).
+        if (
+            self._home is not None
+            and isinstance(event, (Key, MouseDown))
+            and not event.is_forwarded
+            and getattr(event, "key", None) != "escape"
+        ):
+            self._home.disarm_quit()
+        await super().on_event(event)
 
     def on_descendant_focus(self, event: DescendantFocus) -> None:
         """Termux keyboard model, applied app-wide (see :meth:`set_mouse_reporting`).

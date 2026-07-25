@@ -382,6 +382,10 @@ class HomeScreen(Screen[None]):
         self._sync_settings_resolved = False
         self._sync_settings: SyncthingSettings | None = None
         self._sync_note = ""
+        # Esc-Esc-to-quit: a second consecutive Esc at the miller base state exits.
+        # Armed by an Esc that peels nothing; disarmed by any other input (see
+        # DossierApp.on_event) so it only ever fires on two Escs in a row.
+        self._quit_armed = False
         self._show_detail = False
         self._review: ReviewPane | None = None  # mounted on first `action_review`
         self._watch: WatchPane | None = None  # mounted on first `action_watch`
@@ -1233,7 +1237,21 @@ class HomeScreen(Screen[None]):
         getattr(self, f"action_{action}")()
 
     def action_escape(self) -> None:
-        self._peel_once()
+        # Capture-and-clear first: an Esc that *peels* a layer also disarms, so quit
+        # only ever fires on two Escs in a row at the base with nothing between.
+        armed, self._quit_armed = self._quit_armed, False
+        if self._peel_once():
+            return
+        if armed:
+            self.app.exit()  # same exit as action_quit
+        else:
+            self._quit_armed = True
+            self.notify("press Esc again to quit", timeout=3)
+
+    def disarm_quit(self) -> None:
+        """Cancel a pending Esc-Esc quit — called on any non-Esc input so the two
+        Escs must be consecutive (see :meth:`DossierApp.on_event`)."""
+        self._quit_armed = False
 
     def _peel_once(self) -> bool:
         """Peel exactly one Esc layer, outermost transient first; return whether one

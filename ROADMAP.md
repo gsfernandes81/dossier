@@ -427,14 +427,15 @@ built on one reusable `syncthing.query_status`.
   `reconcile-stale` (a `dismissed` path or `folded` keep no longer on disk — info).
   *Still open:* a "show dismissed (N)" toggle to review/undo suppressions from the TUI
   (undo today = hand-edit `reconcile.toml`).
-- **Esc behaviour review** *(backlog)* — the Esc stack has grown layered (cancel edit →
-  exit command mode → clear a per-surface search → close detail → exit the mode →
-  drill-out), spread across the shared `action_escape` chain and each pane's own `escape`
-  binding. Audit it as one deliberate pass for consistency and surprises. **Candidate
-  change: Esc-Esc to quit** from the miller base state — a second Esc at column 1
-  (locations focused, nothing left to peel) exits the app, so "keep pressing Esc to back
-  all the way out" ends in quit rather than a dead key. Fable-advisor first; mind the
-  Termux path (Esc also returns from IME/tap mode there).
+- **Esc behaviour review** — **done.** Unified the layered Esc handling into one
+  `HomeScreen._peel_once` chain (edit → command mode → help panel → mode search →
+  home search layer → detail → mode → narrow drill-out), fixing four audit findings
+  along the way (settings/intake peel a detail before the mode; a mode's bar clears
+  stray text; the `?` HelpPanel is peelable; `←` hops documents→locations on wide).
+  Then **Esc-Esc-to-quit** from the base state — the first Esc arms with a toast, a
+  second consecutive Esc exits; any other input disarms (an app-level hook, so keys a
+  focused widget consumes still cancel the arm), and Termux's IME-dismiss Esc is
+  always a peel so it can't quit spuriously.
 - **Finish the Enter/→ verb sweep** *(deferred — come back to this)* — Phase 14.1 settled
   the app-wide verb (**Enter opens the file, `→` opens detail**) and applied it to the home
   and the expiry watch, the two surfaces that list *documents*. **Bundles** and **review**
