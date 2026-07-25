@@ -774,6 +774,7 @@ class BundlesPane(Vertical):
         state.dismiss_key(sug.key)
         self._store.save_suggestions(state)
         self.refresh_bundles()
+        self.notify(f"dismissed suggestion {sug.slug}")
 
     def _highlighted_suggestion(self) -> suggest.BundleSuggestion | None:
         option_id = _highlighted_id(self.query_one("#bundle-list", OptionList))

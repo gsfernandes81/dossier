@@ -1107,13 +1107,16 @@ class ReviewPane(Vertical):
         if self._persist_state():
             self._populate_succession()
             self._update_summary()
+            self.notify("dismissed this succession")
 
     def _dismiss_orphan(self) -> None:
         leaf = self._cursor_leaf()
         if leaf is None:
             return
         self._state.dismissed.add(leaf.path)
-        self._save_and_refresh()
+        if self._save_and_refresh():
+            # A dismissed leaf just vanishes; confirm it and point at the undo.
+            self.notify(f"dismissed {leaf.path} — h restores")
 
     def action_show_dismissed(self) -> None:
         """`h` — review the orphans you've dismissed and restore one, so undoing a
@@ -1147,7 +1150,8 @@ class ReviewPane(Vertical):
             return
         doc_id, path = picked
         self._state.missing_ok.setdefault(path, set()).add(doc_id)
-        self._save_and_refresh()
+        if self._save_and_refresh():
+            self.notify(f"acknowledged missing {path}")
 
     def action_link(self) -> None:
         leaf = self._cursor_leaf()
@@ -1318,9 +1322,11 @@ class ReviewPane(Vertical):
             return False
         return True
 
-    def _save_and_refresh(self) -> None:
+    def _save_and_refresh(self) -> bool:
         if self._persist_state():
             self._refresh()
+            return True
+        return False
 
     def _refresh(self, *, refilter_dups: bool = False) -> None:
         """Re-run the (cheap) engine and rebuild the orphan tree + missing list.
