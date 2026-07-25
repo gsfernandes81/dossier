@@ -900,6 +900,25 @@ async def test_touch_focus_drives_soft_keyboard_no_kbd_button(
 
 
 @pytest.mark.asyncio
+async def test_touch_action_buttons_are_equal_width(tmp_path: Path):
+    """The Termux tap grid must not render the leftmost button a cell narrower.
+
+    `1fr` columns hand any width that doesn't divide evenly to the right-hand
+    columns, starving column one; on_resize pins equal integer columns so every
+    tap target matches (the ≤1-cell leftover becomes symmetric outer margin). 52
+    and 41 are widths that do *not* divide evenly — the old bug's trigger.
+    """
+    store, config = _setup(tmp_path)
+    for w, h in [(52, 40), (41, 60)]:  # landscape → 3 columns, portrait → 2
+        app = DossierApp(store, config, today=TODAY, touch=True)
+        async with app.run_test(size=(w, h)) as pilot:
+            home = app.home
+            await pilot.pause()
+            widths = {b.region.width for b in home.query("#actionbar Button")}
+            assert len(widths) == 1, f"{w}x{h}: buttons differ in width: {widths}"
+
+
+@pytest.mark.asyncio
 async def test_home_empty_store_shows_a_pointer(tmp_path: Path):
     """A brand-new store is never a blank pane — it says what to do next."""
     config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")

@@ -201,7 +201,12 @@ class HomeScreen(Screen[None]):
        phone gets them 2-wide (3 rows). */
     HomeScreen.touch #bottombar { height: 12; }
     HomeScreen.touch.-portrait #bottombar { height: 16; }
-    HomeScreen.touch #actionbar { display: block; grid-size: 3; }
+    /* align-horizontal centres the fixed-width grid (columns pinned equal in
+       _equalize_action_columns) so any leftover cell becomes symmetric outer
+       margin rather than a fatter right-hand column. */
+    HomeScreen.touch #actionbar {
+        display: block; grid-size: 3; align-horizontal: center;
+    }
     HomeScreen.touch.-portrait #actionbar { grid-size: 2; }
     /* Two-line location rows on touch: a bigger tap target per category and a
        far better fit for a tall phone screen than thin single lines. */
@@ -784,9 +789,29 @@ class HomeScreen(Screen[None]):
         self._portrait = size.height > size.width
         self._narrow = size.width < _NARROW_COLS
         self.set_class(self._portrait, "-portrait")
+        if self._touch:
+            self._equalize_action_columns(size.width)
         if self._row_mode() != self._last_mode:
             self._refresh_documents()
         self._ensure_focus_visible()
+
+    def _equalize_action_columns(self, width: int) -> None:
+        """Pin the touch action grid to equal integer column widths.
+
+        ``1fr`` columns hand any width that doesn't divide evenly to the right-hand
+        columns, so the leftmost button renders a cell narrower — visibly lopsided
+        on Termux. Fixed equal columns plus a centred grid (see the touch CSS) push
+        the ≤1-cell slack into symmetric outer margin instead, so every tap target
+        is the same size whatever the terminal width.
+        """
+        cols = 2 if self._portrait else 3
+        gutter = 1  # matches #actionbar's grid-gutter
+        base = max(6, (width - (cols - 1) * gutter) // cols)
+        # One value per column — a single value sets only the first, leaving the
+        # rest at 1fr (the very lopsidedness we're fixing).
+        self.query_one("#actionbar", Grid).styles.grid_columns = " ".join(
+            [str(base)] * cols
+        )
 
     def on_key(self, event: Key) -> None:
         """Find-fast routing that runs before any binding (Textual dispatches key
