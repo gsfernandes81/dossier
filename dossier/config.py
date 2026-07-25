@@ -96,6 +96,12 @@ class Config:
     service_assume_ac: bool = False
     service_intake: str = "propose"
     service_transcribe_limit: int = 10
+    # Syncthing REST API ([syncthing], per-device — the address/key differ per
+    # device and the key is a secret that must never enter the synced config).
+    # All unset → dossier autodiscovers from Syncthing's own config.xml on desktop.
+    syncthing_address: str | None = None
+    syncthing_apikey: str | None = None
+    syncthing_verify_tls: bool = False
 
     @property
     def meta_dir(self) -> Path:
@@ -189,6 +195,7 @@ class Config:
         if isinstance(dpi, int) and not isinstance(dpi, bool):
             cfg.scan_dpi = dpi
         cfg._apply_service_table(device.get("service"))
+        cfg._apply_syncthing_table(device.get("syncthing"))
         cfg.validate()
         cfg.merge_synced()
         return cfg
@@ -206,6 +213,20 @@ class Config:
         limit = service.get("transcribe_limit")
         if isinstance(limit, int) and not isinstance(limit, bool) and limit >= 0:
             self.service_transcribe_limit = limit
+
+    def _apply_syncthing_table(self, syncthing: object) -> None:
+        """Overlay the per-device ``[syncthing]`` table (REST API connection)."""
+        if not isinstance(syncthing, dict):
+            return
+        address = syncthing.get("address")
+        if isinstance(address, str) and address:
+            self.syncthing_address = address
+        apikey = syncthing.get("apikey")
+        if isinstance(apikey, str) and apikey:
+            self.syncthing_apikey = apikey
+        verify = syncthing.get("verify_tls")
+        if isinstance(verify, bool):
+            self.syncthing_verify_tls = verify
 
     def merge_synced(self) -> None:
         """Overlay settings from the synced ``.dossier/config.toml`` if present."""

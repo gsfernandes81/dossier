@@ -89,6 +89,41 @@ def test_glyphs_defaults_to_nerd_and_loads_from_device(
     assert Config.load().glyphs == "ascii"
 
 
+def test_syncthing_table_defaults_and_loads_from_device(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    cfg = Config(syncthing_root=tmp_path)  # per-device defaults: unset
+    assert cfg.syncthing_address is None
+    assert cfg.syncthing_apikey is None
+    assert cfg.syncthing_verify_tls is False
+
+    root = tmp_path / "docs"
+    (root / ".dossier").mkdir(parents=True)
+    device = tmp_path / "device.toml"
+    device.write_text(
+        f'syncthing_root = "{root.as_posix()}"\n'
+        '[syncthing]\naddress = "127.0.0.1:8384"\n'
+        'apikey = "k3y"\nverify_tls = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+
+    loaded = Config.load()
+    assert loaded.syncthing_address == "127.0.0.1:8384"
+    assert loaded.syncthing_apikey == "k3y"
+    assert loaded.syncthing_verify_tls is True
+
+
+def test_syncthing_table_ignores_wrong_types(tmp_path: Path):
+    cfg = Config(syncthing_root=tmp_path)
+    cfg._apply_syncthing_table({"apikey": 123, "verify_tls": "yes", "address": ""})
+    assert cfg.syncthing_apikey is None
+    assert cfg.syncthing_verify_tls is False
+    assert cfg.syncthing_address is None
+    cfg._apply_syncthing_table("not-a-table")  # must not raise
+    assert cfg.syncthing_apikey is None
+
+
 def test_merge_synced_reads_organize_folders(tmp_path: Path):
     config = Config(syncthing_root=tmp_path)
     config.meta_dir.mkdir(parents=True)
