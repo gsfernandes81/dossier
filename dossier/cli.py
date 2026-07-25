@@ -228,22 +228,34 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
         return 1
 
     report = doctor.run(Store(config), config)
-    if report.findings:
-        grouped = report.by_check()
-        print(f"doctor: {len(report.findings)} finding(s)\n")
-        for check in sorted(grouped):
-            items = grouped[check]
-            print(f"{check} ({len(items)}):")
-            for finding in items:
-                print(f"  {finding.subject}: {finding.detail}")
-            hint = doctor.CHECK_HINTS.get(check)
-            if hint:
-                print(f"  → {hint}")
-            print()
-    else:
+    warnings = [f for f in report.findings if f.severity != "info"]
+    notes = [f for f in report.findings if f.severity == "info"]
+    if warnings:
+        print(f"doctor: {len(warnings)} finding(s)\n")
+        _print_findings(warnings)
+    elif not notes:
         print("doctor: all clear.")
+    if notes:  # advisory / skipped — kept apart so they never read as failures
+        print("doctor: notes\n")
+        _print_findings(notes)
     _print_icon_note(config)
     return 0
+
+
+def _print_findings(findings: list[doctor.Finding]) -> None:
+    """Print findings grouped by check, each group with its recovery hint."""
+    grouped: dict[str, list[doctor.Finding]] = {}
+    for finding in findings:
+        grouped.setdefault(finding.check, []).append(finding)
+    for check in sorted(grouped):
+        items = grouped[check]
+        print(f"{check} ({len(items)}):")
+        for finding in items:
+            print(f"  {finding.subject}: {finding.detail}")
+        hint = doctor.CHECK_HINTS.get(check)
+        if hint:
+            print(f"  → {hint}")
+        print()
 
 
 def _print_icon_note(config: Config) -> None:

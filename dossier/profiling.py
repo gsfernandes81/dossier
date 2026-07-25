@@ -53,7 +53,9 @@ _IMPORT_TARGETS = [
     ("dossier.tui  (TUI launch)", "import dossier.tui"),
 ]
 
-_INTEGRITY_SKIP = frozenset({"sync-conflict", "missing-file"})
+# Mirrors ReviewPane._INTEGRITY_SKIP: skip the conflict/missing tabs' checks and the
+# network `syncthing` group so profiling the Integrity tab stays offline.
+_INTEGRITY_SKIP = frozenset({"sync-conflict", "missing-file", "syncthing"})
 
 
 @dataclass

@@ -20,10 +20,11 @@ from pathlib import Path
 
 import pytest
 
-from dossier import doctor
+from dossier import doctor, syncthing
 from dossier.config import Config
 from dossier.model import Document, Location, Rendition
 from dossier.store import Store
+from dossier.syncthing import FolderStatus, SyncState, SyncStatus
 
 
 @pytest.fixture
@@ -34,6 +35,21 @@ def store(tmp_path: Path) -> Store:
     return st
 
 
+@pytest.fixture(autouse=True)
+def _isolate_syncthing(monkeypatch: pytest.MonkeyPatch):
+    """Keep ``doctor.run`` offline by default — no test may touch a real Syncthing.
+
+    The syncthing-specific tests below re-patch ``query_status`` to the status they
+    need (a later ``setattr`` wins over this one).
+    """
+    monkeypatch.setattr(
+        syncthing,
+        "query_status",
+        lambda *a, **k: SyncStatus(state=SyncState.UNCONFIGURED),
+    )
+    monkeypatch.setattr(syncthing, "probe_health", lambda *a, **k: False)
+
+
 def _kinds(report: doctor.Report) -> dict[str, int]:
     return {check: len(items) for check, items in report.by_check().items()}
 
@@ -41,7 +57,9 @@ def _kinds(report: doctor.Report) -> dict[str, int]:
 def test_clean_store_has_no_findings(store: Store):
     store.save_locations({"file": Location(slug="file", title="File")})
     store.save(Document(id="ok", name="Passport", perm_location="file"))
-    assert doctor.run(store, store.config).findings == []
+    # skip the syncthing group — this asserts the *store* is clean, not the sync setup
+    clean = doctor.run(store, store.config, skip=frozenset({"syncthing"}))
+    assert clean.findings == []
 
 
 def test_run_reuses_a_passed_docs_snapshot(
@@ -191,3 +209,132 @@ def test_conflict_finding_flags_a_clean_auto_merge(store: Store):
     )
     findings = doctor.run(store, store.config).by_check().get("sync-conflict", [])
     assert "auto-merges cleanly" in findings[0].detail
+
+
+# -- Syncthing checks (Phase 15) ---------------------------------------------
+# `_check_syncthing` imports the module lazily and calls `syncthing.query_status`,
+# so patching that attribute (and `probe_health`) drives every branch without a
+# network. `store.config.syncthing_root` is a real tmp dir from the fixture.
+
+
+def _folder(
+    root: Path, *, versioning: str = "staggered", paused: bool = False, shared: int = 1
+) -> FolderStatus:
+    return FolderStatus(
+        id="docs",
+        label="Docs",
+        path=str(root),
+        paused=paused,
+        versioning=versioning,
+        shared_with=shared,
+    )
+
+
+def _sync_findings(report: doctor.Report) -> dict[str, doctor.Finding]:
+    return {f.check: f for f in report.findings if f.check.startswith("syncthing")}
+
+
+def test_syncthing_all_good_is_silent(store: Store, monkeypatch: pytest.MonkeyPatch):
+    status = SyncStatus(
+        state=SyncState.IDLE,
+        store_folder=_folder(store.config.syncthing_root),
+        connected_devices=1,
+        total_devices=1,
+    )
+    monkeypatch.setattr(syncthing, "query_status", lambda *a, **k: status)
+    assert _sync_findings(doctor.run(store, store.config)) == {}
+
+
+def test_syncthing_versioning_off_is_the_headline_warn(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+):
+    status = SyncStatus(
+        state=SyncState.IDLE,
+        store_folder=_folder(store.config.syncthing_root, versioning=""),
+        connected_devices=1,
+        total_devices=1,
+    )
+    monkeypatch.setattr(syncthing, "query_status", lambda *a, **k: status)
+    found = _sync_findings(doctor.run(store, store.config))
+    assert "syncthing-versioning" in found
+    assert found["syncthing-versioning"].severity == "warn"
+
+
+def test_syncthing_paused_and_unshared_warn(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+):
+    folder = _folder(store.config.syncthing_root, paused=True, shared=0)
+    status = SyncStatus(state=SyncState.IDLE, store_folder=folder)
+    monkeypatch.setattr(syncthing, "query_status", lambda *a, **k: status)
+    found = _sync_findings(doctor.run(store, store.config))
+    assert found["syncthing-paused"].severity == "warn"
+    assert found["syncthing-unshared"].severity == "warn"
+
+
+def test_syncthing_folder_not_found_warn(store: Store, monkeypatch: pytest.MonkeyPatch):
+    status = SyncStatus(state=SyncState.IDLE, store_folder=None)
+    monkeypatch.setattr(syncthing, "query_status", lambda *a, **k: status)
+    found = _sync_findings(doctor.run(store, store.config))
+    assert "syncthing-folder" in found and found["syncthing-folder"].severity == "warn"
+
+
+def test_syncthing_unconfigured_is_info(store: Store, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        syncthing,
+        "query_status",
+        lambda *a, **k: SyncStatus(state=SyncState.UNCONFIGURED),
+    )
+    monkeypatch.setattr(syncthing, "probe_health", lambda *a, **k: False)
+    found = _sync_findings(doctor.run(store, store.config))
+    assert list(found) == ["syncthing-unconfigured"]
+    assert found["syncthing-unconfigured"].severity == "info"
+
+
+def test_syncthing_unconfigured_notes_running_daemon(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        syncthing,
+        "query_status",
+        lambda *a, **k: SyncStatus(state=SyncState.UNCONFIGURED),
+    )
+    monkeypatch.setattr(syncthing, "probe_health", lambda *a, **k: True)  # it's running
+    found = _sync_findings(doctor.run(store, store.config))
+    assert "no API key" in found["syncthing-unconfigured"].detail
+
+
+def test_syncthing_unreachable_is_info(store: Store, monkeypatch: pytest.MonkeyPatch):
+    status = SyncStatus(state=SyncState.UNREACHABLE, error="connection refused")
+    monkeypatch.setattr(syncthing, "query_status", lambda *a, **k: status)
+    found = _sync_findings(doctor.run(store, store.config))
+    assert found["syncthing-unreachable"].severity == "info"
+
+
+def test_syncthing_auth_is_warn(store: Store, monkeypatch: pytest.MonkeyPatch):
+    status = SyncStatus(state=SyncState.UNAUTHORIZED, error="403")
+    monkeypatch.setattr(syncthing, "query_status", lambda *a, **k: status)
+    found = _sync_findings(doctor.run(store, store.config))
+    assert found["syncthing-auth"].severity == "warn"
+
+
+def test_syncthing_disconnected_is_info(store: Store, monkeypatch: pytest.MonkeyPatch):
+    status = SyncStatus(
+        state=SyncState.IDLE,
+        store_folder=_folder(store.config.syncthing_root),
+        connected_devices=0,
+        total_devices=2,
+    )
+    monkeypatch.setattr(syncthing, "query_status", lambda *a, **k: status)
+    found = _sync_findings(doctor.run(store, store.config))
+    assert found["syncthing-connectivity"].severity == "info"
+
+
+def test_syncthing_skip_short_circuits_the_network(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+):
+    def boom(*a, **k):
+        raise AssertionError("query_status must not run when syncthing is skipped")
+
+    monkeypatch.setattr(syncthing, "query_status", boom)
+    report = doctor.run(store, store.config, skip=frozenset({"syncthing"}))
+    assert not any(f.check.startswith("syncthing") for f in report.findings)

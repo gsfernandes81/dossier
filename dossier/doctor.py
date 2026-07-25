@@ -46,6 +46,47 @@ CHECK_HINTS: dict[str, str] = {
         "the conflict copy. (Prior versions are also backed up under the local history "
         "dir on save.) See docs/guide/sync-conflicts.md."
     ),
+    "syncthing-unconfigured": (
+        "dossier can't find Syncthing's REST API. Add a `[syncthing]` table to the "
+        'per-device config with `apikey = "…"` (Syncthing GUI → Actions → Settings → '
+        "API Key; on Android: Syncthing-Fork → Web GUI → Settings → API Key). Desktop "
+        "usually autodetects from Syncthing's own config.xml. These checks are "
+        "skipped, not failed."
+    ),
+    "syncthing-unreachable": (
+        "Syncthing isn't answering, so these checks are skipped. Start Syncthing, or "
+        "fix `address` in the `[syncthing]` config. Only a problem if you expected it "
+        "to be running."
+    ),
+    "syncthing-auth": (
+        "Syncthing answered but rejected the API key. Re-copy `apikey` from the GUI "
+        "settings — it changes if Syncthing's config is reset."
+    ),
+    "syncthing-folder": (
+        "No synced Syncthing folder contains the store. The synced folder should be an "
+        "ancestor of the store (its `.stfolder` marker sits at the synced parent, not "
+        "the store root). Share a folder that covers the store, or fix "
+        "`syncthing_root`."
+    ),
+    "syncthing-paused": (
+        "The Syncthing folder holding the store is paused — edits won't propagate. "
+        "Resume it in Syncthing."
+    ),
+    "syncthing-versioning": (
+        "File versioning is OFF on the Syncthing folder holding the store. Versioning "
+        "is dossier's recovery net: it's what lets you undo a bad change that syncs "
+        "between devices — including a Proton Drive revert arriving via Syncthing. "
+        "Enable Staggered File Versioning on this folder (Folder → Edit → File "
+        "Versioning), on every device."
+    ),
+    "syncthing-unshared": (
+        "The Syncthing folder holding the store isn't shared with any other device, so "
+        "nothing is actually syncing. Share it with your other device(s)."
+    ),
+    "syncthing-connectivity": (
+        "No sync devices are currently connected. Sync resumes when both ends are "
+        "online — only a last-seen of days really deserves a look."
+    ),
 }
 
 
@@ -54,6 +95,10 @@ class Finding:
     check: str
     subject: str  # a document id, or a file path for conflict findings
     detail: str
+    # "warn" = a problem to act on (the default, so every existing finding keeps its
+    # meaning); "info" = advisory/skipped (e.g. Syncthing not configured) — surfaced
+    # apart so it never drowns out real warnings or reads as a failure.
+    severity: str = "warn"
 
 
 @dataclass
@@ -80,7 +125,9 @@ def run(
     two heaviest — ``sync-conflict`` and ``missing-file`` — are also short-circuited
     when skipped so they never run; a final filter honours any other skipped kind.
     The Review screen's Integrity tab skips those two because its Conflicts and
-    Missing tabs already own them. ``docs`` reuses an already-loaded document list
+    Missing tabs already own them, and skips ``syncthing`` so the tab stays offline
+    (the home's live sync glyph is the TUI's window on it). ``docs`` reuses an
+    already-loaded document list
     (findings then describe those docs *as loaded*) instead of a fresh
     :meth:`Store.load_all`; omit it — as the CLI does — to check the live store.
     """
@@ -96,9 +143,73 @@ def run(
     if "missing-file" not in skip:
         report.findings += _check_files(docs, config.syncthing_root)
     report.findings += _check_dates(docs)
+    if "syncthing" not in skip:  # a network group; the Review tab skips it wholesale
+        report.findings += _check_syncthing(config)
     if skip:
         report.findings = [f for f in report.findings if f.check not in skip]
     return report
+
+
+def _check_syncthing(config: Config) -> list[Finding]:
+    """Syncthing REST diagnostics (Phase 15).
+
+    Reachability problems are advisory (``info``): a device with no Syncthing
+    configured, or one that just isn't running, is not a broken store — doctor says
+    so and moves on. The real warnings are about the *synced folder* holding the
+    store, chiefly file versioning being off (the recovery net).
+    """
+    from dossier import syncthing
+
+    status = syncthing.query_status(config)
+    state = status.state
+    if state is syncthing.SyncState.UNCONFIGURED:
+        running = syncthing.probe_health(
+            "http://" + syncthing.DEFAULT_ADDRESS
+        ) or syncthing.probe_health("https://" + syncthing.DEFAULT_ADDRESS)
+        detail = (
+            f"Syncthing is running at {syncthing.DEFAULT_ADDRESS} but dossier has no "
+            "API key"
+            if running
+            else "no Syncthing REST API configured"
+        )
+        return [Finding("syncthing-unconfigured", "syncthing", detail, "info")]
+    if state is syncthing.SyncState.UNREACHABLE:
+        detail = status.error or "not answering"
+        return [Finding("syncthing-unreachable", "syncthing", detail, "info")]
+    if state is syncthing.SyncState.UNAUTHORIZED:
+        detail = status.error or "API key rejected"
+        return [Finding("syncthing-auth", "syncthing", detail, "warn")]
+
+    out: list[Finding] = []
+    folder = status.store_folder
+    if folder is None:
+        out.append(
+            Finding(
+                "syncthing-folder",
+                str(config.syncthing_root),
+                "no synced folder contains the store",
+            )
+        )
+    else:
+        name = folder.label or folder.id
+        if folder.paused:
+            out.append(Finding("syncthing-paused", name, "folder is paused"))
+        if not folder.versioning:
+            out.append(Finding("syncthing-versioning", name, "file versioning is off"))
+        if folder.shared_with == 0:
+            out.append(
+                Finding("syncthing-unshared", name, "not shared with any other device")
+            )
+    if status.total_devices > 0 and status.connected_devices == 0:
+        out.append(
+            Finding(
+                "syncthing-connectivity",
+                "syncthing",
+                f"0 of {status.total_devices} device(s) connected",
+                "info",
+            )
+        )
+    return out
 
 
 def _check_conflicts(store: Store) -> list[Finding]:

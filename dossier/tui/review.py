@@ -176,8 +176,10 @@ class ReviewPane(Vertical):
         "tab-succession": "#succession",
         "tab-integrity": "#integrity",
     }
-    # Integrity re-runs the doctor checks, minus the two other tabs already own.
-    _INTEGRITY_SKIP = frozenset({"sync-conflict", "missing-file"})
+    # Integrity re-runs the doctor checks, minus the two other tabs already own and
+    # `syncthing` (a network group — the tab stays offline; the home's sync glyph is
+    # the TUI's live window on Syncthing).
+    _INTEGRITY_SKIP = frozenset({"sync-conflict", "missing-file", "syncthing"})
     _INTEG_SEP = "\x00"  # composite integrity-row id: f"{doc_id}{sep}{index}"
     _SUCC_SEP = "\x00"  # composite succession-row id: f"{newer}{sep}{older}"
 

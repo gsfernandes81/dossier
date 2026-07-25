@@ -15,6 +15,7 @@
 
 """Tests for the CLI dispatch and ``ds init``."""
 
+import argparse
 import subprocess
 import sys
 from io import StringIO
@@ -25,6 +26,7 @@ import pytest
 from dossier import (
     cli,
     config as config_mod,
+    doctor,
 )
 from dossier.config import Config
 
@@ -493,3 +495,42 @@ def test_progress_name_truncates_long_basenames():
     long_name = "x" * 60 + ".pdf"
     out = cli._progress_name(f"Dir/{long_name}")
     assert len(out) == 40 and out.endswith("…")  # truncated to the column width
+
+
+def test_cmd_doctor_splits_warnings_from_notes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    """`ds doctor` counts only warnings as findings; advisory/skipped items (a
+    Syncthing not configured, say) print under a separate 'notes' block, never
+    inflating the count or reading as a failure."""
+    (tmp_path / ".dossier").mkdir()
+    config = Config(syncthing_root=tmp_path)
+    monkeypatch.setattr(cli, "_load_config", lambda: config)
+    report = doctor.Report(
+        findings=[
+            doctor.Finding("syncthing-versioning", "Docs", "file versioning is off"),
+            doctor.Finding("syncthing-unconfigured", "syncthing", "no API key", "info"),
+        ]
+    )
+    monkeypatch.setattr(cli.doctor, "run", lambda *a, **k: report)
+
+    rc = cli.cmd_doctor(argparse.Namespace())
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "doctor: 1 finding(s)" in out  # the info note is not counted
+    assert "syncthing-versioning" in out and "file versioning is off" in out
+    assert "doctor: notes" in out
+    assert "syncthing-unconfigured" in out
+    # the warning is printed before the notes block
+    assert out.index("syncthing-versioning") < out.index("doctor: notes")
+
+
+def test_cmd_doctor_all_clear_when_only_store_is_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    (tmp_path / ".dossier").mkdir()
+    config = Config(syncthing_root=tmp_path)
+    monkeypatch.setattr(cli, "_load_config", lambda: config)
+    monkeypatch.setattr(cli.doctor, "run", lambda *a, **k: doctor.Report(findings=[]))
+    assert cli.cmd_doctor(argparse.Namespace()) == 0
+    assert "all clear" in capsys.readouterr().out
