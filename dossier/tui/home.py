@@ -163,11 +163,11 @@ class HomeScreen(Screen[None]):
     DEFAULT_CSS = """
     #bottombar { dock: bottom; height: 4; }
     #actionbar {
-        display: none; layout: grid; grid-rows: 4; grid-gutter: 0 1;
+        display: none; layout: grid; grid-rows: 3; grid-gutter: 0 1;
         height: auto; width: 1fr;
     }
     #actionbar Button {
-        width: 1fr; min-width: 6; height: 4; content-align: center middle;
+        width: 1fr; min-width: 6; height: 3; content-align: center middle;
     }
     /* The search box reads as its own little command panel: a soft rounded
        edge at rest that brightens distinctly when focused (so it's obvious
@@ -199,8 +199,8 @@ class HomeScreen(Screen[None]):
     /* Touch (Termux): a tap-action grid above the command bar — big thumb
        targets. Landscape lays the six actions 3-wide (2 rows); a tall portrait
        phone gets them 2-wide (3 rows). */
-    HomeScreen.touch #bottombar { height: 12; }
-    HomeScreen.touch.-portrait #bottombar { height: 16; }
+    HomeScreen.touch #bottombar { height: 10; }
+    HomeScreen.touch.-portrait #bottombar { height: 13; }
     /* align-horizontal centres the fixed-width grid (columns pinned equal in
        _equalize_action_columns) so any leftover cell becomes symmetric outer
        margin rather than a fatter right-hand column. */
