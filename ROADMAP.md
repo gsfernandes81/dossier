@@ -33,9 +33,9 @@ done** — a field-level 2-way merge with mtime last-writer-wins, `ds resolve` +
 ResolveScreen, every sidecar covered, and fault-injection tests proving no silent loss.
 **Phase 13 (platform hardening & the scan service) is done** — a Windows + Linux CI matrix
 with platform-gated tests, and a battery-aware background scan service (`ds service run` +
-a build-but-don't-run installer) that closes the phone sync-back loop. **Phases 1–13 are
-complete.** Phases 14–15 are next: **find-fast UX** (launch optimized for the urgent
-lookup, undo, init/empty-state polish, typo-tolerant search) and **Syncthing integration**.
+a build-but-don't-run installer) that closes the phone sync-back loop. **Phases 1–15 are
+complete** — the last two were **find-fast UX** (launch optimized for the urgent lookup,
+undo, init/empty-state polish, typo-tolerant search) and **Syncthing integration**.
 
 **Since then (the command-surface overhaul, PRs #71–#72):** Textual's modal `ctrl+p`
 palette is **retired** for an always-visible **persistent command line** — plain typing
@@ -46,9 +46,12 @@ matching-files list for fast adoption). *This supersedes the "command palette /
 `DossierCommands` provider" and modal `IntakeScreen`/`SettingsScreen` descriptions still
 worded below in Phases 7/9/13.*
 
-**Phase 14 is now complete.** **Next up: Phase 15 — Syncthing integration** (a Termux
-API-reachability spike first, then doctor checks over the REST API, then a sync-aware
-service + a footer sync glyph).
+**Phases 14 and 15 are now complete.** Phase 15 shipped over four slices: a Termux
+API-reachability spike (REST reachable over HTTPS with the GUI API key), a read-only
+`dossier/syncthing.py` status client + `[syncthing]` per-device config, `ds doctor` checks
+over the REST API (versioning-off on the store's folder is the headline), a live home
+footer **sync glyph**, and the scan service **waiting for sync-idle** before batch writes.
+All backlog items below remain open.
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -390,27 +393,28 @@ search forgives phone-keyboard typos.
   *(Dropped the "prefix" tier: substring already subsumes it and the home lists in shelf
   order, so two tiers — exact-set, else fuzzy-set — deliver the intent with less machinery.)*
 
-## Phase 15 — Syncthing integration: orchestrate, don't own
+## Phase 15 — Syncthing integration: orchestrate, don't own  ✅
 Syncthing is the transport (the PC folder also lives in Proton Drive for an opportunistic
 cloud copy — meaning a Proton revert can *propagate* via Syncthing, which makes Syncthing's
 own versioning the recovery net and verifying it non-negotiable). Talk to Syncthing's REST
-API; never bundle, spawn, or reimplement it.
-- [ ] **Doctor checks** (S/M) — via the REST API on localhost: Syncthing reachable ·
-  resolve which Syncthing folder *contains* the store (the synced folder is an
-  **ancestor** of `syncthing_root` — `.stfolder` lives at the synced parent, not the
-  store root, so match the store path against the REST folder list, never expect a
-  marker in the store) · that folder shared and not paused · **file versioning
-  enabled** (the net against a propagated Proton revert) · device
-  connectivity/last-seen. Degrade gracefully to "Syncthing not reachable — checks
-  skipped" rather than failing doctor.
-- [ ] **Sync-aware service + TUI** (M) — the scan service waits for sync-idle before batch
-  writes (don't race an incoming sync); a footer glyph on the home shows sync state
-  (idle / syncing / conflict / unreachable).
-- [ ] **Termux feasibility investigation** (S, first) — *open question for a future agent:*
-  how to reach the API from Termux. Syncthing-Fork on Android exposes the same REST API on
-  127.0.0.1:8384 (API key in its settings/config.xml) — verify reachability from Termux,
-  where the key can live per-device, and what the Play-vs-F-Droid build differences are.
-  If the phone leg proves brittle, ship desktop-only checks and keep the phone read-only.
+API; never bundle, spawn, or reimplement it. All read-only over `urllib` (no new deps),
+built on one reusable `syncthing.query_status`.
+- [x] **Termux feasibility investigation** (S, first) — **done.** REST is reachable from
+  Termux over **HTTPS** (Syncthing-Fork serves a self-signed cert on 127.0.0.1:8384; plain
+  http 307-redirects to https), authing with the GUI **API key** in `X-API-Key`. The key
+  lives in the `[syncthing]` per-device config; on Android `config.xml` is app-private, so
+  the manual key is the only path there (desktop autodiscovers it). The control-by-broadcast
+  intent API is start/stop only — no state query — so REST is the sole data source.
+- [x] **Doctor checks** (S/M) — **done** (`dossier/syncthing.py` + `_check_syncthing`): via
+  the REST API on localhost — reachable · which folder *contains* the store (ancestor match,
+  canonicalized to bridge the Termux `~/storage/shared` ↔ `/storage/emulated/0` symlink) ·
+  shared and not paused · **file versioning enabled** (the headline — the net against a
+  propagated Proton revert) · device connectivity. Unreachable/unconfigured degrade to
+  advisory `info` "notes", never a doctor failure.
+- [x] **Sync-aware service + TUI** (M) — **done.** The scan service `wait_for_idle`s before
+  its batch writes (a timeout/unreachable just proceeds; logged as `sync=…`); a home footer
+  **sync glyph** polls `query_status` off-thread every 30s — idle / syncing / offline /
+  no-auth, hidden when unconfigured, tap for the one-line detail.
 
 ## Notes
 - **Quick wins:** `ds reset` (S), the `ignore_expiry` toggle (S).
