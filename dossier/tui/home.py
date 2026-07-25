@@ -47,6 +47,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.text import Text
 from textual import on, work
@@ -91,6 +92,9 @@ from dossier.tui.screens import (
     open_doc_file,
     toggle_help_panel,
 )
+
+if TYPE_CHECKING:  # syncthing is imported lazily in the poll worker (network/urllib)
+    from dossier.syncthing import SyncStatus, SyncthingSettings
 
 # Sentinel option ids for the two synthetic locations-pane rows (real location
 # slugs are kebab-case, so a NUL prefix can never collide with one).
@@ -187,6 +191,11 @@ class HomeScreen(Screen[None]):
     /* Conflicts block clean sync — the one that most needs acting on — so it reads
        in the warning colour while the others stay muted. */
     #attn-conflicts { color: $warning; }
+    /* The sync glyph rides the live Syncthing state: muted at rest (idle/offline —
+       "not running" is often expected), accent while syncing, warning on a real
+       misconfig (bad key). Hidden entirely when Syncthing isn't configured. */
+    #attn-sync.-active { color: $accent; }
+    #attn-sync.-warn { color: $warning; }
     /* The "these are shortcuts" cue rides the *mouse-reporting* state, not the
        platform: it shows only when a tap/click would actually land. On the desktop
        that is always; on Termux it is only while a list holds focus (focusing the
@@ -367,6 +376,12 @@ class HomeScreen(Screen[None]):
         # actions that change them — not on every reload; expiring is free from docs.
         self._conflict_count = 0
         self._inbox_count = 0
+        # Syncthing status glyph (Phase 15). Settings resolve once (config /
+        # config.xml); a sentinel distinguishes "not resolved yet" from "resolved to
+        # None" (unconfigured). ``_sync_note`` is the tap-to-see one-liner.
+        self._sync_settings_resolved = False
+        self._sync_settings: SyncthingSettings | None = None
+        self._sync_note = ""
         self._show_detail = False
         self._review: ReviewPane | None = None  # mounted on first `action_review`
         self._watch: WatchPane | None = None  # mounted on first `action_watch`
@@ -420,6 +435,9 @@ class HomeScreen(Screen[None]):
                     yield Static("", id="attn-expiring", classes="attn-chip")
                     yield Static("", id="attn-conflicts", classes="attn-chip")
                     yield Static("", id="attn-inbox", classes="attn-chip")
+                    # Live Syncthing state, polled off-thread (see _poll_sync_status);
+                    # a tap prints the one-line detail. Hidden until it has a state.
+                    yield Static("", id="attn-sync", classes="attn-chip")
 
     def on_mount(self) -> None:
         # Composed once in compose() and never remounted, so cache it instead of
@@ -442,6 +460,10 @@ class HomeScreen(Screen[None]):
         self._reload()
         self._focus_default()
         self._warn_slow_yaml()
+        # Live Syncthing status: poll off-thread now and every 30s (the transport
+        # doesn't change second-to-second; a longer cadence keeps it near-free).
+        self._poll_sync_status()
+        self.set_interval(30.0, self._poll_sync_status)
 
     def _warn_slow_yaml(self) -> None:
         """Nudge to enable the fast C YAML backend when PyYAML fell back to pure
@@ -503,6 +525,74 @@ class HomeScreen(Screen[None]):
     def _attn_inbox(self, event: Click) -> None:
         event.stop()
         self.action_intake()
+
+    @on(Click, "#attn-sync")
+    def _attn_sync(self, event: Click) -> None:
+        event.stop()
+        if self._sync_note:  # tap the glyph → the one-line detail (version, folder…)
+            self.notify(self._sync_note)
+
+    @work(thread=True, group="sync-status", exclusive=True)
+    def _poll_sync_status(self) -> None:
+        """Query Syncthing off-thread and repaint the glyph (never the async path)."""
+        status = self._compute_sync_status()
+        self.app.call_from_thread(self._apply_sync_status, status)
+
+    def _compute_sync_status(self) -> SyncStatus:
+        """Resolve settings once (config / desktop config.xml), then query. An
+        unconfigured device short-circuits before any network call. Kept apart from
+        the worker so it is unit-testable without a thread."""
+        from dossier import syncthing
+
+        if not self._sync_settings_resolved:
+            self._sync_settings = syncthing.resolve_settings(self._config)
+            self._sync_settings_resolved = True
+        if self._sync_settings is None:
+            return syncthing.SyncStatus(state=syncthing.SyncState.UNCONFIGURED)
+        return syncthing.query_status(self._config, settings=self._sync_settings)
+
+    def _apply_sync_status(self, status: SyncStatus) -> None:
+        """Paint the sync chip from a status (main thread). Unconfigured → hidden."""
+        from dossier.syncthing import SyncState
+
+        g = self._glyphs
+        views = {
+            SyncState.IDLE: (g.sync_idle, "synced", ""),
+            SyncState.SCANNING: (g.sync_active, "scanning", "-active"),
+            SyncState.SYNCING: (g.sync_active, "syncing", "-active"),
+            SyncState.UNREACHABLE: (g.sync_off, "offline", ""),
+            SyncState.UNAUTHORIZED: (g.sync_off, "no auth", "-warn"),
+        }
+        chip = self.query_one("#attn-sync", Static)
+        chip.remove_class("-active", "-warn")
+        view = views.get(status.state)
+        chip.display = view is not None  # UNCONFIGURED / unknown → no chip, no noise
+        if view is None:
+            self._sync_note = ""
+            return
+        glyph, label, css_class = view
+        if css_class:
+            chip.add_class(css_class)
+        chip.update(f"{glyph} {label}".strip())
+        self._sync_note = self._sync_summary(status)
+
+    def _sync_summary(self, status: SyncStatus) -> str:
+        """The one-line detail shown when the glyph is tapped."""
+        from dossier.syncthing import SyncState
+
+        if status.state is SyncState.UNREACHABLE:
+            return "Syncthing: not reachable"
+        if status.state is SyncState.UNAUTHORIZED:
+            return "Syncthing: API key rejected"
+        parts = [f"Syncthing {status.version or '?'}"]
+        folder = status.store_folder
+        if folder is None:
+            parts.append("store not in a synced folder")
+        else:
+            name = folder.label or folder.id
+            parts.append(f"{name}: {folder.versioning or 'NO versioning'}")
+        parts.append(f"{status.connected_devices}/{status.total_devices} devices")
+        return " · ".join(parts)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if self.editing and action in _EDIT_LOCKED:

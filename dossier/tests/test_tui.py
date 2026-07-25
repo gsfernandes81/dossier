@@ -37,6 +37,7 @@ from textual.widgets import (
     HelpPanel,
     Input,
     OptionList,
+    Static,
     TabbedContent,
     TextArea,
     Tree,
@@ -46,6 +47,7 @@ from dossier import dedup, succession
 from dossier.config import Config
 from dossier.model import Bundle, Document, Rendition
 from dossier.store import Store
+from dossier.syncthing import FolderStatus, SyncState, SyncStatus, SyncthingSettings
 from dossier.tui import (
     DossierApp,
     home as tui_home,
@@ -3348,3 +3350,135 @@ async def test_toggle_dark_command_flips_the_theme(tmp_path: Path):
         await pilot.pause()
         assert app.theme != before
         assert app.theme in ("textual-light", "textual-dark")
+
+
+# -- Home sync glyph (Phase 15, slice 3) -------------------------------------
+@pytest.fixture(autouse=True)
+def _offline_sync(monkeypatch: pytest.MonkeyPatch):
+    """Keep every TUI test off the network: the home polls Syncthing on mount and
+    on a 30s interval, so neuter that worker by default. The glyph tests below drive
+    `_compute_sync_status` / `_apply_sync_status` directly instead."""
+    monkeypatch.setattr(
+        "dossier.tui.home.HomeScreen._poll_sync_status", lambda self: None
+    )
+
+
+def _sync_folder(root: Path, *, versioning: str = "staggered", shared: int = 1):
+    return FolderStatus(
+        id="docs",
+        label="Docs",
+        path=str(root),
+        paused=False,
+        versioning=versioning,
+        shared_with=shared,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_glyph_renders_each_state(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        chip = home.query_one("#attn-sync", Static)
+
+        home._apply_sync_status(
+            SyncStatus(
+                state=SyncState.IDLE,
+                version="v2.1.0",
+                store_folder=_sync_folder(tmp_path),
+                connected_devices=1,
+                total_devices=1,
+            )
+        )
+        await pilot.pause()
+        assert chip.display and "synced" in str(chip.render())
+        assert not chip.has_class("-active") and not chip.has_class("-warn")
+
+        home._apply_sync_status(
+            SyncStatus(state=SyncState.SYNCING, store_folder=_sync_folder(tmp_path))
+        )
+        await pilot.pause()
+        assert "syncing" in str(chip.render()) and chip.has_class("-active")
+
+        home._apply_sync_status(SyncStatus(state=SyncState.UNAUTHORIZED, error="403"))
+        await pilot.pause()
+        assert "no auth" in str(chip.render()) and chip.has_class("-warn")
+        assert not chip.has_class("-active")  # class swapped, not accumulated
+
+        home._apply_sync_status(SyncStatus(state=SyncState.UNREACHABLE, error="x"))
+        await pilot.pause()
+        # offline is muted (often expected), not a warning
+        assert "offline" in str(chip.render()) and not chip.has_class("-warn")
+
+        home._apply_sync_status(SyncStatus(state=SyncState.UNCONFIGURED))
+        await pilot.pause()
+        assert not chip.display  # unconfigured device → no chip, no noise
+
+
+@pytest.mark.asyncio
+async def test_sync_glyph_tap_notifies_detail(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        home._apply_sync_status(
+            SyncStatus(
+                state=SyncState.IDLE,
+                version="v2.1.0",
+                store_folder=_sync_folder(tmp_path, versioning=""),  # versioning off
+                connected_devices=0,
+                total_devices=1,
+            )
+        )
+        await pilot.pause()
+        assert "NO versioning" in home._sync_note and "0/1 devices" in home._sync_note
+
+        notes: list[str] = []
+        monkeypatch.setattr(home, "notify", lambda msg, *a, **k: notes.append(msg))
+        home._attn_sync(SimpleNamespace(stop=lambda: None))
+        assert notes == [home._sync_note]
+
+
+@pytest.mark.asyncio
+async def test_sync_compute_caches_settings_and_reuses_them(
+    tmp_path: Path, monkeypatch
+):
+    store, config = _setup(tmp_path)
+    settings = SyncthingSettings(base_url="http://x", api_key="k")
+    resolves: list[int] = []
+    queried: list[object] = []
+    monkeypatch.setattr(
+        "dossier.syncthing.resolve_settings",
+        lambda *a, **k: (resolves.append(1), settings)[1],
+    )
+    monkeypatch.setattr(
+        "dossier.syncthing.query_status",
+        lambda cfg, *, settings=None, **k: (
+            queried.append(settings),
+            SyncStatus(state=SyncState.IDLE),
+        )[1],
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test():
+        home = app.home
+        home._compute_sync_status()
+        home._compute_sync_status()
+        assert len(resolves) == 1  # resolved once, then cached
+        assert queried == [settings, settings]  # each poll reuses the cached settings
+
+
+@pytest.mark.asyncio
+async def test_sync_compute_unconfigured_never_queries(tmp_path: Path, monkeypatch):
+    store, config = _setup(tmp_path)
+    monkeypatch.setattr("dossier.syncthing.resolve_settings", lambda *a, **k: None)
+
+    def boom(*a, **k):
+        raise AssertionError("query_status must not run when unconfigured")
+
+    monkeypatch.setattr("dossier.syncthing.query_status", boom)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test():
+        assert app.home._compute_sync_status().state is SyncState.UNCONFIGURED

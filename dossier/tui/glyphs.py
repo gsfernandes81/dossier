@@ -59,6 +59,11 @@ class GlyphSet:
     physical: str  # a physical copy exists
     digital: str  # a digital file exists
     primary: str  # the primary rendition marker
+    # Sync-status markers (the home footer sync glyph, Phase 15) — supplied by both
+    # styles like the other status markers, since a bare icon needs an ASCII fallback.
+    sync_idle: str  # in sync / settled
+    sync_active: str  # scanning or syncing
+    sync_off: str  # unreachable / unauthorized — sync is not happening
     # Leading icons (empty in ASCII).
     folder: str = ""  # a physical location
     inbox: str = ""  # the "All" locations row
@@ -81,6 +86,9 @@ ASCII = GlyphSet(
     expiring="~",
     ok="+",
     neutral="·",  # middle dot
+    sync_idle="=",  # settled
+    sync_active="~",  # moving
+    sync_off="x",  # not syncing
     physical="P",
     digital="D",
     primary="*",
@@ -94,6 +102,9 @@ NERD = GlyphSet(
     physical="",  # nf-fa-file_text
     digital="",  # nf-fa-paperclip
     primary="",  # nf-fa-star
+    sync_idle="\uf0c2",  # nf-fa-cloud — settled / in sync
+    sync_active="\uf021",  # nf-fa-refresh — scanning / syncing
+    sync_off="\uf127",  # nf-fa-chain_broken — unreachable / unauthorized
     folder="",  # nf-fa-folder
     inbox="",  # nf-fa-list_ul
     unlocated="",  # nf-fa-question_circle
