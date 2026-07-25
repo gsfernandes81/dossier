@@ -275,6 +275,14 @@ Must fit portrait Termux (~40–60 cols), not just a desktop terminal.
   on a row points at it (moves the cursor, shows detail), and only a click on the row already
   under the cursor opens the file. A mis-aimed click costs a look, not a launched PDF — and a
   double-click, being two clicks, opens in one gesture. Lives in `tui/doclist.py`.
+  - **The verb, by row kind** (applied across home, watch, and every review tab, so `→`
+    always means "detail" and Enter never dies): a row that **is a document** → Enter opens its
+    file, `→` its record (no file → Enter falls through to the record). A **file with no document
+    yet** (an orphan) → Enter opens the file, `→` the suggested match (or a hint at `a`/`l`). A
+    **two-document** row (succession) → Enter opens both files (older first), `→` the newer record.
+    **Another object** (a bundle, a conflict plan) → Enter *activates* it non-destructively (scope
+    to the bundle; show the conflicted record), never mutating — accept/merge/fold stay on
+    `a`/`A`/`f`. Headers and placeholders notify the next move rather than dying.
 - **Views:** Expiring (certs first) · Reconcile (missing files ⇄ in-scope orphans) · Bundles
   (browse members + export) · Detail modal (all fields + notes + file/conflict status; add/edit).
 - **Slot op:** "insert at slot N and shift" is first-class (renumbering neighbors is the correct

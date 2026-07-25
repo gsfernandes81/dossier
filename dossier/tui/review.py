@@ -132,7 +132,6 @@ class ReviewPane(Vertical):
         # spells out both directions, so shift+tab stays bound but hidden.
         Binding("tab", "next_tab", "Switch tab", priority=True),
         Binding("shift+tab", "prev_tab", "Prev tab", priority=True, show=False),
-        Binding("o", "open_file", "Open"),
         Binding("right", "detail", "Details"),
         Binding("s", "scan_dups", "Find duplicates"),
         Binding("x", "reject", "Dismiss"),
@@ -423,6 +422,34 @@ class ReviewPane(Vertical):
             lines.append("identical copy — will be cleared")
         self.query_one("#conflict-detail", Static).update("\n".join(lines))
 
+    @on(OptionList.OptionSelected, "#conflicts")
+    def _open_conflict(self, event: OptionList.OptionSelected) -> None:
+        """Enter — show the conflicted record beside the contested-fields panel;
+        that's what "which side wins?" needs. Enter never merges — `a`/`A` do."""
+        event.stop()
+        self._show_conflict_record()
+
+    def _highlighted_conflict(self) -> resolve.Resolution | None:
+        options = self.query_one("#conflicts", OptionList)
+        index = options.highlighted
+        if index is None:
+            return None
+        option = options.get_option_at_index(index)
+        if option.id is None:  # the "no conflicts" placeholder row
+            return None
+        return self._plans[int(option.id)]
+
+    def _show_conflict_record(self) -> None:
+        """Open the live record for a document conflict; a sidecar conflict
+        (scans/bundles/…) has no document, so say so instead of opening nothing."""
+        plan = self._highlighted_conflict()
+        if plan is None:
+            return
+        if plan.kind == "document":
+            self.post_message(self.OpenDocument(plan.item.doc_id))
+        else:
+            self.notify(f"{plan.kind} conflict — `a` merges it (no document to open)")
+
     def action_accept_all(self) -> None:
         """`A` — merge every conflict at once (the losing copy is archived first)."""
         report = resolve.resolve_all(self._store, apply=True)
@@ -565,8 +592,35 @@ class ReviewPane(Vertical):
             self.notify(f"opened {rel}")
 
     def action_detail(self) -> None:
-        """`→` — show the flagged record, which is where most findings get fixed."""
-        doc_id = self._integrity_doc_id()
+        """`→` — show the record beside the finding (column 3), per tab: the flagged
+        doc (integrity/missing), the orphan's suggested match, the document that
+        links a duplicate, the newer side of a succession, or the conflicted record.
+        The record is where most findings actually get fixed; `→` means "detail"
+        on every tab so the muscle memory never dies."""
+        active = self._active_tab()
+        if active == "tab-conflicts":
+            self._show_conflict_record()
+            return
+        doc_id: str | None = None
+        if active == "tab-integrity":
+            doc_id = self._integrity_doc_id()
+        elif active == "tab-missing":
+            missing = self._highlighted_missing()
+            doc_id = missing[0] if missing is not None else None
+        elif active == "tab-orphans":
+            leaf = self._cursor_leaf()
+            if leaf is None or leaf.suggestion is None:
+                self.notify("no suggested match — `a` adopts · `l` links")
+                return
+            doc_id = leaf.suggestion
+        elif active == "tab-dups":
+            doc_id = self._dup_linking_doc_id()
+            if doc_id is None:
+                self.notify("not linked to a document — see Orphans")
+                return
+        elif active == "tab-succession":
+            proposal = self._highlighted_succession()
+            doc_id = proposal.newer if proposal is not None else None
         if doc_id is not None:
             self.post_message(self.OpenDocument(doc_id))
 
@@ -859,21 +913,16 @@ class ReviewPane(Vertical):
             return active in ("tab-conflicts", "tab-orphans", "tab-succession")
         if action == "accept_all":  # `A` — merge every conflict at once
             return active == "tab-conflicts"
-        if action in ("edit", "detail"):  # `e` edit, `→` show the flagged record
+        if action == "edit":  # `e` — open the flagged record in edit mode
             return active == "tab-integrity"
+        if action == "detail":  # `→` — show a record beside the finding, every tab
+            return True
         if action in ("link", "ignore_glob"):
             return active == "tab-orphans"
         if action == "unlink":
             return active == "tab-missing"
         if action == "fold":
             return active == "tab-dups"
-        if action == "open_file":  # only where a real file sits under the cursor
-            return active in (
-                "tab-orphans",
-                "tab-dups",
-                "tab-succession",
-                "tab-integrity",
-            )
         return True
 
     @on(Tree.NodeExpanded, "#orphans")
@@ -896,19 +945,51 @@ class ReviewPane(Vertical):
         self._filled.add(folder)
 
     @on(Tree.NodeSelected, "#orphans")
-    def _open_orphan_match(self, event: Tree.NodeSelected) -> None:
+    def _open_orphan(self, event: Tree.NodeSelected) -> None:
+        """Enter — open the orphan file itself: the row *is* a file with no document
+        yet, and you must look at it to decide adopt/link/dismiss. `→` shows the
+        suggested match's record instead. (Branch nodes just toggle expand.)"""
         event.stop()
-        data = event.node.data
-        if isinstance(data, _Leaf) and data.suggestion is not None:
-            # open the best-matching document
-            self.post_message(self.OpenDocument(data.suggestion))
+        leaf = event.node.data
+        if isinstance(leaf, _Leaf):
+            self._open_one(leaf.path)
 
     @on(OptionList.OptionSelected, "#missing")
     def _open_missing(self, event: OptionList.OptionSelected) -> None:
+        # The file is gone by definition, so Enter shows the record — the degenerate
+        # case of "no file → the record", not an exception. `→` is a synonym here.
         event.stop()
         if event.option_id is not None:
             doc_id = event.option_id.split(_MISSING_SEP, 1)[0]
             self.post_message(self.OpenDocument(doc_id))
+
+    @on(OptionList.OptionSelected, "#dups")
+    def _open_dup(self, event: OptionList.OptionSelected) -> None:
+        """Enter — open the file under the cursor; deciding fold-vs-dismiss means
+        looking at the pages. `→` opens the record that links it."""
+        event.stop()
+        rel = self._cursor_dup_path()
+        if rel is None:
+            self.notify("move to a keep/copy row")
+        elif self._open_one(rel):
+            self.notify(f"opened {rel}")
+
+    @on(OptionList.OptionSelected, "#succession")
+    def _open_succession(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self._activate_succession()
+
+    def _activate_succession(self) -> None:
+        """Enter — open both sides' files (older first): "does this renewal replace
+        that one?" is a comparison one file can't answer. No files → the newer
+        record (via `→`)."""
+        rels = self._succession_rendition_paths()
+        if not rels:
+            self.action_detail()  # falls through to the newer record
+            return
+        opened = [rel for rel in rels if self._open_one(rel)]
+        if opened:
+            self.notify(f"opened {' + '.join(opened)}")
 
     def action_close(self) -> None:
         self.post_message(self.CloseRequested())
@@ -944,21 +1025,6 @@ class ReviewPane(Vertical):
             return [(rels[0], f"older — {rels[0]}"), (rels[1], f"newer — {rels[1]}")]
         return [(rel, rel) for rel in rels]
 
-    def action_open_file(self) -> None:
-        """Open what the cursor points at with the platform opener (xdg/termux).
-
-        Usually one file; on Succession, *both* — "does this renewal really replace
-        that one?" is a comparison, and one file cannot answer it. (Revealing or
-        copying instead asks which, since neither is meaningful for two at once.)
-        """
-        rels = self.cursor_paths()
-        if not rels:
-            self.notify("no file under the cursor")
-            return
-        opened = [rel for rel in rels if self._open_one(rel)]
-        if opened:
-            self.notify(f"opened {' + '.join(opened)}")
-
     def _open_one(self, rel: str) -> bool:
         """Open one relative path, reporting rather than raising. True if it opened.
         Delegates to the shared path-level seam so review reports misses exactly as
@@ -973,6 +1039,16 @@ class ReviewPane(Vertical):
         # dup rows are "  keep  <path>" / "  copy  <path>"; headers have neither.
         parts = str(options.get_option_at_index(index).prompt).strip().split(None, 1)
         return parts[1] if len(parts) == 2 and parts[0] in ("keep", "copy") else None
+
+    def _dup_linking_doc_id(self) -> str | None:
+        """The document (if any) whose renditions include the cursor's dup path."""
+        rel = self._cursor_dup_path()
+        if rel is None:
+            return None
+        return next(
+            (d.id for d in self._snapshot() if any(r.path == rel for r in d.files)),
+            None,
+        )
 
     # -- decisions (sidecar only — never touches a real file) ----------------
 

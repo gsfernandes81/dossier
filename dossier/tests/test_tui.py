@@ -1232,10 +1232,10 @@ async def test_reconcile_open_file_opens_orphan_under_cursor(
         folder = next(n for n in tree.root.children if n.data == "Wallpapers")
         folder.expand()
         await pilot.pause()
+        tree.focus()
         tree.move_cursor(folder.children[0])
-        screen.action_open_file()
-        await pilot.pause()
-    assert opened == [tmp_path / "Wallpapers" / "bg.jpg"]
+        await pilot.press("enter")  # Enter opens the orphan *file* (the row is a file)
+        await _settle(pilot, lambda: opened == [tmp_path / "Wallpapers" / "bg.jpg"])
 
 
 @pytest.mark.asyncio
@@ -1579,7 +1579,7 @@ async def test_integrity_enter_opens_the_file_and_right_opens_the_record(
 
 
 @pytest.mark.asyncio
-async def test_succession_o_opens_both_sides_older_first(
+async def test_succession_enter_opens_both_sides_older_first(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """A succession asks a comparison question, so one file cannot answer it."""
@@ -1611,7 +1611,7 @@ async def test_succession_o_opens_both_sides_older_first(
         monkeypatch.setattr(pane, "_highlighted_succession", lambda: proposal)
         pane.query_one(TabbedContent).active = "tab-succession"
         await pilot.pause()
-        pane.action_open_file()
+        pane._activate_succession()  # Enter on a succession row (o is retired)
         await pilot.pause()
         # Older first, so the renewal you are judging ends up frontmost.
         assert opened == [tmp_path / "old.pdf", tmp_path / "new.pdf"]
@@ -1620,7 +1620,7 @@ async def test_succession_o_opens_both_sides_older_first(
         opened.clear()
         store.save(replace(store.load("old-coc"), files=[], has_digital=False))
         pane._docs = None  # drop the snapshot so the change is seen
-        pane.action_open_file()
+        pane._activate_succession()
         await pilot.pause()
         assert opened == [tmp_path / "new.pdf"]
 
@@ -2779,13 +2779,15 @@ async def test_each_review_tab_advertises_only_its_own_verbs(tmp_path: Path):
         pane = await _await_review_load(pilot)
         tabs = pane.query_one(TabbedContent)
 
+        # `detail` (`→` = show a record) is live on every tab now; `o`/open_file is
+        # retired (Enter opens the file per row-kind). See the Enter/→ verb sweep.
         expected = {
-            "tab-conflicts": {"accept", "accept_all"},
-            "tab-orphans": {"open_file", "reject", "link", "accept", "ignore_glob"},
-            "tab-missing": {"reject", "unlink"},
-            "tab-dups": {"open_file", "scan_dups", "fold", "reject"},
-            "tab-succession": {"open_file", "reject", "accept"},
-            "tab-integrity": {"open_file", "edit"},
+            "tab-conflicts": {"accept", "accept_all", "detail"},
+            "tab-orphans": {"reject", "link", "accept", "ignore_glob", "detail"},
+            "tab-missing": {"reject", "unlink", "detail"},
+            "tab-dups": {"scan_dups", "fold", "reject", "detail"},
+            "tab-succession": {"reject", "accept", "detail"},
+            "tab-integrity": {"edit", "detail"},
         }
         every = set().union(*expected.values())
         for tab, live in expected.items():
@@ -3638,7 +3640,9 @@ async def test_watch_enter_falls_through_to_detail_for_physical_only(
         home = app.home
         home.action_watch()
         await _settle(pilot, lambda: home.has_class("watch-mode"))
-        options = home._watch.query_one("#watch", OptionList)
+        watch = home._watch
+        assert watch is not None
+        options = watch.query_one("#watch", OptionList)
         options.focus()
         await _settle(
             pilot,
@@ -3658,3 +3662,53 @@ async def test_watch_enter_falls_through_to_detail_for_physical_only(
         assert home._detail_id == "paper"
         assert not opened  # nothing was opened
         assert home.has_class("watch-mode")  # watch stayed up
+
+
+@pytest.mark.asyncio
+async def test_conflicts_enter_shows_the_record(tmp_path: Path):
+    # A document conflict: Enter shows the live record beside the contested-fields
+    # panel (that's what "which side wins?" needs) — and never merges.
+    store, config = _setup(tmp_path)
+    live = store.document_path("passport")
+    live.with_name("passport.sync-conflict-20260101-120000-AAAAAAA.md").write_bytes(
+        store.serialize(Document(id="passport", name="Renewed")).encode()
+    )
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        home.action_review()
+        pane = await _await_review_load(pilot)
+        opts = pane.query_one("#conflicts", OptionList)
+        opts.focus()
+        await _settle(
+            pilot,
+            lambda: (
+                opts.option_count >= 1 and opts.get_option_at_index(0).id is not None
+            ),
+        )
+        opts.highlighted = 0
+        await pilot.press("enter")
+        await _settle(pilot, lambda: home._show_detail)
+        assert home._detail_id == "passport"
+        assert home.has_class("review-mode")  # review stayed up beside the record
+
+
+@pytest.mark.asyncio
+async def test_orphan_right_shows_suggested_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from dossier.tui.review import _Leaf
+
+    store, config = _setup(tmp_path)
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        home.action_review()
+        pane = await _await_review_load(pilot)
+        pane.query_one(TabbedContent).active = "tab-orphans"
+        await pilot.pause()
+        # Enter opens the orphan file; `→` shows the suggested match's record.
+        monkeypatch.setattr(pane, "_cursor_leaf", lambda: _Leaf("x.pdf", "passport"))
+        pane.action_detail()
+        await _settle(pilot, lambda: home._show_detail)
+        assert home._detail_id == "passport"
