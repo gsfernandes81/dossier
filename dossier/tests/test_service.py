@@ -149,7 +149,59 @@ def test_unplugging_mid_run_stops_before_transcribe(
 
 
 def test_summary_line_is_key_value():
-    result = service.ServiceResult("ok", scanned=2, transcribed=1, exit_code=0)
-    assert result.summary() == (
-        "gate=ok scanned=2 transcribed=1 intake=0 failed=0 exit=0"
+    result = service.ServiceResult(
+        "ok", scanned=2, transcribed=1, exit_code=0, sync_wait="idle"
     )
+    assert result.summary() == (
+        "gate=ok sync=idle scanned=2 transcribed=1 intake=0 failed=0 exit=0"
+    )
+
+
+def test_service_waits_for_sync_idle_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store, config, lock = _store_with_linked_doc(tmp_path)
+    order: list[str] = []
+    monkeypatch.setattr(
+        scan, "extract", lambda p, c: order.append("scan") or _reading()
+    )
+    monkeypatch.setattr(scan, "transcribe", lambda p, c: ("", []))
+    result = service.run_service(
+        store,
+        config,
+        probe=_ac,
+        lock_dir=lock,
+        wait_idle=lambda _c: order.append("wait") or "idle",
+    )
+    assert result.sync_wait == "idle"
+    assert order[0] == "wait" and "scan" in order  # settled before the batch write
+
+
+def test_service_proceeds_when_sync_never_settles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store, config, lock = _store_with_linked_doc(tmp_path)
+    monkeypatch.setattr(scan, "extract", lambda p, c: _reading())
+    monkeypatch.setattr(scan, "transcribe", lambda p, c: ("", []))
+    result = service.run_service(
+        store, config, probe=_ac, lock_dir=lock, wait_idle=lambda _c: "timeout"
+    )
+    # availability > strictness: a timeout is logged but the pass still runs
+    assert result.sync_wait == "timeout" and result.exit_code == 0
+    assert result.scanned == 1
+
+
+def test_service_skips_sync_wait_when_gated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store, config, lock = _store_with_linked_doc(tmp_path)
+    waited: list[int] = []
+    result = service.run_service(
+        store,
+        config,
+        probe=_battery,
+        lock_dir=lock,
+        wait_idle=lambda _c: waited.append(1) or "idle",
+    )
+    assert result.gate == "battery" and result.sync_wait == "skipped"
+    assert waited == []  # never got past the power gate, so never waited

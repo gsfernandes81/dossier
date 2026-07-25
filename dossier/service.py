@@ -37,7 +37,7 @@ from pathlib import Path
 
 import platformdirs
 
-from dossier import intake, power, query, scan
+from dossier import intake, power, query, scan, syncthing
 from dossier.config import APP_NAME, Config
 from dossier.errors import IntakeError, ScanError
 from dossier.power import PowerSample
@@ -59,10 +59,13 @@ class ServiceResult:
     intake: int = 0
     failed: int = 0
     exit_code: int = 0
+    # How the pre-write wait for Syncthing to settle went: skipped (never got that
+    # far — gated/locked/termux) | idle | timeout | unavailable. See run_service.
+    sync_wait: str = "skipped"
 
     def summary(self) -> str:
         return (
-            f"gate={self.gate} scanned={self.scanned} "
+            f"gate={self.gate} sync={self.sync_wait} scanned={self.scanned} "
             f"transcribed={self.transcribed} intake={self.intake} "
             f"failed={self.failed} exit={self.exit_code}"
         )
@@ -75,11 +78,14 @@ def run_service(
     probe: Callable[[], PowerSample] = power.read_sample,
     now: Callable[[], datetime] | None = None,
     lock_dir: Path | None = None,
+    wait_idle: Callable[[Config], str] = syncthing.wait_for_idle,
 ) -> ServiceResult:
-    """One batch pass: power-gate → lock → scan + transcribe + intake.
+    """One batch pass: power-gate → lock → wait for sync-idle → scan + transcribe
+    + intake.
 
-    ``probe`` (the power reader), ``now`` (the clock, for lock staleness), and
-    ``lock_dir`` are injectable so the whole thing is testable without hardware.
+    ``probe`` (the power reader), ``now`` (the clock, for lock staleness),
+    ``lock_dir``, and ``wait_idle`` (the Syncthing settle) are injectable so the
+    whole thing is testable without hardware or a network.
     """
     now = now or (lambda: datetime.now(UTC))
     from dossier.platform_open import is_termux
@@ -95,6 +101,9 @@ def run_service(
     if not _acquire_lock(lock_path, now=now):
         return ServiceResult("locked")
     try:
+        # Don't race an incoming sync: settle first, then do the batch writes. A
+        # timeout / unreachable Syncthing just proceeds (availability > strictness).
+        sync_wait = wait_idle(config)
         scanned, failed = _scan_pass(store, config)
         transcribed = intook = 0
         if _still_on_ac(probe, config):  # re-check before each expensive phase
@@ -103,7 +112,13 @@ def run_service(
             if _still_on_ac(probe, config):
                 intook = _intake_pass(store, config)
         return ServiceResult(
-            "ok", scanned, transcribed, intook, failed, 1 if failed else 0
+            "ok",
+            scanned,
+            transcribed,
+            intook,
+            failed,
+            1 if failed else 0,
+            sync_wait=sync_wait,
         )
     finally:
         lock_path.unlink(missing_ok=True)

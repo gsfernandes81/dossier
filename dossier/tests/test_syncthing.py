@@ -37,7 +37,12 @@ import pytest
 from dossier import syncthing
 from dossier.config import Config
 from dossier.errors import ConfigError
-from dossier.syncthing import FolderStatus, SyncState, SyncthingSettings
+from dossier.syncthing import (
+    FolderStatus,
+    SyncState,
+    SyncStatus,
+    SyncthingSettings,
+)
 
 
 def _default_state() -> dict:
@@ -307,3 +312,70 @@ def test_ssl_context_refuses_nonloopback_unverified():
 def test_ssl_context_verified_is_strict():
     ctx = syncthing._ssl_context(True, "192.168.1.5")
     assert isinstance(ctx, ssl.SSLContext) and ctx.verify_mode == ssl.CERT_REQUIRED
+
+
+# -- wait_for_idle (the scan-service settle seam) ----------------------------
+def _idle_folder() -> FolderStatus:
+    return FolderStatus(
+        id="docs", label="Docs", path="/p", paused=False, versioning="", shared_with=1
+    )
+
+
+def test_wait_for_idle_returns_idle_when_settled(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path)
+    status = SyncStatus(state=SyncState.IDLE, store_folder=_idle_folder())
+    slept: list[float] = []
+    got = syncthing.wait_for_idle(
+        config, status_fn=lambda *a, **k: status, sleep=slept.append
+    )
+    assert got == "idle" and slept == []  # already idle → no waiting
+
+
+def test_wait_for_idle_polls_until_idle(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path)
+    states = iter([SyncState.SYNCING, SyncState.SCANNING, SyncState.IDLE])
+    folder = _idle_folder()
+    slept: list[float] = []
+    got = syncthing.wait_for_idle(
+        config,
+        poll=5.0,
+        status_fn=lambda *a, **k: SyncStatus(state=next(states), store_folder=folder),
+        sleep=slept.append,
+    )
+    assert got == "idle" and slept == [5.0, 5.0]  # two waits, then idle
+
+
+def test_wait_for_idle_times_out_while_syncing(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path)
+    folder = _idle_folder()
+    slept: list[float] = []
+    got = syncthing.wait_for_idle(
+        config,
+        timeout=10.0,
+        poll=5.0,
+        status_fn=lambda *a, **k: SyncStatus(
+            state=SyncState.SYNCING, store_folder=folder
+        ),
+        sleep=slept.append,
+    )
+    assert got == "timeout" and slept == [5.0, 5.0]  # waited 0, 5, then 10 >= timeout
+
+
+def test_wait_for_idle_unavailable_when_unreachable(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path)
+    got = syncthing.wait_for_idle(
+        config,
+        status_fn=lambda *a, **k: SyncStatus(state=SyncState.UNREACHABLE),
+        sleep=lambda _s: None,
+    )
+    assert got == "unavailable"
+
+
+def test_wait_for_idle_unavailable_without_a_store_folder(tmp_path: Path):
+    config = Config(syncthing_root=tmp_path)
+    got = syncthing.wait_for_idle(
+        config,
+        status_fn=lambda *a, **k: SyncStatus(state=SyncState.IDLE, store_folder=None),
+        sleep=lambda _s: None,
+    )
+    assert got == "unavailable"  # store not in a synced folder → nothing to race

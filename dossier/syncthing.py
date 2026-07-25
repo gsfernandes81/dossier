@@ -35,7 +35,8 @@ from __future__ import annotations
 import enum
 import json
 import os
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path, PurePath
@@ -261,6 +262,42 @@ def probe_health(
         return True
     except (_Unreachable, _Unauthorized):
         return False
+
+
+def wait_for_idle(
+    config: Config,
+    *,
+    timeout: float = 120.0,
+    poll: float = 5.0,
+    status_fn: Callable[..., SyncStatus] = query_status,
+    sleep: Callable[[float], None] = time.sleep,
+) -> str:
+    """Block until the store's Syncthing folder is idle (the scan service's seam so
+    a batch write doesn't race an incoming sync).
+
+    Returns ``"idle"`` (reached idle within the budget), ``"timeout"`` (still
+    syncing when it ran out), or ``"unavailable"`` (unreachable / unauthorized /
+    unconfigured, or the store isn't in a synced folder — nothing to wait on). The
+    caller proceeds regardless; the value is for the log line. ``status_fn`` and
+    ``sleep`` are injectable so it is testable without a clock or a network.
+    """
+    waited = 0.0
+    while True:
+        status = status_fn(config)
+        if status.state in (
+            SyncState.UNREACHABLE,
+            SyncState.UNAUTHORIZED,
+            SyncState.UNCONFIGURED,
+        ):
+            return "unavailable"
+        if status.store_folder is None:
+            return "unavailable"  # store not under a synced folder — no sync to race
+        if status.state is SyncState.IDLE:
+            return "idle"
+        if waited >= timeout:  # still scanning/syncing — give up waiting, proceed
+            return "timeout"
+        sleep(poll)
+        waited += poll
 
 
 # -- parsing helpers ---------------------------------------------------------
