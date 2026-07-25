@@ -59,6 +59,7 @@ from dossier import (
     dedup_cache,
     dedup_hash,
     doctor,
+    query,
     reconcile,
     resolve,
     scan,
@@ -71,6 +72,7 @@ from dossier.model import Document, ReconcileState, Rendition
 from dossier.store import Store
 from dossier.tui import forms
 from dossier.tui.screens import (
+    ChoiceScreen,
     DocPickerScreen,
     TextPromptScreen,
     open_rel_path,
@@ -144,6 +146,7 @@ class ReviewPane(Vertical):
         Binding("u", "unlink", "Unlink"),
         Binding("f", "fold", "Fold"),
         Binding("g", "ignore_glob", "Ignore glob"),
+        Binding("h", "show_dismissed", "Dismissed"),
     ]
 
     class OpenDocument(Message):
@@ -917,7 +920,7 @@ class ReviewPane(Vertical):
             return active == "tab-integrity"
         if action == "detail":  # `→` — show a record beside the finding, every tab
             return True
-        if action in ("link", "ignore_glob"):
+        if action in ("link", "ignore_glob", "show_dismissed"):
             return active == "tab-orphans"
         if action == "unlink":
             return active == "tab-missing"
@@ -1111,6 +1114,32 @@ class ReviewPane(Vertical):
             return
         self._state.dismissed.add(leaf.path)
         self._save_and_refresh()
+
+    def action_show_dismissed(self) -> None:
+        """`h` — review the orphans you've dismissed and restore one, so undoing a
+        suppression no longer means hand-editing `reconcile.toml`. Only offers files
+        still on disk (a dismissed path that's gone can't re-surface as an orphan)."""
+        root = self._config.syncthing_root
+        dismissed = sorted(
+            p for p in self._state.dismissed if query.resolve_path(root, p).exists()
+        )
+        if not dismissed:
+            self.notify("no dismissed orphans to restore")
+            return
+        self.app.push_screen(
+            ChoiceScreen(
+                f"Restore which dismissed orphan? ({len(dismissed)})",
+                [(p, p) for p in dismissed],
+            ),
+            self._restore_orphan,
+        )
+
+    def _restore_orphan(self, path: str | None) -> None:
+        if path is None:
+            return
+        self._state.dismissed.discard(path)
+        self._save_and_refresh()
+        self.notify(f"restored {path}")
 
     def _ack_missing(self) -> None:
         picked = self._highlighted_missing()

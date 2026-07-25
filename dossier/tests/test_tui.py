@@ -45,7 +45,7 @@ from textual.widgets import (
 
 from dossier import dedup, succession
 from dossier.config import Config
-from dossier.model import Bundle, Document, Rendition
+from dossier.model import Bundle, Document, ReconcileState, Rendition
 from dossier.store import Store
 from dossier.syncthing import FolderStatus, SyncState, SyncStatus, SyncthingSettings
 from dossier.tui import (
@@ -2783,7 +2783,14 @@ async def test_each_review_tab_advertises_only_its_own_verbs(tmp_path: Path):
         # retired (Enter opens the file per row-kind). See the Enter/→ verb sweep.
         expected = {
             "tab-conflicts": {"accept", "accept_all", "detail"},
-            "tab-orphans": {"reject", "link", "accept", "ignore_glob", "detail"},
+            "tab-orphans": {
+                "reject",
+                "link",
+                "accept",
+                "ignore_glob",
+                "detail",
+                "show_dismissed",
+            },
             "tab-missing": {"reject", "unlink", "detail"},
             "tab-dups": {"scan_dups", "fold", "reject", "detail"},
             "tab-succession": {"reject", "accept", "detail"},
@@ -3749,3 +3756,37 @@ async def test_bundles_right_opens_a_member_record(tmp_path: Path):
         await _settle(pilot, lambda: home._show_detail)
         assert home._detail_id == "passport"
         assert home.has_class("bundles-mode")  # bundles stayed up beside the record
+
+
+@pytest.mark.asyncio
+async def test_reconcile_show_dismissed_restores_an_orphan(tmp_path: Path):
+    # `h` on Orphans → a picker of dismissed orphans; picking one un-dismisses it,
+    # so undo no longer means hand-editing reconcile.toml.
+    config = Config(syncthing_root=tmp_path, history_dir=tmp_path / "_h")
+    store = Store(config)
+    store.ensure_layout()
+    (tmp_path / "Wallpapers").mkdir()
+    (tmp_path / "Wallpapers" / "bg.jpg").write_bytes(b"x")
+    store.save_reconcile(ReconcileState(dismissed={"Wallpapers/bg.jpg"}))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)) as pilot:
+        home = app.home
+        home.action_review()
+        pane = await _await_review_load(pilot)
+        pane.query_one(TabbedContent).active = "tab-orphans"
+        await pilot.pause()
+        assert pane._report is not None
+        # dismissed → hidden from the live orphan list
+        assert not any(o.path == "Wallpapers/bg.jpg" for o in pane._report.orphans)
+
+        pane.action_show_dismissed()  # opens the restore picker
+        await _settle(pilot, lambda: isinstance(app.screen, ChoiceScreen))
+        pane._restore_orphan("Wallpapers/bg.jpg")  # simulate picking it
+        await _settle(
+            pilot,
+            lambda: (
+                pane._report is not None
+                and any(o.path == "Wallpapers/bg.jpg" for o in pane._report.orphans)
+            ),
+        )
+        assert "Wallpapers/bg.jpg" not in pane._state.dismissed

@@ -422,11 +422,12 @@ built on one reusable `syncthing.query_status`.
   suggestions — it ships with direct editing first and gains the accept affordance when
   the suggestions framework (Phase 5) lands. Phase 7 (vision) needs Phase 5 to land its
   proposals into.
-- **Reconcile follow-ups** *(low priority)* — **doctor checks done:**
-  `reconcile-folded-link` (a document that links a *folded* duplicate copy — warn) and
-  `reconcile-stale` (a `dismissed` path or `folded` keep no longer on disk — info).
-  *Still open:* a "show dismissed (N)" toggle to review/undo suppressions from the TUI
-  (undo today = hand-edit `reconcile.toml`).
+- **Reconcile follow-ups** — **done.** Doctor checks: `reconcile-folded-link` (a document
+  that links a *folded* duplicate copy — warn) and `reconcile-stale` (a `dismissed` path or
+  `folded` keep no longer on disk — info). And **`h` on the Orphans tab** opens a picker of
+  dismissed orphans and restores one, so undoing a suppression no longer means hand-editing
+  `reconcile.toml`. *(Undo for folded clusters / dismissed successions could extend the same
+  pattern if it's ever wanted.)*
 - **Esc behaviour review** — **done.** Unified the layered Esc handling into one
   `HomeScreen._peel_once` chain (edit → command mode → help panel → mode search →
   home search layer → detail → mode → narrow drill-out), fixing four audit findings
