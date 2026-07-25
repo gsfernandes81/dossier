@@ -17,6 +17,7 @@
 
 import subprocess
 import sys
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,7 @@ def test_cli_import_stays_lean():
         "dossier.answers",
         "dossier.dedup_cache",
         "dossier.export",
+        "dossier.init",
         "dossier.intake",
         "dossier.organize",
         "dossier.power",
@@ -64,8 +66,7 @@ def test_init_creates_layout_and_loadable_config(
     root = tmp_path / "docs"
     root.mkdir()
     device = tmp_path / "cfg" / "config.toml"
-    monkeypatch.setattr(cli, "per_device_config_path", lambda: device)
-    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+    _redirect_device(monkeypatch, device)
 
     assert cli.main(["init", "--root", str(root)]) == 0
     assert device.is_file()
@@ -79,27 +80,39 @@ def test_init_creates_layout_and_loadable_config(
     assert cfg.expiry_threshold_days == 90  # from the seeded synced config
 
 
-def test_init_rejects_missing_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _redirect_device(monkeypatch: pytest.MonkeyPatch, device: Path) -> None:
+    # `ds init` reads its own device path; update_per_device reads config's — both.
+    monkeypatch.setattr("dossier.init.per_device_config_path", lambda: device)
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+
+
+def test_init_rejects_missing_root_non_interactively(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Non-interactive (no TTY) without --yes: a missing --root is an error, never a
+    # silently-created stray folder.
     device = tmp_path / "cfg" / "config.toml"
-    monkeypatch.setattr(cli, "per_device_config_path", lambda: device)
+    _redirect_device(monkeypatch, device)
+    monkeypatch.setattr(sys, "stdin", StringIO())  # non-interactive (isatty False)
     assert cli.main(["init", "--root", str(tmp_path / "nope")]) == 1
     assert not device.exists()
 
 
-def test_init_is_idempotent_without_force(
+def test_init_bare_rerun_leaves_config_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    # After setup, a bare non-interactive `ds init` reports already-configured and
+    # changes nothing (the meaningful idempotency for scripts/CI).
     root = tmp_path / "docs"
     root.mkdir()
     device = tmp_path / "cfg" / "config.toml"
-    monkeypatch.setattr(cli, "per_device_config_path", lambda: device)
+    _redirect_device(monkeypatch, device)
 
     assert cli.main(["init", "--root", str(root)]) == 0
     first = device.read_bytes()
 
-    other = tmp_path / "other"
-    other.mkdir()
-    assert cli.main(["init", "--root", str(other)]) == 0  # no --force
+    monkeypatch.setattr(sys, "stdin", StringIO())  # non-interactive (isatty False)
+    assert cli.main(["init"]) == 0  # no --root → nothing to reconfigure to
     assert device.read_bytes() == first  # unchanged
 
 

@@ -27,14 +27,11 @@ import argparse
 import functools
 import json
 import sys
-import tomllib
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-import tomli_w
 
 # Only the modules dispatch always needs are imported eagerly. The rest are
 # imported inside the handful of commands that use them (see each cmd_*), so a
@@ -43,15 +40,15 @@ import tomli_w
 # `reconcile`/`store` pull them anyway. TYPE_CHECKING holds the deferred modules
 # used only in annotations (strings under `from __future__ import annotations`).
 from dossier import doctor, migrate, query, reconcile, resolve, scan
-from dossier.config import DEFAULT_GLYPHS, Config, per_device_config_path
+from dossier.config import Config, per_device_config_path
 from dossier.errors import ConfigError, IntakeError, ScanError
 from dossier.merge import FieldDecision
 from dossier.model import Document
 
 if TYPE_CHECKING:
     from dossier import intake, preparedness, service_install
-from dossier.platform_open import OpenError, is_termux, open_file, termux_preconditions
-from dossier.store import Store, atomic_write_bytes
+from dossier.platform_open import OpenError, is_termux, open_file
+from dossier.store import Store
 
 
 def _load_config() -> Config | None:
@@ -64,56 +61,19 @@ def _load_config() -> Config | None:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """Bootstrap this device: per-device config + the ``.dossier`` layout."""
-    root: Path | None = args.root
-    if root is None:
-        root = _prompt_for_root()
-    if root is None:
-        print(
-            "error: --root is required (no interactive terminal to prompt).",
-            file=sys.stderr,
-        )
-        return 2
+    """Bootstrap this device — a conversational per-device config + ``.dossier``
+    layout. Deferred import keeps the engine (and its lazy Textual glyph peek) off
+    the hot CLI-startup path."""
+    from dossier import init
 
-    root = root.expanduser().resolve()
-    if not root.is_dir():
-        print(
-            f"error: syncthing root does not exist or is not a directory: {root}",
-            file=sys.stderr,
-        )
-        return 1
-
-    device_path = per_device_config_path()
-    if device_path.is_file() and not args.force:
-        print(f"already configured: {device_path}")
-        existing = _existing_root(device_path)
-        if existing:
-            print(f"  syncthing_root = {existing}")
-        print("re-run with --force to point this device at a different root.")
-        return 0
-
-    config = Config(syncthing_root=root)
-    Store(config).ensure_layout()
-    device_settings = {"syncthing_root": str(root), "glyphs": DEFAULT_GLYPHS}
-    atomic_write_bytes(device_path, tomli_w.dumps(device_settings).encode("utf-8"))
-
-    print("dossier initialised.")
-    print(f"  device config : {device_path}")
-    print(f"  data folder   : {config.meta_dir}")
-    print(f"  icons         : {DEFAULT_GLYPHS} (needs a Nerd Font; set glyphs=ascii)")
-    if is_termux():
-        problems = termux_preconditions()
-        if problems:
-            print("\nTermux setup still needed:")
-            for problem in problems:
-                print(f"  - {problem}")
-        print(
-            "\nTip: add `hide-soft-keyboard-on-startup=true` to "
-            "~/.termux/termux.properties so the keyboard stays down; tap the "
-            "on-screen ⌨ button in the TUI to bring it up when you need to type."
-        )
-    print("\nNext: run `ds migrate` to import from Notion, or `ds` to open the TUI.")
-    return 0
+    assume_yes = args.yes or args.force  # --force is a deprecated alias for --yes
+    io = init.InitIO(
+        ask=lambda prompt, _default: input(prompt),
+        say=print,
+        interactive=sys.stdin.isatty() and not assume_yes,
+        assume_yes=assume_yes,
+    )
+    return init.run(init.InitOptions(root=args.root, glyphs=args.glyphs), io)
 
 
 def _resolve_touch(args: argparse.Namespace) -> bool:
@@ -131,10 +91,28 @@ def _resolve_touch(args: argparse.Namespace) -> bool:
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
-    """Default action: launch the TUI."""
-    config = _load_config()
-    if config is None:
-        return 1
+    """Default action: launch the TUI (walking `ds init` first on an unset device)."""
+    try:
+        config = Config.load()
+    except ConfigError as exc:
+        # First contact: no device config at all, and a terminal to walk it → run init
+        # then launch, so cold-start-to-usable stays one command. Only the *missing
+        # config* case hands off; a bad root / missing .dossier keeps its loud pointer.
+        if not per_device_config_path().is_file() and sys.stdin.isatty():
+            print("dossier isn't set up on this device yet — let's fix that.\n")
+            from dossier import init
+
+            io = init.InitIO(
+                ask=lambda prompt, _default: input(prompt),
+                say=print,
+                interactive=True,
+            )
+            if init.run(init.InitOptions(), io) != 0:
+                return 1
+            config = Config.load()
+        else:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
 
     from dossier.tui import DossierApp
 
@@ -1172,10 +1150,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="the Syncthing root folder that holds (or will hold) .dossier/",
     )
     init_p.add_argument(
-        "--force",
-        action="store_true",
-        help="overwrite an existing per-device config",
+        "--glyphs",
+        choices=("nerd", "ascii"),
+        default=None,
+        help="icon set (skips the icon question)",
     )
+    init_p.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="accept defaults and ask nothing (for scripts)",
+    )
+    init_p.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     init_p.set_defaults(func=cmd_init)
 
     migrate_p = sub.add_parser(
@@ -1487,20 +1473,3 @@ def main(argv: list[str] | None = None) -> int:
     if func is None:
         return cmd_tui(args)
     return func(args)
-
-
-def _prompt_for_root() -> Path | None:
-    if not sys.stdin.isatty():
-        return None
-    raw = input("Syncthing root (the folder that holds .dossier/): ").strip()
-    return Path(raw) if raw else None
-
-
-def _existing_root(device_path: Path) -> str | None:
-    try:
-        with device_path.open("rb") as fh:
-            data = tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError):
-        return None
-    value = data.get("syncthing_root")
-    return str(value) if value else None
