@@ -22,7 +22,7 @@ import pytest
 
 from dossier import doctor, syncthing
 from dossier.config import Config
-from dossier.model import Document, Location, Rendition
+from dossier.model import Document, Location, ReconcileState, Rendition
 from dossier.store import Store
 from dossier.syncthing import FolderStatus, SyncState, SyncStatus
 
@@ -338,3 +338,45 @@ def test_syncthing_skip_short_circuits_the_network(
     monkeypatch.setattr(syncthing, "query_status", boom)
     report = doctor.run(store, store.config, skip=frozenset({"syncthing"}))
     assert not any(f.check.startswith("syncthing") for f in report.findings)
+
+
+# -- reconcile-sidecar consistency -------------------------------------------
+def _recon(report: doctor.Report) -> list[doctor.Finding]:
+    return [f for f in report.findings if f.check.startswith("reconcile")]
+
+
+def test_reconcile_folded_link_is_a_warn(store: Store):
+    root = store.config.syncthing_root
+    (root / "keep.pdf").write_bytes(b"x")
+    (root / "dup.pdf").write_bytes(b"x")  # folding never deletes — the copy remains
+    store.save(Document(id="d", name="Doc", files=[Rendition("dup", "dup.pdf", True)]))
+    store.save_reconcile(ReconcileState(folded={"keep.pdf": {"dup.pdf"}}))
+
+    folded = [
+        f for f in _recon(doctor.run(store, store.config)) if f.check.endswith("link")
+    ]
+    assert len(folded) == 1
+    assert folded[0].severity == "warn"
+    assert folded[0].subject == "d" and "keep.pdf" in folded[0].detail
+
+
+def test_reconcile_stale_entries_are_info(store: Store):
+    # a dismissed orphan and a folded keep whose files are gone from disk
+    store.save_reconcile(
+        ReconcileState(dismissed={"gone.pdf"}, folded={"missing-keep.pdf": {"sub.pdf"}})
+    )
+    stale = [
+        f for f in _recon(doctor.run(store, store.config)) if f.check.endswith("stale")
+    ]
+    assert {f.subject for f in stale} == {"gone.pdf", "missing-keep.pdf"}
+    assert all(f.severity == "info" for f in stale)
+
+
+def test_reconcile_clean_when_doc_links_the_kept_file(store: Store):
+    root = store.config.syncthing_root
+    (root / "keep.pdf").write_bytes(b"x")
+    (root / "dup.pdf").write_bytes(b"x")
+    store.save(Document(id="d", name="Doc", files=[Rendition("k", "keep.pdf", True)]))
+    store.save_reconcile(ReconcileState(folded={"keep.pdf": {"dup.pdf"}}))
+    # links the KEEP, both files present → nothing for either reconcile check
+    assert _recon(doctor.run(store, store.config)) == []

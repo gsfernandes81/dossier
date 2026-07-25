@@ -18,8 +18,9 @@
 Checks: Syncthing conflict files, location-slug referential integrity,
 supersession integrity (dangling / self / cyclic ``supersedes`` links),
 round-trip lint (files that would change on next save), missing rendition files,
-and ambiguous dates — 2-digit-year dates whose day/month order can't be pinned
-down.
+ambiguous dates (2-digit-year dates whose day/month order can't be pinned down),
+reconcile-sidecar consistency (a doc linking a folded duplicate; stale
+suppressions), and Syncthing health over the REST API (advisory).
 """
 
 from __future__ import annotations
@@ -87,6 +88,18 @@ CHECK_HINTS: dict[str, str] = {
         "No sync devices are currently connected. Sync resumes when both ends are "
         "online — only a last-seen of days really deserves a look."
     ),
+    "reconcile-folded-link": (
+        "A document links a file you folded as a duplicate in the reconcile screen. "
+        "The copy still exists (folding never deletes), but the document points at "
+        "the redundant one — re-link the rendition to the kept file, or unfold the "
+        "cluster if they aren't actually the same file."
+    ),
+    "reconcile-stale": (
+        "A `.dossier/reconcile.toml` suppression points at a file that's no longer on "
+        "disk — a harmless leftover from a moved or deleted file. Prune it by "
+        "re-running the relevant reconcile decision, or hand-edit reconcile.toml to "
+        "drop the entry."
+    ),
 }
 
 
@@ -143,6 +156,7 @@ def run(
     if "missing-file" not in skip:
         report.findings += _check_files(docs, config.syncthing_root)
     report.findings += _check_dates(docs)
+    report.findings += _check_reconcile(store, config, docs)
     if "syncthing" not in skip:  # a network group; the Review tab skips it wholesale
         report.findings += _check_syncthing(config)
     if skip:
@@ -348,6 +362,58 @@ def _check_files(docs: list[Document], root: Path) -> list[Finding]:
                         f"linked file not found: {rendition.path}",
                     )
                 )
+    return out
+
+
+def _check_reconcile(
+    store: Store, config: Config, docs: list[Document]
+) -> list[Finding]:
+    """Reconcile-sidecar consistency (``.dossier/reconcile.toml``).
+
+    Two low-noise checks: a document that still links a file the user *folded* as a
+    duplicate (it should point at the kept copy instead — a ``warn``), and sidecar
+    suppressions whose file has since left the disk (harmless cruft to prune —
+    ``info``). Both are read-only; folding never deletes a real file.
+    """
+    state = store.load_reconcile()
+    root = config.syncthing_root
+    out: list[Finding] = []
+
+    # Each folded subset path → the kept (superset) path it was folded under.
+    folded_under: dict[str, str] = {}
+    for keep, subsets in state.folded.items():
+        for subset in subsets:
+            folded_under.setdefault(subset, keep)
+    for doc in docs:
+        for rendition in doc.files:
+            keep = folded_under.get(rendition.path)
+            if keep is not None:
+                out.append(
+                    Finding(
+                        "reconcile-folded-link",
+                        doc.id,
+                        f"links {rendition.path}, folded as a duplicate of {keep}",
+                    )
+                )
+
+    # Stale suppressions: a dismissed orphan or a folded keep no longer on disk.
+    for path in sorted(state.dismissed):
+        if not query.resolve_path(root, path).exists():
+            out.append(
+                Finding(
+                    "reconcile-stale",
+                    path,
+                    "dismissed orphan is gone from disk",
+                    "info",
+                )
+            )
+    for keep in sorted(state.folded):
+        if not query.resolve_path(root, keep).exists():
+            out.append(
+                Finding(
+                    "reconcile-stale", keep, "folded keep is gone from disk", "info"
+                )
+            )
     return out
 
 

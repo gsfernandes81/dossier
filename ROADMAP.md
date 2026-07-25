@@ -422,10 +422,11 @@ built on one reusable `syncthing.query_status`.
   suggestions — it ships with direct editing first and gains the accept affordance when
   the suggestions framework (Phase 5) lands. Phase 7 (vision) needs Phase 5 to land its
   proposals into.
-- **Reconcile follow-ups** *(deferred, low priority)* — doctor checks for a document
-  that links a *folded* duplicate copy and for stale sidecar entries (a `dismissed`
-  path or `folded` keep that no longer exists on disk); a "show dismissed (N)" toggle
-  to review/undo suppressions from the TUI (undo today = hand-edit `reconcile.toml`).
+- **Reconcile follow-ups** *(low priority)* — **doctor checks done:**
+  `reconcile-folded-link` (a document that links a *folded* duplicate copy — warn) and
+  `reconcile-stale` (a `dismissed` path or `folded` keep no longer on disk — info).
+  *Still open:* a "show dismissed (N)" toggle to review/undo suppressions from the TUI
+  (undo today = hand-edit `reconcile.toml`).
 - **Esc behaviour review** *(backlog)* — the Esc stack has grown layered (cancel edit →
   exit command mode → clear a per-surface search → close detail → exit the mode →
   drill-out), spread across the shared `action_escape` chain and each pane's own `escape`
