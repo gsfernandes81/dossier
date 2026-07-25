@@ -70,7 +70,7 @@ def _tokens(text: str) -> list[str]:
     return [t for t in _TOKEN.findall(text.casefold()) if len(t) > 1 or t.isdigit()]
 
 
-def _residue(question: str) -> list[str]:
+def residue(question: str) -> list[str]:
     """The question's content words — stop + trigger words removed."""
     return [t for t in _tokens(question) if t not in _STOP and t not in _TRIGGERS]
 
@@ -186,7 +186,7 @@ def answer(
     """Answer ``question`` from the records — intent lookup, else ranked retrieval."""
     corpus = build_corpus(docs, readings)
     by_id = {doc.id: doc for doc in docs}
-    ranked = rank(corpus, _residue(question), k=max(k, 8))  # headroom for intents
+    ranked = rank(corpus, residue(question), k=max(k, 8))  # headroom for intents
     q = question.casefold()
     if _EXPIRY_RE.search(q):
         return _date_answer(ranked, by_id, readings, today, kind="expiry")

@@ -85,8 +85,8 @@ class DossierApp(App[None]):
             return None
         # ctrl+p opens command mode, which only exists on the home screen. False
         # (not None) so a modal's footer doesn't advertise a dead key; ctrl+q still
-        # quits everywhere. (Watch/Bundles/Intake/Settings regain command access
-        # when Phase B folds them into home modes.)
+        # quits everywhere. (Watch/Bundles/Intake/Settings are home modes now, so
+        # they keep the command bar; only true modal screens lack it.)
         return not (
             action == "command_palette"
             and (self._home is None or self.screen is not self._home)

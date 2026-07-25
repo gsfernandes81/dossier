@@ -13,7 +13,9 @@
 # You should have received a copy of the GNU Affero General Public License along with
 # dossier. If not, see <https://www.gnu.org/licenses/>.
 
-"""Assorted modal screens: supersede/doc-picker/prompt, watch, bundles, settings."""
+"""Shared TUI pieces: the generic modal screens (supersede / doc-picker / prompt /
+choice / readiness), the watch / bundles / settings *mode panes* (columns 1+2 of the
+home, like review), and the shared open-file / help-panel helpers."""
 
 from __future__ import annotations
 

@@ -31,8 +31,9 @@ screen (DESIGN §14):
   pane in place, root-wide, keeping the Miller columns; the detail preview (when
   open) follows the highlighted result.
 
-``Enter`` opens the detail pane for a document; ``o`` opens its file from
-anywhere. The search box is docked at the bottom as a thumb-reachable command
+``Enter`` opens a document's file; ``→`` opens its detail (a physical-only record
+has no file, so Enter falls through to the detail). The search box is docked at the
+bottom as a thumb-reachable command
 bar (``/`` focuses it); typing filters the documents pane in place (root-wide),
 keeping the columns. Under the touch/Termux UI a bottom action bar (Open / Edit /
 New / Bundle / Watch / Commands) replaces the desktop keybind footer; **Commands**
@@ -89,6 +90,7 @@ from dossier.tui.screens import (
     SettingsPane,
     SupersedeScreen,
     WatchPane,
+    _highlighted_id,
     open_doc_file,
     toggle_help_panel,
 )
@@ -2029,13 +2031,6 @@ class HomeScreen(Screen[None]):
 # action -> key, read off the home's own bindings so the command list's key hints
 # and the (soon-retired) palette can never disagree with the actual shortcuts.
 _KEYS = {b.action: b.key for b in HomeScreen.BINDINGS if isinstance(b, Binding)}
-
-
-def _highlighted_id(options: OptionList) -> str | None:
-    index = options.highlighted
-    if index is None:
-        return None
-    return options.get_option_at_index(index).id
 
 
 def _loc_label(icon: str, title: str, count: int, *, two_line: bool = False) -> Text:

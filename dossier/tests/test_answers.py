@@ -48,7 +48,7 @@ def test_rank_selects_the_document_with_the_rare_term():
         Document(id="coc", name="Certificate of Competency"),
     ]
     corpus = answers.build_corpus(docs, {})
-    ranked = answers.rank(corpus, answers._residue("my ENG-1"))
+    ranked = answers.rank(corpus, answers.residue("my ENG-1"))
     assert ranked[0][0] == "eng1"
 
 

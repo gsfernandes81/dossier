@@ -15,10 +15,13 @@
 
 """Command-line interface for the ``dossier`` / ``ds`` commands.
 
-Bare ``ds`` launches the TUI; ``ds init`` bootstraps a device. The subcommands are
-``init``, ``migrate``, ``doctor``, ``reset``, ``reconcile``, ``export``, and
-``scan`` (``--mobile``/``--desktop`` force the touch vs desktop UI on the bare
-launch). ``ds import`` (bulk folder ingest) is deferred post-v1 — see DESIGN.md §12.
+Bare ``ds`` launches the TUI (``--mobile``/``--desktop`` force the touch vs desktop
+UI); ``ds init`` bootstraps a device. The subcommands span setup and maintenance —
+``migrate``, ``doctor``, ``reset``, ``reconcile``, ``resolve``, ``organize``,
+``export`` — and the vision/intake pipeline — ``scan``, ``intake``, ``import`` —
+plus the quick lookups ``expiring``, ``ask``, ``open`` and the ``service`` /
+``profile`` utilities. Command machinery is imported lazily per subcommand so a bare
+launch stays fast (guarded by ``test_cli_import_stays_lean``).
 """
 
 from __future__ import annotations
@@ -830,7 +833,7 @@ def cmd_open(args: argparse.Namespace) -> int:
     docs = store.load_all()
     by_id = {d.id: d for d in docs}
     corpus = answers.build_corpus(docs, store.load_scans())
-    ranked = answers.rank(corpus, answers._residue(term), k=5)
+    ranked = answers.rank(corpus, answers.residue(term), k=5)
     if not ranked:
         print(f"no match for '{term}'.", file=sys.stderr)
         return 1
