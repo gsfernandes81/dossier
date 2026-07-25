@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING
 
+from dossier import fuzz
 from dossier.model import Document, Location
 from dossier.query import reading_text, superseded_ids
 
@@ -122,22 +123,46 @@ def rank(
     k1: float = 1.5,
     b: float = 0.75,
 ) -> list[tuple[str, float]]:
-    """Okapi BM25 — the top-``k`` (doc id, score), best first, zero-scores dropped."""
+    """Okapi BM25 — the top-``k`` (doc id, score), best first, zero-scores dropped.
+
+    Typo-tolerant, precision-first: an in-vocabulary token scores as usual; an
+    out-of-vocabulary one (a likely typo) expands to its nearest ≤3 vocabulary
+    neighbours within an edit budget, contributing at a ``0.5 ** distance`` penalty —
+    so an exact term always outweighs a fuzzy one and a correctly-spelled query is
+    scored bit-for-bit as before.
+    """
     n = len(corpus.ids)
     if n == 0:
         return []
     scores = [0.0] * n
-    for token in set(question_tokens):
+
+    def add(token: str, weight: float) -> None:
         dfreq = corpus.df.get(token, 0)
         if not dfreq:
-            continue
+            return
         idf = math.log(1 + (n - dfreq + 0.5) / (dfreq + 0.5))
         for i, counts in enumerate(corpus.tf):
             freq = counts.get(token, 0)
             if not freq:
                 continue
             denom = freq + k1 * (1 - b + b * corpus.lengths[i] / (corpus.avg_len or 1))
-            scores[i] += idf * (freq * (k1 + 1)) / denom
+            scores[i] += weight * idf * (freq * (k1 + 1)) / denom
+
+    for token in set(question_tokens):
+        if corpus.df.get(token, 0):
+            add(token, 1.0)
+            continue
+        budget = fuzz.budget(token)  # OOV → fuzzy-expand (a short token never does)
+        if budget < 1:
+            continue
+        scored = [(fuzz.distance(token, cand, budget), cand) for cand in corpus.df]
+        near = sorted((d, c) for d, c in scored if d <= budget)
+        if not near:
+            continue
+        best = near[0][0]
+        for dist, cand in near[:3]:
+            if dist == best:  # only the closest neighbours, evenly penalised
+                add(cand, 0.5**best)
     ranked = [(corpus.ids[i], scores[i]) for i in range(n) if scores[i] > 0]
     ranked.sort(key=lambda pair: pair[1], reverse=True)
     return ranked[:k]

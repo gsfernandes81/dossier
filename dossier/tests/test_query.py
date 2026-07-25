@@ -249,3 +249,46 @@ def test_bundle_sort_and_group():
         "travel/india-2024",
         "travel/bali-2025",
     ]
+
+
+def _search(docs, text, **kw):
+    return query.search(
+        docs, query.Filter(text=text), today=TODAY, threshold_days=90, **kw
+    )
+
+
+def test_search_exact_suppresses_fuzzy():
+    docs = [_doc("passport", name="Passport"), _doc("policy", name="Policy")]
+    # An exact substring hit is returned alone — the fuzzy pass never runs.
+    assert [d.id for d in _search(docs, "passport")] == ["passport"]
+
+
+def test_search_fuzzy_fires_only_on_zero_exact():
+    docs = [_doc("passport", name="Passport"), _doc("visa", name="US Visa")]
+    assert [d.id for d in _search(docs, "pasport")] == ["passport"]  # typo forgiven
+    assert [d.id for d in _search(docs, "passport")] == ["passport"]  # exact, unchanged
+
+
+def test_search_short_query_never_fuzzes():
+    docs = [_doc("cat", name="cat"), _doc("car", name="car")]
+    assert [d.id for d in _search(docs, "cat")] == ["cat"]  # not "car"
+    assert _search(docs, "xyz") == []  # a short miss stays a miss (no match-everything)
+
+
+def test_search_fuzzy_ands_its_terms():
+    docs = [_doc("a", name="Marine Certificate"), _doc("b", name="Marine Passport")]
+    # Both terms must land — "cerificate" (typo) picks only the certificate doc.
+    assert [d.id for d in _search(docs, "marine cerificate")] == ["a"]
+
+
+def test_search_fuzzy_matches_a_reading_field():
+    from dossier import scan as scan_mod
+
+    docs = [_doc("d1", name="Untitled scan")]
+    reading = scan_mod.ScanReading.from_payload(
+        {"document_type": "Certificate", "confidence": 0.9}, model="m"
+    )
+    # A typo of a scan's structured field is found once readings are supplied.
+    assert _search(docs, "cerificate") == []  # not in the name
+    hits = _search(docs, "cerificate", readings={"d1": reading})
+    assert [d.id for d in hits] == ["d1"]

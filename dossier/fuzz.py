@@ -50,20 +50,20 @@ def budget(term: str) -> int:
     return 2
 
 
-def within(a: str, b: str, k: int) -> bool:
-    """Whether ``a`` and ``b`` are within ``k`` OSA edits.
+def distance(a: str, b: str, k: int) -> int:
+    """OSA edit distance between ``a`` and ``b``, **capped**: the true distance when
+    it is ≤ ``k``, else ``k + 1`` (callers only care whether it's within budget, and
+    the cap lets the DP early-exit). ``k`` below 0 is treated as 0.
 
-    Length-prefiltered (``abs(len a - len b) > k`` rejects in O(1)) and row-early-exit
-    (a whole DP row exceeding ``k`` means the distance does), so the common no-match is
-    cheap. ``k = 0`` is plain equality.
+    Length-prefiltered (``abs(len a - len b) > k`` returns ``k + 1`` in O(1)) and
+    row-early-exit (a whole DP row exceeding ``k`` means the distance does).
     """
-    if k <= 0:
-        return a == b
+    k = max(k, 0)
+    if a == b:
+        return 0
     la, lb = len(a), len(b)
     if abs(la - lb) > k:
-        return False
-    if a == b:
-        return True
+        return k + 1
     prev2: list[int] | None = None  # row i-2, for the transposition step
     prev = list(range(lb + 1))  # row i-1
     for i in range(1, la + 1):
@@ -85,9 +85,14 @@ def within(a: str, b: str, k: int) -> bool:
             if val < row_best:
                 row_best = val
         if row_best > k:
-            return False
+            return k + 1
         prev2, prev = prev, cur
-    return prev[lb] <= k
+    return min(prev[lb], k + 1)
+
+
+def within(a: str, b: str, k: int) -> bool:
+    """Whether ``a`` and ``b`` are within ``k`` OSA edits (``k = 0`` is equality)."""
+    return a == b if k <= 0 else distance(a, b, k) <= k
 
 
 def term_matches(term: str, tokens: Iterable[str]) -> bool:

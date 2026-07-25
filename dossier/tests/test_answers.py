@@ -120,3 +120,53 @@ def test_no_match_is_unanswered():
     docs = [Document(id="pp", name="Passport")]
     ans = _ans("airspeed velocity of an unladen swallow", docs)
     assert not ans.answered
+
+
+# -- typo tolerance (fuzzy OOV expansion) ------------------------------------
+
+
+def test_rank_typo_resolves_the_right_document():
+    docs = [
+        Document(id="passport", name="British Passport"),
+        Document(id="eng1", name="ENG-1 Medical Certificate"),
+    ]
+    corpus = answers.build_corpus(docs, {})
+    ranked = answers.rank(corpus, ["cerificate"])  # a dropped 't'
+    assert ranked and ranked[0][0] == "eng1"
+
+
+def test_rank_exact_outscores_a_fuzzy_near_miss():
+    docs = [Document(id="a", name="certificate")]
+    corpus = answers.build_corpus(docs, {})
+    exact = answers.rank(corpus, ["certificate"])
+    fuzzy = answers.rank(corpus, ["cerificate"])  # distance 1
+    assert exact[0][0] == fuzzy[0][0] == "a"
+    assert fuzzy[0][1] < exact[0][1]  # penalised — an exact term always wins
+
+
+def test_rank_short_oov_token_matches_nothing():
+    docs = [Document(id="a", name="cat")]
+    corpus = answers.build_corpus(docs, {})
+    assert answers.rank(corpus, ["car"]) == []  # a 3-char OOV never fuzzes
+
+
+def test_rank_in_vocab_query_ignores_fuzzy_expansion():
+    # An exactly-spelled, in-vocab query never triggers the OOV branch, so a near
+    # neighbour doc isn't pulled in — precision-first, structurally.
+    docs = [Document(id="a", name="policy"), Document(id="b", name="polics")]
+    corpus = answers.build_corpus(docs, {})
+    ranked = dict(answers.rank(corpus, ["policy"]))
+    assert "a" in ranked and "b" not in ranked
+
+
+def test_expiry_intent_with_a_typo_subject():
+    docs = [
+        Document(
+            id="eng1",
+            name="ENG-1 Medical Certificate",
+            expiry_date=date(2028, 5, 21),
+        )
+    ]
+    ans = _ans("when does my medcal certificate expire", docs)  # "medcal" typo
+    assert ans.answered
+    assert any("2028-05-21" in line for line in ans.lines)
