@@ -22,16 +22,21 @@ root. The TUI drives everything here.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from dossier import fuzz
 from dossier.model import Bundle, Document, ExpiryStatus, FileStatus
 
 if TYPE_CHECKING:  # kept import-light: readings are duck-typed at runtime
     from dossier.scan import ScanReading
+
+# Word tokens for the typo-tolerant fallback (alphanumeric runs; underscores split).
+_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
 
 # -- file resolution ---------------------------------------------------------
 
@@ -83,6 +88,7 @@ def matches(
     threshold_days: int,
     reading: ScanReading | None = None,
     include_content: bool = False,
+    fuzzy: bool = False,
 ) -> bool:
     """Whether ``doc`` satisfies every set field of ``flt`` (unset fields don't filter).
 
@@ -90,10 +96,11 @@ def matches(
     given, the doc's scan reading — its full transcript too with ``include_content``);
     a tag filter matches a segment or its hierarchical children (``id`` matches
     ``id/passport``); location uses the *effective* (temp-overrides-permanent) location;
-    expiry uses the doc's status against ``threshold_days``.
+    expiry uses the doc's status against ``threshold_days``. ``fuzzy`` lets the text
+    term forgive small typos (only the free-text term — the other filters stay exact).
     """
     return (
-        (not flt.text or _text_matches(doc, flt.text, reading, include_content))
+        (not flt.text or _text_matches(doc, flt.text, reading, include_content, fuzzy))
         and all(_has_tag(doc.tags, tag) for tag in flt.tags)
         and all(bundle in doc.bundles for bundle in flt.bundles)
         and (not flt.locations or doc.effective_location in flt.locations)
@@ -113,19 +120,33 @@ def search(
     """Documents passing ``flt``, order preserved. With ``readings``, the text filter
     also matches a doc's scan reading (structured fields); ``include_content`` extends
     that to the full transcript (opt-in — the noisy body text stays off the default
-    filter). See :func:`matches`."""
-    return [
-        doc
-        for doc in docs
-        if matches(
-            doc,
-            flt,
-            today=today,
-            threshold_days=threshold_days,
-            reading=readings.get(doc.id) if readings else None,
-            include_content=include_content,
-        )
-    ]
+    filter). See :func:`matches`.
+
+    Typo-tolerant, precision-first: an exact pass runs first (unchanged, so a hit
+    query costs exactly what it did before); only when it finds **nothing** and the
+    query has a fuzzable term (≥5 chars) does a second, forgiving pass run — so an
+    exact result can never be displaced by a fuzzy one.
+    """
+
+    def run(fuzzy: bool) -> list[Document]:
+        return [
+            doc
+            for doc in docs
+            if matches(
+                doc,
+                flt,
+                today=today,
+                threshold_days=threshold_days,
+                reading=readings.get(doc.id) if readings else None,
+                include_content=include_content,
+                fuzzy=fuzzy,
+            )
+        ]
+
+    exact = run(fuzzy=False)
+    if exact or not any(fuzz.budget(t) >= 1 for t in _WORD_RE.findall(flt.text)):
+        return exact
+    return run(fuzzy=True)
 
 
 def reading_text(reading: ScanReading, *, include_content: bool = False) -> str:
@@ -155,12 +176,25 @@ def _text_matches(
     text: str,
     reading: ScanReading | None = None,
     include_content: bool = False,
+    fuzzy: bool = False,
 ) -> bool:
-    needle = text.casefold()
     parts = [doc.name, doc.notes, *doc.tags, *doc.bundles]
     if reading is not None:
         parts.append(reading_text(reading, include_content=include_content))
-    return needle in " ".join(parts).casefold()
+    haystack = " ".join(part for part in parts if part)
+    # Exact substring first — the common, fast path, unchanged from before.
+    if text.casefold() in haystack.casefold():
+        return True
+    # Typo-tolerant fallback (only reached in the fuzzy pass, on an exact miss): every
+    # query term must be within its edit-budget of some doc token — budget-0 (short)
+    # terms must hit exactly, so a 2-char query can never match-everything.
+    if not fuzzy:
+        return False
+    terms = [fuzz.fold(t) for t in _WORD_RE.findall(text)]
+    if not terms:
+        return False
+    tokens = {fuzz.fold(t) for t in _WORD_RE.findall(haystack)}
+    return all(fuzz.term_matches(term, tokens) for term in terms)
 
 
 def _has_tag(tags: list[str], wanted: str) -> bool:

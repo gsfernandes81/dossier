@@ -46,8 +46,9 @@ matching-files list for fast adoption). *This supersedes the "command palette /
 `DossierCommands` provider" and modal `IntakeScreen`/`SettingsScreen` descriptions still
 worded below in Phases 7/9/13.*
 
-**Next up:** the rest of Phase 14 — **first-run & empty states**, then typo-tolerant
-search.
+**Phase 14 is now complete.** **Next up: Phase 15 — Syncthing integration** (a Termux
+API-reachability spike first, then doctor checks over the REST API, then a sync-aware
+service + a footer sync glyph).
 
 Effort: **S** ≈ a few hours · **M** ≈ 1–2 slices · **L** ≈ several slices.
 Per-item rationale lives in `DESIGN.md` §14.
@@ -372,12 +373,22 @@ search forgives phone-keyboard typos.
   appears where a list exists (Watch, Bundles, and the **reconcile tabs** — Orphans flatten
   to a matching-files list, `/` → type → `↓` → `a` adopts). Transient pickers/prompts stay
   modal. Same one-screen, CSS-class-toggle idiom as the miller view.
-- [ ] **First-run & empty states** (S) — `ds init` walks root pick → glyph check → Termux
-  preconditions conversationally; every empty surface (no config, empty store, empty
-  inbox, no matches) says exactly what to do next instead of rendering blank.
-- [ ] **Typo-tolerant search** (M) — `/`, `ds open`, and `ds ask` retrieval forgive small
-  edit distances ("cerificate" → Certificate), rank exact > prefix > fuzzy so precision
-  never suffers, and stay fast on Termux (the corpus is small — no index needed).
+- [x] **First-run & empty states** (S) — **done.** `ds init` is a conversational engine
+  (`dossier/init.py`, injected I/O so it's PTY-free to test): detect an existing config
+  (re-run reconfigures, `--root` repoints, bare re-run is a no-op), pick/create the root
+  (scripts create only with `--yes`), an icon render check, Termux/libyaml nudges, then a
+  merge-write so scan/service keys survive. Bare `ds` on an unset device walks init then
+  launches (TTY only). Empty surfaces now point the way: the home documents pane (empty
+  store → `ds import`/`ds migrate`/`:` New; no-match → "nothing matches — Esc clears ·
+  ctrl+t searches scan contents") and intake ("drop files into <inbox>").
+- [x] **Typo-tolerant search** (M) — **done.** One shared bounded-OSA primitive
+  (`dossier/fuzz.py`; transposition = 1 edit, length-scaled budget so short queries never
+  fuzz, diacritic folding) drives all three consumers. The `/` filter and `ds open`/`ds
+  ask` run an **exact pass first**, falling to a forgiving pass only on zero hits (filter)
+  / expanding OOV tokens to penalised vocab neighbours (BM25) — so exact always outranks
+  fuzzy and a correct query is scored exactly as before. No index (the corpus is small).
+  *(Dropped the "prefix" tier: substring already subsumes it and the home lists in shelf
+  order, so two tiers — exact-set, else fuzzy-set — deliver the intent with less machinery.)*
 
 ## Phase 15 — Syncthing integration: orchestrate, don't own
 Syncthing is the transport (the PC folder also lives in Proton Drive for an opportunistic

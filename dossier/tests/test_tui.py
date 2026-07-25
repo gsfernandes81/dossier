@@ -935,6 +935,27 @@ async def test_home_no_search_match_shows_a_pointer(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_home_search_is_typo_tolerant(tmp_path: Path):
+    """A phone-keyboard typo still finds the doc — the fuzzy fallback in the filter."""
+    store, config = _setup(tmp_path)  # has "Passport"
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.query_one("#documents", OptionList).focus()
+        await pilot.pause()
+        for ch in "pasport":  # a dropped 's'
+            await pilot.press(ch)
+        docs = home.query_one("#documents", OptionList)
+        await _settle(
+            pilot,
+            lambda: any(
+                docs.get_option_at_index(i).id == "passport"
+                for i in range(docs.option_count)
+            ),
+        )
+
+
+@pytest.mark.asyncio
 async def test_action_bar_hidden_without_touch(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
