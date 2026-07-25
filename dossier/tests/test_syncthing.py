@@ -80,7 +80,9 @@ def st_server():
     state = _default_state()
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *args):  # keep the test output clean
+        # Signature matches BaseHTTPRequestHandler.log_message so ty accepts the
+        # override; the body just silences the test server's stderr logging.
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
         def _send(self, code: int, obj: object) -> None:

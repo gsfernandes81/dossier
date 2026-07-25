@@ -3418,8 +3418,6 @@ async def test_sync_glyph_renders_each_state(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_sync_glyph_tap_notifies_detail(tmp_path: Path, monkeypatch):
-    from types import SimpleNamespace
-
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test(size=(120, 34)) as pilot:
@@ -3438,8 +3436,8 @@ async def test_sync_glyph_tap_notifies_detail(tmp_path: Path, monkeypatch):
 
         notes: list[str] = []
         monkeypatch.setattr(home, "notify", lambda msg, *a, **k: notes.append(msg))
-        home._attn_sync(SimpleNamespace(stop=lambda: None))
-        assert notes == [home._sync_note]
+        await pilot.click("#attn-sync")  # a real Click through the pilot
+        await _settle(pilot, lambda: notes == [home._sync_note])
 
 
 @pytest.mark.asyncio
