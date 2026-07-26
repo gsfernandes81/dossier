@@ -411,6 +411,12 @@ built on one reusable `syncthing.query_status`.
   shared and not paused · **file versioning enabled** (the headline — the net against a
   propagated Proton revert) · device connectivity. Unreachable/unconfigured degrade to
   advisory `info` "notes", never a doctor failure.
+- [x] **`ds syncthing` key setter** (S) — **done.** `ds syncthing key [KEY]` sets this
+  device's GUI API key (prompts with echo off when `KEY` is omitted, so the secret never
+  lands in shell history); `address` / `forget` / bare-`status` round it out. The key
+  writes to the per-device `[syncthing]` table via a read-merging `config.update_syncthing`
+  (siblings preserved, `None` deletes), so on Android — where `config.xml` is app-private
+  and autodiscovery can't run — providing the key is no longer a hand-edit.
 - [x] **Sync-aware service + TUI** (M) — **done.** The scan service `wait_for_idle`s before
   its batch writes (a timeout/unreachable just proceeds; logged as `sync=…`); a home footer
   **sync glyph** polls `query_status` off-thread every 30s — idle / syncing / offline /
@@ -455,5 +461,19 @@ built on one reusable `syncthing.query_status`.
   cycling all six at 50 cols), so only inactive tabs clip — normal scrolling-tab-bar
   behaviour. Abbreviating six titles to fit 45–50 cols would make the active tab cryptic and
   desync from the docs' vocabulary, a net loss, so the titles stayed.
+- **Reconcile scan cost on FUSE (perf, backlog)** — `ds profile` on the real phone
+  (Android/Termux, libyaml, 137 docs) shows the *interactive* paths are all fast
+  (keystroke 2.7 ms, list load 68 ms parallel) — which is why the profiler's ranked
+  recommendations came back empty bar the FUSE note. The one big number is
+  `scan_files`/`reconcile.run` at ~520–557 ms: the walk pays **2–3 stat syscalls per
+  file** (`rglob` + `path.is_file()` + a *Windows-only* `_is_hidden` `stat()` that is
+  pure waste off-Windows) and descends *into* `.dossier/` only to filter it back out.
+  It already runs off the paint path (a `@work(thread=True)` worker in `review.py`), so
+  it is not felt-lag — but rewriting `scan_files` with `os.scandir`/`os.walk` (DirEntry
+  `is_file` needs no extra stat; prune `.dossier/`, sync and dot dirs *during* the walk;
+  gate the Windows attribute `stat()` behind `os.name == "nt"`) should roughly halve it
+  and cut battery/syscall load on FUSE. Also teach `profiling._recommendations` to rank
+  the scan/reconcile cost — its current blind spot (it ranks load/keystroke/import but
+  not the walk, so a half-second reconcile stays unranked).
 - **Someday:** `createdTime` year-plausibility + "issued X expires Y" range parsing
   (fold into suggestions quality), slug finalization, Obsidian-vault confirmation.

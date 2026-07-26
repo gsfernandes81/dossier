@@ -193,3 +193,23 @@ def test_update_per_device_merges_preserving_root(
     assert back["glyphs"] == "ascii"  # updated
     assert back["scan_model"] == "qwen3vl"  # added
     assert back["syncthing_root"] == tmp_path.as_posix()  # preserved
+
+
+def test_update_syncthing_merges_and_deletes_within_the_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    device_path = tmp_path / "config.toml"
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device_path)
+    device_path.write_text(f'syncthing_root = "{tmp_path.as_posix()}"\n')
+
+    config_mod.update_syncthing({"address": "127.0.0.1:8384"})
+    config_mod.update_syncthing({"apikey": "K"})  # a later set keeps the address
+    import tomllib
+
+    back = tomllib.loads(device_path.read_text())
+    assert back["syncthing"] == {"address": "127.0.0.1:8384", "apikey": "K"}
+    assert back["syncthing_root"] == tmp_path.as_posix()  # sibling key untouched
+
+    config_mod.update_syncthing({"apikey": None})  # None deletes just that key
+    back = tomllib.loads(device_path.read_text())
+    assert back["syncthing"] == {"address": "127.0.0.1:8384"}

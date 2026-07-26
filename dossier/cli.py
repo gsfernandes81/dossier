@@ -20,8 +20,8 @@ UI); ``ds init`` bootstraps a device. The subcommands span setup and maintenance
 ``migrate``, ``doctor``, ``reset``, ``reconcile``, ``resolve``, ``organize``,
 ``export`` — and the vision/intake pipeline — ``scan``, ``intake``, ``import`` —
 plus the quick lookups ``expiring``, ``ask``, ``open`` and the ``service`` /
-``profile`` utilities. Command machinery is imported lazily per subcommand so a bare
-launch stays fast (guarded by ``test_cli_import_stays_lean``).
+``syncthing`` / ``profile`` utilities. Command machinery is imported lazily per
+subcommand so a bare launch stays fast (guarded by ``test_cli_import_stays_lean``).
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING
 # `reconcile`/`store` pull them anyway. TYPE_CHECKING holds the deferred modules
 # used only in annotations (strings under `from __future__ import annotations`).
 from dossier import doctor, migrate, query, reconcile, resolve, scan
-from dossier.config import Config, per_device_config_path
+from dossier.config import Config, per_device_config_path, update_syncthing
 from dossier.errors import ConfigError, IntakeError, ScanError
 from dossier.merge import FieldDecision
 from dossier.model import Document
@@ -1122,6 +1122,88 @@ def cmd_service(_args: argparse.Namespace) -> int:
     return 2
 
 
+def _require_device() -> bool:
+    """True if this device is initialised; else print a pointer to ``ds init``."""
+    if per_device_config_path().is_file():
+        return True
+    print("error: run `ds init` first to set up this device.", file=sys.stderr)
+    return False
+
+
+def _masked_key(key: str | None) -> str:
+    """A stored API key shown as present-but-redacted (never echoed in full)."""
+    if not key:
+        return "(none)"
+    return f"set ({key[:4]}…{key[-2:]})" if len(key) > 8 else "set"
+
+
+def cmd_syncthing_status(_args: argparse.Namespace) -> int:
+    """Show the resolved Syncthing connection + a live reachability probe."""
+    from dossier import syncthing
+
+    config = _load_config()
+    if config is None:
+        return 2
+    settings = syncthing.resolve_settings(config)
+    if settings is None:
+        print("syncthing: unconfigured — no API key set and none autodiscovered.")
+        print("  set one with:  ds syncthing key")
+        return 0
+    print(f"url    : {settings.base_url}")
+    print(f"api-key: {_masked_key(settings.api_key)}  (source: {settings.source})")
+    status = syncthing.query_status(config, settings=settings)
+    detail = f" — {status.error}" if status.error else ""
+    print(f"state  : {status.state.value}{detail}")
+    if status.version:
+        print(f"version: {status.version}")
+    folder = status.store_folder
+    if folder is not None:
+        versioning = folder.versioning or "none"
+        print(f"folder : {folder.label or folder.id}  versioning={versioning}")
+    return 0
+
+
+def cmd_syncthing_key(args: argparse.Namespace) -> int:
+    """Set (or securely prompt for) this device's Syncthing GUI API key."""
+    if not _require_device():
+        return 2
+    key = args.key
+    if key is None:  # prompt with echo off so the secret never lands in shell history
+        import getpass
+
+        try:
+            key = getpass.getpass("Syncthing API key (input hidden): ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 1
+    key = key.strip()
+    if not key:
+        print("error: no key given — nothing changed.", file=sys.stderr)
+        return 2
+    update_syncthing({"apikey": key})
+    print("saved this device's Syncthing API key.  verify it with:  ds syncthing")
+    return 0
+
+
+def cmd_syncthing_address(args: argparse.Namespace) -> int:
+    """Set this device's Syncthing GUI address (host:port or a full URL)."""
+    if not _require_device():
+        return 2
+    address = args.address.strip()
+    update_syncthing({"address": address})
+    print(f"set the Syncthing address to {address}.")
+    return 0
+
+
+def cmd_syncthing_forget(_args: argparse.Namespace) -> int:
+    """Clear this device's stored Syncthing key + address."""
+    if not _require_device():
+        return 2
+    update_syncthing({"apikey": None, "address": None, "verify_tls": None})
+    print("cleared this device's stored Syncthing settings.")
+    return 0
+
+
 def cmd_profile(args: argparse.Namespace) -> int:
     """Time startup + data-load to locate performance bottlenecks (read-only)."""
     from dossier import profiling
@@ -1463,6 +1545,40 @@ def build_parser() -> argparse.ArgumentParser:
         "status", help="show the live power decision, artifacts, and registration state"
     )
     service_status_p.set_defaults(func=cmd_service_status)
+
+    syncthing_p = sub.add_parser(
+        "syncthing",
+        help="set this device's Syncthing API key / address (bare = show status)",
+    )
+    syncthing_p.set_defaults(func=cmd_syncthing_status)
+    syncthing_sub = syncthing_p.add_subparsers(
+        dest="syncthing_command", metavar="<subcommand>"
+    )
+    st_key_p = syncthing_sub.add_parser(
+        "key", help="set the GUI API key (prompts securely if KEY is omitted)"
+    )
+    st_key_p.add_argument(
+        "key",
+        nargs="?",
+        default=None,
+        help="the API key; omit to be prompted (keeps it out of shell history)",
+    )
+    st_key_p.set_defaults(func=cmd_syncthing_key)
+    st_address_p = syncthing_sub.add_parser(
+        "address", help="set the GUI address (host:port or a full URL)"
+    )
+    st_address_p.add_argument(
+        "address", help="e.g. 127.0.0.1:8384 or https://host:8384"
+    )
+    st_address_p.set_defaults(func=cmd_syncthing_address)
+    st_status_p = syncthing_sub.add_parser(
+        "status", help="show the resolved connection + a live reachability probe"
+    )
+    st_status_p.set_defaults(func=cmd_syncthing_status)
+    st_forget_p = syncthing_sub.add_parser(
+        "forget", help="clear this device's stored key + address"
+    )
+    st_forget_p.set_defaults(func=cmd_syncthing_forget)
 
     profile_p = sub.add_parser(
         "profile",

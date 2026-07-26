@@ -534,3 +534,106 @@ def test_cmd_doctor_all_clear_when_only_store_is_checked(
     monkeypatch.setattr(cli.doctor, "run", lambda *a, **k: doctor.Report(findings=[]))
     assert cli.cmd_doctor(argparse.Namespace()) == 0
     assert "all clear" in capsys.readouterr().out
+
+
+def _init_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Init a device and redirect every per-device-config lookup to a tmp file."""
+    root = tmp_path / "root"
+    root.mkdir()
+    device = tmp_path / "device.toml"
+    # `ds init`, cli's own `per_device_config_path`, and config.update_syncthing all
+    # resolve the path independently — redirect all three at their source.
+    monkeypatch.setattr("dossier.init.per_device_config_path", lambda: device)
+    monkeypatch.setattr(cli, "per_device_config_path", lambda: device)
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: device)
+    assert cli.main(["init", "--root", str(root)]) == 0
+    return root
+
+
+def test_syncthing_key_sets_the_apikey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _init_device(tmp_path, monkeypatch)
+    assert cli.main(["syncthing", "key", "SECRETKEY123"]) == 0
+    assert Config.load().syncthing_apikey == "SECRETKEY123"
+
+
+def test_syncthing_key_prompts_when_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _init_device(tmp_path, monkeypatch)
+    # The key is read with echo off (getpass) so it never lands in shell history.
+    monkeypatch.setattr("getpass.getpass", lambda *a, **k: "  PROMPTED-KEY  ")
+    assert cli.main(["syncthing", "key"]) == 0
+    assert Config.load().syncthing_apikey == "PROMPTED-KEY"  # stripped
+
+
+def test_syncthing_key_rejects_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _init_device(tmp_path, monkeypatch)
+    assert cli.main(["syncthing", "key", "   "]) == 2
+    assert Config.load().syncthing_apikey is None  # nothing written
+
+
+def test_syncthing_key_preserves_a_previously_set_address(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # The [syncthing] table is read-merged, so setting the key later keeps the address.
+    _init_device(tmp_path, monkeypatch)
+    assert cli.main(["syncthing", "address", "127.0.0.1:9999"]) == 0
+    assert cli.main(["syncthing", "key", "K"]) == 0
+    cfg = Config.load()
+    assert cfg.syncthing_address == "127.0.0.1:9999"
+    assert cfg.syncthing_apikey == "K"
+
+
+def test_syncthing_forget_clears_key_and_address(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _init_device(tmp_path, monkeypatch)
+    cli.main(["syncthing", "address", "127.0.0.1:9999"])
+    cli.main(["syncthing", "key", "K"])
+    assert cli.main(["syncthing", "forget"]) == 0
+    cfg = Config.load()
+    assert cfg.syncthing_apikey is None and cfg.syncthing_address is None
+
+
+def test_syncthing_key_requires_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    missing = tmp_path / "nope.toml"
+    monkeypatch.setattr(cli, "per_device_config_path", lambda: missing)
+    monkeypatch.setattr(config_mod, "per_device_config_path", lambda: missing)
+    assert cli.main(["syncthing", "key", "K"]) == 2
+    assert "ds init" in capsys.readouterr().err
+
+
+def test_syncthing_status_masks_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from dossier import syncthing
+
+    _init_device(tmp_path, monkeypatch)
+    cli.main(["syncthing", "key", "SUPERSECRETVALUE"])
+    # Canned status so the reachability probe never touches the network.
+    monkeypatch.setattr(
+        syncthing,
+        "query_status",
+        lambda *a, **k: syncthing.SyncStatus(
+            state=syncthing.SyncState.IDLE, version="1.99"
+        ),
+    )
+    assert cli.main(["syncthing"]) == 0  # bare command → status
+    out = capsys.readouterr().out
+    assert "SUPERSECRETVALUE" not in out  # never echo the secret in full
+    assert "api-key: set" in out and "source: config" in out
+    assert "idle" in out and "1.99" in out
+
+
+def test_syncthing_status_unconfigured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from dossier import syncthing
+
+    _init_device(tmp_path, monkeypatch)
+    monkeypatch.setattr(syncthing, "resolve_settings", lambda *a, **k: None)
+    assert cli.main(["syncthing", "status"]) == 0
+    out = capsys.readouterr().out
+    assert "unconfigured" in out and "ds syncthing key" in out

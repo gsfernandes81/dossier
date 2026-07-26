@@ -277,6 +277,27 @@ def update_per_device(changes: Mapping[str, object]) -> None:
     _merge_toml(per_device_config_path(), changes)
 
 
+def update_syncthing(changes: Mapping[str, object | None]) -> None:
+    """Merge ``changes`` into the per-device ``[syncthing]`` sub-table.
+
+    Read-modify-write of just that nested table, so setting the key later never
+    drops the address (and vice versa). A value of ``None`` **deletes** its key —
+    the way ``ds syncthing forget`` clears a stored secret.
+    """
+    path = per_device_config_path()
+    current = _read_toml(path) if path.is_file() else {}
+    existing = current.get("syncthing")
+    table: dict[str, object] = {}
+    if isinstance(existing, dict):
+        table.update({str(k): v for k, v in existing.items()})
+    for key, value in changes.items():
+        if value is None:
+            table.pop(key, None)
+        else:
+            table[key] = value
+    update_per_device({"syncthing": table})
+
+
 def update_synced(config: Config, changes: Mapping[str, object]) -> None:
     """Merge ``changes`` into the synced ``.dossier/config.toml`` (keeps ``include``
     / ``ignore`` and any hand-authored keys)."""
