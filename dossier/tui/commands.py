@@ -90,6 +90,13 @@ ENTRIES: tuple[Entry, ...] = (
         keywords=("renewal", "replaces", "supersedes"),
     ),
     Entry(
+        "Set succession (superseded by)",
+        "superseded_by",
+        "Mark which newer document succeeds this one",
+        Kind.DOC,
+        keywords=("renewal", "replaced by", "succeeded by", "newer", "supersedes"),
+    ),
+    Entry(
         "History — restore an earlier version",
         "history",
         "Roll the current document back to a saved version",

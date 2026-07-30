@@ -351,6 +351,25 @@ def supersession_chain(docs: list[Document], doc: Document) -> list[Document]:
     return chain
 
 
+def would_supersede_cycle(
+    docs: list[Document], *, newer_id: str, older_id: str
+) -> bool:
+    """Whether setting ``newer_id.supersedes = older_id`` would close a loop.
+
+    The edge points *newer → older*; it cycles iff the two ids are the same or
+    ``older`` can already reach ``newer`` by following ``supersedes`` (giving
+    newer → older → … → newer). Both succession commands consult this before
+    writing, so the data stays acyclic — :func:`supersession_chain` is cycle-safe
+    on *read*, this keeps a cycle from being written in the first place.
+    """
+    if newer_id == older_id:
+        return True
+    older = next((d for d in docs if d.id == older_id), None)
+    if older is None:
+        return False
+    return any(d.id == newer_id for d in supersession_chain(docs, older))
+
+
 # -- moves -------------------------------------------------------------------
 
 

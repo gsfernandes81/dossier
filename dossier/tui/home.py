@@ -88,6 +88,7 @@ from dossier.tui.screens import (
     BundlesPane,
     ChoiceScreen,
     SettingsPane,
+    SupersededByScreen,
     SupersedeScreen,
     WatchPane,
     _highlighted_id,
@@ -1498,6 +1499,15 @@ class HomeScreen(Screen[None]):
         if doc is not None:
             self.app.push_screen(
                 SupersedeScreen(self._store, self._docs, doc), self._after_edit
+            )
+
+    def action_superseded_by(self) -> None:
+        """The inverse of :meth:`action_supersede`: pick the newer document that
+        succeeds this one (points *its* ``supersedes`` here)."""
+        doc = self._current_doc()
+        if doc is not None:
+            self.app.push_screen(
+                SupersededByScreen(self._store, self._docs, doc), self._after_edit
             )
 
     def _open_and_edit(self, focus: str = "f-name") -> None:

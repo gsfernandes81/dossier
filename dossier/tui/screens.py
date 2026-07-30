@@ -223,6 +223,19 @@ class _FilterPickerScreen(ModalScreen[_P]):
         raise NotImplementedError
 
 
+def _save_or_notify(node: Widget, store: Store, doc: Document) -> bool:
+    """Save ``doc``, turning the two store failures into a toast. Returns success."""
+    try:
+        store.save(doc)
+    except StaleWriteError:
+        node.notify("changed on disk since load; reopen and retry", severity="error")
+        return False
+    except StoreError as exc:
+        node.notify(str(exc), severity="error")
+        return False
+    return True
+
+
 class SupersedeScreen(_FilterPickerScreen[bool]):
     """Pick the document a renewal replaces, setting its ``supersedes`` link."""
 
@@ -277,17 +290,102 @@ class SupersedeScreen(_FilterPickerScreen[bool]):
         self._accept(event.option_id)  # a mouse click routes through the same path
 
     def _accept(self, option_id: str | None) -> None:
-        self._doc.supersedes = None if option_id == self._CLEAR else option_id
-        try:
-            self._store.save(self._doc)
-        except StaleWriteError:
-            self.notify(
-                "changed on disk since load; reopen and retry", severity="error"
+        target = None if option_id == self._CLEAR else option_id
+        if target is not None and query.would_supersede_cycle(
+            self._docs, newer_id=self._doc.id, older_id=target
+        ):
+            self.notify("that would create a supersession loop", severity="error")
+            return  # keep the picker open so another can be chosen
+        self._doc.supersedes = target
+        if _save_or_notify(self, self._store, self._doc):
+            self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class SupersededByScreen(_FilterPickerScreen[bool]):
+    """Pick the *newer* document that succeeds (supersedes) this one.
+
+    The inverse of :class:`SupersedeScreen`: rather than writing this document's own
+    ``supersedes``, it points the *chosen* document's ``supersedes`` at this one — the
+    natural move when you are looking at the old record and want to mark which renewal
+    replaced it (supersession is stored only on the newer side; that a document *is*
+    superseded is a collection-level fact — see :class:`Document`). Choosing a
+    successor first clears any prior one, so a document is only ever succeeded by a
+    single newer record.
+    """
+
+    CSS = """
+    SupersededByScreen { align: center middle; }
+    #bpanel {
+        width: 80%; max-width: 90; height: 80%;
+        padding: 1 2; background: $panel; border: round $primary;
+    }
+    #bfilter { margin-bottom: 1; }
+    #bcandidates { height: 1fr; }
+    """ + _PICKER_HIGHLIGHT_CSS.format(list_id="bcandidates")
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    _filter_id = "bfilter"
+    _list_id = "bcandidates"
+    _CLEAR = "\x00clear"
+
+    def __init__(self, store: Store, docs: list[Document], doc: Document) -> None:
+        super().__init__()
+        self._store = store
+        self._docs = docs
+        self._doc = doc
+        # The newer document (if any) that currently claims to succeed this one.
+        self._current = next((d for d in docs if d.supersedes == doc.id), None)
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="bpanel"):
+            yield Label(
+                f'Which document supersedes "{self._doc.name or self._doc.id}"?'
             )
+            yield Input(placeholder="filter…", id="bfilter")
+            yield OptionList(id="bcandidates")
+
+    def on_mount(self) -> None:
+        self._populate("")
+        self.query_one("#bfilter", Input).focus()
+
+    def _populate(self, needle: str) -> None:
+        options = self.query_one("#bcandidates", OptionList)
+        lead = Option("— clear succession —", id=self._CLEAR) if self._current else None
+        _fill_doc_options(options, self._docs, needle, exclude=self._doc.id, lead=lead)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "bfilter":
+            self._populate(event.value)
+
+    @on(OptionList.OptionSelected, "#bcandidates")
+    def _pick(self, event: OptionList.OptionSelected) -> None:
+        self._accept(event.option_id)  # a mouse click routes through the same path
+
+    def _accept(self, option_id: str | None) -> None:
+        target_id = None if option_id == self._CLEAR else option_id
+        current_id = self._current.id if self._current is not None else None
+        if target_id == current_id:  # picking the current successor (or clear→none)
+            self.dismiss(False)
             return
-        except StoreError as exc:
-            self.notify(str(exc), severity="error")
+        if target_id is not None and query.would_supersede_cycle(
+            self._docs, newer_id=target_id, older_id=self._doc.id
+        ):
+            # Checked before any write, so a refused pick leaves both sides untouched.
+            self.notify("that would create a supersession loop", severity="error")
             return
+        if self._current is not None:  # a document is succeeded by one record — clear
+            self._current.supersedes = None
+            if not _save_or_notify(self, self._store, self._current):
+                return
+        if target_id is not None:
+            newer = next((d for d in self._docs if d.id == target_id), None)
+            if newer is not None:
+                newer.supersedes = self._doc.id
+                if not _save_or_notify(self, self._store, newer):
+                    return
         self.dismiss(True)
 
     def action_cancel(self) -> None:

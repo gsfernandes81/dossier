@@ -202,6 +202,19 @@ def test_supersession_chain_follows_links_and_is_cycle_safe():
     assert {d.id for d in query.supersession_chain([a, b], a)} == {"b"}
 
 
+def test_would_supersede_cycle_guards_the_write():
+    docs = [_doc("v1"), _doc("v2", supersedes="v1"), _doc("v3", supersedes="v2")]
+    # v3 → v2 → v1 already; pointing v1.supersedes at v3 would close the loop.
+    assert query.would_supersede_cycle(docs, newer_id="v1", older_id="v3") is True
+    assert query.would_supersede_cycle(docs, newer_id="v1", older_id="v2") is True
+    # A doc can never supersede itself.
+    assert query.would_supersede_cycle(docs, newer_id="v1", older_id="v1") is True
+    # Extending the chain forward (a brand-new v4 replacing v3) is fine.
+    assert query.would_supersede_cycle(docs, newer_id="v4", older_id="v3") is False
+    # A dangling older id can't reach anything, so it can't cycle.
+    assert query.would_supersede_cycle(docs, newer_id="v1", older_id="gone") is False
+
+
 def test_plan_move_inserts_and_shifts():
     docs = [
         _doc("a", perm_location="file", perm_slot=1),

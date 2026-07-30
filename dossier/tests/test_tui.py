@@ -60,6 +60,7 @@ from dossier.tui.rows import RowMode
 from dossier.tui.screens import (
     ChoiceScreen,
     DocPickerScreen,
+    SupersededByScreen,
     SupersedeScreen,
     TextPromptScreen,
     _command_index_text,
@@ -875,6 +876,94 @@ async def test_supersede_picker_navigable_from_the_filter(tmp_path: Path):
         await pilot.pause()
 
     assert store.load("passport-2026").supersedes == expected
+
+
+@pytest.mark.asyncio
+async def test_superseded_by_points_the_newer_docs_link_here(tmp_path: Path):
+    # The inverse of supersede: from the *old* record, mark which newer document
+    # succeeds it — that writes the newer doc's `supersedes`, not the old one's.
+    store, config = _setup(tmp_path)
+    store.save(Document(id="old", name="Old Cert"))
+    store.save(Document(id="new", name="New Cert"))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        old = app.home._doc_by_id("old")
+        assert old is not None
+        app.push_screen(SupersededByScreen(store, app.home._docs, old))
+        await pilot.pause()
+        filt = app.screen.query_one("#bfilter", Input)
+        filt.value = "New"  # narrow to the successor, then accept from the filter
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert store.load("new").supersedes == "old"
+    assert store.load("old").supersedes is None  # nothing written on the old side
+
+
+@pytest.mark.asyncio
+async def test_superseded_by_clear_removes_the_successor(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    store.save(Document(id="old", name="Old Cert"))
+    store.save(Document(id="new", name="New Cert", supersedes="old"))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        old = app.home._doc_by_id("old")
+        assert old is not None
+        app.push_screen(SupersededByScreen(store, app.home._docs, old))
+        await pilot.pause()
+        options = app.screen.query_one("#bcandidates", OptionList)
+        # A "clear succession" sentinel leads the list because a successor exists.
+        assert options.get_option_at_index(0).id == SupersededByScreen._CLEAR
+        assert options.highlighted == 0
+        await pilot.press("enter")  # accept the highlighted clear row from the filter
+        await pilot.pause()
+
+    assert store.load("new").supersedes is None
+
+
+@pytest.mark.asyncio
+async def test_supersede_refuses_a_loop(tmp_path: Path):
+    # A already supersedes B; setting B to supersede A would close a 2-cycle.
+    store, config = _setup(tmp_path)
+    store.save(Document(id="a", name="Doc A", supersedes="b"))
+    store.save(Document(id="b", name="Doc B"))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        b = app.home._doc_by_id("b")
+        assert b is not None
+        app.push_screen(SupersedeScreen(store, app.home._docs, b))
+        await pilot.pause()
+        app.screen.query_one("#sfilter", Input).value = "Doc A"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, SupersedeScreen)  # refused → still open
+
+    assert store.load("b").supersedes is None  # nothing written
+
+
+@pytest.mark.asyncio
+async def test_superseded_by_refuses_a_loop(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    store.save(Document(id="a", name="Doc A", supersedes="b"))
+    store.save(Document(id="b", name="Doc B"))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        # From A's record (A already supersedes B), marking B as A's successor would
+        # close the loop — B would then supersede A.
+        a = app.home._doc_by_id("a")
+        assert a is not None
+        app.push_screen(SupersededByScreen(store, app.home._docs, a))
+        await pilot.pause()
+        app.screen.query_one("#bfilter", Input).value = "Doc B"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, SupersededByScreen)  # refused → still open
+
+    assert store.load("b").supersedes is None  # B stays un-linked
+    assert store.load("a").supersedes == "b"  # A's existing link untouched
 
 
 @pytest.mark.asyncio

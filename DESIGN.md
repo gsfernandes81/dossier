@@ -441,8 +441,10 @@ indexing (CRDT-flavored overkill for a physical folder).
 ### Supersession & the expiry watch
 Renewals *replace* rather than accumulate — a new passport / MOT / cert supersedes the old.
 - **Model:** a `supersedes` link on a document (the id of the doc it replaces), set explicitly via
-  the TUI `s` action when filing a renewal. The superseded doc is **kept but marked**, and is
-  excluded from every expiry calculation and from the watch.
+  the TUI `s` action when filing a renewal. The link lives only on the *newer* side, so it is also
+  settable from the *old* record via the inverse command (**"Set succession (superseded by)"** —
+  pick the newer document that succeeds this one, which writes *its* `supersedes`). The superseded
+  doc is **kept but marked**, and is excluded from every expiry calculation and from the watch.
 - **Expiry watch — opt-out, not opt-in.** Most documents have no expiry at all; of those that do,
   the ones that actually matter are **marine certs + motorcycle docs**, and supersession already
   removes the renewed-and-replaced noise. So expiry tracking is **on by default** for any document
