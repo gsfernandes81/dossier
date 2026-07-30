@@ -1153,6 +1153,52 @@ async def test_watch_mode_lists_tracked_and_ignores(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_watch_refreshes_live_when_a_doc_changes(tmp_path: Path):
+    # A change made through the shared detail pane fires _reload; while the watch owns
+    # the columns, that must refresh its list live — not wait for a re-entry.
+    store, config = _setup(tmp_path)  # coc is tracked
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.action_watch()
+        await _settle(pilot, lambda: home.has_class("watch-mode"))
+        assert home._watch is not None
+        watch = home._watch.query_one("#watch", OptionList)
+        await _settle(pilot, lambda: watch.option_count == 1)
+        assert watch.get_option_at_index(0).id == "coc"
+        # Emulate a detail-pane edit that untracks coc, then its save-driven reload.
+        doc = store.load("coc")
+        doc.ignore_expiry = True
+        store.save(doc)
+        home._reload()  # exactly what on_detail_pane_saved calls
+        await _settle(pilot, lambda: watch.option_count == 0)  # dropped live
+
+
+@pytest.mark.asyncio
+async def test_watch_live_refresh_keeps_the_cursor(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    store.save(Document(id="c1", name="Cert One", expiry_date=date(2026, 3, 1)))
+    store.save(Document(id="c2", name="Cert Two", expiry_date=date(2026, 4, 1)))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        home = app.home
+        home.action_watch()
+        await _settle(pilot, lambda: home.has_class("watch-mode"))
+        assert home._watch is not None
+        watch = home._watch.query_one("#watch", OptionList)
+        await _settle(pilot, lambda: watch.option_count >= 3)  # coc + c1 + c2
+        watch.highlighted = next(
+            i
+            for i in range(watch.option_count)
+            if watch.get_option_at_index(i).id == "c2"
+        )
+        home._reload()  # a live refresh must not throw the cursor to the top
+        await pilot.pause()
+        assert watch.highlighted is not None
+        assert watch.get_option_at_index(watch.highlighted).id == "c2"
+
+
+@pytest.mark.asyncio
 async def test_watch_mode_enter_opens_file_and_right_opens_detail_beside(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

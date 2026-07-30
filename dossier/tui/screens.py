@@ -672,6 +672,7 @@ class WatchPane(Vertical):
         )
         summary = self.query_one("#wsummary", Label)
         options = self.query_one("#watch", OptionList)
+        previous = _highlighted_id(options)  # keep the cursor put across a live refresh
         options.clear_options()
         if not tracked:
             note = "nothing matches." if self._filter else "nothing tracked."
@@ -706,6 +707,9 @@ class WatchPane(Vertical):
                 event_note=note,
             )
             options.add_option(Option(row, id=doc.id))
+        ids = [doc.id for doc in tracked]
+        if previous is not None and previous in ids:
+            options.highlighted = ids.index(previous)  # else default to the first row
 
     def action_close(self) -> None:
         self.post_message(self.CloseRequested())

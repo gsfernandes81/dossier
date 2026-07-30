@@ -680,6 +680,17 @@ class HomeScreen(Screen[None]):
         self._refresh_attention()  # expiring count follows the (reloaded) docs
         if self._show_detail:
             self._update_detail()
+        # A visible column-owning mode (watch / bundles) renders its own list in
+        # columns 1+2, so a store change made from the shared detail pane must refresh
+        # it live — otherwise the tracked / bundle list stays stale until the mode is
+        # re-entered. Review is excluded: it keeps a staleness flag (marked above) and
+        # refreshes on its own cheap return path instead.
+        mode = self._column_mode()
+        if mode is not None and mode != "review":
+            pane = self._mode_pane(mode)
+            reload_pane = getattr(pane, "reload_if_stale", None)
+            if callable(reload_pane):
+                reload_pane()
 
     def visible_docs(self) -> list[Document]:
         """Documents passing the current search + expiring filter (unscoped)."""
