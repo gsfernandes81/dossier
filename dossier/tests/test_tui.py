@@ -849,6 +849,60 @@ async def test_supersede_screen_sets_link(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_supersede_picker_navigable_from_the_filter(tmp_path: Path):
+    # The filter keeps focus (so ←/→ edit the text); ↑/↓ steer the list and the
+    # first result is highlighted by default, so Enter accepts without a Tab first.
+    store, config = _setup(tmp_path)
+    store.save(Document(id="passport-2026", name="Passport 2026"))
+    store.save(Document(id="cert-a", name="Alpha Cert"))
+    store.save(Document(id="cert-b", name="Beta Cert"))
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test() as pilot:
+        renewal = app.home._doc_by_id("passport-2026")
+        assert renewal is not None
+        app.push_screen(SupersedeScreen(store, app.home._docs, renewal))
+        await pilot.pause()
+        screen = app.screen
+        filt = screen.query_one("#sfilter", Input)
+        options = screen.query_one("#scandidates", OptionList)
+        assert app.focused is filt  # the filter, not the list, holds focus
+        assert options.highlighted == 0  # first result selected by default
+        await pilot.press("down")  # ↓ steers the list without leaving the filter
+        await pilot.pause()
+        assert app.focused is filt and options.highlighted == 1
+        expected = options.get_option_at_index(1).id
+        await pilot.press("enter")  # Enter accepts the highlighted row
+        await pilot.pause()
+
+    assert store.load("passport-2026").supersedes == expected
+
+
+@pytest.mark.asyncio
+async def test_docpicker_navigable_and_filter_rehighlights(tmp_path: Path):
+    store, config = _setup(tmp_path)
+    for i, name in enumerate(["Alpha", "Beta", "Gamma"]):
+        store.save(Document(id=f"d{i}", name=name))
+    app = DossierApp(store, config, today=TODAY)
+    picked: list[str | None] = []
+    async with app.run_test() as pilot:
+        app.push_screen(DocPickerScreen(app.home._docs, prompt="Pick"), picked.append)
+        await pilot.pause()
+        screen = app.screen
+        filt = screen.query_one("#pfilter", Input)
+        options = screen.query_one("#pcandidates", OptionList)
+        assert app.focused is filt and options.highlighted == 0
+        # Typing filters and re-highlights the top match (still index 0).
+        filt.value = "Gamma"
+        await pilot.pause()
+        assert options.highlighted == 0
+        assert options.get_option_at_index(0).id == "d2"
+        await pilot.press("enter")  # accept the sole match from the filter
+        await pilot.pause()
+
+    assert picked == ["d2"]
+
+
+@pytest.mark.asyncio
 async def test_inline_bundle_creates_and_assigns(tmp_path: Path):
     store, config = _setup(tmp_path)
     app = DossierApp(store, config, today=TODAY)

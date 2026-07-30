@@ -21,12 +21,14 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import date
+from typing import TypeVar
 
 from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.events import Key
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
@@ -156,7 +158,72 @@ def _command_index_text() -> Text:
     return text
 
 
-class SupersedeScreen(ModalScreen[bool]):
+_P = TypeVar("_P")
+
+# A prominent-highlight override so the *selected* row reads clearly even though the
+# filter Input — not the list — holds focus. Without it the highlight falls back to
+# OptionList's dim "blurred" style, easy to miss while typing. Interpolated into the
+# picker CSS keyed by the list's id.
+_PICKER_HIGHLIGHT_CSS = """
+    #{list_id} > .option-list--option-highlighted {{
+        color: $block-cursor-foreground;
+        background: $block-cursor-background;
+        text-style: $block-cursor-text-style;
+    }}
+"""
+
+
+class _FilterPickerScreen(ModalScreen[_P]):
+    """A modal pairing a filter :class:`Input` with an :class:`OptionList`, navigable
+    one-handed: the Input keeps focus so plain typing filters and ``←``/``→`` move the
+    text cursor, while ``↑``/``↓`` (and PageUp/PageDown) steer the list highlight and
+    **Enter accepts the highlighted row** — no Tab to the list first. The first match
+    is highlighted by default (:func:`_fill_doc_options`). Subclasses set ``_filter_id``
+    / ``_list_id`` and implement :meth:`_accept`; a mouse click routes through it too.
+    """
+
+    _filter_id: str
+    _list_id: str
+
+    # Input is single-line, so it never consumes ↑/↓/PageUp/PageDown — they bubble up
+    # here to steer the list; ←/→/Home/End that the Input *does* use for its cursor
+    # are deliberately absent, so they stay with the text field.
+    _NAV_ACTIONS = {
+        "up": "cursor_up",
+        "down": "cursor_down",
+        "pageup": "page_up",
+        "pagedown": "page_down",
+    }
+
+    def _picker_list(self) -> OptionList:
+        return self.query_one(f"#{self._list_id}", OptionList)
+
+    def on_key(self, event: Key) -> None:
+        if self.app.focused is not self.query_one(f"#{self._filter_id}", Input):
+            return
+        action = self._NAV_ACTIONS.get(event.key)
+        if action is None:
+            return  # ←/→ and printables stay with the Input
+        event.stop()
+        event.prevent_default()
+        getattr(self._picker_list(), f"action_{action}")()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Input consumes Enter as a Submitted message (it never reaches on_key), so
+        # this is where "accept the highlighted row" lands.
+        if event.input.id != self._filter_id:
+            return
+        event.stop()
+        options = self._picker_list()
+        index = options.highlighted
+        if index is not None:
+            self._accept(options.get_option_at_index(index).id)
+
+    def _accept(self, option_id: str | None) -> None:
+        raise NotImplementedError
+
+
+class SupersedeScreen(_FilterPickerScreen[bool]):
     """Pick the document a renewal replaces, setting its ``supersedes`` link."""
 
     CSS = """
@@ -167,9 +234,11 @@ class SupersedeScreen(ModalScreen[bool]):
     }
     #sfilter { margin-bottom: 1; }
     #scandidates { height: 1fr; }
-    """
+    """ + _PICKER_HIGHLIGHT_CSS.format(list_id="scandidates")
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
+    _filter_id = "sfilter"
+    _list_id = "scandidates"
     _CLEAR = "\x00clear"
 
     def __init__(self, store: Store, docs: list[Document], doc: Document) -> None:
@@ -205,9 +274,10 @@ class SupersedeScreen(ModalScreen[bool]):
 
     @on(OptionList.OptionSelected, "#scandidates")
     def _pick(self, event: OptionList.OptionSelected) -> None:
-        self._doc.supersedes = (
-            None if event.option_id == self._CLEAR else event.option_id
-        )
+        self._accept(event.option_id)  # a mouse click routes through the same path
+
+    def _accept(self, option_id: str | None) -> None:
+        self._doc.supersedes = None if option_id == self._CLEAR else option_id
         try:
             self._store.save(self._doc)
         except StaleWriteError:
@@ -224,7 +294,7 @@ class SupersedeScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class DocPickerScreen(ModalScreen[str | None]):
+class DocPickerScreen(_FilterPickerScreen[str | None]):
     """Pick a document from a filterable list. Dismisses its id, or ``None``.
 
     A read-only sibling of :class:`SupersedeScreen` — it *chooses* a document and
@@ -239,8 +309,11 @@ class DocPickerScreen(ModalScreen[str | None]):
     }
     #pfilter { margin-bottom: 1; }
     #pcandidates { height: 1fr; }
-    """
+    """ + _PICKER_HIGHLIGHT_CSS.format(list_id="pcandidates")
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    _filter_id = "pfilter"
+    _list_id = "pcandidates"
 
     def __init__(
         self,
@@ -276,7 +349,10 @@ class DocPickerScreen(ModalScreen[str | None]):
 
     @on(OptionList.OptionSelected, "#pcandidates")
     def _pick(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(event.option_id)
+        self._accept(event.option_id)  # a mouse click routes through the same path
+
+    def _accept(self, option_id: str | None) -> None:
+        self.dismiss(option_id)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -976,6 +1052,9 @@ def _fill_doc_options(
         if needle and needle not in f"{doc.name} {doc.id}".casefold():
             continue
         options.add_option(Option(doc.name or doc.id, id=doc.id))
+    # Highlight the first row by default, so ↑/↓ have a starting point and Enter has
+    # something to accept without a Tab into the list first (the filter keeps focus).
+    options.highlighted = 0 if options.option_count else None
 
 
 def _loc_label(doc: Document, locations: dict[str, Location]) -> str | None:
