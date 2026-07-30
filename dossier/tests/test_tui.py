@@ -923,8 +923,9 @@ async def test_superseded_by_clear_removes_the_successor(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_supersede_refuses_a_loop(tmp_path: Path):
-    # A already supersedes B; setting B to supersede A would close a 2-cycle.
+async def test_supersede_overrides_a_loop_and_says_so(tmp_path: Path):
+    # A already supersedes B; setting B to supersede A would loop. The new link wins:
+    # A's old link is dropped so B → A stands, and the user is told which link gave way.
     store, config = _setup(tmp_path)
     store.save(Document(id="a", name="Doc A", supersedes="b"))
     store.save(Document(id="b", name="Doc B"))
@@ -938,20 +939,21 @@ async def test_supersede_refuses_a_loop(tmp_path: Path):
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, SupersedeScreen)  # refused → still open
+        assert any("took precedence" in n.message for n in app._notifications)
 
-    assert store.load("b").supersedes is None  # nothing written
+    assert store.load("b").supersedes == "a"  # the new link stands
+    assert store.load("a").supersedes is None  # the old, conflicting link was cleared
 
 
 @pytest.mark.asyncio
-async def test_superseded_by_refuses_a_loop(tmp_path: Path):
+async def test_superseded_by_overrides_a_loop_and_says_so(tmp_path: Path):
     store, config = _setup(tmp_path)
     store.save(Document(id="a", name="Doc A", supersedes="b"))
     store.save(Document(id="b", name="Doc B"))
     app = DossierApp(store, config, today=TODAY)
     async with app.run_test() as pilot:
-        # From A's record (A already supersedes B), marking B as A's successor would
-        # close the loop — B would then supersede A.
+        # From A's record (A already supersedes B), marking B as A's successor loops;
+        # the new link wins and A's old link to B is dropped.
         a = app.home._doc_by_id("a")
         assert a is not None
         app.push_screen(SupersededByScreen(store, app.home._docs, a))
@@ -960,10 +962,10 @@ async def test_superseded_by_refuses_a_loop(tmp_path: Path):
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, SupersededByScreen)  # refused → still open
+        assert any("took precedence" in n.message for n in app._notifications)
 
-    assert store.load("b").supersedes is None  # B stays un-linked
-    assert store.load("a").supersedes == "b"  # A's existing link untouched
+    assert store.load("b").supersedes == "a"  # B now succeeds A (new link)
+    assert store.load("a").supersedes is None  # A's old link to B was cleared
 
 
 @pytest.mark.asyncio

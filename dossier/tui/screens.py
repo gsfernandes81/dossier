@@ -236,6 +236,31 @@ def _save_or_notify(node: Widget, store: Store, doc: Document) -> bool:
     return True
 
 
+def _break_supersede_cycle(
+    node: Widget, store: Store, docs: list[Document], *, newer: Document, older_id: str
+) -> bool:
+    """Let a new succession link win over an old one that would loop with it.
+
+    Pointing ``newer`` at ``older_id`` closes a loop only if some existing link on
+    ``older``'s chain points back at ``newer``; that one link is cleared here so the
+    new edge stays acyclic, and the user is told which link gave way. Returns ``False``
+    only on a store failure (already toasted) — ``True`` when there was nothing to
+    break or it was broken cleanly.
+    """
+    breaker = query.supersede_cycle_link(docs, newer_id=newer.id, older_id=older_id)
+    if breaker is None:
+        return True
+    breaker.supersedes = None
+    if not _save_or_notify(node, store, breaker):
+        return False
+    node.notify(
+        f"“{breaker.name or breaker.id}” no longer supersedes "
+        f"“{newer.name or newer.id}” — the new succession link took precedence.",
+        severity="warning",
+    )
+    return True
+
+
 class SupersedeScreen(_FilterPickerScreen[bool]):
     """Pick the document a renewal replaces, setting its ``supersedes`` link."""
 
@@ -291,11 +316,10 @@ class SupersedeScreen(_FilterPickerScreen[bool]):
 
     def _accept(self, option_id: str | None) -> None:
         target = None if option_id == self._CLEAR else option_id
-        if target is not None and query.would_supersede_cycle(
-            self._docs, newer_id=self._doc.id, older_id=target
+        if target is not None and not _break_supersede_cycle(
+            self, self._store, self._docs, newer=self._doc, older_id=target
         ):
-            self.notify("that would create a supersession loop", severity="error")
-            return  # keep the picker open so another can be chosen
+            return  # a store failure while clearing the old link — already reported
         self._doc.supersedes = target
         if _save_or_notify(self, self._store, self._doc):
             self.dismiss(True)
@@ -370,22 +394,23 @@ class SupersededByScreen(_FilterPickerScreen[bool]):
         if target_id == current_id:  # picking the current successor (or clear→none)
             self.dismiss(False)
             return
-        if target_id is not None and query.would_supersede_cycle(
-            self._docs, newer_id=target_id, older_id=self._doc.id
+        newer = (
+            next((d for d in self._docs if d.id == target_id), None)
+            if target_id is not None
+            else None
+        )
+        if newer is not None and not _break_supersede_cycle(
+            self, self._store, self._docs, newer=newer, older_id=self._doc.id
         ):
-            # Checked before any write, so a refused pick leaves both sides untouched.
-            self.notify("that would create a supersession loop", severity="error")
-            return
+            return  # a store failure while clearing the old link — already reported
         if self._current is not None:  # a document is succeeded by one record — clear
             self._current.supersedes = None
             if not _save_or_notify(self, self._store, self._current):
                 return
-        if target_id is not None:
-            newer = next((d for d in self._docs if d.id == target_id), None)
-            if newer is not None:
-                newer.supersedes = self._doc.id
-                if not _save_or_notify(self, self._store, newer):
-                    return
+        if newer is not None:
+            newer.supersedes = self._doc.id
+            if not _save_or_notify(self, self._store, newer):
+                return
         self.dismiss(True)
 
     def action_cancel(self) -> None:

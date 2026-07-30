@@ -351,23 +351,29 @@ def supersession_chain(docs: list[Document], doc: Document) -> list[Document]:
     return chain
 
 
-def would_supersede_cycle(
+def supersede_cycle_link(
     docs: list[Document], *, newer_id: str, older_id: str
-) -> bool:
-    """Whether setting ``newer_id.supersedes = older_id`` would close a loop.
+) -> Document | None:
+    """The existing link that setting ``newer_id.supersedes = older_id`` would loop
+    through, or ``None`` when the edge is acyclic.
 
-    The edge points *newer → older*; it cycles iff the two ids are the same or
-    ``older`` can already reach ``newer`` by following ``supersedes`` (giving
-    newer → older → … → newer). Both succession commands consult this before
-    writing, so the data stays acyclic — :func:`supersession_chain` is cycle-safe
-    on *read*, this keeps a cycle from being written in the first place.
+    The edge points *newer → older*; it closes a loop iff ``older`` can already reach
+    ``newer`` by following ``supersedes`` (giving newer → older → … → newer). The one
+    edge that completes that loop is ``newer``'s predecessor on the path — the
+    document whose ``supersedes`` points directly at ``newer``. Clearing it is what
+    lets the **new** link take precedence over the old one (the succession commands
+    do exactly that, then tell the user), keeping the data acyclic.
+
+    A self-link (``newer_id == older_id``) returns ``None`` — callers already exclude
+    the document itself from the candidate list.
     """
     if newer_id == older_id:
-        return True
+        return None
     older = next((d for d in docs if d.id == older_id), None)
     if older is None:
-        return False
-    return any(d.id == newer_id for d in supersession_chain(docs, older))
+        return None
+    path = [older, *supersession_chain(docs, older)]
+    return next((d for d in path if d.supersedes == newer_id), None)
 
 
 # -- moves -------------------------------------------------------------------
