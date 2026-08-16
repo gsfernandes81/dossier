@@ -335,9 +335,11 @@ until the cutover step the user personally green-lights.
     verifies SGR mouse/tap events, the IME mouse-mode trick, glyph rendering, and the
     musl toolchain choice. **Go/no-go gate for the whole plan**; findings appended to
     this document.
-- **R-UI — TUI layout plan (gate, D12).** A separate design session produces the
-  simpler-than-Miller layout plan (screens, navigation model, how §4.5's surfaces are
-  arranged). **User-approved before R3 starts.** R1/R2 are not blocked by it.
+- **R-UI — TUI layout plan (gate, D12).** **Done (2026-08-16): see
+  [`REWRITE-UI.md`](REWRITE-UI.md)** — user-approved: single-list drill-down stack,
+  flat list (no location headers; location = row data + filter), sticky-toggle
+  detail, command drill-down with minimal hotkeys. The gate is satisfied; R3
+  implements that document.
 - **R1 — `journal` crate.** Op model, append, fold, compaction, torn-line tolerance;
   property tests (union-commutativity, compaction-preserves-fold, tombstone
   supremacy); **golden test vectors** checked in as JSON fixtures; synthetic perf
