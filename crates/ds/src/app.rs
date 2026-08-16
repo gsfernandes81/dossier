@@ -585,7 +585,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         }
         Msg::Tap { col, row } => {
             model.flash = None;
-            if row == search_row(model) {
+            let (top, bottom) = search_zone(model);
+            if row >= top && row <= bottom {
                 // Tapping the search field is how every phone app says "I want
                 // to type", so it is what drops mouse reporting for one tap.
                 model.raise_keyboard()
@@ -619,11 +620,21 @@ fn action_bar_row(model: &Model) -> u16 {
     model.rows_on_screen.saturating_sub(3)
 }
 
-/// The search bar's row: second from the bottom, above the hint line. Present on
-/// every layout, which is why the keyboard affordance lives there rather than in
-/// the touch-only action bar.
-fn search_row(model: &Model) -> u16 {
-    model.rows_on_screen.saturating_sub(2)
+/// The rows the search bar occupies, inclusive — and therefore the rows that
+/// raise the keyboard when tapped.
+///
+/// **Two rows on a touch layout**, sitting against the bottom edge of the
+/// screen. One terminal row is too small a target for a thumb when the row above
+/// it is a button that opens files; two rows against the screen edge means an
+/// overshoot downwards hits nothing at all, and only a deliberate reach upwards
+/// finds the action bar.
+fn search_zone(model: &Model) -> (u16, u16) {
+    let last = model.rows_on_screen.saturating_sub(1);
+    if crate::layout::touch_bar(model.cols) {
+        (last.saturating_sub(1), last)
+    } else {
+        (last.saturating_sub(1), last.saturating_sub(1))
+    }
 }
 
 #[cfg(test)]
@@ -810,9 +821,13 @@ mod tests {
     #[test]
     fn tapping_the_search_bar_drops_mouse_reporting_for_the_ime() {
         let mut m = model();
-        let bar = m.rows_on_screen - 2;
-        update(&mut m, Msg::Tap { col: 3, row: bar });
-        assert!(!m.mouse_on && m.keyboard_hint, "the next tap now reaches Termux");
+        // **Both** rows of the touch search bar, right down to the screen edge.
+        for row in [m.rows_on_screen - 2, m.rows_on_screen - 1] {
+            m.mouse_on = true;
+            m.keyboard_hint = false;
+            update(&mut m, Msg::Tap { col: 3, row });
+            assert!(!m.mouse_on && m.keyboard_hint, "row {row} is part of the target");
+        }
 
         // And the very next keystroke puts reporting back, as before.
         update(&mut m, Msg::Char('c'));

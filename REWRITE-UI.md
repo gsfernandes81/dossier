@@ -102,7 +102,13 @@ tap-on-selected opens; **tapping the search bar** drops mouse reporting so the
 next tap raises the IME, restored on the next keypress; the app owns scrolling.
 Touch mode shows a one-row action bar above the search bar — the only extra
 chrome touch gets — carrying this surface's four verbs (Open · Detail · Expiry ·
-Scans).
+Scans). Below it the **search bar is two rows on a touch layout** (query, then
+count + chips + the hints the buttons do not carry), sitting against the bottom
+edge: the whole block is the keyboard target, and one terminal row is too small
+a thing to ask a thumb to hit when the row above it opens files. It costs no
+document rows — the second row is the hint line the action bar had already made
+redundant. On a keyboard layout the bar stays one row with its own hint line
+below.
 
 **Amended 2026-08-16, from the device.** The action bar's fourth quarter was a
 `⌨ Keys` button. Termux's own extra-keys row can carry a keyboard toggle, so a
@@ -153,11 +159,13 @@ User calls from that review, binding on R3–R5:
   implemented until the user confirms it is a real pain point.**
 - Possible follow-up: ship a **Termux colour theme**, if the default palette
   fights the semantic tokens in practice.
-- **Diverges from the mockups, deliberately (2026-08-16, first device run of the
-  real app):** the touch action bar's fourth quarter is `^t Scans`, not
-  `⌨ Keys`, and the keyboard affordance moved to the search bar — see §5. The
-  published mockup pages still show the old bar; everything else on them still
-  holds.
+- **Diverges from the mockups, deliberately (2026-08-16, first device runs of
+  the real app):** the touch action bar's fourth quarter is `^t Scans`, not
+  `⌨ Keys`; the keyboard affordance moved to the search bar; and that bar is
+  **two rows** on touch, having absorbed the hint line — see §5. Both changes
+  came from the phone: a redundant button, then a target too small for a thumb.
+  The published mockup pages still show the old one-row bar with `⌨ Keys`;
+  everything else on them still holds.
 
 ## 8. Acceptance checklist (R3–R5 must satisfy)
 

@@ -66,25 +66,37 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
         return;
     }
 
-    let mut constraints = vec![Constraint::Length(1), Constraint::Min(1)];
-    if crate::layout::touch_bar(area.width) {
-        constraints.push(Constraint::Length(1));
-    }
-    constraints.push(Constraint::Length(1));
-    constraints.push(Constraint::Length(1));
+    // Touch and keyboard get the same four rows of chrome, spent differently.
+    // With the action bar showing this surface's verbs as buttons, a separate
+    // hint line would only repeat them — so that row goes to the search bar
+    // instead, which doubles the size of the one target a thumb must hit.
+    let touch = crate::layout::touch_bar(area.width);
+    let constraints = if touch {
+        vec![
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ]
+    } else {
+        vec![
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ]
+    };
     let chunks =
         Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
 
-    let (body, rest) = (chunks[1], &chunks[2..]);
     draw_header(frame, chunks[0], model, theme);
-    draw_body(frame, body, model, theme);
-    if crate::layout::touch_bar(area.width) {
-        draw_action_bar(frame, rest[0], model, theme);
-        draw_search(frame, rest[1], model, theme);
-        draw_footer(frame, rest[2], model, theme);
+    draw_body(frame, chunks[1], model, theme);
+    if touch {
+        draw_action_bar(frame, chunks[2], model, theme);
+        draw_search(frame, chunks[3], model, theme);
     } else {
-        draw_search(frame, rest[0], model, theme);
-        draw_footer(frame, rest[1], model, theme);
+        draw_search(frame, chunks[2], model, theme);
+        draw_footer(frame, chunks[3], model, theme);
     }
 }
 
@@ -297,62 +309,114 @@ fn draw_action_bar(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// The docked search bar: prompt, query, filter chips, `matched/total`.
-fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
-    let count = format!("{}/{} ", model.rows.len(), model.store.docs.len());
+/// The filter chips: what is narrowing the list beyond the query itself.
+fn chips(model: &Model) -> String {
     let mut chips = String::new();
     if model.filter == Filter::Expiring {
         chips.push_str("  [expiring]");
     }
     match model.scan_search {
-        // The chip says which of the two searches is running, and admits when
-        // it is still waiting — a query that quietly ignores `ctrl+t` for two
+        // The chip says which of the two searches is running, and admits when it
+        // is still waiting — a query that quietly ignores `ctrl+t` for two
         // seconds reads as the toggle not working.
         ScanSearch::On => chips.push_str("  [scans]"),
         ScanSearch::Loading => chips.push_str("  [scans…]"),
         ScanSearch::Off => {}
     }
-    if !model.mouse_on {
-        chips.push_str("  [tap anywhere for the keyboard]");
-    }
-    // The keyboard target. Tapping anywhere on this row drops mouse reporting so
-    // the next tap raises the IME; the glyph is there so the row reads as
-    // tappable, and it lights up while reporting is dropped so the state is
-    // visible rather than mysterious.
-    let key_glyph = if crate::layout::touch_bar(area.width) { "⌨ " } else { "" };
-    let key_tone = if model.keyboard_hint { Tone::Armed } else { Tone::Muted };
-
-    let typed = format!("{}_", model.query);
-    let room = (area.width as usize).saturating_sub(width(&count) + width(key_glyph) + 3);
-    let body = truncate(&format!("{typed}{chips}"), room);
-    let gap =
-        (area.width as usize).saturating_sub(2 + width(&body) + width(key_glyph) + width(&count));
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(" > ", theme.style(Tone::Accent)),
-            Span::raw(body),
-            Span::raw(" ".repeat(gap)),
-            Span::styled(key_glyph, theme.style(key_tone)),
-            Span::styled(count, theme.style(Tone::Muted)),
-        ])),
-        area,
-    );
+    chips
 }
 
-/// Per-surface hints only — never another surface's verbs (v2's `check_action`
-/// lesson). A verb appears here when it works, and not before.
-fn draw_footer(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
-    let line = if let Some(flash) = &model.flash {
-        Line::styled(
-            format!(" {}", truncate(flash, area.width as usize - 1)),
-            theme.style(Tone::Flash),
-        )
-    } else if model.esc_armed {
-        Line::styled(" esc again to quit", theme.style(Tone::Armed))
-    } else if model.detail {
-        Line::styled(" ⏎ open  ← close  esc back  ^q quit", theme.style(Tone::Muted))
+/// The docked search bar.
+///
+/// **One row on a keyboard layout, two on a touch one.** The second row is not
+/// decoration: the whole block is the keyboard target, and one terminal row is
+/// too small a thing to ask a thumb to hit between the action bar above it and
+/// the screen edge below. Doubling it costs nothing, because the row it takes is
+/// the hint line the action bar had already made redundant.
+fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+    let count = format!("{}/{}", model.rows.len(), model.store.docs.len());
+    let cols = area.width as usize;
+    let touch = area.height > 1;
+
+    if !touch {
+        let body = truncate(
+            &format!("{}_{}", model.query, chips(model)),
+            cols.saturating_sub(width(&count) + 4),
+        );
+        let gap = cols.saturating_sub(3 + width(&body) + width(&count) + 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" > ", theme.style(Tone::Accent)),
+                Span::raw(body),
+                Span::raw(" ".repeat(gap)),
+                Span::styled(format!("{count} "), theme.style(Tone::Muted)),
+            ])),
+            area,
+        );
+        return;
+    }
+
+    // Row one: the query, with the keyboard glyph at the far end so the block
+    // reads as tappable. It lights up while reporting is dropped, so the state
+    // is visible rather than mysterious.
+    let key_tone = if model.keyboard_hint { Tone::Armed } else { Tone::Muted };
+    let typed = truncate(&format!("{}_", model.query), cols.saturating_sub(6));
+    let gap = cols.saturating_sub(3 + width(&typed) + 3);
+    let query_row = Line::from(vec![
+        Span::styled(" > ", theme.style(Tone::Accent)),
+        Span::raw(typed),
+        Span::raw(" ".repeat(gap)),
+        Span::styled("⌨ ", theme.style(key_tone)),
+    ]);
+
+    // Row two: what the search found, and what is filtering it — or, when there
+    // is something to say, the message instead. The count is worth losing for a
+    // moment; a message nobody reads is worth nothing.
+    let (message, tone) = status_text(model, true);
+    let info_row = if model.flash.is_some() || model.esc_armed {
+        Line::styled(format!(" {}", fit(&message, cols.saturating_sub(1))), theme.style(tone))
     } else {
-        Line::styled(" ⏎ open  → detail  ^x expiring  ^q quit", theme.style(Tone::Muted))
+        let left = format!(" {count}{}", chips(model));
+        let room = cols.saturating_sub(width(&left) + 1);
+        let hint = if width(&message) <= room { message } else { String::new() };
+        let gap = cols.saturating_sub(width(&left) + width(&hint) + 1);
+        Line::from(vec![
+            Span::styled(left, theme.style(Tone::Muted)),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(format!("{hint} "), theme.style(Tone::Muted)),
+        ])
     };
+
+    frame.render_widget(Paragraph::new(vec![query_row, info_row]), area);
+}
+
+/// What the bottom line says: a message if there is one, else this surface's
+/// hints. Per-surface only — never another surface's verbs (v2's `check_action`
+/// lesson), and a verb appears here when it works, not before.
+///
+/// On a touch layout the action bar is already showing the verbs as buttons, so
+/// the hints shrink to the two things it does not carry.
+fn status_text(model: &Model, touch: bool) -> (String, Tone) {
+    if let Some(flash) = &model.flash {
+        return (flash.clone(), Tone::Flash);
+    }
+    if model.esc_armed {
+        return ("esc again to quit".into(), Tone::Armed);
+    }
+    let hints = match (touch, model.detail) {
+        (true, _) => "esc back  ^q quit",
+        (false, true) => "⏎ open  ← close  esc back  ^q quit",
+        (false, false) => "⏎ open  → detail  ^x expiring  ^q quit",
+    };
+    (hints.into(), Tone::Muted)
+}
+
+/// The keyboard layout's hint line.
+fn draw_footer(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+    let (message, tone) = status_text(model, false);
+    let line = Line::styled(
+        format!(" {}", truncate(&message, area.width as usize - 1)),
+        theme.style(tone),
+    );
     frame.render_widget(Paragraph::new(line), area);
 }

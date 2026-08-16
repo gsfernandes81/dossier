@@ -162,10 +162,12 @@ fn the_phone_screen_matches_the_approved_mockup() {
 
     let bar = &lines[25];
     assert!(bar.contains("⏎ Open") && bar.contains("→ Detail") && bar.contains("^t Scans"));
-    assert!(lines[26].starts_with(" > _"), "the search bar is docked: {:?}", lines[26]);
-    assert!(lines[26].contains('⌨'), "and carries the keyboard target: {:?}", lines[26]);
-    assert!(lines[26].trim_end().ends_with("14/14"), "matched/total: {:?}", lines[26]);
-    assert!(lines[27].contains("⏎ open"), "hints for this surface: {:?}", lines[27]);
+    // The search bar is docked at the bottom and is **two rows** on touch: the
+    // query, then the count and hints. Both rows are the keyboard target.
+    assert!(lines[26].starts_with(" > _"), "the query row: {:?}", lines[26]);
+    assert!(lines[26].contains('⌨'), "and carries the keyboard glyph: {:?}", lines[26]);
+    assert!(lines[27].trim_start().starts_with("14/14"), "matched/total: {:?}", lines[27]);
+    assert!(lines[27].contains("^q quit"), "and the hints the buttons do not carry");
 }
 
 /// **Every line is exactly the terminal's width, and the status column lands on
@@ -233,7 +235,11 @@ fn detail_splits_wide_and_pushes_narrow() {
     assert!(lines[1].contains("Motorcycle Insurance"), "title: {:?}", lines[1]);
     assert!(!lines[3].contains("RC Book"), "the list is covered, not squeezed");
     assert!(lines.iter().any(|l| l.contains("! expired")), "standing in words, not just a date");
-    assert!(lines[27].contains("← close"), "the hints changed with the surface");
+    // On touch it is the *buttons* that change with the surface — the hint line
+    // carries only what they do not (`esc`, `^q`), which is why it can be short
+    // enough to share a row with the count.
+    assert!(lines[25].contains("← Back"), "the action bar changed: {:?}", lines[25]);
+    assert!(lines[27].contains("esc back"), "{:?}", lines[27]);
 }
 
 /// Below the floor the app says so instead of drawing something broken.
@@ -272,15 +278,23 @@ fn the_keyboard_target_is_the_search_bar() {
     assert!(!lines[25].contains('⌨'), "not in the action bar: {:?}", lines[25]);
     assert!(lines[26].contains('⌨'), "on the search bar: {:?}", lines[26]);
 
-    update(&mut m, Msg::Tap { col: 3, row: 26 });
-    assert!(!m.mouse_on, "tapping it drops mouse reporting for one tap");
-    let lines = screen(&mut m, 45, 28);
-    assert!(lines[26].contains("[tap anywhere for the keyboard]"), "{:?}", lines[26]);
+    // **Both** rows raise the keyboard, and they sit against the bottom edge —
+    // one row is too small a thing to ask a thumb to hit when the row above it
+    // opens files.
+    for row in [26u16, 27] {
+        m.mouse_on = true;
+        m.keyboard_hint = false;
+        update(&mut m, Msg::Tap { col: 3, row });
+        assert!(!m.mouse_on, "row {row} is part of the target");
+    }
 
-    // The desktop has a keyboard and no touch chrome, so it gets no glyph.
+    // The desktop has a keyboard and no touch chrome, so it gets one row and no
+    // glyph.
     let mut wide = model(100, 26);
     let lines = screen(&mut wide, 100, 26);
     assert!(!lines[24].contains('⌨'), "{:?}", lines[24]);
+    assert!(lines[24].starts_with(" > _"), "one-row search bar: {:?}", lines[24]);
+    assert!(lines[25].contains("⏎ open"), "and a hint line of its own: {:?}", lines[25]);
 }
 
 /// Typing narrows the list and the count says so — the fzf-style feedback the
@@ -294,7 +308,7 @@ fn typing_narrows_the_list_and_the_count() {
     let lines = screen(&mut m, 45, 28);
     assert!(lines[1].contains("COC Certificate"));
     assert!(lines[26].contains("coc_"), "the query is shown with a cursor: {:?}", lines[26]);
-    assert!(lines[26].trim_end().ends_with("1/14"), "matched/total: {:?}", lines[26]);
+    assert!(lines[27].trim_start().starts_with("1/14"), "matched/total: {:?}", lines[27]);
 }
 
 /// The expiring filter shows its chip, so a filtered list can never be mistaken
@@ -305,7 +319,7 @@ fn the_expiring_filter_is_visible_in_the_bar() {
     update(&mut m, Msg::ToggleExpiring);
     assert_eq!(m.filter, Filter::Expiring);
     let lines = screen(&mut m, 45, 28);
-    assert!(lines[26].contains("[expiring]"), "the chip: {:?}", lines[26]);
+    assert!(lines[27].contains("[expiring]"), "the chip: {:?}", lines[27]);
     assert!(lines[1].contains("Motorcycle Insurance"), "soonest first: {:?}", lines[1]);
 }
 
@@ -315,7 +329,7 @@ fn an_empty_store_explains_itself() {
     let mut m = Model::new(Store::default(), "2026-10-20".into(), "2027-01-18".into(), 45, 28);
     let lines = screen(&mut m, 45, 28);
     assert!(lines[1].contains("no documents yet"), "{:?}", lines[1]);
-    assert!(lines[26].trim_end().ends_with("0/0"));
+    assert!(lines[27].trim_start().starts_with("0/0"));
 }
 
 /// A long name is cut with an ellipsis at a **cell** boundary, so a wide-glyph
