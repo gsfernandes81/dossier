@@ -1,5 +1,11 @@
 # dossier — Project Rules
 
+> **⚠ Rewrite planned:** a v3 rewrite (Rust + Ratatui core, journal store, Python
+> demoted to a desktop enrichment satellite) is specified in **[`REWRITE.md`](REWRITE.md)**.
+> If your task is part of that rewrite, `REWRITE.md` is authoritative and overrides the
+> Python-specific rules below for the Rust crates; the rules below still govern the
+> Python code while it exists.
+
 A cross-platform **TUI** for tracking personal documents — physical **and** digital — on
 **Windows and Android (Termux)**. It replaces a Notion system with local, Syncthing-synced
 Markdown files. Full design in **`DESIGN.md`** — **read it before writing feature code.**

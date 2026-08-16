@@ -1,5 +1,10 @@
 # dossier roadmap
 
+> **⚠ Rewrite planned (2026-08-16).** A full v3 rewrite — Rust + Ratatui core, per-writer
+> journal store, Python reduced to a desktop enrichment satellite — is planned in
+> **[`REWRITE.md`](REWRITE.md)**, which supersedes this file where they conflict. The
+> phases below remain the authoritative record of what the *current* Python app shipped.
+
 **Where we are (2026-07-25).** The Miller-columns home shipped (PRs #15–#31):
 browse · detail pane · bottom-bar search · the full action set · touch/Termux ·
 Nerd-Font icons · spacing/gutter polish. **Expiries now come from the Notion
