@@ -38,7 +38,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{Filter, ListGeometry, Model};
+use crate::app::{Filter, ListGeometry, Model, ScanSearch};
 use crate::layout::{fit, pad_left, short_date, truncate, width};
 use crate::theme::{Theme, Tone};
 use crate::{Doc, Status};
@@ -303,8 +303,13 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     if model.filter == Filter::Expiring {
         chips.push_str("  [expiring]");
     }
-    if model.scans {
-        chips.push_str("  [scans]");
+    match model.scan_search {
+        // The chip says which of the two searches is running, and admits when
+        // it is still waiting — a query that quietly ignores `ctrl+t` for two
+        // seconds reads as the toggle not working.
+        ScanSearch::On => chips.push_str("  [scans]"),
+        ScanSearch::Loading => chips.push_str("  [scans…]"),
+        ScanSearch::Off => {}
     }
     if !model.mouse_on {
         chips.push_str("  [tap to raise the keyboard]");

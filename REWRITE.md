@@ -585,6 +585,26 @@ until the cutover step the user personally green-lights.
       construction, in `.cargo/config.toml`; the CI phone leg installs it
       explicitly rather than trusting the runner image. The phone binary is
       still fully static — 4.9 MB, up from 2.6 MB before TLS.
+  - **Slice 5 done (2026-08-16) — R3 feature-complete.** `ctrl+t`, content
+    search, and the worker plumbing invariant 7 actually requires.
+    - `scans.rs` folds the **`enrich`** namespace into folded text per file path
+      (transcript, evidence, issuer, holder, document number, keywords). Matching
+      there is **exact substring only**: a transcript is hundreds of words, and a
+      two-edit budget loose in it would match nearly anything.
+    - **The load is lazy and off the render loop.** The first `ctrl+t` returns
+      `Effect::LoadScans`, a worker reads the bulky namespace, and the result
+      arrives as `Msg::ScansLoaded`. So the event loop is now **channel-driven**:
+      terminal input has its own thread and lands in the same queue as worker
+      results, and the loop blocks on one `recv()`. No polling timeout, no busy
+      wait — an idle `ds` still costs zero CPU, which on a phone is battery. This
+      is the shape R5's tree walks and Syncthing polls plug into.
+    - Scan hits **widen** the result rather than replacing it, appended in list
+      order, so a document found by name never drops out because its transcript
+      does not say the word. A load that lands after the user changed their mind
+      is kept but not applied, and does not disarm a pending quit — a worker
+      message is not a keystroke.
+    - **Startup is unchanged at 12 ms** for 950 docs / 6,650 ops: the enrich
+      namespace costs nothing until something asks for it.
 - **R4 — Editing**: detail editing via ops, undo (inverse ops), slots with
   insert-and-shift, supersession, bundle membership, settings ops, `ds init`/`reset`.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs),

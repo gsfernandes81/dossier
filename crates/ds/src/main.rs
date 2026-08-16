@@ -44,6 +44,8 @@
 use std::io::{self, Stderr, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
@@ -55,9 +57,11 @@ use ratatui::crossterm::{
 };
 use ratatui::Terminal;
 
-use ds::app::{update, Effect, Model};
+use ds::app::{update, Effect, Model, Msg};
+use ds::scans::Scans;
 use ds::status::Report;
 use ds::{find, input, load, open, Theme};
+use journal::Journal;
 
 /// Browse, search and open your documents.
 #[derive(Parser, Debug)]
@@ -144,7 +148,7 @@ fn run(args: &Args, start: Instant) -> io::Result<u8> {
             Ok(status(&loaded, &config, &root, *quiet, *no_sync))
         }
         Some(Command::Open { query }) => Ok(open_one(&loaded, &root, &query.join(" "))),
-        None => browse(loaded, &root, start).map(|()| 0),
+        None => browse(loaded, &journal, &root, start).map(|()| 0),
     }
 }
 
@@ -226,7 +230,7 @@ fn open_one(loaded: &load::Loaded, root: &Path, query: &str) -> u8 {
 }
 
 /// The TUI: everything, in order, with the terminal restored whatever happens.
-fn browse(loaded: load::Loaded, root: &Path, start: Instant) -> io::Result<()> {
+fn browse(loaded: load::Loaded, journal: &Journal, root: &Path, start: Instant) -> io::Result<()> {
     let ops = loaded.load.lines.len();
     let build_at = start.elapsed();
     let mut model = Model::new(loaded.store, loaded.today, loaded.warn_until, 80, 24);
@@ -257,7 +261,7 @@ fn browse(loaded: load::Loaded, root: &Path, start: Instant) -> io::Result<()> {
         writeln!(io::stderr(), "{line}")?;
     }
 
-    let result = event_loop(&mut terminal, &mut model, theme, root);
+    let result = event_loop(&mut terminal, &mut model, theme, root, journal);
     leave_terminal(&mut terminal, &mut stderr, model.mouse_on)?;
     result
 }
@@ -290,14 +294,38 @@ fn leave_terminal(terminal: &mut Tui, stderr: &mut Stderr, mouse_on: bool) -> io
     terminal.show_cursor()
 }
 
-fn event_loop(terminal: &mut Tui, model: &mut Model, theme: Theme, root: &Path) -> io::Result<()> {
+/// The loop: messages in from **one** channel, frames out.
+///
+/// Terminal input arrives on its own thread and lands in the same queue as
+/// results from workers, so the loop can block on a single `recv()` — no polling
+/// timeout, no busy wait. An idle `ds` costs no CPU at all, and on a phone idle
+/// CPU is battery. It is also what invariant 7 asks for: a worker can wake the
+/// UI without the UI ever asking whether it is done.
+fn event_loop(
+    terminal: &mut Tui,
+    model: &mut Model,
+    theme: Theme,
+    root: &Path,
+    journal: &Journal,
+) -> io::Result<()> {
     let mut stderr = io::stderr();
     let mut mouse_applied = model.mouse_on;
+    let (tx, rx) = mpsc::channel::<Msg>();
+
+    // The input thread. `event::read()` blocks it, never the loop below.
+    let input_tx = tx.clone();
+    std::thread::spawn(move || {
+        while let Ok(event) = event::read() {
+            let Some(msg) = input::to_msg(&event) else { continue };
+            if input_tx.send(msg).is_err() {
+                // The loop is gone, so the app is quitting.
+                return;
+            }
+        }
+    });
+
     loop {
-        // A blocking read: the loop wakes only on input, so an idle `ds` costs
-        // no CPU at all. On a phone, idle CPU is battery.
-        let event = event::read()?;
-        let Some(msg) = input::to_msg(&event) else { continue };
+        let Ok(msg) = rx.recv() else { return Ok(()) };
         let effect = update(model, msg);
 
         // The terminal is reconciled against the model, never commanded
@@ -322,6 +350,17 @@ fn event_loop(terminal: &mut Tui, model: &mut Model, theme: Theme, root: &Path) 
                 if let Err(error) = open::open_file(&path) {
                     model.flash = Some(error.to_string());
                 }
+            }
+            Effect::LoadScans => {
+                // Off the render loop: the `enrich` namespace is the bulky half
+                // of the store, and the frame that turned the chip on has
+                // already been drawn by the time this thread finishes.
+                let journal = journal.clone();
+                let tx = tx.clone();
+                std::thread::spawn(move || {
+                    let scans = Scans::load(&journal).unwrap_or_default();
+                    let _ = tx.send(Msg::ScansLoaded(Arc::new(scans)));
+                });
             }
         }
         terminal.draw(|frame| find::draw(frame, model, theme))?;

@@ -46,8 +46,15 @@ use crate::{Doc, Status, Store};
 /// rust: an enum, not a struct with an option per field. Exhaustive `match` in
 /// [`update`] then means the compiler tells us when a new message has no
 /// handler — the state-machine tool Rust gives us that Python does not.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
+    /// A worker finished reading the `enrich` namespace (`ctrl+t`).
+    ///
+    /// rust: an `Arc`, so handing the result to the model costs a pointer copy
+    /// rather than cloning a store's worth of transcripts across the thread
+    /// boundary. This variant is also why `Msg` is not `Copy` — messages from
+    /// workers carry data, and that is the whole point of having them.
+    ScansLoaded(std::sync::Arc<crate::scans::Scans>),
     /// A bare printable character. On the Find surface every one of these is
     /// search text (invariant 1) — the surface binds no letter keys at all.
     Char(char),
@@ -119,6 +126,9 @@ pub enum Effect {
     Redraw,
     /// Hand this path — relative to the Syncthing root — to the platform opener.
     Open(String),
+    /// Read the `enrich` namespace on a worker thread and post the result back
+    /// as [`Msg::ScansLoaded`]. **Never on the render loop** (invariant 7).
+    LoadScans,
     /// Leave, restoring the terminal.
     Quit,
 }
@@ -131,6 +141,18 @@ pub enum Filter {
     All,
     /// Only documents in the expiry watch, soonest first (`:expiring`).
     Expiring,
+}
+
+/// Whether `ctrl+t` is on, and whether the text it needs has arrived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScanSearch {
+    /// Names, notes, tags and bundles only.
+    #[default]
+    Off,
+    /// Asked for; a worker is reading the `enrich` namespace.
+    Loading,
+    /// On, with the text in hand.
+    On,
 }
 
 /// The rectangle the renderer last drew document rows into.
@@ -167,10 +189,12 @@ pub struct Model {
     pub warn_until: String,
     /// The search text. A bare printable anywhere on the list lands here.
     pub query: String,
-    /// `ctrl+t`: whether scan text is part of the haystack. The enrich namespace
-    /// that holds that text is loaded lazily, so this is the chip and the
-    /// intent; the load arrives with the enrich slice.
-    pub scans: bool,
+    /// `ctrl+t`: whether scan text is part of the haystack, and whether it has
+    /// arrived yet.
+    pub scan_search: ScanSearch,
+    /// The scan text, once a worker has read it. Kept even when the toggle is
+    /// off, so a second `ctrl+t` is instant.
+    pub scans: Option<std::sync::Arc<crate::scans::Scans>>,
     /// Which documents the list shows.
     pub filter: Filter,
     /// Indices into `store.docs`, in list order — the result of filter + search.
@@ -209,7 +233,8 @@ impl Model {
             today,
             warn_until,
             query: String::new(),
-            scans: false,
+            scan_search: ScanSearch::Off,
+            scans: None,
             filter: Filter::All,
             rows: Vec::new(),
             cursor: 0,
@@ -266,14 +291,38 @@ impl Model {
             Filter::All => None,
             Filter::Expiring => Some(self.store.expiring()),
         };
+        let mut matched = self.store.search(&self.query);
+        // `ctrl+t` widens the haystack rather than replacing it: a document
+        // whose *name* matches must never drop out of the list because its scan
+        // text does not mention the word.
+        if self.scan_search == ScanSearch::On && !self.query.is_empty() {
+            if let Some(scans) = &self.scans {
+                let needle = crate::search::fold(&self.query);
+                let found: Vec<usize> = self
+                    .store
+                    .docs
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, doc)| {
+                        !matched.contains(i)
+                            && scans.any_matches(
+                                doc.files.iter().map(|file| file.path.clone()),
+                                &needle,
+                            )
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+                matched.extend(found);
+                matched.sort_unstable();
+            }
+        }
         self.rows = match base {
-            None => self.store.search(&self.query),
+            None => matched,
             Some(expiring) if self.query.is_empty() => expiring,
             Some(expiring) => {
                 // The filter decides the set *and* the order; the search then
                 // narrows it. Running the search first would re-sort the list
                 // back into shelf order and lose "soonest first".
-                let matched = self.store.search(&self.query);
                 expiring.into_iter().filter(|i| matched.contains(i)).collect()
             }
         };
@@ -427,17 +476,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
     // A key press means the user is at the keyboard, so the IME affordance has
     // done its job: restore mouse reporting. Doing it here, once, is why the
     // drop can never become a mode you get stuck in.
-    if model.keyboard_hint && is_key(msg) {
+    if model.keyboard_hint && is_key(&msg) {
         model.mouse_on = true;
         model.keyboard_hint = false;
     }
 
     // Esc arms only on a *consecutive* Esc; any other key disarms it.
     let was_armed = model.esc_armed;
-    if !matches!(msg, Msg::Esc) {
+    if !matches!(msg, Msg::Esc | Msg::ScansLoaded(_)) {
         model.esc_armed = false;
     }
-    if is_key(msg) {
+    if is_key(&msg) {
         model.flash = None;
     }
 
@@ -471,8 +520,40 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.requery();
             Effect::Redraw
         }
-        Msg::ToggleScans => {
-            model.scans = !model.scans;
+        // `ctrl+t` on the browse surface. The modifier combination Termux's
+        // keyboard variants are least reliable at delivering, which is why R0.2
+        // probed it on the real device before anything depended on it.
+        Msg::ToggleScans => match model.scan_search {
+            ScanSearch::On | ScanSearch::Loading => {
+                model.scan_search = ScanSearch::Off;
+                model.requery();
+                Effect::Redraw
+            }
+            // Already read once: turning it back on costs nothing.
+            ScanSearch::Off if model.scans.is_some() => {
+                model.scan_search = ScanSearch::On;
+                model.requery();
+                Effect::Redraw
+            }
+            ScanSearch::Off => {
+                model.scan_search = ScanSearch::Loading;
+                Effect::LoadScans
+            }
+        },
+        Msg::ScansLoaded(scans) => {
+            // A load that finished after the user changed their mind is kept,
+            // not applied: the work is done, and the next `ctrl+t` is instant.
+            let count = scans.len();
+            model.scans = Some(scans);
+            if model.scan_search == ScanSearch::Loading {
+                model.scan_search = ScanSearch::On;
+                model.flash = Some(if count == 0 {
+                    "no scan text yet — the desktop satellite writes it".into()
+                } else {
+                    format!("searching inside {count} scanned files")
+                });
+                model.requery();
+            }
             Effect::Redraw
         }
         Msg::ToggleExpiring => {
@@ -515,8 +596,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
 }
 
 /// Whether this message came from the keyboard.
-fn is_key(msg: Msg) -> bool {
-    !matches!(msg, Msg::Tap { .. } | Msg::Scroll(_) | Msg::Resize { .. })
+fn is_key(msg: &Msg) -> bool {
+    !matches!(msg, Msg::Tap { .. } | Msg::Scroll(_) | Msg::Resize { .. } | Msg::ScansLoaded(_))
 }
 
 /// The terminal row the touch action bar sits on: directly above the search bar
@@ -769,6 +850,83 @@ mod tests {
         assert!(m.cursor >= m.offset, "the cursor came along");
         update(&mut m, Msg::Scroll(-100));
         assert_eq!(m.offset, 0);
+    }
+
+    /// **`ctrl+t` never blocks the render loop** (invariant 7). The first press
+    /// asks for a load and shows that it is waiting; the answer arrives as a
+    /// message like any other.
+    #[test]
+    fn the_scan_search_loads_on_a_worker_and_arrives_as_a_message() {
+        let mut m = model();
+        assert_eq!(update(&mut m, Msg::ToggleScans), Effect::LoadScans);
+        assert_eq!(m.scan_search, ScanSearch::Loading, "and it says so on screen");
+
+        let scans = std::sync::Arc::new(crate::scans::Scans {
+            by_path: [("Marine/coc.pdf".to_string(), "master mariner".to_string())]
+                .into_iter()
+                .collect(),
+        });
+        update(&mut m, Msg::ScansLoaded(scans));
+        assert_eq!(m.scan_search, ScanSearch::On);
+
+        for c in "mariner".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(m.rows.len(), 1, "found by what the page says, not by its name");
+        assert_eq!(m.current().unwrap().id, "coc");
+
+        // Off again, and the word is nowhere in any name.
+        update(&mut m, Msg::ToggleScans);
+        assert_eq!(m.scan_search, ScanSearch::Off);
+        assert!(m.rows.is_empty());
+    }
+
+    /// **Scan text widens the result, never replaces it.** A document whose name
+    /// matches must not drop out because its transcript does not say the word.
+    #[test]
+    fn scan_matches_are_added_to_name_matches_in_list_order() {
+        let mut m = model();
+        let scans = std::sync::Arc::new(crate::scans::Scans {
+            by_path: [("Marine/eng1.pdf".to_string(), "coc reference".to_string())]
+                .into_iter()
+                .collect(),
+        });
+        update(&mut m, Msg::ToggleScans);
+        update(&mut m, Msg::ScansLoaded(scans));
+        for c in "coc".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        let ids: Vec<&str> = m.rows.iter().map(|&i| m.store.docs[i].id.as_str()).collect();
+        assert_eq!(ids, ["coc", "eng1"], "the name match first, in list order");
+    }
+
+    /// A second `ctrl+t` costs nothing: the text is kept even while the toggle
+    /// is off, so only the first press ever waits.
+    #[test]
+    fn the_second_toggle_needs_no_second_load() {
+        let mut m = model();
+        update(&mut m, Msg::ToggleScans);
+        update(&mut m, Msg::ScansLoaded(std::sync::Arc::new(crate::scans::Scans::default())));
+        update(&mut m, Msg::ToggleScans);
+        assert_eq!(update(&mut m, Msg::ToggleScans), Effect::Redraw, "no second load");
+        assert_eq!(m.scan_search, ScanSearch::On);
+    }
+
+    /// A load that lands after the user changed their mind is kept, not applied
+    /// — and it does not disarm a pending quit, because the user did not touch
+    /// anything.
+    #[test]
+    fn a_late_load_does_not_reopen_the_toggle_or_disarm_the_quit() {
+        let mut m = model();
+        update(&mut m, Msg::ToggleScans);
+        update(&mut m, Msg::ToggleScans); // changed their mind while it loaded
+        update(&mut m, Msg::Esc);
+        assert!(m.esc_armed);
+
+        update(&mut m, Msg::ScansLoaded(std::sync::Arc::new(crate::scans::Scans::default())));
+        assert_eq!(m.scan_search, ScanSearch::Off, "not turned on behind their back");
+        assert!(m.scans.is_some(), "but the work is kept");
+        assert!(m.esc_armed, "a worker message is not a keystroke");
     }
 
     /// The header count is the number of documents actually wanting attention —

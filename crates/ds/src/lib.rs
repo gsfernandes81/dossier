@@ -49,6 +49,8 @@
 //!   full for a person, problems only for cron.
 //! - [`syncthing`] — asking the local daemon how the sync is going, status only,
 //!   with the loopback-scoped TLS exception Termux forces.
+//! - [`scans`] — what the documents *say*, loaded lazily on a worker the first
+//!   time `ctrl+t` asks for it.
 //!
 //! # Reading this code
 //!
@@ -69,6 +71,7 @@ pub mod input;
 pub mod layout;
 pub mod load;
 pub mod open;
+pub mod scans;
 pub mod search;
 pub mod status;
 pub mod syncthing;
