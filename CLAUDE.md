@@ -4,7 +4,19 @@
 > demoted to a desktop enrichment satellite) is specified in **[`REWRITE.md`](REWRITE.md)**.
 > If your task is part of that rewrite, `REWRITE.md` is authoritative and overrides the
 > Python-specific rules below for the Rust crates; the rules below still govern the
-> Python code while it exists.
+> Python code while it exists. The layout gate is settled in
+> [`REWRITE-UI.md`](REWRITE-UI.md); phase R0.2's spike lives in [`spike/`](spike/) with
+> its protocol and findings in [`docs/dev/spike-r02.md`](docs/dev/spike-r02.md).
+>
+> **Rust local gate** (mirror it before pushing, same discipline as the Python one — CI
+> runs it as the separate `spike` workflow):
+> ```bash
+> cd spike
+> cargo fmt --check
+> cargo clippy --all-targets -- -D warnings   # pedantic is on; triage, never silence
+> cargo test --release
+> cargo build --release --target aarch64-unknown-linux-musl   # the phone target
+> ```
 
 A cross-platform **TUI** for tracking personal documents — physical **and** digital — on
 **Windows and Android (Termux)**. It replaces a Notion system with local, Syncthing-synced

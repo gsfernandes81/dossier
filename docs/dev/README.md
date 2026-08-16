@@ -18,4 +18,12 @@ non-obvious things that aren't in the code or git history. User-facing docs are 
   (poll for the effect), the `DEFAULT_CSS`/`SCOPED_CSS` screen-styling gotcha, and the
   real-terminal PTY driver in `tools/`.
 
+The v3 rewrite ([`../../REWRITE.md`](../../REWRITE.md)) adds two measurement records:
+
+- **[startup-timing.md](startup-timing.md)** — the R0.1 protocol and the Python
+  baseline the rewrite has to beat (phone cold 1053 ms usable, warm ≈ 670 ms).
+- **[spike-r02.md](spike-r02.md)** — the R0.2 Ratatui spike: how to build and run it on
+  the phone, the measurement + terminal-behaviour checklist, results, and the findings
+  (including the "no NDK, no zig" musl toolchain answer).
+
 Started with a handoff mid-feature? See [`../../HANDOFF.md`](../../HANDOFF.md) if present.

@@ -1,0 +1,135 @@
+# Phase R0.2 spike CI (REWRITE.md §6, §10).
+#
+# Three jobs, and the third one is the point: the phone build. The spike can only
+# be measured on the real devices, and this workflow is what puts a runnable
+# binary in reach — download the artifact, copy it into $PATH on Termux, run it.
+# The Rust checks here are the shape R1's crates inherit (fmt, clippy -D
+# warnings, test on both desktop platforms, cross-build + artifact upload,
+# synthetic perf gate); they live in their own file so a spike failure can never
+# be confused with the Python app's CI.
+name: spike
+
+on:
+  push:
+    paths:
+      - "spike/**"
+      - ".github/workflows/spike.yml"
+  pull_request:
+    paths:
+      - "spike/**"
+      - ".github/workflows/spike.yml"
+  # The phone binary is often wanted without a code change (a new phone, a lost
+  # download), so the workflow can be run by hand from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: spike
+
+jobs:
+  # Lint + format are platform-independent: run them once.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (with fmt + clippy)
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: spike
+
+      - name: Format check
+        run: cargo fmt --check
+
+      # `-D warnings` makes pedantic findings fail the build, which is what
+      # "triaged, not silenced" means in practice (REWRITE.md §4.6): the allows
+      # are written down in main.rs with reasons, not discovered by ignoring red.
+      - name: Clippy (pedantic, denied)
+        run: cargo clippy --all-targets -- -D warnings
+
+  # The unit suite plus the synthetic perf gate, on both desktop platforms.
+  # Windows is not decoration here: it is a target (REWRITE.md §4.4) and its
+  # terminal handling is the part most likely to differ.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: spike
+
+      - name: Test
+        run: cargo test --release
+
+      # Printed as well as asserted: the CI log becomes a record of what the
+      # runner managed, which is a useful floor next to the on-phone numbers.
+      - name: Perf gate (keystroke -> frame)
+        run: cargo run --release -- --bench --assert-budget --rounds 100
+
+      - name: Upload the desktop binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ds-spike-${{ matrix.os }}
+          path: |
+            spike/target/release/ds-spike
+            spike/target/release/ds-spike.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  # The phone. Fully static aarch64 musl, linked by rust-lld against Rust's own
+  # self-contained musl objects — no NDK, no musl-gcc, no cargo-zigbuild (the
+  # R0.2 toolchain finding, encoded in spike/.cargo/config.toml).
+  phone:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + the Android/Termux target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: spike
+
+      - name: Cross-build (static, aarch64 musl)
+        run: cargo build --release --target aarch64-unknown-linux-musl
+
+      # A dynamically linked "static" binary would fail on Termux at runtime,
+      # long after this job went green — so assert it here, where it is cheap.
+      - name: Verify it is actually static
+        run: |
+          file target/aarch64-unknown-linux-musl/release/ds-spike
+          file target/aarch64-unknown-linux-musl/release/ds-spike | grep -q "statically linked"
+          ls -l target/aarch64-unknown-linux-musl/release/ds-spike
+
+      # Emulated, so the timings mean nothing — but "the ARM binary starts,
+      # renders 1,000 rows and exits 0" is exactly what a download is worth
+      # knowing before it reaches the phone.
+      - name: Smoke-run it under qemu
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-user-static
+          qemu-aarch64-static target/aarch64-unknown-linux-musl/release/ds-spike --bench --rounds 10
+
+      - name: Upload the phone binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ds-spike-aarch64-musl
+          path: spike/target/aarch64-unknown-linux-musl/release/ds-spike
+          if-no-files-found: error
+          retention-days: 14
