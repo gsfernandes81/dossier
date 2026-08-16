@@ -1,0 +1,707 @@
+<title>The Bar, Four Ways</title>
+<style>
+/* dossier v3 — R-UI mockups.
+   The page is a technical datasheet: monospace carries the headings because the
+   subject is a terminal; prose sits in a quiet sans beneath it. Terminal panes
+   follow the viewer's theme, which is the point REWRITE-UI §6 makes — semantic
+   tokens map to ANSI, so the user's own terminal theme carries the palette. */
+
+:root {
+  --ground: #eef1f3;
+  --surface: #ffffff;
+  --ink: #161a1e;
+  --muted: #5d6b77;
+  --faint: #8b98a3;
+  --rule: #d5dbe0;
+  --accent: #12676a;
+  --accent-soft: #d9eaea;
+
+  --term-bg: #fbfbfa;
+  --term-fg: #24292e;
+  --term-dim: #7b8792;
+  --term-sel-bg: #24292e;
+  --term-sel-fg: #fbfbfa;
+  --term-exp: #b83c26;
+  --term-soon: #8a6410;
+  --term-ok: #3a7346;
+  --term-acc: #12676a;
+  --term-btn: #4d5a65;
+
+  --shadow: 0 1px 2px rgba(20, 30, 40, .06), 0 8px 24px -12px rgba(20, 30, 40, .18);
+
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
+    "Roboto Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1418;
+    --surface: #161c22;
+    --ink: #e3e8ec;
+    --muted: #8a98a4;
+    --faint: #6b7883;
+    --rule: #222b33;
+    --accent: #5fb6b9;
+    --accent-soft: #14343a;
+
+    --term-bg: #0b0f13;
+    --term-fg: #d5dde3;
+    --term-dim: #74828d;
+    --term-sel-bg: #d5dde3;
+    --term-sel-fg: #0b0f13;
+    --term-exp: #f0795d;
+    --term-soon: #dda845;
+    --term-ok: #71b77e;
+    --term-acc: #5fb6b9;
+    --term-btn: #93a1ad;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0f1418;
+  --surface: #161c22;
+  --ink: #e3e8ec;
+  --muted: #8a98a4;
+  --faint: #6b7883;
+  --rule: #222b33;
+  --accent: #5fb6b9;
+  --accent-soft: #14343a;
+
+  --term-bg: #0b0f13;
+  --term-fg: #d5dde3;
+  --term-dim: #74828d;
+  --term-sel-bg: #d5dde3;
+  --term-sel-fg: #0b0f13;
+  --term-exp: #f0795d;
+  --term-soon: #dda845;
+  --term-ok: #71b77e;
+  --term-acc: #5fb6b9;
+  --term-btn: #93a1ad;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(2rem, 5vw, 4.5rem) clamp(1rem, 4vw, 2.5rem) 6rem;
+}
+
+/* ── masthead ─────────────────────────────────────────────────────────── */
+.masthead { display: flex; flex-direction: column; gap: .75rem; margin-bottom: 1rem; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: .74rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+h1 {
+  font-family: var(--mono);
+  font-size: clamp(1.7rem, 4.2vw, 2.6rem);
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.standfirst {
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+  margin: 0;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.25rem;
+  font-family: var(--mono);
+  font-size: .76rem;
+  color: var(--faint);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: .7rem 0;
+  margin: 1.5rem 0 3rem;
+}
+.meta b { color: var(--muted); font-weight: 500; }
+
+/* ── sections ─────────────────────────────────────────────────────────── */
+section { margin: 0 0 4.5rem; }
+
+h2 {
+  font-family: var(--mono);
+  font-size: 1.18rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  margin: 0 0 .4rem;
+  display: flex;
+  align-items: baseline;
+  gap: .7rem;
+  flex-wrap: wrap;
+}
+h2 .tag {
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .18rem .5rem;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+h3 {
+  font-family: var(--mono);
+  font-size: .82rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  margin: 0 0 .15rem;
+}
+
+p { max-width: 66ch; margin: 0 0 1rem; }
+p.lede { color: var(--muted); margin-bottom: 1.8rem; }
+
+/* ── terminal specimens ───────────────────────────────────────────────── */
+.specimens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.75rem;
+  align-items: flex-start;
+  margin: 1.5rem 0 0;
+}
+
+figure { margin: 0; display: flex; flex-direction: column; gap: .55rem; min-width: 0; }
+
+figcaption { display: flex; flex-direction: column; gap: .1rem; }
+figcaption .size {
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--faint);
+}
+figcaption .how { font-size: .84rem; color: var(--muted); max-width: 46ch; }
+
+.term {
+  background: var(--term-bg);
+  color: var(--term-fg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  padding: .55rem .6rem;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.term pre {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.34;
+  white-space: pre;
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums;
+  tab-size: 1;
+}
+
+/* the phone pane sits at its true 45-column width */
+.term.phone pre { font-size: 12px; }
+@media (max-width: 620px) { .term pre { font-size: 10.5px; } }
+
+/* terminal semantic tokens — every colour is paired with a glyph, so the
+   monochrome reading survives (REWRITE-UI §6) */
+.hd  { font-weight: 700; }
+.dim { color: var(--term-dim); }
+.exp { color: var(--term-exp); font-weight: 600; }
+.soon { color: var(--term-soon); font-weight: 600; }
+.ok  { color: var(--term-ok); }
+.none { color: var(--term-dim); }
+.acc { color: var(--term-acc); }
+.warn { color: var(--term-exp); font-weight: 600; }
+.btn { color: var(--term-btn); }
+.sel { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.seldim { background: var(--term-sel-bg); color: var(--term-sel-fg); opacity: .72; }
+
+/* ── notes ────────────────────────────────────────────────────────────── */
+.notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.1rem 2rem;
+  margin: 2rem 0 0;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+}
+.note { display: flex; gap: .7rem; align-items: flex-start; }
+.note .k {
+  font-family: var(--mono);
+  font-size: .7rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .12rem .38rem;
+  border-radius: 2px;
+  white-space: nowrap;
+  margin-top: .18rem;
+}
+.note p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 44ch; }
+.note p b { color: var(--ink); font-weight: 600; }
+
+/* ── key/value table ──────────────────────────────────────────────────── */
+.kv { width: 100%; border-collapse: collapse; margin: 1.25rem 0 0; font-size: .9rem; }
+.kv th, .kv td { text-align: left; padding: .55rem .8rem .55rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.kv th { font-family: var(--mono); font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.kv td.k { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+.kv td { color: var(--muted); }
+.kv td b { color: var(--ink); font-weight: 600; }
+.scroller { overflow-x: auto; }
+
+footer {
+  border-top: 1px solid var(--rule);
+  padding-top: 1.4rem;
+  margin-top: 1rem;
+  font-family: var(--mono);
+  font-size: .74rem;
+  color: var(--faint);
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem 1.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .term { transition: box-shadow .2s ease; }
+}
+
+/* ── interaction diagrams (page 3) ────────────────────────────────────── */
+.kbd {
+  font-family: var(--mono);
+  font-size: .78rem;
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: .1rem .42rem;
+  background: var(--surface);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.chain { display: flex; flex-direction: column; gap: 0; margin: 1.5rem 0 0; }
+.chain .layer {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 1rem;
+  align-items: baseline;
+  padding: .7rem 0 .7rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.chain .layer:first-child { border-top: 1px solid var(--rule); }
+.chain .layer .what { font-family: var(--mono); font-size: .82rem; color: var(--ink); }
+.chain .layer .then { font-size: .9rem; color: var(--muted); }
+.chain .layer.arm .what { color: var(--term-soon); }
+.chain .layer.quit .what { color: var(--term-exp); }
+
+.seq { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1.4rem; margin: 1.5rem 0 0; counter-reset: step; }
+.seq > div { border-top: 2px solid var(--accent); padding-top: .7rem; }
+.seq > div::before {
+  counter-increment: step;
+  content: counter(step);
+  display: block;
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--accent);
+  margin-bottom: .3rem;
+}
+.seq h4 { font-family: var(--mono); font-size: .84rem; margin: 0 0 .3rem; font-weight: 600; }
+.seq p { font-size: .88rem; color: var(--muted); margin: 0; max-width: none; }
+
+.swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin: 1.4rem 0 0; }
+.swatch { display: flex; gap: .6rem; align-items: baseline; }
+.swatch .g {
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  width: 1.4rem;
+  text-align: center;
+  flex: none;
+}
+.swatch .t { font-size: .86rem; color: var(--muted); }
+.swatch .t b { color: var(--ink); font-weight: 600; display: block; font-family: var(--mono); font-size: .8rem; }
+
+
+/* ── search-bar specimens ─────────────────────────────────────────────── */
+:root {
+  --term-slab: #e4eaee;
+  --term-slab-fg: #10161b;
+  --term-rule: #c6d0d7;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --term-slab: #1b242c;
+    --term-slab-fg: #eaf0f5;
+    --term-rule: #2c3843;
+  }
+}
+:root[data-theme="dark"] {
+  --term-slab: #1b242c;
+  --term-slab-fg: #eaf0f5;
+  --term-rule: #2c3843;
+}
+
+.slab { background: var(--term-slab); color: var(--term-slab-fg); }
+.slabdim { background: var(--term-slab); color: var(--term-dim); }
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.uline {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+.rule { color: var(--term-rule); }
+
+/* NO_COLOR, honestly: hues collapse to the foreground, attributes survive —
+   which means a slab has to be built from reverse video, and that is heavier. */
+.term.mono .acc,
+.term.mono .exp,
+.term.mono .soon,
+.term.mono .ok,
+.term.mono .rule { color: var(--term-fg); }
+.term.mono .slab { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.term.mono .slabdim { background: var(--term-sel-bg); color: var(--term-sel-fg); opacity: .72; }
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 2.5rem 2rem;
+  margin: 1.5rem 0 0;
+}
+.option { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+.option h3 { display: flex; align-items: baseline; gap: .6rem; }
+.option h3 .letter {
+  font-size: .68rem;
+  letter-spacing: .12em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .12rem .4rem;
+  border-radius: 2px;
+}
+.option .cost {
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--faint);
+}
+.option p { font-size: .9rem; color: var(--muted); margin: 0; max-width: 48ch; }
+.option p + p { margin-top: .5rem; }
+.option p b { color: var(--ink); font-weight: 600; }
+
+.pair { display: flex; flex-wrap: wrap; gap: 1.75rem; align-items: flex-start; }
+.verdict {
+  border-left: 3px solid var(--accent);
+  padding: .2rem 0 .2rem 1.1rem;
+  margin: 1.6rem 0 0;
+}
+.verdict p { margin: 0; max-width: 60ch; }
+.verdict p + p { margin-top: .6rem; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · follow-up · search bar</p>
+    <h1>The Bar, Four Ways</h1>
+    <p class="standfirst">
+      The search bar is two rows now and still doesn't read as a control — three
+      dim rows stacked at the bottom of the screen give the eye no edge to land
+      on. Four ways to fix that, each drawn at the real 45 columns, with what it
+      costs and how it survives a terminal with no colour.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Surface</b> Find, touch layout</span>
+    <span><b>Pane</b> 45×28 · portrait Termux</span>
+    <span><b>Budget</b> 12 document rows</span>
+    <span><b>Must survive</b> NO_COLOR · 16-colour themes</span>
+  </div>
+
+  <section>
+    <h2>The problem <span class="tag">as it ships today</span></h2>
+    <p class="lede">
+      Everything below the list is dim text on the same ground as the list. The
+      block is twice as tall as it was, and it still has no boundary — height
+      alone doesn't make a target legible.
+    </p>
+    <div class="specimens">
+      <figure>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="dim"> ⏎ Open     → Detail   ^x Expiry  ^t Scans  </span> 
+ <span class="acc">&gt;</span> coc_                                 <span class="dim">⌨ </span>   
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <figcaption>
+          <span class="size">45 columns · bottom of the screen</span>
+          <span class="how">The bar starts where the list happens to stop.</span>
+        </figcaption>
+      </figure>
+    </div>
+    <div class="notes">
+      <div class="note">
+        <span class="k">rule</span>
+        <p>Colour is never the only signal — whatever is added has to read the
+          same in <b>monochrome</b>, where hues collapse but reverse video,
+          bold, dim and underline all survive.</p>
+      </div>
+      <div class="note">
+        <span class="k">rule</span>
+        <p>The terminal theme owns the palette. A fix that needs a specific
+          background colour is a fix that <b>breaks on somebody's Solarized</b>.</p>
+      </div>
+      <div class="note">
+        <span class="k">rule</span>
+        <p>Twelve documents is the budget. Anything that spends a row has to be
+          worth <b>a document</b>, every screen, forever.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Four options</h2>
+    <p class="lede">
+      Each drawn against the same four list rows, so the boundary — or its
+      absence — is what differs.
+    </p>
+
+    <div class="options">
+      <div class="option">
+        <h3><span class="letter">A</span> Slab</h3>
+        <span class="cost">costs no rows · one background attribute</span>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="dim"> ⏎ Open     → Detail   ^x Expiry  ^t Scans  </span> 
+<span class="slab"> &gt; coc█                                 ⌨    </span>
+<span class="slabdim"> 3/24  [scans]             esc back  ^q quit </span></pre></div>
+        <p>Both bar rows get a filled ground, so the block reads as one object
+          sitting under the list. The cursor becomes a <b>block</b>, which is
+          what a focused field looks like everywhere else.</p>
+        <p>Strongest separation available for free. In monochrome the fill has
+          to be reverse video — heavier than this, and worth seeing before
+          choosing it.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">B</span> Rule</h3>
+        <span class="cost">costs one document row · 12 → 11</span>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+<span class="rule">─────────────────────────────────────────────</span>
+<span class="dim"> ⏎ Open     → Detail   ^x Expiry  ^t Scans  </span> 
+ <span class="acc">&gt;</span> coc_                                 <span class="dim">⌨ </span>   
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <p>A hairline across the full width, and nothing else changes. The
+          quietest possible answer, and the only one that reads identically in
+          every terminal and every theme.</p>
+        <p>It buys separation with the one currency that is genuinely scarce
+          here: <b>a document per screen, forever</b>.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">C</span> Field</h3>
+        <span class="cost">costs no rows · underline + one chip</span>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="dim"> ⏎ Open     → Detail   ^x Expiry  ^t Scans  </span> 
+<span class="chip"> &gt; </span><span class="uline"> coc█                                  </span><span class="dim">⌨ </span> 
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <p>The query row is underlined end to end and the prompt becomes a small
+          reverse-video chip — the two marks that say "text goes here" without
+          filling anything.</p>
+        <p>Lightest touch of the four, and the only one whose emphasis lands
+          exactly on the row you type into. Underline is an attribute, so
+          monochrome loses nothing at all.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">D</span> Chips</h3>
+        <span class="cost">costs no rows · reverse chips + slab</span>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="chip"> ⏎ Open </span>   <span class="chip"> → Detail </span> <span class="chip"> ^x Expiry</span> <span class="chip"> ^t Scans </span>  
+<span class="slab"> &gt; coc█                                 ⌨    </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <p>The buttons become buttons — each label in its own reverse block —
+          and the field keeps a single slab row beneath them. The two halves of
+          the chrome stop looking like one another.</p>
+        <p>The most app-like, and the most assertive: four inverted blocks are a
+          lot of ink for a surface whose job is to disappear behind a list.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Which one holds up <span class="tag">whole screen · monochrome</span></h2>
+    <p class="lede">
+      D drawn full-height, then the same frame with every colour removed — the
+      NO_COLOR reading is where a design that leans on hue quietly falls apart.
+    </p>
+    <div class="pair">
+      <figure>
+        <div class="term phone"><pre> <span class="hd">dossier</span>                   <span class="acc">! 3 exp · 24 docs</span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama             12-26 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt               ·    
+<span class="dim">    softcopy · marine</span>                        
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+<span class="chip"> ⏎ Open </span>   <span class="chip"> → Detail </span> <span class="chip"> ^x Expiry</span> <span class="chip"> ^t Scans </span>  
+<span class="slab"> &gt; coc█                                 ⌨    </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <figcaption>
+          <span class="size">45×28 · in colour</span>
+          <span class="how">Buttons, field, list: three different weights.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre> <span class="hd">dossier</span>                   <span class="acc">! 3 exp · 24 docs</span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama             12-26 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt               ·    
+<span class="dim">    softcopy · marine</span>                        
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+<span class="chip"> ⏎ Open </span>   <span class="chip"> → Detail </span> <span class="chip"> ^x Expiry</span> <span class="chip"> ^t Scans </span>  
+<span class="slab"> &gt; coc█                                 ⌨    </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <figcaption>
+          <span class="size">45×28 · NO_COLOR</span>
+          <span class="how">The structure survives; the chips get heavier, and
+            the expiry markers carry the status alone.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Side by side</h2>
+    <div class="scroller">
+      <table class="kv">
+        <thead>
+          <tr><th>Option</th><th>Rows</th><th>Monochrome</th><th>Risk</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="k">A · Slab</td>
+            <td>none</td>
+            <td>becomes reverse video — heavier</td>
+            <td>a two-row inverted block can dominate a small screen</td>
+          </tr>
+          <tr>
+            <td class="k">B · Rule</td>
+            <td><b>one document</b></td>
+            <td>identical</td>
+            <td>none, beyond the row it spends</td>
+          </tr>
+          <tr>
+            <td class="k">C · Field</td>
+            <td>none</td>
+            <td>identical — underline is an attribute</td>
+            <td>subtle; may still read as thin at arm's length</td>
+          </tr>
+          <tr>
+            <td class="k">D · Chips</td>
+            <td>none</td>
+            <td>chips get heavier, structure survives</td>
+            <td>most ink on screen; buttons compete with the list</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="verdict">
+      <p><b>My pick is C, with D's chips on the buttons only.</b> The underline
+        puts the emphasis on the row your thumb is aiming at, costs no rows, and
+        is the one treatment that looks the same on every terminal anyone will
+        ever run this on. Making the four buttons chips at the same time gives
+        the chrome two distinct textures without a second filled block.</p>
+      <p>If it still reads thin on the device, A is one line of code away — the
+        slab and the underline are the same span, differently styled.</p>
+      <p>B is the fallback I would take only if both fail, because a document
+        row is the most expensive thing on this screen.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/searchbar.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>
