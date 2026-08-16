@@ -158,9 +158,13 @@ section and the golden vectors in the same slice.
 - **Truncation detection (the Proton-revert defense)**: a reverted, *shorter* journal
   propagates through Syncthing as an ordinary modification — no conflict file, still
   valid JSONL, silently missing recent ops. So each device persists, in **local**
-  (non-synced) state, a high-water mark per journal file (byte length + max `ts`
-  seen); on load, any journal that has regressed below its mark triggers a loud
-  `ds status` anomaly pointing at Syncthing versioning for recovery. "Conflicts are
+  (non-synced) state, a high-water mark per journal file (max `ts` seen + byte
+  length). **The damage signal is max-`ts` regression** — compaction can never
+  regress it (it always preserves the newest ops, §3.3), while a revert by
+  definition deletes them — so a max-`ts` regression triggers the loud `ds status`
+  anomaly pointing at Syncthing versioning for recovery. A byte-length shrink with
+  max `ts` preserved is ordinary compaction and must **not** alarm; length is a
+  secondary corroborator only. "Conflicts are
   structurally impossible" does **not** mean "damage is impossible" — this check is
   what keeps the difference honest.
 - **Compaction**: a writer compacts **only its own file** (single writer ⇒ no race):
