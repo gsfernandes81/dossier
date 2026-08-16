@@ -33,6 +33,9 @@ jiff = { version = "0.2", features = ["tzdb-bundle-always"] }
 clap = { version = "4", features = ["derive"] }
 # `val` payloads arrive as JSON values and stay that way until a field is read.
 serde_json = { workspace = true }
+# Deriving the config's shape, so a malformed file is a parse error naming the
+# key rather than a pile of hand-written `get`/`as_str` checks.
+serde = { workspace = true }
 # Error types that carry what to do about them — the opener's whole job.
 thiserror = { workspace = true }
 # Search folds accents so `résumé` matches `resume`, which needs NFKD
@@ -43,6 +46,12 @@ unicode-normalization = "0.1"
 # character, and every alignment decision in REWRITE-UI.md depends on knowing
 # that. R0.2 confirmed the phone agrees with this crate's table.
 unicode-width = "0.2"
+# The per-device config file is TOML (REWRITE.md §2), and it is the only TOML
+# left in v3 — everything shared moved into the journal as ops.
+toml = "1"
+# The platform config directory, so the config lands where v2's `platformdirs`
+# put it and a configured device keeps working.
+dirs = "6"
 
 [dev-dependencies]
 proptest = "1"

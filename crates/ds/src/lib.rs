@@ -43,6 +43,10 @@
 //!   arithmetic, and the semantic colour tokens.
 //! - [`open`] — handing a file to the platform's opener, with the guidance that
 //!   makes a missing opener fixable.
+//! - [`config`] / [`load`] — the small per-device TOML, and the one path from a
+//!   directory to a store that every entry point shares.
+//! - [`status`] — what `ds status` reports, as data that is rendered twice: in
+//!   full for a person, problems only for cron.
 //!
 //! # Reading this code
 //!
@@ -55,13 +59,16 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod config;
 pub mod detail;
 pub mod doc;
 pub mod find;
 pub mod input;
 pub mod layout;
+pub mod load;
 pub mod open;
 pub mod search;
+pub mod status;
 pub mod theme;
 
 pub use app::{update, Effect, Model, Msg};

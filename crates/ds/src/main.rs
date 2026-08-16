@@ -13,7 +13,8 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! `ds` — the binary: terminal lifecycle, the event loop, and nothing else.
+//! `ds` — the binary: terminal lifecycle, the event loop, and the commands that
+//! need no terminal at all.
 //!
 //! Everything that decides anything lives in the library. This file is the
 //! *shell*: it reads the journal, sets the terminal up, pumps events through
@@ -24,8 +25,10 @@
 //!
 //! ```text
 //! ds                      browse the store
-//! ds --root <DIR>         the Syncthing root (default: $DS_ROOT)
-//! ds --journal <DIR>      a journal directory directly, for a copy or a test
+//! ds status [--quiet]     what the store is, and what is wrong with it
+//! ds open <query>         open a document's file without the TUI
+//! --root <DIR>            the Syncthing root (default: $DS_ROOT, then config)
+//! --journal <DIR>         a journal directory directly, for a copy or a test
 //! DS_TIMING=1             print the startup breakdown to stderr at first paint
 //! DS_TIMING=exit          ...and quit right after (wrap the run in `time`)
 //! ```
@@ -39,11 +42,11 @@
 #![forbid(unsafe_code)]
 
 use std::io::{self, Stderr, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::time::Instant;
 
-use clap::Parser;
-use jiff::{civil::Date, ToSpan, Zoned};
+use clap::{Parser, Subcommand};
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture},
@@ -53,59 +56,159 @@ use ratatui::crossterm::{
 use ratatui::Terminal;
 
 use ds::app::{update, Effect, Model};
-use ds::{find, input, open, Store};
-use journal::{Journal, Namespace};
+use ds::status::Report;
+use ds::{find, input, load, open, Theme};
 
 /// Browse, search and open your documents.
 #[derive(Parser, Debug)]
 #[command(name = "ds", version, about, long_about = None)]
 struct Args {
     /// The Syncthing root — the folder the journal and the documents live in.
-    #[arg(long, value_name = "DIR")]
+    #[arg(long, value_name = "DIR", global = true)]
     root: Option<PathBuf>,
 
     /// A journal directory to read directly, instead of `<root>/.dossier/journal`.
     ///
     /// Reading an exported copy is how R3 is daily-driven before cutover, so
     /// this is a first-class flag rather than a debugging one.
-    #[arg(long, value_name = "DIR")]
+    #[arg(long, value_name = "DIR", global = true)]
     journal: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Command>,
 }
 
-fn main() {
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Report what the store contains and anything wrong with it.
+    Status {
+        /// Print only problems, and exit non-zero if there are any.
+        ///
+        /// The mode a cron job uses: silent for months, believable when it
+        /// finally speaks. Read-only by design (REWRITE.md §3.1).
+        #[arg(long)]
+        quiet: bool,
+    },
+    /// Open a document's file without starting the TUI.
+    Open {
+        /// A document id, or search terms — the same matching the TUI does.
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+    },
+}
+
+/// Exit codes, so a script can tell the cases apart.
+mod code {
+    /// Something the user asked for could not be done.
+    pub const FAILED: u8 = 1;
+    /// A query matched nothing, or matched too much to act on.
+    pub const NO_MATCH: u8 = 2;
+    /// `--quiet` found something wrong with the store.
+    pub const UNHEALTHY: u8 = 3;
+}
+
+fn main() -> ExitCode {
     // The stopwatch starts on the first line of real work, as close to `execve`
     // as a Rust program gets.
     let start = Instant::now();
     let args = Args::parse();
 
-    if let Err(error) = run(&args, start) {
-        eprintln!("ds: {error}");
-        std::process::exit(1);
+    match run(&args, start) {
+        Ok(code) => ExitCode::from(code),
+        Err(error) => {
+            eprintln!("ds: {error}");
+            ExitCode::from(code::FAILED)
+        }
     }
 }
 
-/// Everything, in order, with the terminal restored whatever happens.
-fn run(args: &Args, start: Instant) -> io::Result<()> {
-    let root = args
-        .root
-        .clone()
-        .or_else(|| std::env::var_os("DS_ROOT").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."));
-    let journal = args.journal.clone().map_or_else(|| Journal::under_root(&root), Journal::new);
+fn run(args: &Args, start: Instant) -> io::Result<u8> {
+    // A config that exists but is broken is fatal; one that is simply absent is
+    // not. A fresh device has none until `ds init`, and `--root` covers it.
+    let config = ds::config::Config::load().map_err(io::Error::other)?;
+    let journal =
+        load::locate(args.journal.clone(), args.root.clone(), config.syncthing_root.clone());
+    let root = load::root_for(args.root.clone(), config.syncthing_root.clone(), &journal);
+    let loaded = load::load(&journal).map_err(io::Error::other)?;
 
-    // Read + parse. The `meta` namespace only: transcripts and scan readings
-    // live in `enrich` and are not on the startup path (§3.1), which is half the
-    // reason the fold is fast enough to do on every launch.
-    let load = journal.load(Namespace::Meta).map_err(io::Error::other)?;
-    let read_at = start.elapsed();
-    let folded = journal::fold(&load.lines);
-    let fold_at = start.elapsed();
-    let store = Store::build(&folded);
+    match &args.command {
+        Some(Command::Status { quiet }) => Ok(status(&loaded, *quiet)),
+        Some(Command::Open { query }) => Ok(open_one(&loaded, &root, &query.join(" "))),
+        None => browse(loaded, &root, start).map(|()| 0),
+    }
+}
+
+/// `ds status`.
+fn status(loaded: &load::Loaded, quiet: bool) -> u8 {
+    let report = Report::new(
+        loaded.path.display().to_string(),
+        &loaded.load,
+        &loaded.stats,
+        &loaded.store,
+        &loaded.today,
+        &loaded.warn_until,
+    );
+    if quiet {
+        if report.healthy() {
+            return 0;
+        }
+        print!("{}", report.problems());
+        return code::UNHEALTHY;
+    }
+    print!("{}", report.render());
+    0
+}
+
+/// `ds open <query>` — the TUI's `Enter` verb, without the TUI.
+///
+/// An id is tried first, so a script that knows exactly what it wants is never
+/// at the mercy of a search. Several matches are **listed, not guessed**: opening
+/// the wrong document silently is worse than opening none.
+fn open_one(loaded: &load::Loaded, root: &Path, query: &str) -> u8 {
+    let docs = &loaded.store.docs;
+    let matched: Vec<usize> = docs
+        .iter()
+        .position(|doc| doc.id == query)
+        .map_or_else(|| loaded.store.search(query), |exact| vec![exact]);
+    let [only] = matched[..] else {
+        if matched.is_empty() {
+            eprintln!("ds: nothing matches {query:?}");
+        } else {
+            eprintln!("ds: {} documents match {query:?}:", matched.len());
+            for &i in matched.iter().take(10) {
+                eprintln!("  {}  {}", docs[i].id, docs[i].name);
+            }
+            if matched.len() > 10 {
+                eprintln!("  … and {} more", matched.len() - 10);
+            }
+        }
+        return code::NO_MATCH;
+    };
+
+    let doc = &docs[only];
+    let Some(file) = doc.primary_file() else {
+        eprintln!("ds: {} has no file linked", doc.name);
+        return code::NO_MATCH;
+    };
+    let path = open::resolve(root, &file.path);
+    match open::open_file(&path) {
+        Ok(()) => {
+            println!("{}", path.display());
+            0
+        }
+        Err(error) => {
+            eprintln!("ds: {error}");
+            code::FAILED
+        }
+    }
+}
+
+/// The TUI: everything, in order, with the terminal restored whatever happens.
+fn browse(loaded: load::Loaded, root: &Path, start: Instant) -> io::Result<()> {
+    let ops = loaded.load.lines.len();
     let build_at = start.elapsed();
-
-    let (today, warn_until) = window(store.warn_days());
-    let mut model = Model::new(store, today, warn_until, 80, 24);
-    let theme = ds::theme::Theme::from_env();
+    let mut model = Model::new(loaded.store, loaded.today, loaded.warn_until, 80, 24);
+    let theme = Theme::from_env();
 
     let mut stderr = io::stderr();
     let mut terminal = enter_terminal(&mut stderr)?;
@@ -116,14 +219,10 @@ fn run(args: &Args, start: Instant) -> io::Result<()> {
     let timing = std::env::var("DS_TIMING").unwrap_or_default();
     if !timing.is_empty() {
         let line = format!(
-            "DS_TIMING read={:.1}ms fold={:.1}ms build={:.1}ms term={:.1}ms usable={:.1}ms \
-             ops={} docs={}",
-            ms(read_at),
-            ms(fold_at) - ms(read_at),
-            ms(build_at) - ms(fold_at),
+            "DS_TIMING store={:.1}ms term={:.1}ms usable={:.1}ms ops={ops} docs={}",
+            ms(build_at),
             ms(init_at) - ms(build_at),
             ms(paint_at),
-            load.lines.len(),
             model.store.docs.len(),
         );
         if timing == "exit" {
@@ -136,7 +235,7 @@ fn run(args: &Args, start: Instant) -> io::Result<()> {
         writeln!(io::stderr(), "{line}")?;
     }
 
-    let result = event_loop(&mut terminal, &mut model, theme, &root);
+    let result = event_loop(&mut terminal, &mut model, theme, root);
     leave_terminal(&mut terminal, &mut stderr, model.mouse_on)?;
     result
 }
@@ -145,23 +244,13 @@ fn ms(duration: std::time::Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
 }
 
-/// Today and the far edge of the warn window, both ISO.
-///
-/// Resolved once at startup and carried in the model: every expiry comparison is
-/// then a string comparison against these two, which is why nothing else in the
-/// crate needs a date library.
-fn window(warn_days: i64) -> (String, String) {
-    let today: Date = Zoned::now().date();
-    let warn_until = today.checked_add(warn_days.days()).unwrap_or(today);
-    (today.to_string(), warn_until.to_string())
-}
-
 type Tui = Terminal<CrosstermBackend<Stderr>>;
 
 /// Raw mode, alternate screen, SGR mouse reporting.
 ///
-/// The TUI paints to **stderr** so stdout stays free for piping — `ds` will grow
-/// commands whose output is meant to be read by something other than a person.
+/// The TUI paints to **stderr** so stdout stays free for piping — `ds open`
+/// prints the path it opened, and a future command's output is meant to be read
+/// by something other than a person.
 fn enter_terminal(stderr: &mut Stderr) -> io::Result<Tui> {
     enable_raw_mode()?;
     // `EnableMouseCapture` turns on SGR (1006) reporting, which is what Termux
@@ -179,12 +268,7 @@ fn leave_terminal(terminal: &mut Tui, stderr: &mut Stderr, mouse_on: bool) -> io
     terminal.show_cursor()
 }
 
-fn event_loop(
-    terminal: &mut Tui,
-    model: &mut Model,
-    theme: ds::theme::Theme,
-    root: &std::path::Path,
-) -> io::Result<()> {
+fn event_loop(terminal: &mut Tui, model: &mut Model, theme: Theme, root: &Path) -> io::Result<()> {
     let mut stderr = io::stderr();
     let mut mouse_applied = model.mouse_on;
     loop {

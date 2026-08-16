@@ -542,6 +542,28 @@ until the cutover step the user personally green-lights.
       costs about as much as the fold itself and is now on the startup path; the
       phone number is the one that decides, and R3's first on-device run should
       take it before anything else joins that path.
+  - **Slice 3 done (2026-08-16):** the commands that need no terminal, and the
+    config that lets a bare `ds` work. `config.rs` reads the per-device TOML
+    (§2: `syncthing_root`, `device`, `[syncthing]`, and nothing else — everything
+    shared is journal ops); **a missing config is a normal state**, not an error,
+    which is what lets R3 be driven with `--root` before `ds init` exists.
+    `load.rs` is the one path from a directory to a store that the TUI, `status`
+    and `open` all share, so they cannot disagree about what the store contains.
+    `status.rs` builds a report as *data* and renders it twice — in full for a
+    person, problems only for `--quiet` — so the two forms cannot drift.
+    - **`--quiet` treats an expiring document as the store working, not as a
+      fault**, and exits 3 only on real damage (malformed lines, duplicate
+      `(ts, w)` keys, loader anomalies). A cron job that cries wolf about a
+      certificate is a cron job that gets ignored.
+    - **`ds open` refuses to guess**: an id first, then the same search the TUI
+      does; several matches are listed and exit 2 rather than one being opened.
+      A file the store lists but Syncthing has not delivered says exactly that.
+    - Six tests spawn the **real binary** against a real journal directory,
+      because arg wiring and exit codes are precisely what a library test cannot
+      see.
+    - One dependency note: `jiff` **panics** when a span is built from an absurd
+      day count, before any checked arithmetic can refuse — so the warn window
+      (which comes from the journal, i.e. from data) is clamped to a century.
 - **R4 — Editing**: detail editing via ops, undo (inverse ops), slots with
   insert-and-shift, supersession, bundle membership, settings ops, `ds init`/`reset`.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs),
