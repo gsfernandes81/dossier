@@ -1,8 +1,10 @@
 # dossier v3 — Rewrite Plan (Rust core + journal store)
 
 **Status:** Approved plan, ready for implementation. Produced from a design session with
-a Fable advisor (2026-08-16); decisions below are **user-confirmed** — do not re-litigate
-them during implementation.
+a Fable advisor (2026-08-16) and hardened by an independent adversarial review (15
+findings — HLC ordering, torn-tail repair, writer locking, truncation detection,
+exporter/cutover sequencing — all incorporated below); decisions are **user-confirmed**
+— do not re-litigate them during implementation.
 **Supersedes:** `DESIGN.md` and `ROADMAP.md` describe the *current Python app* (v2).
 They remain the authoritative record of v2's behavior and rationale — this plan cites
 them as the port spec — but where this document contradicts them, **this document wins**.
@@ -82,6 +84,18 @@ section and the golden vectors in the same slice.
 - **Writer id** = `<device>-<component>`, e.g. `desk-core`, `desk-lab`, `phone-core`.
   Device part comes from per-device config (set by `ds init`); a writer appends **only
   to its own file**. Discovery is a directory glob — no registry.
+- **Filename grammar (frozen)**: writer files match `^[a-z0-9][a-z0-9-]*\.jsonl$` and
+  nothing else is folded. Both implementations **exclude** anything containing
+  `.sync-conflict-`, the `.stversions/` dir, and rewrite temps. Compaction temps are
+  named `<writer>.jsonl.tmp-<pid>` (does not match the glob) and the pattern
+  `*.jsonl.tmp-*` goes into `.stignore` on **both devices before any journal exists
+  in the synced tree** (Phase R7 pre-step; `.stignore` is per-device and never syncs).
+- **One process per writer id**: a writer takes an OS advisory lock on a lock file in
+  the platform-**local** data dir (never on FUSE / never synced) before appending or
+  compacting. A second process that fails the lock runs **read-only** with a visible
+  notice (browse/open/status still work — `ds status --quiet` from cron is read-only
+  by design). This closes the v2-supported "TUI open + cron job" concurrency without
+  duplicate `(ts, w)` keys or append-vs-compaction races.
 - Single-writer-per-file means Syncthing never sees two versions of one file to
   reconcile: **conflicts are structurally impossible**, not merely handled. The v2
   merge/resolve machinery (Phase 12) is not ported. `.sync-conflict-*` files, should
@@ -91,37 +105,64 @@ section and the golden vectors in the same slice.
 ### 3.2 Op format (JSONL, one op per line)
 
 ```json
-{"v":1,"ts":1755300000123,"ctr":7,"w":"desk-core","op":"set","ent":"doc","id":"coc-card-2025","f":"expiry_date","val":"2026-09-28"}
+{"v":1,"ts":1755300000123,"w":"desk-core","op":"set","ent":"doc","id":"coc-card-2025","f":"expiry_date","val":"2026-09-28"}
 ```
 
 - `v` — format version (unknown-versioned or unknown-`op` lines are **preserved
   verbatim** through compaction; forward compatibility).
-- `ts` (unix ms, device clock) + `ctr` (per-writer monotonic counter; on startup,
-  initialize above the max ever seen across *all* journals — Lamport-style, so a
-  skewed clock can't reorder a writer against itself) + `w`. Total order for LWW is
-  lexicographic `(ts, ctr, w)`.
+- `ts` is a **hybrid logical clock, not raw wall time**: on every append,
+  `ts = max(now_ms, own_last_ts + 1)`, where `own_last_ts` initializes on startup
+  from the max `ts` seen across **all** journals. Per-writer `ts` is therefore
+  strictly monotonic — a backwards clock jump (NTP fix between sessions) can never
+  reorder a writer against itself — while staying human-meaningful as a timestamp.
+  Total order for LWW is lexicographic `(ts, w)`, which is unique because a writer
+  never repeats a `ts`. All numbers in the format are **integers** (no floats, ever;
+  dates are ISO strings) — this matters for §10's canonical comparison.
 - Ops (final list frozen in R1): `create` / `delete` (tombstone; retained forever) /
-  `set` / `unset` for entity fields; `state` ops for review/suggestion dismissals
-  (**dismiss-wins union**, matching v2 semantics); `reading` / `proposal` in `enrich`.
+  `set` / `unset` for entity fields; `state` ops for review/suggestion entries as
+  **per-key LWW** (`dismissed`/`active`, newest op wins) — *not* a monotone union,
+  because v2 ships restore verbs (`h` un-dismisses an orphan) that a union could
+  never express; `reading` / `proposal` in `enrich`.
 - **Field-level LWW** on scalars *and* whole-list values (tags, files). Rationale:
   single user, two devices; concurrent same-field edits within a sync window are
   vanishingly rare, and LWW's loser is still in the journal (recoverable), never
   silently gone. Do not build OR-sets — documented simplicity trade, revisit only on
   evidence.
 - Doc `id` stays the slug (v2 rules: reserved-name guard, collision suffixing). An id
-  rename = `create` new + copy fields + `delete` old, emitted atomically as
-  consecutive ops from one writer.
+  rename = `create` new + copy fields + **reference fixups** + `delete` old, emitted
+  as consecutive ops from one writer. Fixups are part of the contract: rewrite every
+  inbound `supersedes` pointing at the old id, and re-emit the effective
+  review/suggestion `state` under the new id (stale old-id state is harmless after
+  the tombstone but must not be *relied* on). `enrich` entries are keyed by file
+  path/fingerprint, not doc id, so they are unaffected. A golden vector (§10) covers
+  rename-with-inbound-references.
 
 ### 3.3 Fold, durability, compaction, history
 
-- **Fold**: group ops by `(ent, id)`; apply in `(ts, ctr, w)` order; tombstone wins
-  over any older ops and suppresses older `create`s; `state` maps are unions. The fold
+- **Fold**: group ops by `(ent, id)`; apply in `(ts, w)` order; a tombstone wins over
+  all older ops, and **ops newer than the tombstone are ignored unless a `create`
+  newer than the tombstone precedes them** (no partial-doc resurrection from a stray
+  `set`; a golden vector pins this); `state` entries are per-key LWW (§3.2). The fold
   is a pure function — **fold(A ∪ B) ≡ fold(B ∪ A)**, property-tested (§10).
 - **Append durability**: one op = one `write()` of a full line ending in `\n`;
-  `fsync` after user-initiated saves (edits are rare; the cost is nothing). On load,
-  a torn final line (no trailing `\n` / parse failure) is dropped with a warning —
-  crash-safe by construction. Atomic same-directory temp + rename for any full-file
-  rewrite (the v2 EXDEV lesson stands).
+  `fsync` after user-initiated saves (edits are rare; the cost is nothing). Torn
+  final line (no trailing `\n` / parse failure): dropped with a warning on load, and
+  — critically — **repaired before any append**: a writer opening its own file for
+  append must first truncate a torn tail (it was never durable), otherwise the next
+  append glues two ops into one unparseable line and destroys the *new* op.
+  **Mid-file unparseable lines** (distinct from unknown-`op`/unknown-`v` lines, which
+  fold as opaque and survive compaction): both implementations skip them, count them,
+  surface the count as a `ds status` anomaly, and preserve them verbatim through
+  compaction — never silently discard. Atomic same-directory temp + rename for any
+  full-file rewrite (the v2 EXDEV lesson stands).
+- **Truncation detection (the Proton-revert defense)**: a reverted, *shorter* journal
+  propagates through Syncthing as an ordinary modification — no conflict file, still
+  valid JSONL, silently missing recent ops. So each device persists, in **local**
+  (non-synced) state, a high-water mark per journal file (byte length + max `ts`
+  seen); on load, any journal that has regressed below its mark triggers a loud
+  `ds status` anomaly pointing at Syncthing versioning for recovery. "Conflicts are
+  structurally impossible" does **not** mean "damage is impossible" — this check is
+  what keeps the difference honest.
 - **Compaction**: a writer compacts **only its own file** (single writer ⇒ no race):
   rewrite as the minimal op set reproducing its contribution to the fold, **keeping**
   (a) all tombstones, (b) all ops newer than **30 days** — which makes the journal
@@ -146,17 +187,22 @@ Daily (what `ds --help` leads with):
 | `ds` | the TUI (find → open, the urgent lookup) |
 | `ds open <query>` | shell-side find: exact-then-fuzzy match over names/tags/notes + reading text; opens the file (picker on ties). Absorbs v2 `ds ask` (the intent router is dropped; a simple ranked retrieval + one-line answer for question-shaped queries). |
 | `ds file` | the one filing flow: unfiled files (inbox drops **and** in-scope orphans are the same concept) → review card queue; consumes satellite proposals when present, manual filing when not. Prints/updates the **unfiled counter**. |
-| `ds status` | the router, git-status style: unfiled count · expiring/expired · missing files · duplicate clusters · syncthing health (reachable / folder shared / **versioning on**) · journal anomalies — each line naming the verb that fixes it. Absorbs v2 `ds doctor` + `ds reconcile` (CLI) + `ds syncthing status`. `--quiet` mode = v2 `ds expiring` contract: empty stdout when clean, exit 0/1/2, cron-safe. |
+| `ds status` | the router, git-status style: unfiled count · expiring/expired · missing files · duplicate clusters · syncthing health (reachable / folder shared / **versioning on**) · journal anomalies — each line naming the verb that fixes it. Absorbs v2 `ds doctor` + `ds reconcile` (CLI) + `ds syncthing status`. `--quiet` mode = v2 `ds expiring` contract **exactly**: exit 1 is driven by expiry/event findings *only* (other findings never flip a cron job), empty stdout when clean, exit 2 = tool broken; keeps `--days N` and `--bundle SLUG` so existing cron/Task-Scheduler jobs port with a rename. |
 | `ds export <bundle> <dest>` | materialize a bundle (copies + manifest), v2 semantics. |
 
 Maintenance (listed under a separate heading): `ds init` (conversational; sets device
 id, root, termux checks, syncthing API key — absorbs v2 `ds syncthing key/address`),
 `ds reset` (same hard guarantee: never touches anything outside `.dossier/`),
-`ds organize` (canonical renames, plan → `--apply`). Hidden: a self-timing flag (§9).
+`ds organize` (canonical renames, plan → `--apply`). Bundle rename lives in the TUI
+command line (`:bundle rename old new`), emitting the bundle-entity ops plus a
+per-member `set bundles` op — the v2 "rewrites all members atomically" guarantee
+becomes "emitted as one consecutive op run from one writer". Hidden: a self-timing
+flag (§9).
 
 Gone from the binary entirely: `migrate` (Notion cutover is history), `resolve`
 (no conflicts to resolve), `profile` (replaced by built-in timing), `ask`, `scan`,
-`service`, `import`/`intake` as separate verbs.
+`service`, `import`/`intake` as separate verbs, and `ds add` (creation happens in
+the TUI or via `ds file` — a bare CLI creator earned no keep).
 
 ### 4.2 Crate layout
 
@@ -179,10 +225,13 @@ both live in this repo; CI runs both toolchains (§10).
 `ratatui` + `crossterm` (TUI; crossterm speaks SGR mouse — the Termux touch story
 ports), `serde`/`serde_json`, `clap`, `walkdir` (the reconcile tree walk — one
 `DirEntry` pass kills the v2 520 ms FUSE stat storm), `thiserror`/`anyhow`, `dirs`,
-`jiff` or `chrono` (dates), `ureq` + rustls (Syncthing REST, status only).
-**No async runtime** — std threads + channels are sufficient at this scale and far
-better learning material than tokio. Every added dependency needs a sentence of
-justification in the PR.
+`jiff` or `chrono` (dates), `ureq` + rustls (Syncthing REST, status only — **note:**
+on Termux the API is HTTPS-only with a *self-signed* cert (Phase 15 finding; plain
+http 307-redirects), so rustls needs a custom `ServerCertVerifier` pinned/permissive
+for `127.0.0.1` only — budget for that shim in R3, never disable verification
+globally). **No async runtime** — std threads + channels are sufficient at this
+scale and far better learning material than tokio. Every added dependency needs a
+sentence of justification in the PR.
 
 ### 4.4 Platform targets
 
@@ -289,10 +338,16 @@ until the cutover step the user personally green-lights.
   supremacy); **golden test vectors** checked in as JSON fixtures; synthetic perf
   test (fold 1k docs / 50k ops < 20 ms in CI with generous margin). Freeze §3.
 - **R2 — Exporter + parity (Python).** One-shot v2-store → journal converter using
-  the existing trusted `store.py` reader (docs + locations + bundles + reconcile +
-  suggestions + scans + intake sidecars). Parity harness: `fold(export(store)) ==
-  store.load_all()` field-by-field across all ~948 real docs (read-only). Also: the
-  Python fold for the satellite, validated against the R1 golden vectors.
+  the existing trusted `store.py` reader: docs + locations + bundles + reconcile +
+  suggestions + scans + intake sidecars **and the synced `config.toml` → settings
+  ops** (`expiry_threshold_days`, `include`/`ignore` scope globs, `[intake]`
+  inbox/filed/keyword-map, `[organize.folders]` — losing these at cutover would
+  silently reset scope and filing behavior). Parity harness: `fold(export(store)) ==
+  store.load_all()` + settings, field-by-field across all ~948 real docs
+  (read-only). Also: the Python fold for the satellite, validated against the R1
+  golden vectors. **All R2–R6 test journals live *outside* the synced tree**
+  (scratch/local dirs) — anything created inside the Syncthing folder syncs by
+  default, and half-built journals must never reach the phone early.
 - **R3 — Read-only core** *(needs R-UI)*: browse + search (exact→fuzzy, ctrl+t
   content search) + open + `ds status` (counts, syncthing REST checks) + `ds open`.
   Daily-usable read-only against an exported copy of the real store.
@@ -303,11 +358,15 @@ until the cutover step the user personally green-lights.
   D11), `ds export` with manifest, `ds organize`.
 - **R6 — Satellite adaptation**: persistence adapter, `ds-lab` CLI, gut the Python
   package, service writes to `enrich/`, sync-idle wait kept.
-- **R7 — Cutover (big-bang, D4) + polish.** Rehearse on a copy; then: stop edits →
-  export → parity green → archive the old `.dossier/` contents locally → new layout
-  syncs → binary on the phone. Rollback = the archived v2 store (additive, nothing
-  destroyed). Then: `.stignore` update, README/CLAUDE.md rewrite, v2 code deletion,
-  CI finalization, Termux install docs. **The user personally runs the cutover.**
+- **R7 — Cutover (big-bang, D4) + polish.** Rehearse on a copy; then, in this order:
+  **(1) install the phone binary and verify it launches** (the phone must never sit
+  with a deleted v2 store and no app), **(2) `.stignore` the compaction-temp pattern
+  on both devices** (per-device file, never syncs — §3.1), (3) stop edits → export →
+  parity green, (4) archive the old `.dossier/` contents to the local data dir,
+  (5) let the journal layout sync, (6) confirm the phone folds it. Rollback = the
+  archived v2 store (additive, nothing destroyed). Then: README/CLAUDE.md rewrite,
+  v2 code deletion, CI finalization, Termux install docs. **The user personally runs
+  the cutover.**
 
 Sequencing notes: R1 ∥ R2 overlap after §3 freezes; R-UI runs during R1/R2; R3–R5 are
 strictly ordered; R6 can overlap R4/R5 once the adapter exists.
@@ -317,9 +376,10 @@ strictly ordered; R6 can overlap R4/R5 once the adapter exists.
 - The exporter is idempotent and read-only w.r.t. the v2 store; parity failure on any
   field is a hard stop.
 - The archived v2 store goes to the platform data dir (non-synced), not the trash.
-- `.dossier/journal/` is added to sync **only at cutover** (avoid half-migrated state
-  syncing to the phone); Syncthing versioning verified on before cutover (existing
-  status check).
+- `.dossier/journal/` first exists inside the synced tree **at cutover, never
+  before** — enforced by keeping all pre-cutover journals outside the Syncthing
+  folder entirely (§6 R2), since anything created inside it syncs by default.
+  Syncthing versioning verified on before cutover (existing status check).
 - The real files tree is untouched by every phase except user-approved
   `ds organize --apply` / `ds file` moves — same v2 guarantee, same rollback-safe
   rename (move file, then op; roll back the move if the append fails).
@@ -333,6 +393,8 @@ strictly ordered; R6 can overlap R4/R5 once the adapter exists.
 | Review: orphans/missing/duplicates/succession/integrity | **Port** (five tabs; conflicts tab dropped) |
 | Suggestions accept/dismiss | **Port**; name-parse source in Rust, reading source from satellite |
 | Bundles + export + manifest | **Port**; readiness = counts only |
+| Bundle rename (atomic member rewrite) | **Port** as a TUI command-line verb emitting per-member ops (§4.1) |
+| `ds add` | **Drop** — creation via TUI / `ds file` |
 | Undo/history | **Port, redesigned**: journal-as-history, inverse ops, 30-day horizon |
 | `ds status` router | **New** (absorbs doctor/reconcile-CLI/syncthing-status/expiring) |
 | `ds file` | **New** (absorbs intake + import + orphan-adopt; D11 triage) |
@@ -367,9 +429,14 @@ each phase end and recorded in the PR. A phase does not ship over-budget.
 ## 10. Testing & CI
 
 - **journal crate**: property tests (proptest) for the §3.3 invariants; golden vector
-  fixtures shared with the Python fold (both implementations must produce
-  byte-identical folded state from the same fixture set — the cross-language
-  drift-killer).
+  fixtures shared with the Python fold — both implementations serialize their folded
+  state to **canonical JSON** (sorted keys, UTF-8, integers only — the format has no
+  floats by construction, §3.2) and must match byte-for-byte; comparing raw
+  serializer defaults is unimplementable (serde_json and `json.dumps` disagree on
+  key order and escaping). Required vectors include: union-commutativity,
+  compaction-preserves-fold, tombstone-then-newer-`set` (no resurrection),
+  tombstone-then-newer-`create` (legitimate recreate), id-rename with inbound
+  `supersedes`, per-key `state` LWW un-dismiss, torn tail, mid-file garbage line.
 - **TUI**: ratatui `TestBackend` renders to an in-memory buffer (the analog of v2's
   `run_test`); same discipline as v2 — poll for effects, never sleep-then-assert. A
   thin PTY smoke test on real terminals (port the `tools/` driver idea; `expectrl` or
@@ -390,7 +457,8 @@ each phase end and recorded in the PR. A phase does not ship over-budget.
 | Journal design flaw found late | §3 frozen in R1 behind property tests + golden vectors; `v` field enables evolution; unknown-op preservation |
 | Two fold implementations drift (Rust/Python) | Shared golden vectors; CI runs both against the same fixtures |
 | Feature-parity creep | §8 is authoritative; PRs may not port anything marked Drop |
-| Clock skew reorders LWW between devices | Per-writer `ctr` Lamport floor; worst case a field resolves to the older edit — still in the journal, recoverable; acceptable for 1 user / 2 devices |
+| Clock skew reorders LWW between devices | `ts` is a hybrid logical clock (§3.2), strictly monotonic per writer; cross-writer worst case a field resolves to the older edit — still in the journal, recoverable; acceptable for 1 user / 2 devices |
+| Journal damage without a conflict file (Proton revert, partial sync) | Local high-water marks per journal + loud `ds status` regression anomaly (§3.3); Syncthing staggered versioning as the restore path |
 | Interaction polish regressions (Esc/verbs/find-fast) | §4.5 invariants are the acceptance checklist for R3–R5; each gets a test |
 | Big-bang cutover surprise | Cutover *rehearsed on a copy* first; parity hard-stop; archived v2 store as rollback; user runs it personally |
 | Learning-codebase pressure vs. shipping | Commenting standard (§4.6) is part of review, not an afterthought; slices stay small |
