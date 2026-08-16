@@ -1,0 +1,737 @@
+<title>Press and Type</title>
+<style>
+/* dossier v3 — R-UI mockups.
+   The page is a technical datasheet: monospace carries the headings because the
+   subject is a terminal; prose sits in a quiet sans beneath it. Terminal panes
+   follow the viewer's theme, which is the point REWRITE-UI §6 makes — semantic
+   tokens map to ANSI, so the user's own terminal theme carries the palette. */
+
+:root {
+  --ground: #eef1f3;
+  --surface: #ffffff;
+  --ink: #161a1e;
+  --muted: #5d6b77;
+  --faint: #8b98a3;
+  --rule: #d5dbe0;
+  --accent: #12676a;
+  --accent-soft: #d9eaea;
+
+  --term-bg: #fbfbfa;
+  --term-fg: #24292e;
+  --term-dim: #7b8792;
+  --term-sel-bg: #24292e;
+  --term-sel-fg: #fbfbfa;
+  --term-exp: #b83c26;
+  --term-soon: #8a6410;
+  --term-ok: #3a7346;
+  --term-acc: #12676a;
+  --term-btn: #4d5a65;
+
+  --shadow: 0 1px 2px rgba(20, 30, 40, .06), 0 8px 24px -12px rgba(20, 30, 40, .18);
+
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
+    "Roboto Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1418;
+    --surface: #161c22;
+    --ink: #e3e8ec;
+    --muted: #8a98a4;
+    --faint: #6b7883;
+    --rule: #222b33;
+    --accent: #5fb6b9;
+    --accent-soft: #14343a;
+
+    --term-bg: #0b0f13;
+    --term-fg: #d5dde3;
+    --term-dim: #74828d;
+    --term-sel-bg: #d5dde3;
+    --term-sel-fg: #0b0f13;
+    --term-exp: #f0795d;
+    --term-soon: #dda845;
+    --term-ok: #71b77e;
+    --term-acc: #5fb6b9;
+    --term-btn: #93a1ad;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0f1418;
+  --surface: #161c22;
+  --ink: #e3e8ec;
+  --muted: #8a98a4;
+  --faint: #6b7883;
+  --rule: #222b33;
+  --accent: #5fb6b9;
+  --accent-soft: #14343a;
+
+  --term-bg: #0b0f13;
+  --term-fg: #d5dde3;
+  --term-dim: #74828d;
+  --term-sel-bg: #d5dde3;
+  --term-sel-fg: #0b0f13;
+  --term-exp: #f0795d;
+  --term-soon: #dda845;
+  --term-ok: #71b77e;
+  --term-acc: #5fb6b9;
+  --term-btn: #93a1ad;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(2rem, 5vw, 4.5rem) clamp(1rem, 4vw, 2.5rem) 6rem;
+}
+
+/* ── masthead ─────────────────────────────────────────────────────────── */
+.masthead { display: flex; flex-direction: column; gap: .75rem; margin-bottom: 1rem; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: .74rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+h1 {
+  font-family: var(--mono);
+  font-size: clamp(1.7rem, 4.2vw, 2.6rem);
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.standfirst {
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+  margin: 0;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.25rem;
+  font-family: var(--mono);
+  font-size: .76rem;
+  color: var(--faint);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: .7rem 0;
+  margin: 1.5rem 0 3rem;
+}
+.meta b { color: var(--muted); font-weight: 500; }
+
+/* ── sections ─────────────────────────────────────────────────────────── */
+section { margin: 0 0 4.5rem; }
+
+h2 {
+  font-family: var(--mono);
+  font-size: 1.18rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  margin: 0 0 .4rem;
+  display: flex;
+  align-items: baseline;
+  gap: .7rem;
+  flex-wrap: wrap;
+}
+h2 .tag {
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .18rem .5rem;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+h3 {
+  font-family: var(--mono);
+  font-size: .82rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  margin: 0 0 .15rem;
+}
+
+p { max-width: 66ch; margin: 0 0 1rem; }
+p.lede { color: var(--muted); margin-bottom: 1.8rem; }
+
+/* ── terminal specimens ───────────────────────────────────────────────── */
+.specimens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.75rem;
+  align-items: flex-start;
+  margin: 1.5rem 0 0;
+}
+
+figure { margin: 0; display: flex; flex-direction: column; gap: .55rem; min-width: 0; }
+
+figcaption { display: flex; flex-direction: column; gap: .1rem; }
+figcaption .size {
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--faint);
+}
+figcaption .how { font-size: .84rem; color: var(--muted); max-width: 46ch; }
+
+.term {
+  background: var(--term-bg);
+  color: var(--term-fg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  padding: .55rem .6rem;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.term pre {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.34;
+  white-space: pre;
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums;
+  tab-size: 1;
+}
+
+/* the phone pane sits at its true 45-column width */
+.term.phone pre { font-size: 12px; }
+@media (max-width: 620px) { .term pre { font-size: 10.5px; } }
+
+/* terminal semantic tokens — every colour is paired with a glyph, so the
+   monochrome reading survives (REWRITE-UI §6) */
+.hd  { font-weight: 700; }
+.dim { color: var(--term-dim); }
+.exp { color: var(--term-exp); font-weight: 600; }
+.soon { color: var(--term-soon); font-weight: 600; }
+.ok  { color: var(--term-ok); }
+.none { color: var(--term-dim); }
+.acc { color: var(--term-acc); }
+.warn { color: var(--term-exp); font-weight: 600; }
+.btn { color: var(--term-btn); }
+.sel { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.seldim { background: var(--term-sel-bg); color: var(--term-sel-fg); opacity: .72; }
+
+/* ── notes ────────────────────────────────────────────────────────────── */
+.notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.1rem 2rem;
+  margin: 2rem 0 0;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+}
+.note { display: flex; gap: .7rem; align-items: flex-start; }
+.note .k {
+  font-family: var(--mono);
+  font-size: .7rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .12rem .38rem;
+  border-radius: 2px;
+  white-space: nowrap;
+  margin-top: .18rem;
+}
+.note p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 44ch; }
+.note p b { color: var(--ink); font-weight: 600; }
+
+/* ── key/value table ──────────────────────────────────────────────────── */
+.kv { width: 100%; border-collapse: collapse; margin: 1.25rem 0 0; font-size: .9rem; }
+.kv th, .kv td { text-align: left; padding: .55rem .8rem .55rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.kv th { font-family: var(--mono); font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.kv td.k { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+.kv td { color: var(--muted); }
+.kv td b { color: var(--ink); font-weight: 600; }
+.scroller { overflow-x: auto; }
+
+footer {
+  border-top: 1px solid var(--rule);
+  padding-top: 1.4rem;
+  margin-top: 1rem;
+  font-family: var(--mono);
+  font-size: .74rem;
+  color: var(--faint);
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem 1.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .term { transition: box-shadow .2s ease; }
+}
+
+/* ── interaction diagrams (page 3) ────────────────────────────────────── */
+.kbd {
+  font-family: var(--mono);
+  font-size: .78rem;
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: .1rem .42rem;
+  background: var(--surface);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.chain { display: flex; flex-direction: column; gap: 0; margin: 1.5rem 0 0; }
+.chain .layer {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 1rem;
+  align-items: baseline;
+  padding: .7rem 0 .7rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.chain .layer:first-child { border-top: 1px solid var(--rule); }
+.chain .layer .what { font-family: var(--mono); font-size: .82rem; color: var(--ink); }
+.chain .layer .then { font-size: .9rem; color: var(--muted); }
+.chain .layer.arm .what { color: var(--term-soon); }
+.chain .layer.quit .what { color: var(--term-exp); }
+
+.seq { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1.4rem; margin: 1.5rem 0 0; counter-reset: step; }
+.seq > div { border-top: 2px solid var(--accent); padding-top: .7rem; }
+.seq > div::before {
+  counter-increment: step;
+  content: counter(step);
+  display: block;
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--accent);
+  margin-bottom: .3rem;
+}
+.seq h4 { font-family: var(--mono); font-size: .84rem; margin: 0 0 .3rem; font-weight: 600; }
+.seq p { font-size: .88rem; color: var(--muted); margin: 0; max-width: none; }
+
+.swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin: 1.4rem 0 0; }
+.swatch { display: flex; gap: .6rem; align-items: baseline; }
+.swatch .g {
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  width: 1.4rem;
+  text-align: center;
+  flex: none;
+}
+.swatch .t { font-size: .86rem; color: var(--muted); }
+.swatch .t b { color: var(--ink); font-weight: 600; display: block; font-family: var(--mono); font-size: .8rem; }
+
+
+/* ── merged search-bar specimens ──────────────────────────────────────── */
+:root {
+  --term-slab: #e4eaee;
+  --term-slab-fg: #10161b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --term-slab: #1b242c;
+    --term-slab-fg: #eaf0f5;
+  }
+}
+:root[data-theme="dark"] {
+  --term-slab: #1b242c;
+  --term-slab-fg: #eaf0f5;
+}
+
+.chip, .cap { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.slab { background: var(--term-slab); color: var(--term-slab-fg); }
+.uline, .slabline {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+.slabline { background: var(--term-slab); color: var(--term-slab-fg); }
+
+/* NO_COLOR, honestly: hues collapse to the foreground; reverse, bold, dim and
+   underline all survive, which is why the rule is built from those four. */
+.term.mono .acc,
+.term.mono .exp,
+.term.mono .soon,
+.term.mono .ok { color: var(--term-fg); }
+.term.mono .slab,
+.term.mono .slabline { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+
+.rulebox {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1.2rem 2rem;
+  margin: 1.6rem 0 0;
+  padding: 1.3rem 0 0;
+  border-top: 1px solid var(--rule);
+}
+.rulebox > div { display: flex; flex-direction: column; gap: .35rem; }
+.rulebox .texture {
+  font-family: var(--mono);
+  font-size: .95rem;
+  align-self: flex-start;
+  padding: .1rem .5rem;
+  border-radius: 2px;
+}
+.rulebox .texture.rev { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.rulebox .texture.und {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--faint);
+  color: var(--ink);
+}
+.rulebox .texture.faint { color: var(--faint); }
+.rulebox p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 40ch; }
+.rulebox p b { color: var(--ink); font-weight: 600; }
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 2.5rem 2rem;
+  margin: 1.5rem 0 0;
+}
+.option { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+.option.pick { position: relative; }
+.option h3 { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+.option h3 .letter {
+  font-size: .68rem;
+  letter-spacing: .12em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .12rem .4rem;
+  border-radius: 2px;
+}
+.option h3 .flag {
+  font-family: var(--sans);
+  font-size: .7rem;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--term-sel-fg);
+  background: var(--accent);
+  padding: .1rem .45rem;
+  border-radius: 2px;
+}
+.option .cost { font-family: var(--mono); font-size: .72rem; color: var(--faint); }
+.option p { font-size: .9rem; color: var(--muted); margin: 0; max-width: 48ch; }
+.option p + p { margin-top: .5rem; }
+.option p b { color: var(--ink); font-weight: 600; }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.5rem 0 0; }
+.verdict {
+  border-left: 3px solid var(--accent);
+  padding: .2rem 0 .2rem 1.1rem;
+  margin: 1.8rem 0 0;
+}
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .6rem; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · search bar · C + D</p>
+    <h1>Press and Type</h1>
+    <p class="standfirst">
+      C marked the field with an underline and the prompt with a reverse chip; D
+      marked the buttons with reverse chips. Shipping both would use one texture
+      for two unrelated jobs. So the merge starts by deciding what each texture
+      <em>means</em> — and the four candidates differ only in how strictly that
+      rule is kept.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Surface</b> Find, touch layout</span>
+    <span><b>Pane</b> 45×28 · portrait Termux</span>
+    <span><b>Rows spent</b> none, in all four</span>
+    <span><b>Textures</b> reverse · underline · dim</span>
+  </div>
+
+  <section>
+    <h2>The rule <span class="tag">what makes it one design</span></h2>
+    <p class="lede">
+      A terminal has four things to draw with — reverse video, underline, bold
+      and dim — and they all survive with colour switched off. Cohesion here
+      means each one saying exactly one thing, everywhere, on every surface.
+    </p>
+    <div class="rulebox">
+      <div>
+        <span class="texture rev">&nbsp;⏎&nbsp;</span>
+        <p><b>Reverse — you can press this.</b> Buttons, and the keyboard
+          affordance at the end of the field. Nothing else.</p>
+      </div>
+      <div>
+        <span class="texture und">coc█&nbsp;</span>
+        <p><b>Underline — you can type here.</b> One span per surface, and only
+          the surface that takes text has one.</p>
+      </div>
+      <div>
+        <span class="texture faint">3/24 · [scans]</span>
+        <p><b>Dim — information only.</b> Counts, chips, hints: things that tell
+          you where you are and never respond to a tap.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Four ways to keep it</h2>
+    <p class="lede">
+      Same four list rows above each, so what differs is only the chrome.
+    </p>
+
+    <div class="options">
+      <div class="option">
+        <h3><span class="letter">M1</span> Strict</h3>
+        <span class="cost">chips on buttons · underline on field · dim ⌨</span>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="chip"> ⏎ Open </span>   <span class="chip"> → Detail </span> <span class="chip"> ^x Expiry</span> <span class="chip"> ^t Scans </span>  
+<span class="acc"> &gt;</span><span class="uline"> coc█                                   </span><span class="dim"> ⌨ </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <p>The rule applied literally, and then one exception: the <b>⌨</b> stays
+          dim, so the field row carries no reverse at all.</p>
+        <p>Cleanest reading of the two textures — but the ⌨ <em>is</em> pressable,
+          so dimming it breaks the rule it was written to keep.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">M2</span> Anchored</h3>
+        <span class="cost">chips on buttons · underline on field · chip ⌨</span>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="chip"> ⏎ Open </span>   <span class="chip"> → Detail </span> <span class="chip"> ^x Expiry</span> <span class="chip"> ^t Scans </span>  
+<span class="acc"> &gt;</span><span class="uline"> coc█                                   </span><span class="chip"> ⌨ </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <p>The same, with the exception removed: the keyboard glyph is a button,
+          so it gets a chip like every other button.</p>
+        <p>The chip also <b>closes the field at the right</b>, which is what makes
+          the underline read as a bounded box rather than a stray rule.</p>
+      </div>
+
+      <div class="option pick">
+        <h3><span class="letter">M3</span> Key caps <span class="flag">recommended</span></h3>
+        <span class="cost">reverse on the key only · underline on field</span>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="cap"> ⏎ </span> Open   <span class="cap"> → </span> Detail <span class="cap"> ^x </span> Expiry<span class="cap"> ^t </span> Scans  
+<span class="acc"> &gt;</span><span class="uline"> coc█                                   </span><span class="cap"> ⌨ </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <p>Reverse marks <b>the key you press</b>, not the whole button: a cap,
+          then a plain label. Half the ink of M2 for the same affordance, and the
+          bar teaches its own keybindings while it sits there.</p>
+        <p>It also scales: a fifth button costs a two-column cap, not a whole
+          inverted block.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">M4</span> Full weight</h3>
+        <span class="cost">chips · underline · filled field</span>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="chip"> ⏎ Open </span>   <span class="chip"> → Detail </span> <span class="chip"> ^x Expiry</span> <span class="chip"> ^t Scans </span>  
+<span class="slab"> &gt; </span><span class="slabline"> coc█                                  </span><span class="slab"> ⌨ </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <p>C and D stacked without merging: the field is underlined <em>and</em>
+          filled, under a row of solid chips.</p>
+        <p>Unmissable, and the ceiling worth seeing — but two competing fills
+          make the chrome louder than the list it exists to serve.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>M3 in the states that matter</h2>
+    <p class="lede">
+      An empty field at launch, a toggle switched on, the whole screen, and the
+      same rule on a keyboard layout where there are no buttons at all.
+    </p>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="cap"> ⏎ </span> Open   <span class="cap"> → </span> Detail <span class="cap"> ^x </span> Expiry<span class="cap"> ^t </span> Scans  
+<span class="acc"> &gt;</span><span class="uline"> █                                      </span><span class="cap"> ⌨ </span>
+ <span class="dim">24/24</span>                    <span class="dim">esc back  ^q quit</span>  </pre></div>
+        <figcaption>
+          <span class="size">45 cols · nothing typed</span>
+          <span class="how">The empty underline is the invitation — the field
+            reads as waiting rather than as a blank row.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre>  Ship Security Awareness              02-30 
+<span class="dim">    cert-file 6 · marine</span>                     
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="cap"> ⏎ </span> Open   <span class="cap"> → </span> Detail <span class="cap"> ^x </span> Expiry<span class="cap"> ^t </span> Scans• 
+<span class="acc"> &gt;</span><span class="uline"> coc█                                   </span><span class="cap"> ⌨ </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <figcaption>
+          <span class="size">45 cols · content search on</span>
+          <span class="how">A toggle that is on gets a dot beside its label; the
+            cap never changes, because the key never changes.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre> <span class="hd">dossier</span>                   <span class="acc">! 3 exp · 24 docs</span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama             12-26 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt               ·    
+<span class="dim">    softcopy · marine</span>                        
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+<span class="cap"> ⏎ </span> Open   <span class="cap"> → </span> Detail <span class="cap"> ^x </span> Expiry<span class="cap"> ^t </span> Scans  
+<span class="acc"> &gt;</span><span class="uline"> coc█                                   </span><span class="cap"> ⌨ </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <figcaption>
+          <span class="size">45×28 · whole screen</span>
+          <span class="how">Twelve documents, unchanged.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre> <span class="hd">dossier</span>                   <span class="acc">! 3 exp · 24 docs</span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama             12-26 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt               ·    
+<span class="dim">    softcopy · marine</span>                        
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+<span class="cap"> ⏎ </span> Open   <span class="cap"> → </span> Detail <span class="cap"> ^x </span> Expiry<span class="cap"> ^t </span> Scans  
+<span class="acc"> &gt;</span><span class="uline"> coc█                                   </span><span class="cap"> ⌨ </span>
+ 3/24  <span class="dim">[scans]</span>             <span class="dim">esc back  ^q quit</span> </pre></div>
+        <figcaption>
+          <span class="size">45×28 · NO_COLOR</span>
+          <span class="how">Nothing structural is lost: caps and selection are
+            reverse, the field is underline, and the expiry markers carry the
+            status on their own.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <figure style="margin-top:1.75rem">
+      <div class="term"><pre>  Ship Security Awareness            marine                     cert-file 6    02-30                
+<span class="sel">▸ COC Certificate (Master)         marine                     cert-file 8  ! 09-26 </span>                 
+  COC Certificate 2019                marine                     cert-file 9     ·                  
+  COC Endorsement — Panama            marine                    cert-file 10    12-26               
+                                                                                                    
+<span class="acc"> &gt;</span><span class="uline"> coc█                                                                                        </span><span class="dim">3/24 </span>
+ <span class="dim">⏎ open  → detail  ^x expiring  ^q quit</span>                                                             </pre></div>
+      <figcaption>
+        <span class="size">100 cols · keyboard layout</span>
+        <span class="how">No action bar, no caps, no ⌨ — and the field is still
+          the underlined span. The rule survives losing three quarters of its
+          own vocabulary, which is the test of whether it was a rule.</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>M3.</b> It keeps what you liked in C — the underline putting the
+        emphasis exactly where the thumb lands — and what you liked in D, that
+        the buttons look like buttons, while spending a third of D's ink. The
+        cap is also the honest shape: what you press <em>is</em> the key, and on
+        the keyboard layout the same mark teaches the same binding.</p>
+      <p>One thing to decide with it: the caps are <b>⏎ → ^x ^t</b>, which means
+        the bar shows control combinations to someone holding a phone with no
+        control key. The alternative is caps that read as touch targets
+        (<b>▸ ▹ ! ⌕</b>) and hints that name the keys instead. I would ship the
+        keys — you use both a keyboard and a thumb on this device, and the
+        keybindings are the part worth learning.</p>
+      <p>If M3 reads too light on the real screen, M2 is the same code with the
+        cap widened to the whole button; the two differ by one constant.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/searchbar-merge.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>

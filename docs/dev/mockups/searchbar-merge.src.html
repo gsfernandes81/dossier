@@ -1,0 +1,284 @@
+<title>Press and Type</title>
+<style>
+/*CSS*/
+
+/* ── merged search-bar specimens ──────────────────────────────────────── */
+:root {
+  --term-slab: #e4eaee;
+  --term-slab-fg: #10161b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --term-slab: #1b242c;
+    --term-slab-fg: #eaf0f5;
+  }
+}
+:root[data-theme="dark"] {
+  --term-slab: #1b242c;
+  --term-slab-fg: #eaf0f5;
+}
+
+.chip, .cap { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.slab { background: var(--term-slab); color: var(--term-slab-fg); }
+.uline, .slabline {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+.slabline { background: var(--term-slab); color: var(--term-slab-fg); }
+
+/* NO_COLOR, honestly: hues collapse to the foreground; reverse, bold, dim and
+   underline all survive, which is why the rule is built from those four. */
+.term.mono .acc,
+.term.mono .exp,
+.term.mono .soon,
+.term.mono .ok { color: var(--term-fg); }
+.term.mono .slab,
+.term.mono .slabline { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+
+.rulebox {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1.2rem 2rem;
+  margin: 1.6rem 0 0;
+  padding: 1.3rem 0 0;
+  border-top: 1px solid var(--rule);
+}
+.rulebox > div { display: flex; flex-direction: column; gap: .35rem; }
+.rulebox .texture {
+  font-family: var(--mono);
+  font-size: .95rem;
+  align-self: flex-start;
+  padding: .1rem .5rem;
+  border-radius: 2px;
+}
+.rulebox .texture.rev { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.rulebox .texture.und {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--faint);
+  color: var(--ink);
+}
+.rulebox .texture.faint { color: var(--faint); }
+.rulebox p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 40ch; }
+.rulebox p b { color: var(--ink); font-weight: 600; }
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 2.5rem 2rem;
+  margin: 1.5rem 0 0;
+}
+.option { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+.option.pick { position: relative; }
+.option h3 { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+.option h3 .letter {
+  font-size: .68rem;
+  letter-spacing: .12em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .12rem .4rem;
+  border-radius: 2px;
+}
+.option h3 .flag {
+  font-family: var(--sans);
+  font-size: .7rem;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--term-sel-fg);
+  background: var(--accent);
+  padding: .1rem .45rem;
+  border-radius: 2px;
+}
+.option .cost { font-family: var(--mono); font-size: .72rem; color: var(--faint); }
+.option p { font-size: .9rem; color: var(--muted); margin: 0; max-width: 48ch; }
+.option p + p { margin-top: .5rem; }
+.option p b { color: var(--ink); font-weight: 600; }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.5rem 0 0; }
+.verdict {
+  border-left: 3px solid var(--accent);
+  padding: .2rem 0 .2rem 1.1rem;
+  margin: 1.8rem 0 0;
+}
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .6rem; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · search bar · C + D</p>
+    <h1>Press and Type</h1>
+    <p class="standfirst">
+      C marked the field with an underline and the prompt with a reverse chip; D
+      marked the buttons with reverse chips. Shipping both would use one texture
+      for two unrelated jobs. So the merge starts by deciding what each texture
+      <em>means</em> — and the four candidates differ only in how strictly that
+      rule is kept.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Surface</b> Find, touch layout</span>
+    <span><b>Pane</b> 45×28 · portrait Termux</span>
+    <span><b>Rows spent</b> none, in all four</span>
+    <span><b>Textures</b> reverse · underline · dim</span>
+  </div>
+
+  <section>
+    <h2>The rule <span class="tag">what makes it one design</span></h2>
+    <p class="lede">
+      A terminal has four things to draw with — reverse video, underline, bold
+      and dim — and they all survive with colour switched off. Cohesion here
+      means each one saying exactly one thing, everywhere, on every surface.
+    </p>
+    <div class="rulebox">
+      <div>
+        <span class="texture rev">&nbsp;⏎&nbsp;</span>
+        <p><b>Reverse — you can press this.</b> Buttons, and the keyboard
+          affordance at the end of the field. Nothing else.</p>
+      </div>
+      <div>
+        <span class="texture und">coc█&nbsp;</span>
+        <p><b>Underline — you can type here.</b> One span per surface, and only
+          the surface that takes text has one.</p>
+      </div>
+      <div>
+        <span class="texture faint">3/24 · [scans]</span>
+        <p><b>Dim — information only.</b> Counts, chips, hints: things that tell
+          you where you are and never respond to a tap.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Four ways to keep it</h2>
+    <p class="lede">
+      Same four list rows above each, so what differs is only the chrome.
+    </p>
+
+    <div class="options">
+      <div class="option">
+        <h3><span class="letter">M1</span> Strict</h3>
+        <span class="cost">chips on buttons · underline on field · dim ⌨</span>
+        <div class="term phone"><pre><!--S:m1--></pre></div>
+        <p>The rule applied literally, and then one exception: the <b>⌨</b> stays
+          dim, so the field row carries no reverse at all.</p>
+        <p>Cleanest reading of the two textures — but the ⌨ <em>is</em> pressable,
+          so dimming it breaks the rule it was written to keep.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">M2</span> Anchored</h3>
+        <span class="cost">chips on buttons · underline on field · chip ⌨</span>
+        <div class="term phone"><pre><!--S:m2--></pre></div>
+        <p>The same, with the exception removed: the keyboard glyph is a button,
+          so it gets a chip like every other button.</p>
+        <p>The chip also <b>closes the field at the right</b>, which is what makes
+          the underline read as a bounded box rather than a stray rule.</p>
+      </div>
+
+      <div class="option pick">
+        <h3><span class="letter">M3</span> Key caps <span class="flag">recommended</span></h3>
+        <span class="cost">reverse on the key only · underline on field</span>
+        <div class="term phone"><pre><!--S:m3--></pre></div>
+        <p>Reverse marks <b>the key you press</b>, not the whole button: a cap,
+          then a plain label. Half the ink of M2 for the same affordance, and the
+          bar teaches its own keybindings while it sits there.</p>
+        <p>It also scales: a fifth button costs a two-column cap, not a whole
+          inverted block.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">M4</span> Full weight</h3>
+        <span class="cost">chips · underline · filled field</span>
+        <div class="term phone"><pre><!--S:m4--></pre></div>
+        <p>C and D stacked without merging: the field is underlined <em>and</em>
+          filled, under a row of solid chips.</p>
+        <p>Unmissable, and the ceiling worth seeing — but two competing fills
+          make the chrome louder than the list it exists to serve.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>M3 in the states that matter</h2>
+    <p class="lede">
+      An empty field at launch, a toggle switched on, the whole screen, and the
+      same rule on a keyboard layout where there are no buttons at all.
+    </p>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:m3-empty--></pre></div>
+        <figcaption>
+          <span class="size">45 cols · nothing typed</span>
+          <span class="how">The empty underline is the invitation — the field
+            reads as waiting rather than as a blank row.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:m3-active--></pre></div>
+        <figcaption>
+          <span class="size">45 cols · content search on</span>
+          <span class="how">A toggle that is on gets a dot beside its label; the
+            cap never changes, because the key never changes.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:m3-full--></pre></div>
+        <figcaption>
+          <span class="size">45×28 · whole screen</span>
+          <span class="how">Twelve documents, unchanged.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre><!--S:m3-full--></pre></div>
+        <figcaption>
+          <span class="size">45×28 · NO_COLOR</span>
+          <span class="how">Nothing structural is lost: caps and selection are
+            reverse, the field is underline, and the expiry markers carry the
+            status on their own.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <figure style="margin-top:1.75rem">
+      <div class="term"><pre><!--S:m3-desk--></pre></div>
+      <figcaption>
+        <span class="size">100 cols · keyboard layout</span>
+        <span class="how">No action bar, no caps, no ⌨ — and the field is still
+          the underlined span. The rule survives losing three quarters of its
+          own vocabulary, which is the test of whether it was a rule.</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>M3.</b> It keeps what you liked in C — the underline putting the
+        emphasis exactly where the thumb lands — and what you liked in D, that
+        the buttons look like buttons, while spending a third of D's ink. The
+        cap is also the honest shape: what you press <em>is</em> the key, and on
+        the keyboard layout the same mark teaches the same binding.</p>
+      <p>One thing to decide with it: the caps are <b>⏎ → ^x ^t</b>, which means
+        the bar shows control combinations to someone holding a phone with no
+        control key. The alternative is caps that read as touch targets
+        (<b>▸ ▹ ! ⌕</b>) and hints that name the keys instead. I would ship the
+        keys — you use both a keyboard and a thumb on this device, and the
+        keybindings are the part worth learning.</p>
+      <p>If M3 reads too light on the real screen, M2 is the same code with the
+        cap widened to the whole button; the two differ by one constant.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/searchbar-merge.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>
