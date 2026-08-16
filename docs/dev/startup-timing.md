@@ -53,16 +53,28 @@ Read the results as: shell total ≈ interpreter+site boot + the `ds-timing`
 total (+ a few ms of teardown). The gap between shell total and the probe's
 total is the part only a native binary can remove.
 
-## Baseline results (fill in — R0.1)
+## Baseline results (R0.1 — measured 2026-08-16, Android/Termux)
 
-| Device | Condition | Shell total | ds-timing line |
-|---|---|---|---|
-| Phone (Termux) | cold ×3 | | |
-| Phone (Termux) | warm ×3 | | |
-| Desktop (Windows) | cold ×3 | | |
-| Desktop (Windows) | warm ×3 | | |
+| Device | Condition | Shell total | usable | imports+init | attention | load | paint |
+|---|---|---|---|---|---|---|---|
+| Phone | cold | 1.430s | 1053ms | 701ms | 20ms | 84ms | 249ms |
+| Phone | warm | 1.005s | 693ms | 329ms | 35ms | 102ms | 227ms |
+| Phone | warm | 0.941s | 660ms | 321ms | 24ms | 91ms | 224ms |
+| Phone | warm | 0.945s | 657ms | 316ms | 27ms | 90ms | 224ms |
+| Phone | warm | 0.999s | 669ms | 318ms | 28ms | 90ms | 233ms |
+| Phone | warm | 0.976s | 689ms | 310ms | 30ms | 113ms | 237ms |
+| Desktop (Windows) | — | *(not yet measured; optional)* | | | | | |
 
-Store size at measurement: ____ docs. Date: ____.
+Store size at measurement: the phone store (≈948 docs per
+`docs/dev/project-context.md`; unconfirmed at run time).
 
-Once filled, copy the phone-cold median into `REWRITE.md` §Phase R0 as the
-baseline the rewrite must embarrass.
+**Reading (v3 baseline):** phone cold = **1.43 s wall / 1053 ms usable**; warm
+median ≈ **0.98 s wall / 670 ms usable** — 6.5–9.5× over the 150 ms ceiling.
+The gap `shell − usable` (~300–380 ms) is CPython interpreter/site boot before
+our first timestamp. Every bucket is structural to Python/Textual: interpreter
+boot ~300 ms, framework imports ~320 ms warm (700 cold), first layout/paint
+~230 ms. Even a hypothetically *free* store load leaves ~850 ms of
+interpreter+framework overhead — the store is **not** the bottleneck at this
+scale (load ≈ 95 ms warm; the libyaml + parallel-read work did its job). The
+rewrite's premise is confirmed by measurement: only removing the
+interpreter+framework layer can reach the budget.

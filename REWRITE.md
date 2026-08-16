@@ -326,10 +326,13 @@ Every phase lands in CI-green, conventional-commit slices; each phase ends with 
 until the cutover step the user personally green-lights.
 
 - **R0 — Measure + spike (confirmed first, D6).**
-  - R0.1: instrument and record the current Python app's cold start on the real phone
-    (three runs, cold and warm). **Shipped:** the `DS_TIMING` probe + protocol —
-    see `docs/dev/startup-timing.md`; the on-phone runs (user's to do) fill its
-    baseline table. This is the baseline the rewrite must embarrass.
+  - R0.1: **done (2026-08-16).** The `DS_TIMING` probe + protocol live in
+    `docs/dev/startup-timing.md`, with the real-phone baseline recorded there:
+    **cold 1.43 s wall / 1053 ms usable; warm median ≈ 0.98 s / 670 ms** —
+    6.5–9.5× the budget, CPU-bound, and structural (interpreter ~300 ms +
+    framework imports ~320 ms + first paint ~230 ms; store load only ~95 ms).
+    This is the number the rewrite must embarrass. Desktop/Windows numbers are
+    optional nice-to-have.
   - R0.2: **spike** — a Ratatui list of 1,000 synthetic docs, cross-compiled static
     musl from the PC, run on Termux and Windows. Measures time-to-first-paint;
     verifies SGR mouse/tap events, the IME mouse-mode trick, glyph rendering, and the
