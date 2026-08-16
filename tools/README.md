@@ -43,3 +43,41 @@ print(t.text())                # whole screen as text
 ch, fg, bg, bold, rev = t.cell(row, col)   # per-cell char + colours
 t.close()
 ```
+
+## v3 rewrite tooling
+
+Two more dev-only scripts, both tied to [`REWRITE.md`](../REWRITE.md) and both
+deleted when their phase is done.
+
+### Drive the Rust spike (R0.2)
+
+```bash
+uv run --group driver python tools/drive_spike.py          # 100x30 desktop
+uv run --group driver python tools/drive_spike.py --touch  # 45x28 phone
+```
+
+`ptyterm.py` drives a native binary as happily as the Textual app — the terminal
+is the interface, not the language. Build it first (`cd spike && cargo build
+--release`), or pass `--bin PATH`.
+
+### Export a v2 store to a v3 journal (R2)
+
+```bash
+uv run python tools/export_journal.py --dest ~/journal-rehearsal
+```
+
+Read-only with respect to the store. Two guards it enforces rather than assumes:
+the destination **may not be inside the Syncthing root** (anything there syncs by
+default, and a half-built journal must never reach the phone before cutover), and
+**parity is the exit code** — any field-level mismatch is a hard stop and prints
+every difference.
+
+To see what the Rust core makes of the result:
+
+```bash
+cargo run -p journal --example fold_dir -- ~/journal-rehearsal --stats
+```
+
+Its canonical JSON must match the Python fold's byte-for-byte; that is the
+cross-language check the golden vectors cannot cover, because no fixture can be
+written for the real store.

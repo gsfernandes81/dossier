@@ -463,10 +463,33 @@ until the cutover step the user personally green-lights.
     `serde_json` and `json.dumps`, so §10's cross-language comparison is sound
     rather than aspirational. The drift risk §11 lists is now closed by a test that
     fails in *both* languages the moment either fold changes.
-  - **Still to come in R2:** the v2-store → journal exporter (docs, locations,
-    bundles, reconcile, suggestions, scans, intake sidecars **and** the synced
-    `config.toml` → settings ops), and the parity harness against the real ~948
-    docs (read-only, run by the user — no real store exists in the dev container).
+  - **Slice 2 done (2026-08-16):** `dossier/export_journal.py` — the one-shot
+    converter and the parity harness. Exports documents, locations, bundles, the
+    synced settings, reconcile decisions (as per-key `review` state), suggestion
+    dismissals, scans and intake proposals. Read-only w.r.t. the v2 store and
+    **idempotent**, so a rehearsal costs nothing and a re-run after a fix is safe.
+    The value mapping lives in one place and is used by *both* the exporter and the
+    parity check, so parity tests the round trip through JSONL — where a migration
+    actually loses things — instead of re-deriving the same mistake twice and
+    agreeing with itself. `tools/export_journal.py` runs it against a real store
+    and **refuses a destination inside the Syncthing root**, enforcing §7's
+    "no journal in the synced tree before cutover" mechanically rather than by
+    documentation; parity failure is its exit code.
+  - **Cross-language cutover proof:** `cargo run -p journal --example fold_dir`
+    folds a journal directory and prints its canonical JSON. Running it over a
+    Python-exported store gives a **byte-identical** result to the Python fold —
+    the golden vectors prove agreement on hand-written fixtures, this proves it on
+    an exporter's real output, which is the case no fixture can cover. It is also
+    the tool for R7's "confirm the phone folds it" step.
+  - **One format finding, now binding:** v2's `ScanReading.confidence` is a
+    **float**, and §3.2 bans floats (they would make the canonical comparison
+    between the two folds unimplementable). It is exported as an integer
+    `confidence_permille` (0–1000), *renamed* rather than rounded in place so
+    nothing can read it as a fraction by accident. The satellite must read and
+    write it that way from now on.
+  - **Still to come in R2:** the parity run against the real ~948 documents. That
+    is the user's to make — no real store exists in the dev container, and the
+    standing rule keeps real-store operations read-only and user-initiated.
 
 - **R3 — Read-only core** *(needs R-UI)*: browse + search (exact→fuzzy, ctrl+t
   content search) + open + `ds status` (counts, syncthing REST checks) + `ds open`.
