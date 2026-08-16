@@ -38,10 +38,13 @@
 //! - [`op`] — the line format: parse, classify, round-trip, torn-tail handling.
 //! - [`fold`] — ops in, state out, plus the health counters `ds status` reports.
 //! - [`names`] — the frozen filename grammar that decides what gets folded.
+//! - [`store`] — reading a journal directory: the `meta`/`enrich` split,
+//!   per-file reports, and the anomalies `ds status` reports.
+//! - [`watermark`] — truncation detection: the high-water marks that catch a
+//!   journal reverted behind Syncthing's back.
 //!
-//! Still to come in R1: the journal reader (directory discovery, per-file
-//! high-water marks), the appending writer (HLC, advisory lock, torn-tail
-//! repair) and compaction.
+//! Still to come in R1: the appending writer (HLC, advisory lock, torn-tail
+//! repair before append) and compaction.
 //!
 //! # Reading this code
 //!
@@ -61,6 +64,10 @@
 pub mod fold;
 pub mod names;
 pub mod op;
+pub mod store;
+pub mod watermark;
 
 pub use fold::{fold, Entity, EntityKey, Fold, FoldStats};
 pub use op::{parse_body, parse_line, Line, Op, OpKind, OpaqueReason, FORMAT_VERSION};
+pub use store::{Anomaly, Journal, Load, Namespace};
+pub use watermark::{Damage, HighWater, Mark};

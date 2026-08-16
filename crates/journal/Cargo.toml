@@ -20,6 +20,12 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# The store tests write real journal directories: file discovery, unreadable
+# files and torn tails are exactly the behaviours a mocked filesystem would
+# fake away. `tempfile` keeps them off the developer's disk and out of any
+# Syncthing folder (the standing rule: tests never touch real data).
+tempfile = "3"
+
 # REWRITE.md §10 names property tests for the fold invariants. They are the only
 # way to state "fold(A ∪ B) ≡ fold(B ∪ A)" as a claim about *all* op streams
 # rather than about the three the author thought of.

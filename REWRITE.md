@@ -387,9 +387,21 @@ until the cutover step the user personally green-lights.
     At the *real* store size (~948 docs, ~15k ops) that is ≈17 ms parse+fold on this
     machine. The phone is slower, so R3's first on-device run should check it against
     the 100 ms budget before anything else joins the startup path.
-  - **Still to come in R1:** the reader (directory discovery, per-file high-water
-    marks), the appending writer (HLC, advisory lock via std's `File::try_lock`,
-    torn-tail repair before append), and compaction with its
+  - **Slice 2 done (2026-08-16):** the reader and the truncation defense.
+    `store.rs` discovers writer files per namespace (`meta` on every launch,
+    `enrich` only when asked), reports per-file size/high-water/malformed counts,
+    and turns every problem into an `Anomaly` rather than an error — one bad file
+    costs that writer's contribution, never the store. `.sync-conflict-*` copies
+    are **reported and never read**, which is what keeps "conflicts are
+    structurally impossible" an honest claim rather than a hopeful one.
+    `watermark.rs` implements the Proton-revert defense with its table pinned by
+    tests in both directions: a `max_ts` regression or a vanished file is damage;
+    a file that shrinks by 97% while keeping its newest op is compaction and must
+    stay silent. Marks only ever climb, so a revert keeps being reported until the
+    data is genuinely recovered (`accept` is the deliberate way out). An
+    end-to-end test plays the whole scenario out on a real directory.
+  - **Still to come in R1:** the appending writer (HLC, advisory lock via std's
+    `File::try_lock`, torn-tail repair before append), and compaction with its
     `compaction-preserves-fold` golden vector.
 - **R2 — Exporter + parity (Python).** One-shot v2-store → journal converter using
   the existing trusted `store.py` reader: docs + locations + bundles + reconcile +
