@@ -13,6 +13,7 @@ on:
       - "Cargo.lock"
       - ".cargo/**"
       - "rustfmt.toml"
+      - "docs/dev/demo/**"
       - ".github/workflows/rust.yml"
   pull_request:
     paths:
@@ -97,3 +98,19 @@ jobs:
 
       - name: Cross-build (static, aarch64 musl)
         run: cargo build --workspace --release --target aarch64-unknown-linux-musl
+
+      # So the phone can be given a build without one being cross-compiled by
+      # hand and handed over out of band. GitHub only shows a workflow's own
+      # "Run workflow" button on the default branch, but artifacts are
+      # per-run — `gh run download` works from any branch.
+      - name: Stage the phone bundle
+        run: |
+          mkdir -p bundle
+          cp target/aarch64-unknown-linux-musl/release/ds bundle/ds
+          cp -r docs/dev/demo bundle/demo
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ds-phone
+          path: bundle/
+          if-no-files-found: error

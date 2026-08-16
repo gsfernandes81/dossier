@@ -1,0 +1,180 @@
+{"v":1,"ts":1755000000001,"w":"desk-core","op":"create","ent":"location","id":"cert-file"}
+{"v":1,"ts":1755000000002,"w":"desk-core","op":"set","ent":"location","id":"cert-file","f":"title","val":"Certificate File"}
+{"v":1,"ts":1755000000003,"w":"desk-core","op":"create","ent":"location","id":"passport-pouch"}
+{"v":1,"ts":1755000000004,"w":"desk-core","op":"set","ent":"location","id":"passport-pouch","f":"title","val":"Passport Pouch"}
+{"v":1,"ts":1755000000005,"w":"desk-core","op":"create","ent":"location","id":"blue-folder"}
+{"v":1,"ts":1755000000006,"w":"desk-core","op":"set","ent":"location","id":"blue-folder","f":"title","val":"Blue Folder"}
+{"v":1,"ts":1755000000007,"w":"desk-core","op":"create","ent":"location","id":"file-4096"}
+{"v":1,"ts":1755000000008,"w":"desk-core","op":"set","ent":"location","id":"file-4096","f":"title","val":"File 4096"}
+{"v":1,"ts":1755000000009,"w":"desk-core","op":"create","ent":"location","id":"softcopy"}
+{"v":1,"ts":1755000000010,"w":"desk-core","op":"set","ent":"location","id":"softcopy","f":"title","val":"Softcopy only"}
+{"v":1,"ts":1755000000011,"w":"desk-core","op":"create","ent":"settings","id":"synced"}
+{"v":1,"ts":1755000000012,"w":"desk-core","op":"set","ent":"settings","id":"synced","f":"expiry_threshold_days","val":90}
+{"v":1,"ts":1755000000013,"w":"desk-core","op":"create","ent":"doc","id":"coc-master"}
+{"v":1,"ts":1755000000014,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"name","val":"COC Certificate (Master)"}
+{"v":1,"ts":1755000000015,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"perm_location","val":"cert-file"}
+{"v":1,"ts":1755000000016,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"tags","val":["marine"]}
+{"v":1,"ts":1755000000017,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"perm_slot","val":8}
+{"v":1,"ts":1755000000018,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"issue_date","val":"2021-09-29"}
+{"v":1,"ts":1755000000019,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"expiry_date","val":"2026-09-28"}
+{"v":1,"ts":1755000000020,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"notes","val":"Revalidation booked at MMD, slot 14 Oct. Bring originals + 2 photos."}
+{"v":1,"ts":1755000000021,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"files","val":[{"label":"complete","path":"Marine/coc-master.pdf","primary":true}]}
+{"v":1,"ts":1755000000022,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"supersedes","val":"coc-2019"}
+{"v":1,"ts":1755000000023,"w":"desk-core","op":"set","ent":"doc","id":"coc-master","f":"bundles","val":["us-visa","joining-2027"]}
+{"v":1,"ts":1755000000024,"w":"desk-core","op":"create","ent":"doc","id":"coc-2019"}
+{"v":1,"ts":1755000000025,"w":"desk-core","op":"set","ent":"doc","id":"coc-2019","f":"name","val":"COC Certificate 2019"}
+{"v":1,"ts":1755000000026,"w":"desk-core","op":"set","ent":"doc","id":"coc-2019","f":"perm_location","val":"cert-file"}
+{"v":1,"ts":1755000000027,"w":"desk-core","op":"set","ent":"doc","id":"coc-2019","f":"tags","val":["marine"]}
+{"v":1,"ts":1755000000028,"w":"desk-core","op":"set","ent":"doc","id":"coc-2019","f":"perm_slot","val":9}
+{"v":1,"ts":1755000000029,"w":"desk-core","op":"set","ent":"doc","id":"coc-2019","f":"issue_date","val":"2016-08-02"}
+{"v":1,"ts":1755000000030,"w":"desk-core","op":"set","ent":"doc","id":"coc-2019","f":"expiry_date","val":"2021-08-01"}
+{"v":1,"ts":1755000000031,"w":"desk-core","op":"set","ent":"doc","id":"coc-2019","f":"notes","val":"Superseded by the 2026 revalidation."}
+{"v":1,"ts":1755000000032,"w":"desk-core","op":"create","ent":"doc","id":"eng1"}
+{"v":1,"ts":1755000000033,"w":"desk-core","op":"set","ent":"doc","id":"eng1","f":"name","val":"ENG-1 Medical"}
+{"v":1,"ts":1755000000034,"w":"desk-core","op":"set","ent":"doc","id":"eng1","f":"perm_location","val":"cert-file"}
+{"v":1,"ts":1755000000035,"w":"desk-core","op":"set","ent":"doc","id":"eng1","f":"tags","val":["marine","medical"]}
+{"v":1,"ts":1755000000036,"w":"desk-core","op":"set","ent":"doc","id":"eng1","f":"perm_slot","val":3}
+{"v":1,"ts":1755000000037,"w":"desk-core","op":"set","ent":"doc","id":"eng1","f":"issue_date","val":"2026-01-14"}
+{"v":1,"ts":1755000000038,"w":"desk-core","op":"set","ent":"doc","id":"eng1","f":"expiry_date","val":"2027-01-13"}
+{"v":1,"ts":1755000000039,"w":"desk-core","op":"set","ent":"doc","id":"eng1","f":"notes","val":"MMD Mumbai."}
+{"v":1,"ts":1755000000040,"w":"desk-core","op":"set","ent":"doc","id":"eng1","f":"files","val":[{"label":"complete","path":"Marine/eng1-2026.pdf","primary":true}]}
+{"v":1,"ts":1755000000041,"w":"desk-core","op":"set","ent":"doc","id":"eng1","f":"bundles","val":["joining-2027"]}
+{"v":1,"ts":1755000000042,"w":"desk-core","op":"create","ent":"doc","id":"stcw-basic"}
+{"v":1,"ts":1755000000043,"w":"desk-core","op":"set","ent":"doc","id":"stcw-basic","f":"name","val":"STCW Basic Safety Training"}
+{"v":1,"ts":1755000000044,"w":"desk-core","op":"set","ent":"doc","id":"stcw-basic","f":"perm_location","val":"cert-file"}
+{"v":1,"ts":1755000000045,"w":"desk-core","op":"set","ent":"doc","id":"stcw-basic","f":"tags","val":["marine"]}
+{"v":1,"ts":1755000000046,"w":"desk-core","op":"set","ent":"doc","id":"stcw-basic","f":"perm_slot","val":4}
+{"v":1,"ts":1755000000047,"w":"desk-core","op":"set","ent":"doc","id":"stcw-basic","f":"issue_date","val":"2021-06-01"}
+{"v":1,"ts":1755000000048,"w":"desk-core","op":"set","ent":"doc","id":"stcw-basic","f":"expiry_date","val":"2031-05-31"}
+{"v":1,"ts":1755000000049,"w":"desk-core","op":"create","ent":"doc","id":"aff"}
+{"v":1,"ts":1755000000050,"w":"desk-core","op":"set","ent":"doc","id":"aff","f":"name","val":"Advanced Fire Fighting"}
+{"v":1,"ts":1755000000051,"w":"desk-core","op":"set","ent":"doc","id":"aff","f":"perm_location","val":"cert-file"}
+{"v":1,"ts":1755000000052,"w":"desk-core","op":"set","ent":"doc","id":"aff","f":"tags","val":["marine"]}
+{"v":1,"ts":1755000000053,"w":"desk-core","op":"set","ent":"doc","id":"aff","f":"perm_slot","val":5}
+{"v":1,"ts":1755000000054,"w":"desk-core","op":"set","ent":"doc","id":"aff","f":"issue_date","val":"2019-11-30"}
+{"v":1,"ts":1755000000055,"w":"desk-core","op":"set","ent":"doc","id":"aff","f":"expiry_date","val":"2029-11-30"}
+{"v":1,"ts":1755000000056,"w":"desk-core","op":"create","ent":"doc","id":"ssa"}
+{"v":1,"ts":1755000000057,"w":"desk-core","op":"set","ent":"doc","id":"ssa","f":"name","val":"Ship Security Awareness"}
+{"v":1,"ts":1755000000058,"w":"desk-core","op":"set","ent":"doc","id":"ssa","f":"perm_location","val":"cert-file"}
+{"v":1,"ts":1755000000059,"w":"desk-core","op":"set","ent":"doc","id":"ssa","f":"tags","val":["marine"]}
+{"v":1,"ts":1755000000060,"w":"desk-core","op":"set","ent":"doc","id":"ssa","f":"perm_slot","val":6}
+{"v":1,"ts":1755000000061,"w":"desk-core","op":"set","ent":"doc","id":"ssa","f":"issue_date","val":"2020-02-28"}
+{"v":1,"ts":1755000000062,"w":"desk-core","op":"set","ent":"doc","id":"ssa","f":"expiry_date","val":"2030-02-28"}
+{"v":1,"ts":1755000000063,"w":"desk-core","op":"create","ent":"doc","id":"coc-endorse"}
+{"v":1,"ts":1755000000064,"w":"desk-core","op":"set","ent":"doc","id":"coc-endorse","f":"name","val":"COC Endorsement — Panama"}
+{"v":1,"ts":1755000000065,"w":"desk-core","op":"set","ent":"doc","id":"coc-endorse","f":"perm_location","val":"cert-file"}
+{"v":1,"ts":1755000000066,"w":"desk-core","op":"set","ent":"doc","id":"coc-endorse","f":"tags","val":["marine"]}
+{"v":1,"ts":1755000000067,"w":"desk-core","op":"set","ent":"doc","id":"coc-endorse","f":"perm_slot","val":10}
+{"v":1,"ts":1755000000068,"w":"desk-core","op":"set","ent":"doc","id":"coc-endorse","f":"issue_date","val":"2021-12-04"}
+{"v":1,"ts":1755000000069,"w":"desk-core","op":"set","ent":"doc","id":"coc-endorse","f":"expiry_date","val":"2026-12-03"}
+{"v":1,"ts":1755000000070,"w":"desk-core","op":"create","ent":"doc","id":"sea-service"}
+{"v":1,"ts":1755000000071,"w":"desk-core","op":"set","ent":"doc","id":"sea-service","f":"name","val":"Sea Service Testimonial 2024"}
+{"v":1,"ts":1755000000072,"w":"desk-core","op":"set","ent":"doc","id":"sea-service","f":"perm_location","val":"softcopy"}
+{"v":1,"ts":1755000000073,"w":"desk-core","op":"set","ent":"doc","id":"sea-service","f":"tags","val":["marine"]}
+{"v":1,"ts":1755000000074,"w":"desk-core","op":"set","ent":"doc","id":"sea-service","f":"issue_date","val":"2024-11-02"}
+{"v":1,"ts":1755000000075,"w":"desk-core","op":"set","ent":"doc","id":"sea-service","f":"files","val":[{"label":"complete","path":"Marine/testimonial-2024.pdf","primary":true}]}
+{"v":1,"ts":1755000000076,"w":"desk-core","op":"create","ent":"doc","id":"passport-in"}
+{"v":1,"ts":1755000000077,"w":"desk-core","op":"set","ent":"doc","id":"passport-in","f":"name","val":"Passport (IN)"}
+{"v":1,"ts":1755000000078,"w":"desk-core","op":"set","ent":"doc","id":"passport-in","f":"perm_location","val":"passport-pouch"}
+{"v":1,"ts":1755000000079,"w":"desk-core","op":"set","ent":"doc","id":"passport-in","f":"tags","val":["identity","travel"]}
+{"v":1,"ts":1755000000080,"w":"desk-core","op":"set","ent":"doc","id":"passport-in","f":"perm_slot","val":1}
+{"v":1,"ts":1755000000081,"w":"desk-core","op":"set","ent":"doc","id":"passport-in","f":"issue_date","val":"2021-06-01"}
+{"v":1,"ts":1755000000082,"w":"desk-core","op":"set","ent":"doc","id":"passport-in","f":"expiry_date","val":"2031-05-31"}
+{"v":1,"ts":1755000000083,"w":"desk-core","op":"set","ent":"doc","id":"passport-in","f":"files","val":[{"label":"complete","path":"Identity/passport.pdf","primary":true}]}
+{"v":1,"ts":1755000000084,"w":"desk-core","op":"set","ent":"doc","id":"passport-in","f":"bundles","val":["us-visa"]}
+{"v":1,"ts":1755000000085,"w":"desk-core","op":"create","ent":"doc","id":"cdc"}
+{"v":1,"ts":1755000000086,"w":"desk-core","op":"set","ent":"doc","id":"cdc","f":"name","val":"Seaman Book (CDC)"}
+{"v":1,"ts":1755000000087,"w":"desk-core","op":"set","ent":"doc","id":"cdc","f":"perm_location","val":"passport-pouch"}
+{"v":1,"ts":1755000000088,"w":"desk-core","op":"set","ent":"doc","id":"cdc","f":"tags","val":["marine","identity"]}
+{"v":1,"ts":1755000000089,"w":"desk-core","op":"set","ent":"doc","id":"cdc","f":"perm_slot","val":2}
+{"v":1,"ts":1755000000090,"w":"desk-core","op":"set","ent":"doc","id":"cdc","f":"issue_date","val":"2017-04-01"}
+{"v":1,"ts":1755000000091,"w":"desk-core","op":"set","ent":"doc","id":"cdc","f":"expiry_date","val":"2027-03-31"}
+{"v":1,"ts":1755000000092,"w":"desk-core","op":"create","ent":"doc","id":"yellow-fever"}
+{"v":1,"ts":1755000000093,"w":"desk-core","op":"set","ent":"doc","id":"yellow-fever","f":"name","val":"Yellow Fever Card"}
+{"v":1,"ts":1755000000094,"w":"desk-core","op":"set","ent":"doc","id":"yellow-fever","f":"perm_location","val":"passport-pouch"}
+{"v":1,"ts":1755000000095,"w":"desk-core","op":"set","ent":"doc","id":"yellow-fever","f":"tags","val":["travel","medical"]}
+{"v":1,"ts":1755000000096,"w":"desk-core","op":"set","ent":"doc","id":"yellow-fever","f":"perm_slot","val":3}
+{"v":1,"ts":1755000000097,"w":"desk-core","op":"set","ent":"doc","id":"yellow-fever","f":"issue_date","val":"2019-03-11"}
+{"v":1,"ts":1755000000098,"w":"desk-core","op":"create","ent":"doc","id":"us-visa"}
+{"v":1,"ts":1755000000099,"w":"desk-core","op":"set","ent":"doc","id":"us-visa","f":"name","val":"US B1/B2 Visa"}
+{"v":1,"ts":1755000000100,"w":"desk-core","op":"set","ent":"doc","id":"us-visa","f":"perm_location","val":"passport-pouch"}
+{"v":1,"ts":1755000000101,"w":"desk-core","op":"set","ent":"doc","id":"us-visa","f":"tags","val":["travel"]}
+{"v":1,"ts":1755000000102,"w":"desk-core","op":"set","ent":"doc","id":"us-visa","f":"perm_slot","val":4}
+{"v":1,"ts":1755000000103,"w":"desk-core","op":"set","ent":"doc","id":"us-visa","f":"issue_date","val":"2023-02-01"}
+{"v":1,"ts":1755000000104,"w":"desk-core","op":"set","ent":"doc","id":"us-visa","f":"expiry_date","val":"2033-01-31"}
+{"v":1,"ts":1755000000105,"w":"desk-core","op":"set","ent":"doc","id":"us-visa","f":"bundles","val":["us-visa"]}
+{"v":1,"ts":1755000000106,"w":"desk-core","op":"create","ent":"doc","id":"moto-ins"}
+{"v":1,"ts":1755000000107,"w":"desk-core","op":"set","ent":"doc","id":"moto-ins","f":"name","val":"Motorcycle Insurance"}
+{"v":1,"ts":1755000000108,"w":"desk-core","op":"set","ent":"doc","id":"moto-ins","f":"perm_location","val":"blue-folder"}
+{"v":1,"ts":1755000000109,"w":"desk-core","op":"set","ent":"doc","id":"moto-ins","f":"tags","val":["motorcycle"]}
+{"v":1,"ts":1755000000110,"w":"desk-core","op":"set","ent":"doc","id":"moto-ins","f":"perm_slot","val":1}
+{"v":1,"ts":1755000000111,"w":"desk-core","op":"set","ent":"doc","id":"moto-ins","f":"issue_date","val":"2025-08-01"}
+{"v":1,"ts":1755000000112,"w":"desk-core","op":"set","ent":"doc","id":"moto-ins","f":"expiry_date","val":"2026-07-31"}
+{"v":1,"ts":1755000000113,"w":"desk-core","op":"set","ent":"doc","id":"moto-ins","f":"notes","val":"Renew with Bajaj Allianz; NCB 35%."}
+{"v":1,"ts":1755000000114,"w":"desk-core","op":"create","ent":"doc","id":"rc-book"}
+{"v":1,"ts":1755000000115,"w":"desk-core","op":"set","ent":"doc","id":"rc-book","f":"name","val":"RC Book — Himalayan 450"}
+{"v":1,"ts":1755000000116,"w":"desk-core","op":"set","ent":"doc","id":"rc-book","f":"perm_location","val":"blue-folder"}
+{"v":1,"ts":1755000000117,"w":"desk-core","op":"set","ent":"doc","id":"rc-book","f":"tags","val":["motorcycle"]}
+{"v":1,"ts":1755000000118,"w":"desk-core","op":"set","ent":"doc","id":"rc-book","f":"perm_slot","val":2}
+{"v":1,"ts":1755000000119,"w":"desk-core","op":"set","ent":"doc","id":"rc-book","f":"issue_date","val":"2024-05-20"}
+{"v":1,"ts":1755000000120,"w":"desk-core","op":"create","ent":"doc","id":"dl"}
+{"v":1,"ts":1755000000121,"w":"desk-core","op":"set","ent":"doc","id":"dl","f":"name","val":"Driving Licence"}
+{"v":1,"ts":1755000000122,"w":"desk-core","op":"set","ent":"doc","id":"dl","f":"perm_location","val":"blue-folder"}
+{"v":1,"ts":1755000000123,"w":"desk-core","op":"set","ent":"doc","id":"dl","f":"tags","val":["identity"]}
+{"v":1,"ts":1755000000124,"w":"desk-core","op":"set","ent":"doc","id":"dl","f":"perm_slot","val":3}
+{"v":1,"ts":1755000000125,"w":"desk-core","op":"set","ent":"doc","id":"dl","f":"issue_date","val":"2013-09-01"}
+{"v":1,"ts":1755000000126,"w":"desk-core","op":"set","ent":"doc","id":"dl","f":"expiry_date","val":"2033-08-31"}
+{"v":1,"ts":1755000000127,"w":"desk-core","op":"create","ent":"doc","id":"puc"}
+{"v":1,"ts":1755000000128,"w":"desk-core","op":"set","ent":"doc","id":"puc","f":"name","val":"PUC Certificate"}
+{"v":1,"ts":1755000000129,"w":"desk-core","op":"set","ent":"doc","id":"puc","f":"perm_location","val":"blue-folder"}
+{"v":1,"ts":1755000000130,"w":"desk-core","op":"set","ent":"doc","id":"puc","f":"tags","val":["motorcycle"]}
+{"v":1,"ts":1755000000131,"w":"desk-core","op":"set","ent":"doc","id":"puc","f":"perm_slot","val":4}
+{"v":1,"ts":1755000000132,"w":"desk-core","op":"set","ent":"doc","id":"puc","f":"issue_date","val":"2026-02-10"}
+{"v":1,"ts":1755000000133,"w":"desk-core","op":"set","ent":"doc","id":"puc","f":"expiry_date","val":"2026-08-09"}
+{"v":1,"ts":1755000000134,"w":"desk-core","op":"create","ent":"doc","id":"pan"}
+{"v":1,"ts":1755000000135,"w":"desk-core","op":"set","ent":"doc","id":"pan","f":"name","val":"PAN Card"}
+{"v":1,"ts":1755000000136,"w":"desk-core","op":"set","ent":"doc","id":"pan","f":"perm_location","val":"file-4096"}
+{"v":1,"ts":1755000000137,"w":"desk-core","op":"set","ent":"doc","id":"pan","f":"tags","val":["identity","financial"]}
+{"v":1,"ts":1755000000138,"w":"desk-core","op":"set","ent":"doc","id":"pan","f":"perm_slot","val":12}
+{"v":1,"ts":1755000000139,"w":"desk-core","op":"create","ent":"doc","id":"aadhaar"}
+{"v":1,"ts":1755000000140,"w":"desk-core","op":"set","ent":"doc","id":"aadhaar","f":"name","val":"Aadhaar"}
+{"v":1,"ts":1755000000141,"w":"desk-core","op":"set","ent":"doc","id":"aadhaar","f":"perm_location","val":"file-4096"}
+{"v":1,"ts":1755000000142,"w":"desk-core","op":"set","ent":"doc","id":"aadhaar","f":"tags","val":["identity"]}
+{"v":1,"ts":1755000000143,"w":"desk-core","op":"set","ent":"doc","id":"aadhaar","f":"perm_slot","val":13}
+{"v":1,"ts":1755000000144,"w":"desk-core","op":"create","ent":"doc","id":"degree"}
+{"v":1,"ts":1755000000145,"w":"desk-core","op":"set","ent":"doc","id":"degree","f":"name","val":"Degree Certificate"}
+{"v":1,"ts":1755000000146,"w":"desk-core","op":"set","ent":"doc","id":"degree","f":"perm_location","val":"file-4096"}
+{"v":1,"ts":1755000000147,"w":"desk-core","op":"set","ent":"doc","id":"degree","f":"tags","val":["education"]}
+{"v":1,"ts":1755000000148,"w":"desk-core","op":"set","ent":"doc","id":"degree","f":"perm_slot","val":14}
+{"v":1,"ts":1755000000149,"w":"desk-core","op":"set","ent":"doc","id":"degree","f":"issue_date","val":"2016-07-15"}
+{"v":1,"ts":1755000000150,"w":"desk-core","op":"create","ent":"doc","id":"marksheets"}
+{"v":1,"ts":1755000000151,"w":"desk-core","op":"set","ent":"doc","id":"marksheets","f":"name","val":"Marksheets (B.Tech)"}
+{"v":1,"ts":1755000000152,"w":"desk-core","op":"set","ent":"doc","id":"marksheets","f":"perm_location","val":"file-4096"}
+{"v":1,"ts":1755000000153,"w":"desk-core","op":"set","ent":"doc","id":"marksheets","f":"tags","val":["education"]}
+{"v":1,"ts":1755000000154,"w":"desk-core","op":"set","ent":"doc","id":"marksheets","f":"perm_slot","val":15}
+{"v":1,"ts":1755000000155,"w":"desk-core","op":"set","ent":"doc","id":"marksheets","f":"perm_subslot","val":1}
+{"v":1,"ts":1755000000156,"w":"desk-core","op":"set","ent":"doc","id":"marksheets","f":"issue_date","val":"2016-07-15"}
+{"v":1,"ts":1755000000157,"w":"desk-core","op":"create","ent":"doc","id":"birth"}
+{"v":1,"ts":1755000000158,"w":"desk-core","op":"set","ent":"doc","id":"birth","f":"name","val":"Birth Certificate"}
+{"v":1,"ts":1755000000159,"w":"desk-core","op":"set","ent":"doc","id":"birth","f":"perm_location","val":"file-4096"}
+{"v":1,"ts":1755000000160,"w":"desk-core","op":"set","ent":"doc","id":"birth","f":"tags","val":["identity"]}
+{"v":1,"ts":1755000000161,"w":"desk-core","op":"set","ent":"doc","id":"birth","f":"perm_slot","val":1}
+{"v":1,"ts":1755000000162,"w":"desk-core","op":"create","ent":"doc","id":"rent"}
+{"v":1,"ts":1755000000163,"w":"desk-core","op":"set","ent":"doc","id":"rent","f":"name","val":"Rent Agreement 2026"}
+{"v":1,"ts":1755000000164,"w":"desk-core","op":"set","ent":"doc","id":"rent","f":"perm_location","val":"file-4096"}
+{"v":1,"ts":1755000000165,"w":"desk-core","op":"set","ent":"doc","id":"rent","f":"tags","val":["financial"]}
+{"v":1,"ts":1755000000166,"w":"desk-core","op":"set","ent":"doc","id":"rent","f":"perm_slot","val":20}
+{"v":1,"ts":1755000000167,"w":"desk-core","op":"set","ent":"doc","id":"rent","f":"issue_date","val":"2026-01-05"}
+{"v":1,"ts":1755000000168,"w":"desk-core","op":"set","ent":"doc","id":"rent","f":"expiry_date","val":"2027-01-04"}
+{"v":1,"ts":1755000000169,"w":"desk-core","op":"create","ent":"doc","id":"insurance-health"}
+{"v":1,"ts":1755000000170,"w":"desk-core","op":"set","ent":"doc","id":"insurance-health","f":"name","val":"Health Insurance Policy"}
+{"v":1,"ts":1755000000171,"w":"desk-core","op":"set","ent":"doc","id":"insurance-health","f":"perm_location","val":"file-4096"}
+{"v":1,"ts":1755000000172,"w":"desk-core","op":"set","ent":"doc","id":"insurance-health","f":"tags","val":["financial","medical"]}
+{"v":1,"ts":1755000000173,"w":"desk-core","op":"set","ent":"doc","id":"insurance-health","f":"perm_slot","val":21}
+{"v":1,"ts":1755000000174,"w":"desk-core","op":"set","ent":"doc","id":"insurance-health","f":"issue_date","val":"2025-12-01"}
+{"v":1,"ts":1755000000175,"w":"desk-core","op":"set","ent":"doc","id":"insurance-health","f":"expiry_date","val":"2026-11-30"}
+{"v":1,"ts":1755000000176,"w":"desk-core","op":"create","ent":"doc","id":"bank-kyc"}
+{"v":1,"ts":1755000000177,"w":"desk-core","op":"set","ent":"doc","id":"bank-kyc","f":"name","val":"Bank KYC Pack"}
+{"v":1,"ts":1755000000178,"w":"desk-core","op":"set","ent":"doc","id":"bank-kyc","f":"perm_location","val":"softcopy"}
+{"v":1,"ts":1755000000179,"w":"desk-core","op":"set","ent":"doc","id":"bank-kyc","f":"tags","val":["financial"]}
+{"v":1,"ts":1755000000180,"w":"desk-core","op":"set","ent":"doc","id":"bank-kyc","f":"issue_date","val":"2025-04-01"}
