@@ -268,11 +268,30 @@ impl Writer {
         if let Some(parent) = path.parent() {
             create_dir_all(parent, "create journal directory")?;
         }
-        let mut file =
-            OpenOptions::new().create(true).read(true).append(true).open(&path).map_err(
-                |source| Error::Io { action: "open journal file", path: path.clone(), source },
-            )?;
-        repair_torn_tail(&mut file, &path)?;
+        // The repair needs its own read+write handle, and the ordering matters:
+        // truncate first, *then* open for appending. On Windows a handle opened
+        // in append mode is granted `FILE_APPEND_DATA` without `FILE_WRITE_DATA`
+        // — deliberately, so an append cannot overwrite — and `set_len` needs
+        // the latter, so truncating through the append handle fails with
+        // "Access is denied". It works on Linux, which is exactly why the CI
+        // matrix has a Windows leg.
+        {
+            let mut repair = OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .truncate(false)
+                .open(&path)
+                .map_err(|source| Error::Io {
+                    action: "open journal file for repair",
+                    path: path.clone(),
+                    source,
+                })?;
+            repair_torn_tail(&mut repair, &path)?;
+        }
+        let file = OpenOptions::new().create(true).read(true).append(true).open(&path).map_err(
+            |source| Error::Io { action: "open journal file", path: path.clone(), source },
+        )?;
 
         Ok(Self {
             writer_id: writer_id.to_string(),
@@ -527,7 +546,8 @@ fn repair_torn_tail(file: &mut File, path: &Path) -> Result<(), Error> {
         None => return Ok(()),
     };
     file.set_len(keep).map_err(io("truncate torn tail of"))?;
-    file.seek(SeekFrom::End(0)).map_err(io("seek to end of"))?;
+    // No seek-to-end needed: the caller drops this handle and reopens the file
+    // for appending, which starts at the (now correct) end by definition.
     Ok(())
 }
 

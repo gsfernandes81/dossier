@@ -18,6 +18,11 @@
 > cargo build --workspace --release --target aarch64-unknown-linux-musl   # the phone target
 > (cd spike && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --release)
 > ```
+> **The Windows CI leg is not decoration** — it has already caught a bug a green
+> Linux run missed: a file handle opened in append mode on Windows lacks
+> `FILE_WRITE_DATA`, so `set_len` on it fails with "Access is denied" while working
+> fine on Linux. Anything touching file handles, locks or renames is exactly what
+> that leg is for; read its conclusion, never infer it from the Linux one.
 
 A cross-platform **TUI** for tracking personal documents — physical **and** digital — on
 **Windows and Android (Termux)**. It replaces a Notion system with local, Syncthing-synced
