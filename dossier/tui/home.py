@@ -44,6 +44,9 @@ keyboard), which is the home for every action not on a button or a core key.
 from __future__ import annotations
 
 import contextlib
+import os
+import sys
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
@@ -466,14 +469,53 @@ class HomeScreen(Screen[None]):
         # Never select-all on focus: `/` and the type-to-search router should let
         # you keep refining the filter, not replace it with the next keystroke.
         self.query_one("#search", Input).select_on_focus = False
+        t_mount = time.perf_counter()
         self._scan_attention()  # conflict/inbox counts (I/O) before the first render
+        t_attention = time.perf_counter()
         self._reload()
+        t_load = time.perf_counter()
         self._focus_default()
         self._warn_slow_yaml()
         # Live Syncthing status: poll off-thread now and every 30s (the transport
         # doesn't change second-to-second; a longer cadence keeps it near-free).
         self._poll_sync_status()
         self.set_interval(30.0, self._poll_sync_status)
+        if os.environ.get("DS_TIMING"):
+            # After the *next* repaint — the first frame showing the loaded rows,
+            # i.e. the "usable" moment REWRITE.md §9 budgets.
+            self.call_after_refresh(self._report_startup, t_mount, t_attention, t_load)
+
+    def _report_startup(
+        self, t_mount: float, t_attention: float, t_load: float
+    ) -> None:
+        """The ``DS_TIMING`` startup probe (the R0.1 baseline for the v3 rewrite —
+        protocol in docs/dev/startup-timing.md).
+
+        Prints one breakdown line to stderr, timed at the first frame that shows
+        the loaded rows. ``DS_TIMING=exit`` also quits immediately, so a shell
+        ``time`` wrapper around the launch measures the full
+        interpreter-boot→usable span; any other value keeps the app running and
+        mirrors the line as a notification.
+        """
+        import dossier
+
+        now = time.perf_counter()
+
+        def ms(a: float, b: float) -> str:
+            return f"{(b - a) * 1000.0:.0f}ms"
+
+        line = (
+            f"ds-timing: usable {ms(dossier.STARTUP_T0, now)}"
+            f" (imports+init {ms(dossier.STARTUP_T0, t_mount)}"
+            f" · attention {ms(t_mount, t_attention)}"
+            f" · load {ms(t_attention, t_load)}"
+            f" · paint {ms(t_load, now)})"
+        )
+        print(line, file=sys.stderr)
+        if os.environ.get("DS_TIMING") == "exit":
+            self.app.exit()
+        else:
+            self.notify(line, timeout=12)
 
     def _warn_slow_yaml(self) -> None:
         """Nudge to enable the fast C YAML backend when PyYAML fell back to pure

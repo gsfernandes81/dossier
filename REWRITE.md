@@ -327,8 +327,9 @@ until the cutover step the user personally green-lights.
 
 - **R0 — Measure + spike (confirmed first, D6).**
   - R0.1: instrument and record the current Python app's cold start on the real phone
-    (documented protocol: `time` wrappers + an in-app first-paint timestamp; three
-    runs, cold and warm). This is the baseline the rewrite must embarrass.
+    (three runs, cold and warm). **Shipped:** the `DS_TIMING` probe + protocol —
+    see `docs/dev/startup-timing.md`; the on-phone runs (user's to do) fill its
+    baseline table. This is the baseline the rewrite must embarrass.
   - R0.2: **spike** — a Ratatui list of 1,000 synthetic docs, cross-compiled static
     musl from the PC, run on Termux and Windows. Measures time-to-first-paint;
     verifies SGR mouse/tap events, the IME mouse-mode trick, glyph rendering, and the

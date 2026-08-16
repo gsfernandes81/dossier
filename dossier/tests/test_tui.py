@@ -3981,3 +3981,34 @@ async def test_reconcile_show_dismissed_restores_an_orphan(tmp_path: Path):
             ),
         )
         assert "Wallpapers/bg.jpg" not in pane._state.dismissed
+
+
+@pytest.mark.asyncio
+async def test_ds_timing_probe_reports_and_exit_mode_quits(
+    tmp_path: Path, monkeypatch, capfd
+):
+    """The DS_TIMING startup probe (R0.1 baseline; docs/dev/startup-timing.md).
+
+    One breakdown line on stderr after the first loaded frame, and `exit` mode
+    must actually stop the app — that is what lets a shell `time` wrapper read
+    the full boot→usable span.
+    """
+    import asyncio
+
+    store, config = _setup(tmp_path)
+    monkeypatch.setenv("DS_TIMING", "exit")
+    app = DossierApp(store, config, today=TODAY)
+    async with app.run_test(size=(120, 34)):
+        # Poll for the exit rather than driving the pilot: the probe fires via
+        # call_after_refresh and then exits the app, after which pilot
+        # interaction would be invalid.
+        for _ in range(300):
+            if not app.is_running:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("DS_TIMING=exit did not stop the app")
+    err = capfd.readouterr().err
+    assert "ds-timing: usable" in err
+    for bucket in ("imports+init", "attention", "load", "paint"):
+        assert bucket in err
