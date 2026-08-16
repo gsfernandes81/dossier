@@ -42,9 +42,10 @@
 //!   per-file reports, and the anomalies `ds status` reports.
 //! - [`watermark`] — truncation detection: the high-water marks that catch a
 //!   journal reverted behind Syncthing's back.
+//! - [`writer`] — appending: the hybrid logical clock, the one-process-per-writer
+//!   lock, and the torn-tail repair that has to happen before any append.
 //!
-//! Still to come in R1: the appending writer (HLC, advisory lock, torn-tail
-//! repair before append) and compaction.
+//! Still to come in R1: compaction.
 //!
 //! # Reading this code
 //!
@@ -66,8 +67,10 @@ pub mod names;
 pub mod op;
 pub mod store;
 pub mod watermark;
+pub mod writer;
 
 pub use fold::{fold, Entity, EntityKey, Fold, FoldStats};
 pub use op::{parse_body, parse_line, Line, Op, OpKind, OpaqueReason, FORMAT_VERSION};
 pub use store::{Anomaly, Journal, Load, Namespace};
 pub use watermark::{Damage, HighWater, Mark};
+pub use writer::{Draft, Hlc, Writer};

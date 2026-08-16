@@ -400,9 +400,21 @@ until the cutover step the user personally green-lights.
     stay silent. Marks only ever climb, so a revert keeps being reported until the
     data is genuinely recovered (`accept` is the deliberate way out). An
     end-to-end test plays the whole scenario out on a real directory.
-  - **Still to come in R1:** the appending writer (HLC, advisory lock via std's
-    `File::try_lock`, torn-tail repair before append), and compaction with its
-    `compaction-preserves-fold` golden vector.
+  - **Slice 3 done (2026-08-16):** `writer.rs` — the appending half. The hybrid
+    logical clock (monotonic per writer even across a backwards NTP correction,
+    seeded from the whole store so a slow-clocked device does not lose every LWW
+    comparison), the one-process-per-writer advisory lock, and the torn-tail
+    repair that must happen *before* the first append. Callers describe ops with
+    a `Draft` and the writer stamps `v`/`ts`/`w`, so forging a timestamp or
+    writing under another writer's id is not a mistake the API can make.
+    `append_all` writes a consecutive run for the edits that are only correct
+    together (id rename, bundle rename). **The lock needs no dependency**: std's
+    `File::try_lock` has been stable since 1.89, and a failed lock is a
+    recoverable `Error::Locked`, not a crash — the caller degrades to read-only,
+    which is what keeps `ds status --quiet` from cron working while the TUI is
+    open.
+  - **Still to come in R1:** compaction and its `compaction-preserves-fold`
+    golden vector.
 - **R2 — Exporter + parity (Python).** One-shot v2-store → journal converter using
   the existing trusted `store.py` reader: docs + locations + bundles + reconcile +
   suggestions + scans + intake sidecars **and the synced `config.toml` → settings
