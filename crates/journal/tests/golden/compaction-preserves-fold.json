@@ -1,0 +1,14 @@
+{
+  "name": "compaction-preserves-fold",
+  "why": "Compaction rewrites a writer's own file as the minimal set reproducing its contribution. The fold of the whole store must be byte-identical afterwards. Two rules earn their place here: the `unset` survives even though the `set` it cancelled is dropped (phone-core set that field earlier, and the unset is what keeps it removed), and the tombstone plus the unreadable-to-this-build v2 line are both retained.",
+  "files": [
+    "{\"v\":1,\"ts\":1797407000001,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"passport\"}\n{\"v\":1,\"ts\":1797407000002,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"name\",\"val\":\"Passport v1\"}\n{\"v\":1,\"ts\":1797407000003,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"name\",\"val\":\"Passport v2\"}\n{\"v\":1,\"ts\":1797407000004,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"name\",\"val\":\"Passport v3\"}\n{\"v\":1,\"ts\":1797407000005,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"expiry_date\",\"val\":\"2030-01-01\"}\n{\"v\":1,\"ts\":1797407000006,\"w\":\"desk-core\",\"op\":\"unset\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"expiry_date\"}\n{\"v\":1,\"ts\":1797407000007,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"scratch\"}\n{\"v\":1,\"ts\":1797407000008,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"scratch\",\"f\":\"name\",\"val\":\"Scratch\"}\n{\"v\":1,\"ts\":1797407000009,\"w\":\"desk-core\",\"op\":\"delete\",\"ent\":\"doc\",\"id\":\"scratch\"}\n{\"v\":2,\"ts\":1797407000010,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"from-the-future\",\"val\":1}\n",
+    "{\"v\":1,\"ts\":1797407000000,\"w\":\"phone-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"expiry_date\",\"val\":\"2099-12-31\"}\n"
+  ],
+  "canonical": "{\"enrich\":{},\"entities\":{\"doc\":{\"passport\":{\"name\":\"Passport v3\"}}},\"states\":{},\"tombstones\":{\"doc\":[\"scratch\"]}}",
+  "compact": {
+    "file": 0,
+    "at": 1800000000000,
+    "expect_lines": 6
+  }
+}

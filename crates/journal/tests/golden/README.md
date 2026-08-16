@@ -18,7 +18,8 @@ suite with no Rust toolchain anywhere in the loop.
   "files": ["<raw journal file body>", "…"],
   "canonical": "<the canonical JSON the fold must produce>",
   "torn": ["<expected torn tail>", "…"],
-  "stats": {"malformed": 1}
+  "stats": {"malformed": 1},
+  "compact": {"file": 0, "at": 1800000000000, "expect_lines": 6}
 }
 ```
 
@@ -30,6 +31,7 @@ suite with no Rust toolchain anywhere in the loop.
 | `canonical` | the expected canonical JSON, compared **byte-for-byte** |
 | `torn` | optional; the torn tails expected across all files, in file order |
 | `stats` | optional; only the health counters this vector pins (`folded`, `opaque`, `malformed`, `orphaned`, `duplicate_keys`) |
+| `compact` | optional; compact `files[file]` as of wall clock `at` (ms), keep exactly `expect_lines` lines, and require the fold of the whole store to be **unchanged** |
 
 ## Canonical JSON
 
@@ -61,12 +63,13 @@ canonical string to make a test pass.
 
 ## Coverage
 
-Present: `union-commutativity`, `tombstone-then-newer-set`,
+`union-commutativity`, `tombstone-then-newer-set`,
 `tombstone-then-newer-create`, `id-rename-with-inbound-supersedes`,
 `state-per-key-lww-undismiss`, `torn-tail`, `mid-file-garbage`,
-`lines-from-the-future`, `enrich-payload-lww`.
+`lines-from-the-future`, `enrich-payload-lww`,
+`compaction-preserves-fold`.
 
-Still owed (arrives with the compaction slice): **compaction-preserves-fold** —
-compacting a writer's file must leave the fold of the whole store unchanged,
-while keeping every tombstone, every op newer than 30 days, and every line the
-compacting build did not understand.
+The last one carries the two compaction rules that are easiest to get wrong: an
+`unset` survives even when the `set` it cancelled is dropped (the *other* writer
+may have set that field earlier, and the unset is what keeps it removed), and a
+line from a newer format version is retained verbatim rather than rewritten.

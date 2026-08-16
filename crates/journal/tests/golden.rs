@@ -53,6 +53,21 @@ struct Vector {
     /// Expected health counters — only the keys a vector cares about.
     #[serde(default)]
     stats: BTreeMap<String, usize>,
+    /// For compaction vectors: which file to compact, when, and how much of it
+    /// should survive.
+    #[serde(default)]
+    compact: Option<Compact>,
+}
+
+/// The compaction half of a vector.
+#[derive(Debug, Deserialize)]
+struct Compact {
+    /// Index into `files`.
+    file: usize,
+    /// Wall clock in ms — decides the 30-day retention boundary.
+    at: i64,
+    /// How many lines must survive.
+    expect_lines: usize,
 }
 
 fn golden_dir() -> PathBuf {
@@ -94,6 +109,48 @@ fn parse(vector: &Vector) -> (Vec<Line>, Vec<String>) {
         torn.extend(tail);
     }
     (lines, torn)
+}
+
+/// Compacting the named file leaves the fold of the whole store unchanged.
+///
+/// The invariant compaction exists to not break, checked the way the Python
+/// satellite will check it: plan the compaction, keep only the surviving lines,
+/// and fold the store again.
+#[test]
+fn compaction_preserves_the_fold() {
+    let mut ran = 0;
+    for vector in load_vectors() {
+        let Some(compact) = &vector.compact else { continue };
+        ran += 1;
+
+        // Parse each file separately: only the named one is compacted.
+        let parsed: Vec<Vec<Line>> = vector.files.iter().map(|body| parse_body(body).0).collect();
+        let plan = journal::compaction_plan(&parsed[compact.file], compact.at);
+        assert_eq!(
+            plan.keep.len(),
+            compact.expect_lines,
+            "vector `{}`: compaction kept {} lines, expected {}",
+            vector.name,
+            plan.keep.len(),
+            compact.expect_lines
+        );
+
+        let mut after: Vec<Line> = Vec::new();
+        for (index, lines) in parsed.iter().enumerate() {
+            if index == compact.file {
+                after.extend(plan.keep.iter().map(|&i| lines[i].clone()));
+            } else {
+                after.extend(lines.iter().cloned());
+            }
+        }
+        assert_eq!(
+            fold(&after).canonical_json(),
+            vector.canonical,
+            "vector `{}`: compaction changed the fold",
+            vector.name
+        );
+    }
+    assert!(ran > 0, "no compaction vector was exercised");
 }
 
 /// Every fixture folds to exactly its recorded canonical JSON.
@@ -176,6 +233,7 @@ fn the_required_vectors_are_all_present() {
         "state-per-key-lww-undismiss",
         "torn-tail",
         "mid-file-garbage",
+        "compaction-preserves-fold",
     ] {
         assert!(names.iter().any(|n| n == required), "missing required vector `{required}`");
     }

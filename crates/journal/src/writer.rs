@@ -380,6 +380,106 @@ impl Writer {
     pub fn clock(&self) -> &Hlc {
         &self.clock
     }
+
+    /// Rewrite this writer's file as the minimal set that reproduces it
+    /// ([`crate::compact`]).
+    ///
+    /// Safe without any coordination: a writer compacts **only its own file**,
+    /// and it holds that file's lock, so there is no reader-writer race to lose
+    /// and no other device to agree with.
+    ///
+    /// Returns `None` when nothing was done. The rewrite is a same-directory
+    /// temp plus a rename — atomic, and same-directory because a cross-device
+    /// rename fails with `EXDEV` (the lesson v2 learned the hard way). The temp
+    /// name deliberately does not match the journal grammar, so a compaction
+    /// that dies half-way leaves a file the next fold ignores rather than a
+    /// truncated history it believes.
+    ///
+    /// # Errors
+    /// [`Error::Io`] or [`Error::Serialize`]. On failure the original file is
+    /// untouched: nothing is replaced until the new one is complete and flushed.
+    pub fn compact(&mut self, now_ms: i64, when: When) -> Result<Option<Report>, Error> {
+        let io = |action: &'static str, path: &Path| {
+            let path = path.to_path_buf();
+            move |source: std::io::Error| Error::Io { action, path: path.clone(), source }
+        };
+
+        let body =
+            std::fs::read_to_string(&self.path).map_err(io("read for compaction", &self.path))?;
+        let (lines, _torn) = crate::op::parse_body(&body);
+        let plan = crate::compact::plan(&lines, now_ms);
+        if when == When::IfWorthwhile && !plan.worth_doing() {
+            return Ok(None);
+        }
+
+        let directory = self.path.parent().unwrap_or_else(|| Path::new("."));
+        let temp = directory.join(names::compaction_temp_file(&self.writer_id, std::process::id()));
+
+        // Build the whole new body in memory first. A writer's file is a few
+        // megabytes at the store's real scale (§3.3), and holding it means the
+        // window where the temp exists is as short as possible.
+        let mut rewritten = String::with_capacity(body.len());
+        for &index in &plan.keep {
+            match &lines[index] {
+                // Re-serialized, which is lossless because `Op` carries unknown
+                // fields (`extra`).
+                crate::op::Line::Op(op) => rewritten.push_str(&op.to_line()?),
+                // Never re-serialized: bytes this build did not understand are
+                // bytes it must not rewrite.
+                crate::op::Line::Opaque { raw, .. } | crate::op::Line::Malformed { raw, .. } => {
+                    rewritten.push_str(raw);
+                }
+            }
+            rewritten.push('\n');
+        }
+
+        {
+            let mut file = File::create(&temp).map_err(io("create temp file", &temp))?;
+            file.write_all(rewritten.as_bytes()).map_err(io("write temp file", &temp))?;
+            // Flush before the rename, or a crash could leave the rename done
+            // and the contents not — the one ordering that loses data.
+            file.sync_all().map_err(io("flush temp file", &temp))?;
+        }
+        std::fs::rename(&temp, &self.path).map_err(io("rename temp file over", &self.path))?;
+
+        // The old handle still points at the replaced file, so reopen.
+        self.file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(io("reopen after compaction", &self.path))?;
+
+        Ok(Some(Report {
+            lines_before: plan.total,
+            lines_after: plan.keep.len(),
+            bytes_before: body.len() as u64,
+            bytes_after: rewritten.len() as u64,
+        }))
+    }
+}
+
+/// Whether [`Writer::compact`] should respect the trigger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum When {
+    /// Only if the file is mostly dead ops (the §3.3 trigger). What a clean
+    /// exit uses.
+    IfWorthwhile,
+    /// Regardless — for a maintenance verb the user asked for.
+    Always,
+}
+
+/// What a compaction did, for the caller to report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Report {
+    /// Lines before.
+    pub lines_before: usize,
+    /// Lines after.
+    pub lines_after: usize,
+    /// Bytes before.
+    pub bytes_before: u64,
+    /// Bytes after.
+    pub bytes_after: u64,
 }
 
 fn create_dir_all(path: &Path, action: &'static str) -> Result<(), Error> {
@@ -592,6 +692,95 @@ mod tests {
             .collect();
         assert_eq!(locks, ["desk-core.meta.lock"]);
         assert!(!fixture.locks.starts_with(fixture.journal.path()));
+    }
+
+    /// Compaction shrinks the file and leaves the fold identical — checked
+    /// through a real rewrite, not just the planner.
+    #[test]
+    fn compacting_shrinks_the_file_without_changing_the_fold() {
+        let fixture = fixture();
+        let mut writer = open(&fixture, "desk-core");
+        writer.append(Draft::create("doc", "passport")).expect("append");
+        for i in 0..40 {
+            writer
+                .append(Draft::set("doc", "passport", "name", format!("Passport v{i}")))
+                .expect("append");
+        }
+        writer.commit().expect("commit");
+
+        let before = fold(&fixture.journal.load(Namespace::Meta).expect("loads").lines);
+        // Far in the future, so nothing is inside the 30-day retention window.
+        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
+        let report =
+            writer.compact(future, When::IfWorthwhile).expect("compacts").expect("did work");
+
+        assert_eq!(report.lines_after, 2, "a create and the newest name write");
+        assert!(report.bytes_after < report.bytes_before / 4);
+
+        let load = fixture.journal.load(Namespace::Meta).expect("loads");
+        assert!(load.anomalies.is_empty(), "{:?}", load.anomalies);
+        assert_eq!(fold(&load.lines).canonical_json(), before.canonical_json());
+    }
+
+    /// A compaction never lowers the file's high-water mark, which is what lets
+    /// a `max_ts` regression be trusted as a damage signal.
+    #[test]
+    fn compaction_never_lowers_the_high_water_mark() {
+        let fixture = fixture();
+        let mut writer = open(&fixture, "desk-core");
+        writer.append(Draft::create("doc", "x")).expect("append");
+        for i in 0..30 {
+            writer.append(Draft::set("doc", "x", "name", format!("v{i}"))).expect("append");
+        }
+        writer.commit().expect("commit");
+        let before = fixture.journal.load(Namespace::Meta).expect("loads").files[0].max_ts;
+
+        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
+        writer.compact(future, When::Always).expect("compacts");
+
+        let after = fixture.journal.load(Namespace::Meta).expect("loads").files[0].max_ts;
+        assert_eq!(before, after);
+    }
+
+    /// The writer keeps working after a compaction — the old file handle points
+    /// at a replaced inode, so it has to be reopened.
+    #[test]
+    fn appends_continue_after_a_compaction() {
+        let fixture = fixture();
+        let mut writer = open(&fixture, "desk-core");
+        writer.append(Draft::create("doc", "x")).expect("append");
+        for i in 0..20 {
+            writer.append(Draft::set("doc", "x", "name", format!("v{i}"))).expect("append");
+        }
+        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
+        writer.compact(future, When::Always).expect("compacts");
+
+        writer.append(Draft::set("doc", "x", "slot", 7)).expect("append after compaction");
+        writer.commit().expect("commit");
+
+        let load = fixture.journal.load(Namespace::Meta).expect("loads");
+        assert!(load.anomalies.is_empty(), "{:?}", load.anomalies);
+        assert_eq!(fold(&load.lines).get("doc", "x").expect("alive").fields["slot"], 7);
+    }
+
+    /// The trigger is respected: a healthy file is left alone, and no temp file
+    /// is left behind either way.
+    #[test]
+    fn a_healthy_file_is_left_alone_and_no_temp_survives() {
+        let fixture = fixture();
+        let mut writer = open(&fixture, "desk-core");
+        writer.append(Draft::create("doc", "x")).expect("append");
+        writer.append(Draft::set("doc", "x", "name", "only")).expect("append");
+        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
+        assert!(writer.compact(future, When::IfWorthwhile).expect("runs").is_none());
+
+        let directory = writer.path().parent().expect("has a parent");
+        let leftovers: Vec<_> = std::fs::read_dir(directory)
+            .expect("readable")
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .filter(|name| name.contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files must never be left in the synced tree");
     }
 
     /// An id outside the frozen grammar is refused before anything is created —

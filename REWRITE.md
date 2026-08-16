@@ -144,6 +144,12 @@ section and the golden vectors in the same slice.
   newer than the tombstone precedes them** (no partial-doc resurrection from a stray
   `set`; a golden vector pins this); `state` entries are per-key LWW (§3.2). The fold
   is a pure function — **fold(A ∪ B) ≡ fold(B ∪ A)**, property-tested (§10).
+  **R1 clarification (both implementations):** a `set`/`unset` for an entity that has
+  no `create` at all is *also* ignored, not treated as an implicit create — a stray
+  field write must never materialize a document — and each one is counted as an
+  `orphaned` op so `ds status` can say a `create` went missing. Ops sharing a
+  `(ts, w)` key are counted as `duplicate_keys`: impossible under the HLC + writer
+  lock, so a non-zero count means two processes shared a writer id.
 - **Append durability**: one op = one `write()` of a full line ending in `\n`;
   `fsync` after user-initiated saves (edits are rare; the cost is nothing). Torn
   final line (no trailing `\n` / parse failure): dropped with a warning on load, and
@@ -413,8 +419,26 @@ until the cutover step the user personally green-lights.
     recoverable `Error::Locked`, not a crash — the caller degrades to read-only,
     which is what keeps `ds status --quiet` from cron working while the TUI is
     open.
-  - **Still to come in R1:** compaction and its `compaction-preserves-fold`
-    golden vector.
+  - **Slice 4 done (2026-08-16) — R1 complete.** `compact.rs` rewrites a writer's
+    own file as the minimal set reproducing its contribution: every `create` and
+    `delete` (tombstones forever), the newest `set`/`unset` per field, the newest
+    `state`/`reading`/`proposal` per key, **everything inside the 30-day undo
+    horizon**, and every line this build could not read — preserved verbatim, since
+    it is not compaction's place to discard what it did not understand. Two rules
+    earn their own tests because they look wrong at first glance: an `unset`
+    survives even when the `set` it cancelled is dropped (the *other* writer may
+    have set that field earlier, and the unset is what keeps it removed), and ops
+    older than their entity's newest tombstone are dropped as permanently
+    unreachable. The rewrite is a same-directory temp + rename (EXDEV lesson), the
+    temp name deliberately fails the journal grammar so a half-finished compaction
+    is invisible to the next fold, and `Writer::compact` holds the writer lock
+    throughout. The `compaction-preserves-fold` golden vector is in, and two
+    property tests generalize it: compaction preserves the fold for *arbitrary*
+    two-writer streams, and never lowers a file's high-water mark — the second
+    being what keeps the truncation defense from firing on routine maintenance.
+  - **§3 is frozen** as of this slice. 78 tests across the crate; the one contract
+    clarification R1 added (orphaned `set` handling, duplicate-key counting) is
+    written into §3.3 above.
 - **R2 — Exporter + parity (Python).** One-shot v2-store → journal converter using
   the existing trusted `store.py` reader: docs + locations + bundles + reconcile +
   suggestions + scans + intake sidecars **and the synced `config.toml` → settings

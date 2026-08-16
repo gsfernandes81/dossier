@@ -27,7 +27,7 @@
 //! generator below enforces it, and `FoldStats::duplicate_keys` is how a real
 //! store notices the guarantee was broken.
 
-use journal::{fold, parse_line, Line};
+use journal::{compaction_plan, fold, parse_line, Line};
 use proptest::prelude::*;
 use serde_json::{json, Value};
 
@@ -196,6 +196,42 @@ proptest! {
         let entity = fold(&all).get("doc", "passport").cloned().expect("recreated");
         prop_assert_eq!(entity.fields.len(), 1);
         prop_assert_eq!(&entity.fields["slot"], &json!(3));
+    }
+
+    /// **Compaction preserves the fold.** Compacting one writer's file — at any
+    /// point on the clock, so the retention window sometimes covers everything
+    /// and sometimes nothing — cannot change the state the whole store folds to.
+    /// This is the claim the golden vector demonstrates on one example and this
+    /// makes about every op stream.
+    #[test]
+    fn compaction_preserves_the_fold(a in stream(), b in stream(), now in 0i64..2_000i64) {
+        let taken: std::collections::BTreeSet<_> =
+            a.iter().map(|s| (s.ts, s.writer)).collect();
+        let b: Vec<Spec> = b.into_iter().filter(|s| !taken.contains(&(s.ts, s.writer))).collect();
+
+        let (mine, theirs) = (lines(&a), lines(&b));
+        let mut before = mine.clone();
+        before.extend(theirs.clone());
+
+        let plan = compaction_plan(&mine, now);
+        let mut after: Vec<Line> = plan.keep.iter().map(|&i| mine[i].clone()).collect();
+        after.extend(theirs);
+
+        prop_assert_eq!(fold(&after).canonical_json(), fold(&before).canonical_json());
+        prop_assert!(plan.keep.len() <= mine.len());
+    }
+
+    /// **Compaction never lowers a file's highest timestamp.** The truncation
+    /// defense treats a `max_ts` regression as damage, so this has to hold for
+    /// every possible file — otherwise a routine compaction would raise a false
+    /// alarm about data loss.
+    #[test]
+    fn compaction_never_lowers_the_high_water_mark(specs in stream(), now in 0i64..2_000i64) {
+        let all = lines(&specs);
+        let plan = compaction_plan(&all, now);
+        let max = |lines: &[Line]| lines.iter().filter_map(Line::as_op).map(|op| op.ts).max();
+        let kept: Vec<Line> = plan.keep.iter().map(|&i| all[i].clone()).collect();
+        prop_assert_eq!(max(&kept), max(&all));
     }
 
     /// **Folding is deterministic and free of hidden state**: the same input

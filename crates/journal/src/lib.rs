@@ -44,8 +44,7 @@
 //!   journal reverted behind Syncthing's back.
 //! - [`writer`] — appending: the hybrid logical clock, the one-process-per-writer
 //!   lock, and the torn-tail repair that has to happen before any append.
-//!
-//! Still to come in R1: compaction.
+//! - [`compact`] — shrinking a writer's own file without changing what it means.
 //!
 //! # Reading this code
 //!
@@ -62,6 +61,7 @@
 // There is no need for `unsafe` anywhere in this design.
 #![forbid(unsafe_code)]
 
+pub mod compact;
 pub mod fold;
 pub mod names;
 pub mod op;
@@ -69,6 +69,7 @@ pub mod store;
 pub mod watermark;
 pub mod writer;
 
+pub use compact::{plan as compaction_plan, Plan as CompactionPlan};
 pub use fold::{fold, Entity, EntityKey, Fold, FoldStats};
 pub use op::{parse_body, parse_line, Line, Op, OpKind, OpaqueReason, FORMAT_VERSION};
 pub use store::{Anomaly, Journal, Load, Namespace};
