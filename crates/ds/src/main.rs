@@ -88,6 +88,14 @@ enum Command {
         /// finally speaks. Read-only by design (REWRITE.md §3.1).
         #[arg(long)]
         quiet: bool,
+
+        /// Skip the Syncthing check.
+        ///
+        /// The only part of `status` that touches the network. Worth having a
+        /// switch for: on a metered or captive connection the two-second
+        /// timeout is the slowest thing this command does.
+        #[arg(long)]
+        no_sync: bool,
     },
     /// Open a document's file without starting the TUI.
     Open {
@@ -132,15 +140,23 @@ fn run(args: &Args, start: Instant) -> io::Result<u8> {
     let loaded = load::load(&journal).map_err(io::Error::other)?;
 
     match &args.command {
-        Some(Command::Status { quiet }) => Ok(status(&loaded, *quiet)),
+        Some(Command::Status { quiet, no_sync }) => {
+            Ok(status(&loaded, &config, &root, *quiet, *no_sync))
+        }
         Some(Command::Open { query }) => Ok(open_one(&loaded, &root, &query.join(" "))),
         None => browse(loaded, &root, start).map(|()| 0),
     }
 }
 
 /// `ds status`.
-fn status(loaded: &load::Loaded, quiet: bool) -> u8 {
-    let report = Report::new(
+fn status(
+    loaded: &load::Loaded,
+    config: &ds::config::Config,
+    root: &Path,
+    quiet: bool,
+    no_sync: bool,
+) -> u8 {
+    let mut report = Report::new(
         loaded.path.display().to_string(),
         &loaded.load,
         &loaded.stats,
@@ -148,6 +164,12 @@ fn status(loaded: &load::Loaded, quiet: bool) -> u8 {
         &loaded.today,
         &loaded.warn_until,
     );
+    // The one network call in the whole binary, and the only one that can be
+    // slow — so it is last, after everything local has already been decided.
+    if !no_sync {
+        report.sync = ds::syncthing::Settings::from_config(&config.syncthing)
+            .map(|settings| ds::syncthing::query(&settings, root));
+    }
     if quiet {
         if report.healthy() {
             return 0;

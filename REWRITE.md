@@ -564,6 +564,27 @@ until the cutover step the user personally green-lights.
     - One dependency note: `jiff` **panics** when a span is built from an absurd
       day count, before any checked arithmetic can refuse — so the warn window
       (which comes from the journal, i.e. from data) is clamped to a century.
+  - **Slice 4 done (2026-08-16):** the Syncthing REST check, status only.
+    `syncthing.rs` ports v2's client down to the part `ds status` needs, with its
+    three rules intact: **reachability problems are states, never errors** (the
+    rest of the report is still worth printing); **the interesting folder is the
+    one containing the store**, matched on canonicalized paths so Termux's
+    `~/storage/shared` symlink resolves to what the daemon reports; and the
+    §4.3 shim — **TLS verification is dropped for loopback only**, refused
+    outright for any other host, because that is where the certificate is
+    self-signed and the API key is the real authenticator. A paused folder and a
+    daemon that has been off for a week are silent failures the journal cannot
+    see, so both fail `--quiet`'s health check; versioning being off is reported
+    but is not a fault. Tests run a real socket server rather than a mocked
+    transport — the header, the status codes and the URLs are the whole point.
+    - **Cost, and it is a real one:** `ureq` → `rustls` → **`ring`, which
+      compiles C and assembly**. That breaks R0.2's "the phone target needs no
+      external toolchain" for the *dependency* (Rust's own code still needs only
+      `rustup target add`): `cc` looks for an `aarch64-linux-musl-gcc` that does
+      not exist. Fixed by pointing `cc` at **clang**, which cross-compiles by
+      construction, in `.cargo/config.toml`; the CI phone leg installs it
+      explicitly rather than trusting the runner image. The phone binary is
+      still fully static — 4.9 MB, up from 2.6 MB before TLS.
 - **R4 — Editing**: detail editing via ops, undo (inverse ops), slots with
   insert-and-shift, supersession, bundle membership, settings ops, `ds init`/`reset`.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs),

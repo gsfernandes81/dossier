@@ -21,6 +21,9 @@
 > cargo build --workspace --release --target aarch64-unknown-linux-musl   # the phone target
 > (cd spike && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --release)
 > ```
+> The phone cross-build needs **clang** on PATH (`.cargo/config.toml` points `cc` at
+> it). Rust itself still needs nothing but `rustup target add` — the C compiler is
+> for `ring`, which arrives with the Syncthing REST check via rustls.
 > **The Windows CI leg is not decoration** — it has already caught a bug a green
 > Linux run missed: a file handle opened in append mode on Windows lacks
 > `FILE_WRITE_DATA`, so `set_len` on it fails with "Access is denied" while working

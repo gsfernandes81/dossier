@@ -30,6 +30,8 @@ use std::fmt::Write as _;
 
 use journal::{FoldStats, Load};
 
+use crate::syncthing::State;
+
 use crate::{Status, Store};
 
 /// Everything `ds status` knows, before it is turned into text.
@@ -63,6 +65,8 @@ pub struct Report {
     pub malformed: usize,
     /// Everything the loader thought was worth reporting.
     pub anomalies: Vec<String>,
+    /// What the local Syncthing daemon says, when there is one to ask.
+    pub sync: Option<crate::syncthing::Status>,
 }
 
 /// One writer's file, as the report lists it.
@@ -131,6 +135,7 @@ impl Report {
             // The loader's own wording, verbatim: an anomaly this report
             // reworded would be an anomaly nothing else agrees with.
             anomalies: load.anomalies.iter().map(ToString::to_string).collect(),
+            sync: None,
         }
     }
 
@@ -141,7 +146,24 @@ impl Report {
     /// job silent for months and believable when it finally speaks.
     #[must_use]
     pub fn healthy(&self) -> bool {
-        self.anomalies.is_empty() && self.malformed == 0 && self.duplicate_keys == 0
+        self.anomalies.is_empty()
+            && self.malformed == 0
+            && self.duplicate_keys == 0
+            && self.sync_healthy()
+    }
+
+    /// Whether the transport is in a state that will actually move documents.
+    ///
+    /// An unconfigured daemon is not a fault — plenty of runs have no key, and a
+    /// device that was never set up should not nag. Everything else here is a
+    /// silent failure: the app looks fine, and nothing reaches the other device.
+    fn sync_healthy(&self) -> bool {
+        let Some(sync) = &self.sync else { return true };
+        match sync.state {
+            State::Unconfigured => true,
+            State::Refused | State::Unreachable | State::Unauthorized => false,
+            State::Idle | State::Busy => sync.folder.as_ref().is_some_and(|f| !f.paused),
+        }
     }
 
     /// The full report.
@@ -174,11 +196,38 @@ impl Report {
             "expiry    {} tracked · {} expired · {} within {} days",
             self.tracked, self.expired, self.soon, self.warn_days
         );
+        if let Some(sync) = &self.sync {
+            let _ = writeln!(out, "syncthing {}", Self::sync_line(sync));
+        }
         out.push_str(&self.problems());
         if self.healthy() {
             out.push_str("health    no anomalies\n");
         }
         out
+    }
+
+    /// The Syncthing line: state, then the facts that decide whether these
+    /// documents actually move.
+    fn sync_line(sync: &crate::syncthing::Status) -> String {
+        let mut line = sync.state.label().to_string();
+        if let Some(version) = &sync.version {
+            let _ = write!(line, " · {version}");
+        }
+        if let Some(folder) = &sync.folder {
+            let _ = write!(line, " · folder {}", folder.label);
+            if folder.paused {
+                line.push_str(" (PAUSED)");
+            }
+            if folder.versioning.is_empty() {
+                // The design leans on Syncthing versioning as the undo history
+                // of last resort (§7). Off is worth saying out loud.
+                line.push_str(" · no versioning");
+            }
+        } else {
+            line.push_str(" · the store is in no synced folder");
+        }
+        let _ = write!(line, " · {}/{} peers connected", sync.connected, sync.devices);
+        line
     }
 
     /// Only what is wrong — the `--quiet` form, and the tail of the loud one.
@@ -203,6 +252,29 @@ impl Report {
         }
         for anomaly in &self.anomalies {
             let _ = writeln!(out, "anomaly   {anomaly}");
+        }
+        // Syncthing problems belong in the quiet form too: a paused folder or a
+        // daemon that has been off for a week is exactly the silent failure a
+        // cron job exists to catch, and neither shows up in the journal.
+        if let Some(sync) = &self.sync {
+            match sync.state {
+                State::Unreachable | State::Unauthorized | State::Refused => {
+                    let _ = writeln!(
+                        out,
+                        "syncthing {} — {}",
+                        sync.state.label(),
+                        sync.detail.as_deref().unwrap_or("no detail")
+                    );
+                }
+                State::Unconfigured | State::Idle | State::Busy => {}
+            }
+            if let Some(folder) = &sync.folder {
+                if folder.paused {
+                    let _ = writeln!(out, "syncthing folder {} is PAUSED", folder.label);
+                }
+            } else if sync.state == State::Idle || sync.state == State::Busy {
+                let _ = writeln!(out, "syncthing the store is in no synced folder");
+            }
         }
         out
     }
@@ -288,6 +360,70 @@ mod tests {
         assert!(problems.contains("sync conflict copy present"), "{problems}");
         assert!(problems.contains("desk-core.sync-conflict"), "it names the file: {problems}");
         assert!(problems.contains("never merge by hand"), "and what to do: {problems}");
+    }
+
+    fn sync(state: State, folder: Option<crate::syncthing::Folder>) -> crate::syncthing::Status {
+        crate::syncthing::Status {
+            state,
+            detail: Some("detail".into()),
+            version: Some("v1.27.0".into()),
+            folder,
+            connected: 1,
+            devices: 1,
+        }
+    }
+
+    fn folder(paused: bool, versioning: &str) -> crate::syncthing::Folder {
+        crate::syncthing::Folder {
+            id: "docs".into(),
+            label: "Documents".into(),
+            paused,
+            versioning: versioning.into(),
+            folder_state: Some("idle".into()),
+        }
+    }
+
+    /// **A paused folder is a silent failure**: everything looks fine and
+    /// nothing reaches the other device. It fails the health check, so a cron
+    /// job finds it.
+    #[test]
+    fn a_paused_folder_is_unhealthy_and_says_so() {
+        let mut r =
+            report(&Load { present: true, ..Load::default() }, &FoldStats::default(), Vec::new());
+        r.sync = Some(sync(State::Idle, Some(folder(true, "staggered"))));
+        assert!(!r.healthy());
+        assert!(r.problems().contains("PAUSED"), "{}", r.problems());
+        assert!(
+            r.render().contains("syncthing idle · v1.27.0 · folder Documents (PAUSED)"),
+            "{}",
+            r.render()
+        );
+    }
+
+    /// Versioning off is reported — the design leans on it as the undo history
+    /// of last resort — but it is not damage, so cron stays quiet about it.
+    #[test]
+    fn versioning_off_is_mentioned_but_is_not_a_fault() {
+        let mut r =
+            report(&Load { present: true, ..Load::default() }, &FoldStats::default(), Vec::new());
+        r.sync = Some(sync(State::Idle, Some(folder(false, ""))));
+        assert!(r.healthy());
+        assert!(r.render().contains("no versioning"));
+        assert_eq!(r.problems(), "");
+    }
+
+    /// A device that never configured the API is not nagged; a daemon that was
+    /// configured and is now unreachable is.
+    #[test]
+    fn unconfigured_is_quiet_and_unreachable_is_not() {
+        let mut r =
+            report(&Load { present: true, ..Load::default() }, &FoldStats::default(), Vec::new());
+        r.sync = Some(sync(State::Unconfigured, None));
+        assert!(r.healthy(), "never set up is not a fault");
+
+        r.sync = Some(sync(State::Unreachable, None));
+        assert!(!r.healthy());
+        assert!(r.problems().contains("unreachable"));
     }
 
     /// A device with no journal yet says so plainly, rather than reporting an

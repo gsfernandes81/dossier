@@ -84,6 +84,15 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup target add aarch64-unknown-linux-musl
 
+      # Rust needs no toolchain for this target — but `ring` (via rustls, via
+      # the Syncthing REST check) compiles C and assembly, and `cc` looks for an
+      # `aarch64-linux-musl-gcc` that does not exist. clang cross-compiles by
+      # construction; `.cargo/config.toml` points cc at it. Installed
+      # explicitly rather than relied on from the image, so this leg does not
+      # depend on what a runner happens to ship.
+      - name: Install clang (the cross C compiler for ring)
+        run: sudo apt-get update && sudo apt-get install -y clang llvm
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Cross-build (static, aarch64 musl)

@@ -10,3 +10,16 @@
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
 rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes"]
+
+# `ureq` + `rustls` bring in `ring`, whose build compiles C and assembly — the
+# one thing in the tree that is not pure Rust (REWRITE.md §4.3 budgets for the
+# Syncthing REST check; this is what it costs). `cc` looks for a
+# `aarch64-linux-musl-gcc` that does not exist, so point it at clang, which is a
+# cross-compiler by construction and needs no per-target toolchain of its own.
+#
+# Rust's own code still needs nothing but `rustup target add` — this affects the
+# C dependency only, and only when cross-compiling.
+[env]
+CC_aarch64_unknown_linux_musl = "clang"
+AR_aarch64_unknown_linux_musl = "llvm-ar"
+CFLAGS_aarch64_unknown_linux_musl = "--target=aarch64-unknown-linux-musl"

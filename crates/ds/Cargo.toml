@@ -52,6 +52,11 @@ toml = "1"
 # The platform config directory, so the config lands where v2's `platformdirs`
 # put it and a configured device keeps working.
 dirs = "6"
+# Syncthing's REST API, status only (REWRITE.md §4.3). Blocking, tiny, and
+# rustls rather than the system TLS stack — the phone binary is static musl, so
+# there is no system stack to link against. `default-features = false` drops the
+# platform certificate verifier for the same reason.
+ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
 
 [dev-dependencies]
 proptest = "1"

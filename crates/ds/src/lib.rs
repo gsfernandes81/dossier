@@ -47,6 +47,8 @@
 //!   directory to a store that every entry point shares.
 //! - [`status`] — what `ds status` reports, as data that is rendered twice: in
 //!   full for a person, problems only for cron.
+//! - [`syncthing`] — asking the local daemon how the sync is going, status only,
+//!   with the loopback-scoped TLS exception Termux forces.
 //!
 //! # Reading this code
 //!
@@ -69,6 +71,7 @@ pub mod load;
 pub mod open;
 pub mod search;
 pub mod status;
+pub mod syncthing;
 pub mod theme;
 
 pub use app::{update, Effect, Model, Msg};
