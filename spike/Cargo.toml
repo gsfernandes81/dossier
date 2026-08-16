@@ -1,0 +1,29 @@
+[package]
+name = "ds-spike"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Phase R0.2 go/no-go spike for the dossier v3 rewrite (throwaway)"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[dependencies]
+# The whole point of the spike: does Ratatui + crossterm paint 1k rows fast
+# enough, and does crossterm's SGR mouse reporting survive Termux? Ratatui
+# re-exports the crossterm it was built against (`ratatui::crossterm`), so this
+# is one dependency, not two — no version-skew between backend and frontend.
+ratatui = "0.30"
+# Terminal cells are not bytes and not chars: CJK and emoji are two columns
+# wide. Right-aligned columns and `…` truncation need real display widths, which
+# is exactly what REWRITE-UI.md §1 requires ("never `len()`"). The spike proves
+# the approach before R3 depends on it.
+unicode-width = "0.2"
+
+# The spike is measured in release mode only; these are the settings the real
+# binary will ship with, so the numbers transfer.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

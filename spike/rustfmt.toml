@@ -1,0 +1,11 @@
+# Formatting for the Rust side of dossier.
+#
+# `max_width = 100` (rustfmt's default) rather than the Python side's 88: Rust's
+# `self.`/`::`-heavy expressions wrap badly at 88, and the two languages live in
+# separate directories, so there is nothing to keep visually aligned.
+#
+# `use_small_heuristics = "Max"` lets a short struct literal, match arm or call
+# stay on one line as long as it fits the width — the default caps those at
+# fractions of the width, which turns readable one-liners into five-line blocks.
+max_width = 100
+use_small_heuristics = "Max"

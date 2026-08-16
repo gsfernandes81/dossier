@@ -79,6 +79,10 @@ scratch/
 config.local.toml
 notion-export*.json
 
+# Rust build output (the v3 rewrite — see REWRITE.md). Cargo.lock IS committed for
+# the binary crates, same reasoning as uv.lock.
+target/
+
 # Core dumps
 core
 core.[0-9]*
