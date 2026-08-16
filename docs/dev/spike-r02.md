@@ -147,12 +147,25 @@ Checklist §3 results (1–15): _pending_
 
 ### 4.4 Windows — **to be filled in**
 
+Already covered by CI (`windows-latest`, MSVC, first run green): `cargo test
+--release` and the headless perf gate both pass, so the renderer and the
+keystroke→frame budget hold on Windows. What CI cannot see is startup in a real
+console and the interactive behaviour — that is what the rows below are for.
+
 | Run | Shell total | usable | data | term init | first paint |
 |---|---|---|---|---|---|
 | 1 | | | | | |
 | 2 | | | | | |
 
 Checklist §3 results (7–9, 12–15): _pending_
+
+### 4.5 CI status
+
+First run of the `spike` workflow on this branch: **all four jobs green** —
+`check` (fmt + pedantic clippy denied), `test (ubuntu-latest)`,
+`test (windows-latest)` (both including the `--assert-budget` perf gate), and
+`phone` (static aarch64 cross-build, verified statically linked, smoke-run under
+qemu, artifact uploaded). The Python `CI` workflow is unaffected and green.
 
 ## 5. Findings so far
 
