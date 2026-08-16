@@ -49,3 +49,13 @@ tokens in `style.css`.
 The panes deliberately follow the viewer's light/dark theme — that demonstrates
 REWRITE-UI.md §6's claim rather than asserting it: semantic tokens map to ANSI,
 so the user's own terminal theme carries the palette.
+
+## Known divergence
+
+The real app's touch action bar reads `⏎ Open · → Detail · ^x Expiry · ^t Scans`;
+these pages still show `⌨ Keys` in the fourth quarter. That button was dropped
+after the first device run of the real binary — Termux's own extra-keys row can
+carry a keyboard toggle, so the affordance moved to the search bar (a dim `⌨`
+beside the count; tapping anywhere on that row drops mouse reporting for one
+tap). REWRITE-UI.md §5 and §7a record the reasoning. Nothing else on these pages
+has been superseded.

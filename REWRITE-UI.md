@@ -98,10 +98,21 @@ Exactly **two** layout states (the Miller collapse ladder is gone):
 ## 5. Touch / Termux
 
 The v2 findings port as-is (REWRITE.md invariant 6): SGR mouse on; tap selects,
-tap-on-selected opens; focusing the bar drops mouse reporting so the next tap
-raises the IME, restored on blur; the app owns scrolling. Touch mode shows a
-one-row action bar (Open · Detail · Commands · ⌨) above the search bar — the only
-extra chrome touch gets.
+tap-on-selected opens; **tapping the search bar** drops mouse reporting so the
+next tap raises the IME, restored on the next keypress; the app owns scrolling.
+Touch mode shows a one-row action bar above the search bar — the only extra
+chrome touch gets — carrying this surface's four verbs (Open · Detail · Expiry ·
+Scans).
+
+**Amended 2026-08-16, from the device.** The action bar's fourth quarter was a
+`⌨ Keys` button. Termux's own extra-keys row can carry a keyboard toggle, so a
+second button for it wasted a quarter of the only touch chrome there is. The
+keyboard affordance is now the search bar itself — which is what the sentence
+above always said, and what a thumb does anyway when it wants to type — marked
+with a dim `⌨` beside the count. The freed quarter went to `^t Scans`: with
+`^x Expiry` beside it, the two touch buttons are exactly the verbs whose keys are
+modifier combinations, which are the ones a phone keyboard is least reliable at
+delivering.
 
 ## 6. Visual language
 
@@ -142,6 +153,11 @@ User calls from that review, binding on R3–R5:
   implemented until the user confirms it is a real pain point.**
 - Possible follow-up: ship a **Termux colour theme**, if the default palette
   fights the semantic tokens in practice.
+- **Diverges from the mockups, deliberately (2026-08-16, first device run of the
+  real app):** the touch action bar's fourth quarter is `^t Scans`, not
+  `⌨ Keys`, and the keyboard affordance moved to the search bar — see §5. The
+  published mockup pages still show the old bar; everything else on them still
+  holds.
 
 ## 8. Acceptance checklist (R3–R5 must satisfy)
 

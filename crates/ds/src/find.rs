@@ -283,12 +283,13 @@ fn two_line_row(
 fn draw_action_bar(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     let quarter = (area.width as usize / 4).max(1);
     let detail = if model.detail { "← Back" } else { "→ Detail" };
+    let scan_label = if model.scan_search == ScanSearch::Off { "^t Scans" } else { "^t Scans•" };
     // Short enough that a quarter of a 45-column phone screen holds the whole
-    // label — a truncated button is a button nobody trusts.
-    let labels = ["⏎ Open", detail, "^x Expiry", "⌨ Keys"];
-    // The keyboard affordance flashes while reporting is dropped, so the state
-    // is visible rather than mysterious.
-    let tone = if model.keyboard_hint { Tone::Armed } else { Tone::Muted };
+    // label — a truncated button is a button nobody trusts. The last two are the
+    // verbs whose keys are modifier combinations, which is what a thumb most
+    // needs a button for; the keyboard affordance moved to the search bar.
+    let labels = ["⏎ Open", detail, "^x Expiry", scan_label];
+    let tone = Tone::Muted;
     let spans: Vec<Span> = labels
         .iter()
         .map(|label| Span::styled(fit(&format!(" {label}"), quarter), theme.style(tone)))
@@ -312,17 +313,26 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
         ScanSearch::Off => {}
     }
     if !model.mouse_on {
-        chips.push_str("  [tap to raise the keyboard]");
+        chips.push_str("  [tap anywhere for the keyboard]");
     }
+    // The keyboard target. Tapping anywhere on this row drops mouse reporting so
+    // the next tap raises the IME; the glyph is there so the row reads as
+    // tappable, and it lights up while reporting is dropped so the state is
+    // visible rather than mysterious.
+    let key_glyph = if crate::layout::touch_bar(area.width) { "⌨ " } else { "" };
+    let key_tone = if model.keyboard_hint { Tone::Armed } else { Tone::Muted };
+
     let typed = format!("{}_", model.query);
-    let room = (area.width as usize).saturating_sub(width(&count) + 3);
+    let room = (area.width as usize).saturating_sub(width(&count) + width(key_glyph) + 3);
     let body = truncate(&format!("{typed}{chips}"), room);
-    let gap = (area.width as usize).saturating_sub(2 + width(&body) + width(&count));
+    let gap =
+        (area.width as usize).saturating_sub(2 + width(&body) + width(key_glyph) + width(&count));
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" > ", theme.style(Tone::Accent)),
             Span::raw(body),
             Span::raw(" ".repeat(gap)),
+            Span::styled(key_glyph, theme.style(key_tone)),
             Span::styled(count, theme.style(Tone::Muted)),
         ])),
         area,

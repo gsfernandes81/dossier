@@ -430,11 +430,18 @@ impl Model {
         (index < self.rows.len()).then_some(index)
     }
 
-    /// The touch action bar: `⏎ Open · → Detail · : Cmds · ⌨ Keys`, in quarters.
+    /// The touch action bar: `⏎ Open · → Detail · ^x Expiry · ^t Scans`, in
+    /// quarters.
     ///
     /// Quarters rather than measured labels, so the hit test needs no geometry
     /// from the renderer beyond the row it sits on — and so a fat thumb always
     /// lands on something.
+    ///
+    /// The last two carry the verbs whose *keys* are modifier combinations —
+    /// exactly the ones a phone keyboard is least reliable at delivering (R0.2
+    /// probed `ctrl+t` on the device for that reason). The keyboard affordance
+    /// that used to sit here moved to the search bar, where tapping to type is
+    /// the universal phone idiom; see [`Model::raise_keyboard`].
     fn tap_action_bar(&mut self, col: u16) -> Effect {
         let quarter = (self.cols / 4).max(1);
         match (col / quarter).min(3) {
@@ -443,22 +450,24 @@ impl Model {
                 self.detail = !self.detail;
                 Effect::Redraw
             }
-            // The third quarter carries whatever this surface's third verb is.
-            // Today that is the expiring filter; when command mode lands it
-            // becomes `: Cmds`. What it never becomes is a button for something
-            // that does not work yet — v2's `check_action` lesson.
             2 => update(self, Msg::ToggleExpiring),
-            _ => self.raise_keyboard(),
+            _ => update(self, Msg::ToggleScans),
         }
     }
 
     /// The Termux IME affordance (invariant 6, DESIGN §14).
     ///
     /// Termux raises the soft keyboard on a tap only while mouse tracking is
-    /// **off**, and no escape sequence can raise it directly. So the `⌨` control
-    /// drops reporting for exactly one tap: the tap raises the keyboard, and the
-    /// first key press turns reporting back on. Confirmed working on the phone
-    /// in R0.2.
+    /// **off**, and no escape sequence can raise it directly. So this drops
+    /// reporting for exactly one tap: that tap raises the keyboard, and the
+    /// first key press turns reporting back on.
+    ///
+    /// It is reached by **tapping the search bar** — REWRITE-UI.md §5's own
+    /// wording ("focusing the bar drops mouse reporting so the next tap raises
+    /// the IME"), and the thing a thumb does anyway when it wants to type. It
+    /// had a quarter of the action bar until the device said otherwise: Termux's
+    /// own extra-keys row can carry a keyboard toggle, which makes a second
+    /// button for it a waste of a quarter of the only touch chrome there is.
     ///
     /// This flips state only. Reporting is a *terminal* command, so the shell
     /// performs it by reconciling itself against [`Model::mouse_on`] after every
@@ -576,7 +585,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         }
         Msg::Tap { col, row } => {
             model.flash = None;
-            if crate::layout::touch_bar(model.cols) && row == action_bar_row(model) {
+            if row == search_row(model) {
+                // Tapping the search field is how every phone app says "I want
+                // to type", so it is what drops mouse reporting for one tap.
+                model.raise_keyboard()
+            } else if crate::layout::touch_bar(model.cols) && row == action_bar_row(model) {
                 model.tap_action_bar(col)
             } else if let Some(index) = model.row_at(row) {
                 // Tap selects; a tap on the already-selected row opens
@@ -604,6 +617,13 @@ fn is_key(msg: &Msg) -> bool {
 /// and the hint line.
 fn action_bar_row(model: &Model) -> u16 {
     model.rows_on_screen.saturating_sub(3)
+}
+
+/// The search bar's row: second from the bottom, above the hint line. Present on
+/// every layout, which is why the keyboard affordance lives there rather than in
+/// the touch-only action bar.
+fn search_row(model: &Model) -> u16 {
+    model.rows_on_screen.saturating_sub(2)
 }
 
 #[cfg(test)]
@@ -764,7 +784,7 @@ mod tests {
     }
 
     /// The action bar's quarters are hit-tested without the renderer measuring
-    /// labels: `⏎ Open` on the left, `⌨ Keys` on the right.
+    /// labels: `⏎ Open` on the left, `^t Scans` on the right.
     #[test]
     fn the_action_bar_is_four_quarters() {
         let mut m = model();
@@ -773,8 +793,31 @@ mod tests {
             update(&mut m, Msg::Tap { col: 2, row: bar }),
             Effect::Open("Marine/coc.pdf".into())
         );
-        update(&mut m, Msg::Tap { col: 44, row: bar });
-        assert!(!m.mouse_on, "the right-hand quarter is the keyboard affordance");
+        update(&mut m, Msg::Tap { col: 24, row: bar });
+        assert_eq!(m.filter, Filter::Expiring, "the third quarter is the expiring filter");
+        assert_eq!(
+            update(&mut m, Msg::Tap { col: 44, row: bar }),
+            Effect::LoadScans,
+            "and the fourth is the content search"
+        );
+    }
+
+    /// **Tapping the search bar is the keyboard affordance** (REWRITE-UI.md §5).
+    /// It sits there rather than in the action bar because tapping the field you
+    /// want to type into is what a thumb does anyway — and because Termux's own
+    /// extra-keys row can already carry a keyboard toggle, so a second button
+    /// for it wastes a quarter of the only touch chrome there is.
+    #[test]
+    fn tapping_the_search_bar_drops_mouse_reporting_for_the_ime() {
+        let mut m = model();
+        let bar = m.rows_on_screen - 2;
+        update(&mut m, Msg::Tap { col: 3, row: bar });
+        assert!(!m.mouse_on && m.keyboard_hint, "the next tap now reaches Termux");
+
+        // And the very next keystroke puts reporting back, as before.
+        update(&mut m, Msg::Char('c'));
+        assert!(m.mouse_on && !m.keyboard_hint);
+        assert_eq!(m.query, "c");
     }
 
     /// **The expiring filter is a filter, not a mode**: it re-orders the same

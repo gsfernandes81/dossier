@@ -161,8 +161,9 @@ fn the_phone_screen_matches_the_approved_mockup() {
     assert_eq!(ds::layout::visible_rows(45, 28), 12);
 
     let bar = &lines[25];
-    assert!(bar.contains("⏎ Open") && bar.contains("→ Detail") && bar.contains("⌨ Keys"));
+    assert!(bar.contains("⏎ Open") && bar.contains("→ Detail") && bar.contains("^t Scans"));
     assert!(lines[26].starts_with(" > _"), "the search bar is docked: {:?}", lines[26]);
+    assert!(lines[26].contains('⌨'), "and carries the keyboard target: {:?}", lines[26]);
     assert!(lines[26].trim_end().ends_with("14/14"), "matched/total: {:?}", lines[26]);
     assert!(lines[27].contains("⏎ open"), "hints for this surface: {:?}", lines[27]);
 }
@@ -258,6 +259,28 @@ fn no_color_loses_nothing_but_colour() {
     assert!(!no_color, "NO_COLOR emits none");
     assert_eq!(with_color, without_color, "the text is identical either way");
     assert!(without_color.iter().any(|l| l.contains('!')), "the expired marker is text");
+}
+
+/// **The keyboard affordance lives on the search bar, not in the action bar.**
+/// Termux's own extra-keys row can carry a keyboard toggle, so a second button
+/// for it wastes a quarter of the only touch chrome there is — and tapping the
+/// field you want to type into is what a thumb does anyway.
+#[test]
+fn the_keyboard_target_is_the_search_bar() {
+    let mut m = model(45, 28);
+    let lines = screen(&mut m, 45, 28);
+    assert!(!lines[25].contains('⌨'), "not in the action bar: {:?}", lines[25]);
+    assert!(lines[26].contains('⌨'), "on the search bar: {:?}", lines[26]);
+
+    update(&mut m, Msg::Tap { col: 3, row: 26 });
+    assert!(!m.mouse_on, "tapping it drops mouse reporting for one tap");
+    let lines = screen(&mut m, 45, 28);
+    assert!(lines[26].contains("[tap anywhere for the keyboard]"), "{:?}", lines[26]);
+
+    // The desktop has a keyboard and no touch chrome, so it gets no glyph.
+    let mut wide = model(100, 26);
+    let lines = screen(&mut wide, 100, 26);
+    assert!(!lines[24].contains('⌨'), "{:?}", lines[24]);
 }
 
 /// Typing narrows the list and the count says so — the fzf-style feedback the
