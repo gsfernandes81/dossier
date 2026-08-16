@@ -152,6 +152,45 @@ pub fn pad_left(text: &str, cols: usize) -> String {
     format!("{}{cut}", " ".repeat(pad))
 }
 
+/// Break `text` into lines of at most `cols` display columns, at word
+/// boundaries where there is one.
+///
+/// The renderer wraps free text itself rather than handing it to a widget,
+/// because a wrapped value has to line up **under its own column** — a
+/// continuation line that starts at the left margin reads as a new field. A word
+/// longer than the whole width is cut rather than allowed to overflow.
+#[must_use]
+pub fn wrap(text: &str, cols: usize) -> Vec<String> {
+    if cols == 0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let candidate =
+            if current.is_empty() { word.width() } else { current.width() + 1 + word.width() };
+        if candidate <= cols {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+            continue;
+        }
+        if !current.is_empty() {
+            lines.push(std::mem::take(&mut current));
+        }
+        if word.width() <= cols {
+            current.push_str(word);
+        } else {
+            lines.push(truncate(word, cols));
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
 /// `2026-09-28` → `09-26`: the compact expiry the row shows.
 ///
 /// Month and year, because the day is never what makes someone act — the month
@@ -211,6 +250,21 @@ mod tests {
         assert_eq!(truncate("Passport", 5), "Pass…");
         assert_eq!(width(&fit("護照", 10)), 10);
         assert_eq!(width(&pad_left("8", 4)), 4);
+    }
+
+    /// **Wrapping happens here, not in a widget**, so a continuation line can be
+    /// indented under its own column instead of starting at the left margin —
+    /// where it would read as a new field.
+    #[test]
+    fn wrapping_breaks_on_words_and_respects_cells() {
+        let lines = wrap("Revalidation booked at MMD, slot 14 Oct. Bring originals", 20);
+        assert!(lines.iter().all(|line| width(line) <= 20), "{lines:?}");
+        assert_eq!(lines[0], "Revalidation booked");
+        assert!(lines.join(" ").contains("Bring originals"), "nothing is lost: {lines:?}");
+
+        let long = wrap("supercalifragilistic", 8);
+        assert_eq!(long, ["superca…"], "a word wider than the pane is cut, never overflowed");
+        assert!(wrap("", 10).is_empty());
     }
 
     /// The compact date is month-year, and a non-date is left alone.

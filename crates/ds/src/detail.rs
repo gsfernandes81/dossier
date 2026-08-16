@@ -28,11 +28,11 @@
 
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::Model;
-use crate::layout::truncate;
+use crate::layout::{truncate, wrap};
 use crate::theme::{Theme, Tone};
 use crate::Status;
 
@@ -54,7 +54,7 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     let mut lines = vec![
         Line::styled(format!(" {}", truncate(&doc.name, inner)), theme.style(Tone::Title)),
         Line::raw(""),
-        field("location", &nonempty(doc.place()), theme),
+        field("location", &nonempty(doc.place()), inner, theme),
     ];
 
     // Expiry carries its standing in words next to the date: `2026-09-28` alone
@@ -78,15 +78,20 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
         ),
     ]));
 
-    lines.push(field("issued", &nonempty(doc.issue_date.clone().unwrap_or_default()), theme));
-    lines.push(field("tags", &nonempty(doc.tags.join(" ")), theme));
-    lines.push(field("bundles", &nonempty(doc.bundles.join(" · ")), theme));
+    lines.push(field(
+        "issued",
+        &nonempty(doc.issue_date.clone().unwrap_or_default()),
+        inner,
+        theme,
+    ));
+    lines.push(field("tags", &nonempty(doc.tags.join(" ")), inner, theme));
+    lines.push(field("bundles", &nonempty(doc.bundles.join(" · ")), inner, theme));
 
     // Files: the count, then one line each with the primary marked — the file
     // `Enter` opens is the one with the arrow, and seeing which that is matters
     // more than any other field on this screen.
     if doc.files.is_empty() {
-        lines.push(field("files", "none", theme));
+        lines.push(field("files", "none", inner, theme));
     } else {
         let primary = doc.primary_file().map(|f| f.path.clone());
         for (i, file) in doc.files.iter().enumerate() {
@@ -120,16 +125,18 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     }
 
     if !doc.notes.is_empty() {
-        lines.push(field("notes", &doc.notes, theme));
+        lines.extend(wrapped_field("notes", &doc.notes, inner, theme));
     }
 
     lines.push(Line::raw(""));
-    lines.push(Line::styled(
-        " read-only until R4 makes this the editing surface",
-        theme.style(Tone::Muted),
-    ));
+    for line in wrap("read-only until R4 makes this the editing surface", inner) {
+        lines.push(Line::styled(format!(" {line}"), theme.style(Tone::Muted)));
+    }
 
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+    // No widget-level wrap: everything above is already laid out to this pane's
+    // width, and letting the widget wrap as well would put a continuation line
+    // at the left margin, where it reads as a new field.
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 /// An em dash beats a blank: an empty value and a missing field look identical
@@ -146,6 +153,20 @@ fn label(text: &str, theme: Theme) -> Span<'static> {
     Span::styled(format!(" {text:<LABEL_COLS$}"), theme.style(Tone::Muted))
 }
 
-fn field(name: &str, value: &str, theme: Theme) -> Line<'static> {
-    Line::from(vec![label(name, theme), Span::raw(value.to_string())])
+/// A one-line field: label, then the value cut to whatever the pane leaves.
+fn field(name: &str, value: &str, inner: usize, theme: Theme) -> Line<'static> {
+    let value_cols = inner.saturating_sub(LABEL_COLS).max(8);
+    Line::from(vec![label(name, theme), Span::raw(truncate(value, value_cols))])
+}
+
+/// A field whose value is free text: wrapped, with continuations **hanging under
+/// the value column** so the field still reads as one thing.
+fn wrapped_field(name: &str, value: &str, inner: usize, theme: Theme) -> Vec<Line<'static>> {
+    let value_cols = inner.saturating_sub(LABEL_COLS).max(8);
+    let mut lines = Vec::new();
+    for (i, chunk) in wrap(value, value_cols).into_iter().enumerate() {
+        let head = if i == 0 { label(name, theme) } else { Span::raw(" ".repeat(LABEL_COLS + 1)) };
+        lines.push(Line::from(vec![head, Span::raw(chunk)]));
+    }
+    lines
 }

@@ -312,3 +312,26 @@ fn wide_glyphs_do_not_break_the_columns() {
     );
     assert!(row.contains('!'), "and its marker survived the cut: {:?}", row);
 }
+
+/// **A wrapped value stays in its own column.** A continuation line that starts
+/// at the left margin reads as a new field, which is why the renderer wraps free
+/// text itself instead of handing it to a widget.
+#[test]
+fn a_long_note_hangs_under_its_column() {
+    let mut store = sample_store();
+    store.docs[0].notes =
+        "Revalidation booked at MMD, slot 14 Oct. Bring originals and two photographs.".into();
+    let mut m = Model::new(store, "2026-10-20".into(), "2027-01-18".into(), 45, 28);
+    update(&mut m, Msg::OpenDetail);
+    let lines = screen(&mut m, 45, 28);
+
+    let first = lines.iter().position(|l| l.contains("notes")).expect("the notes field");
+    let value_column = lines[first].find("Revalidation").expect("the value");
+    let continuation = &lines[first + 1];
+    assert!(continuation.trim_start().starts_with("14 Oct."), "wrapped: {continuation:?}");
+    assert_eq!(
+        continuation.find("14 Oct."),
+        Some(value_column),
+        "and it hangs under the value, not at the margin: {continuation:?}"
+    );
+}
