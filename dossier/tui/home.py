@@ -511,9 +511,13 @@ class HomeScreen(Screen[None]):
             f" · load {ms(t_attention, t_load)}"
             f" · paint {ms(t_load, now)})"
         )
+        # A plain stderr print lands in the *alternate screen* buffer and is wiped
+        # by the terminal restore on exit — so in exit mode the line rides
+        # `App.exit(message=…)`, which Textual renders after restoring the
+        # terminal. The stderr copy stays for headless/test capture.
         print(line, file=sys.stderr)
         if os.environ.get("DS_TIMING") == "exit":
-            self.app.exit()
+            self.app.exit(message=line)
         else:
             self.notify(line, timeout=12)
 
