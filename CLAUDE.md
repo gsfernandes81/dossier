@@ -140,7 +140,8 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 - **Commit messages: conventional commits** — `type(scope): summary`. Types: `feat`, `fix`,
   `refactor`, `chore`, `docs`, `test`. Scopes track the module map below (`store`, `model`,
   `tui`, `migrate`, `export`, `doctor`, `cli`, `dev`).
-- `origin` is `gsfernandes81/dossier` (private).
+- `origin` is `gsfernandes81/dossier` (**public** — the code is public; the store is not,
+  and personal data stays gitignored as below).
 - Name branches descriptively (`store-atomic-writes`, `fix/expiry-parse`), not by harness
   hash; rename before the first commit if needed (`git branch -m <name>`).
 
