@@ -1,0 +1,25 @@
+[package]
+name = "ds"
+description = "The dossier v3 core: browse, search, open, status"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The store. Everything this crate shows is a fold of it.
+journal = { path = "../journal" }
+# `val` payloads arrive as JSON values and stay that way until a field is read.
+serde_json = { workspace = true }
+# Search folds accents so `résumé` matches `resume`, which needs NFKD
+# decomposition — the one thing std's `to_lowercase` cannot do. Ported from v2's
+# `fuzz.fold`, whose behaviour the golden expectations here depend on.
+unicode-normalization = "0.1"
+# Terminal columns are not characters: a CJK document name is two cells per
+# character, and every alignment decision in REWRITE-UI.md depends on knowing
+# that. R0.2 confirmed the phone agrees with this crate's table.
+unicode-width = "0.2"
+
+[dev-dependencies]
+proptest = "1"
