@@ -1,0 +1,181 @@
+<title>How It Answers</title>
+<style>/*CSS*/</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">dossier v3 · R-UI mockup 3 of 3</p>
+    <h1>How It Answers</h1>
+    <p class="standfirst">
+      The layout is the easy half. What makes the app feel like itself is a handful of
+      rules about what keys do, applied without exception — most of them paid for by
+      about twenty pull requests of getting it wrong in v2. These are the ones the
+      rewrite carries over intact.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Verbs</b> ⏎ opens the file · → opens the record</span>
+    <span><b>Esc</b> peels exactly one layer</span>
+    <span><b>Letters</b> none on the base list</span>
+    <span><b>Measured</b> 0.33 ms keystroke → frame</span>
+  </div>
+
+  <section>
+    <h2>Five keystrokes, cold <span class="tag">acceptance</span></h2>
+    <p class="lede">
+      The benchmark the whole design answers to: from a dark phone screen to the file
+      open, in five keystrokes and under a tenth of a second. On the real phone the app
+      is interactive <b>6.2 ms</b> after launch — the typing is now the slow part, by
+      three orders of magnitude.
+    </p>
+    <p style="max-width:none">
+      <span class="kbd">ds</span> <span class="kbd">c</span> <span class="kbd">o</span>
+      <span class="kbd">c</span> <span class="kbd">⏎</span>
+      &nbsp;&nbsp;<span style="color:var(--muted);font-size:.9rem">— launch, three letters into the search that is always already focused, Enter.</span>
+    </p>
+    <div class="notes" style="border-top:none;padding-top:0">
+      <div class="note"><span class="k">inv 1</span><p><b>The first character is kept.</b> There is no “press / to search”: a printable on the list <em>is</em> the search, and it starts with the letter you pressed.</p></div>
+      <div class="note"><span class="k">why</span><p>This is why no letter is bound on the base surface, and why every panel moved behind <code>:</code>. One rule, enforced everywhere, rather than a table of exceptions.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Escape peels one layer <span class="tag">inv 3</span></h2>
+    <p class="lede">
+      Every press removes exactly one thing, in a fixed order, and it takes two
+      consecutive presses at the base state to quit. This is not tidiness — on Termux
+      the keyboard's own dismiss key sends Escape, so an app that quits on a stray
+      Escape is an app that quits while you are reading it.
+    </p>
+    <div class="chain">
+      <div class="layer"><span class="what">esc</span><span class="then">closes the edit in progress — twice discards it</span></div>
+      <div class="layer"><span class="what">esc</span><span class="then">leaves command mode, back to search</span></div>
+      <div class="layer"><span class="what">esc</span><span class="then">clears the search text and its filter chips</span></div>
+      <div class="layer"><span class="what">esc</span><span class="then">pops the surface — detail, review, bundles — cursor preserved</span></div>
+      <div class="layer arm"><span class="what">esc</span><span class="then">at the base state: <b>arms</b>, and says so in the footer</span></div>
+      <div class="layer quit"><span class="what">esc</span><span class="then">quits — but only immediately after the one above; any other key disarms it</span></div>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="k">verified</span><p>Tested on the phone in R0.2: dismissing the soft keyboard with Escape <b>does not quit the app</b>.</p></div>
+      <div class="note"><span class="k">always</span><p><span class="kbd">ctrl+c</span> and <span class="kbd">ctrl+q</span> quit cleanly from anywhere, and nothing ever binds over them.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The verb pair <span class="tag">inv 2</span></h2>
+    <p class="lede">
+      One pair of keys, applied by row kind on every surface in the app. You never have
+      to learn what Enter does <em>here</em>.
+    </p>
+    <div class="scroller">
+      <table class="kv">
+        <thead><tr><th>Row</th><th>⏎ Enter</th><th>→ Right</th></tr></thead>
+        <tbody>
+          <tr><td class="k">document</td><td>opens the linked file in the platform opener</td><td>opens the record</td></tr>
+          <tr><td class="k">document, no file</td><td><b>falls through to the record</b> — never an error</td><td>opens the record</td></tr>
+          <tr><td class="k">orphan file</td><td>opens the file, so you can see what it is</td><td>the filing card for it</td></tr>
+          <tr><td class="k">succession pair</td><td>opens the newer document's file</td><td>the pair, side by side</td></tr>
+          <tr><td class="k">bundle</td><td>scopes the Find list to its members</td><td>the bundle's record</td></tr>
+          <tr><td class="k">a count in the header</td><td colspan="2">tapping it runs the command it names</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="k">inv 2</span><p><b>Enter never mutates.</b> Nothing is filed, deleted or renamed by the key you press most often.</p></div>
+      <div class="note"><span class="k">v2</span><p>The footer only ever advertises verbs that would actually work on the highlighted row — v2's <code>check_action</code> lesson.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Touch, and the keyboard problem <span class="tag">inv 6</span></h2>
+    <p class="lede">
+      Termux only raises its soft keyboard on a tap when mouse reporting is <em>off</em>
+      — and no escape sequence, API or property exists for an app to raise it directly.
+      So the <code>⌨</code> control drops mouse reporting for exactly one tap. Four
+      steps, and the user sees none of them.
+    </p>
+    <div class="seq">
+      <div>
+        <h4>tap ⌨</h4>
+        <p>The app turns off SGR mouse reporting and says so quietly in the bar.</p>
+      </div>
+      <div>
+        <h4>tap anywhere</h4>
+        <p>With reporting off, Termux treats it as a plain tap and raises the keyboard.</p>
+      </div>
+      <div>
+        <h4>type</h4>
+        <p>Characters land in the search bar, which never lost focus.</p>
+      </div>
+      <div>
+        <h4>first key restores it</h4>
+        <p>Mouse reporting comes back on, so taps select rows again. No mode to get stuck in.</p>
+      </div>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="k">R0.2</span><p><b>Termux has no function keys.</b> That makes the on-screen <code>⌨</code> button the <em>only</em> route to this — not a convenience. It is why the touch action bar exists at all.</p></div>
+      <div class="note"><span class="k">#4302</span><p>Mouse mode also blocks the terminal's own scrollback, so <b>the app owns scrolling</b>. Verified on the phone: drags scroll the list.</p></div>
+      <div class="note"><span class="k">inv 6</span><p><b>First tap selects, a second tap on the same row opens.</b> No double-tap timing — timing gestures are miserable on a laggy terminal.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Colour is never alone <span class="tag">§6</span></h2>
+    <p class="lede">
+      Every status carries a glyph as well as a colour, so the list reads the same in
+      monochrome, under <code>NO_COLOR</code>, and on a phone font with no icon set.
+      R0.2 confirmed the phone has <b>no Nerd Font glyphs at all</b> — which turns the
+      ASCII-first rule from a preference into a requirement.
+    </p>
+    <div class="swatches">
+      <div class="swatch"><span class="g exp">!</span><span class="t"><b>expired</b>past its date and not superseded</span></div>
+      <div class="swatch"><span class="g soon">~</span><span class="t"><b>expiring</b>inside nine months</span></div>
+      <div class="swatch"><span class="g">&nbsp;</span><span class="t"><b>tracked</b>expires, but not yet worth attention</span></div>
+      <div class="swatch"><span class="g dim">·</span><span class="t"><b>no expiry</b>most documents</span></div>
+      <div class="swatch"><span class="g acc">▸</span><span class="t"><b>cursor</b>selection is reverse video — never an indent shift</span></div>
+      <div class="swatch"><span class="g dim">…</span><span class="t"><b>truncated</b>cut by display width, never by byte count</span></div>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="k">verified</span><p>Column arithmetic holds on the device: CJK at two cells, Cyrillic, Devanagari with zero-width marks, and combining accents all keep the columns straight.</p></div>
+      <div class="note"><span class="k">avoid</span><p><b>No emoji in aligned columns.</b> Their declared width is one cell but they paint wider — fine in prose, wrong in a right-aligned status column.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>When there is no room <span class="tag">§4</span></h2>
+    <p class="lede">
+      Two layout states, and a floor. Below 38×12 the app says so plainly instead of
+      rendering a broken frame — a notice you can read beats a layout you cannot.
+    </p>
+    <div class="specimens">
+      <figure>
+        <figcaption>
+          <h3>below the floor</h3>
+          <span class="size">30 × 10</span>
+          <span class="how">Resize re-layouts, debounced. Rotating the phone is a resize.</span>
+        </figcaption>
+        <div class="term"><pre><!--S:too-small--></pre></div>
+      </figure>
+      <figure style="flex:1 1 340px">
+        <figcaption>
+          <h3>the two states</h3>
+          <span class="size">the whole responsive plan</span>
+        </figcaption>
+        <table class="kv" style="margin-top:.3rem">
+          <tbody>
+            <tr><td class="k">≥ 100 cols</td><td>split-capable — the record opens beside the list</td></tr>
+            <tr><td class="k">&lt; 100 cols</td><td>single-pane — everything is a full-screen push</td></tr>
+            <tr><td class="k">&lt; 70 cols</td><td>rows go two-line</td></tr>
+            <tr><td class="k">&lt; 38 × 12</td><td>the notice on the left</td></tr>
+          </tbody>
+        </table>
+      </figure>
+    </div>
+  </section>
+
+  <footer>
+    <span>Every rule here is an acceptance test for R3–R5, not a suggestion.</span>
+    <span>Spec: REWRITE.md §4.5, REWRITE-UI.md §5–§8</span>
+    <span>1 of 3: The Find Surface · 2 of 3: Behind the Colon</span>
+  </footer>
+</div>

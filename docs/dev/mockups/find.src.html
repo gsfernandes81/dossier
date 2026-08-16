@@ -1,0 +1,120 @@
+<title>The Find Surface</title>
+<style>/*CSS*/</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">dossier v3 · R-UI mockup 1 of 3</p>
+    <h1>The Find Surface</h1>
+    <p class="standfirst">
+      The app is a finder that happens to have management surfaces behind it. This is
+      the screen you see 95% of the time — cold start, type, open, done. Every pane
+      below is rendered on a real character grid: the phone screens are genuinely 45
+      columns wide, padded with display widths, so nothing here cheats on alignment.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Layout</b> single list, flat, drill-down stack</span>
+    <span><b>Phone</b> 45×28 portrait Termux</span>
+    <span><b>Desktop</b> 100×26</span>
+    <span><b>Measured</b> 6.2 ms to first paint</span>
+  </div>
+
+  <section>
+    <h2>Cold start <span class="tag">U1 · U2</span></h2>
+    <p class="lede">
+      One full-width list, sorted in physical shelf order — location, then slot, then
+      name. No group headers: where a thing lives is row data and a filter, never a
+      pane of its own. The search bar sits at the <em>bottom</em>, where a thumb is.
+    </p>
+
+    <div class="specimens">
+      <figure>
+        <figcaption>
+          <h3>find — nothing typed</h3>
+          <span class="size">45 × 28 · phone</span>
+          <span class="how">The counts in the header each name a command. 948 documents, and the list is virtualized.</span>
+        </figcaption>
+        <div class="term phone"><pre><!--S:find-phone--></pre></div>
+      </figure>
+
+      <figure>
+        <figcaption>
+          <h3>find — typed “coc”</h3>
+          <span class="size">45 × 28 · phone</span>
+          <span class="how">A bare printable starts the search anywhere on this surface, and the first character is kept. Four keystrokes, then Enter opens the file.</span>
+        </figcaption>
+        <div class="term phone"><pre><!--S:find-phone-typed--></pre></div>
+      </figure>
+    </div>
+
+    <div class="notes">
+      <div class="note"><span class="k">U2</span><p>Rows go <b>two-line below ~70 columns</b>: name and status on top, dim location · slot · tags underneath. The phone never truncates a name into uselessness.</p></div>
+      <div class="note"><span class="k">inv 1</span><p><b>No letter keys are bound here at all.</b> Every letter belongs to the search box — that is what makes find-fast possible, and it is why the panels moved to commands.</p></div>
+      <div class="note"><span class="k">§1</span><p>Status is <b>colour plus a marker</b>: <code>!</code> expired, <code>~</code> expiring, blank when tracked, <code>·</code> when it never expires. Readable in monochrome, and on a phone font with no Nerd Font glyphs.</p></div>
+      <div class="note"><span class="k">§1</span><p>The count reads <b>fzf-style</b> — <code>4/948</code> — so you always know whether you are looking at a filtered view.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The record <span class="tag">U3 · inv 2</span></h2>
+    <p class="lede">
+      <code>Enter</code> opens the file. <code>→</code> opens the record. That pair is
+      the whole navigation model, applied by row kind everywhere in the app — and
+      <code>Enter</code> never mutates and never dies: on a document with no file it
+      falls through to the record instead of erroring.
+    </p>
+
+    <div class="specimens">
+      <figure>
+        <figcaption>
+          <h3>detail — narrow</h3>
+          <span class="size">45 × 28 · full-screen push</span>
+          <span class="how">Esc pops back to the list with the cursor where you left it. This is also the only editing surface.</span>
+        </figcaption>
+        <div class="term phone"><pre><!--S:detail-phone--></pre></div>
+      </figure>
+
+      <figure style="flex: 1 1 520px;">
+        <figcaption>
+          <h3>detail — wide</h3>
+          <span class="size">100 × 26 · sticky split</span>
+          <span class="how">At ≥ 100 columns the record splits in beside the list and follows the cursor. The list keeps focus; a single vertical rule separates them, no boxes.</span>
+        </figcaption>
+        <div class="term"><pre><!--S:split-desktop--></pre></div>
+      </figure>
+    </div>
+
+    <div class="notes">
+      <div class="note"><span class="k">U3</span><p>Detail is a <b>sticky toggle</b>, not a mode — open it once and it follows the cursor until you close it.</p></div>
+      <div class="note"><span class="k">U4</span><p>Because detail is not a search surface, it <b>may bind letters</b>: <code>s</code> supersede, <code>b</code> bundle, <code>u</code> undo. Each also has a <code>:</code> command.</p></div>
+      <div class="note"><span class="k">§4</span><p>Exactly <b>two layout states</b>. Split-capable at ≥ 100 columns, single-pane below. The old three-tier collapse ladder is gone.</p></div>
+      <div class="note"><span class="k">R4</span><p>Undo is <b>append the inverse op</b> — the journal is the history, with a durable 30-day horizon.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Full width <span class="tag">§1</span></h2>
+    <p class="lede">
+      Above ~70 columns rows collapse to a single line: name left, then dim tags,
+      right-aligned location and slot, and the expiry column last so the status
+      markers form a straight edge you can scan down.
+    </p>
+    <div class="specimens">
+      <figure style="flex: 1 1 100%;">
+        <figcaption>
+          <h3>find — desktop</h3>
+          <span class="size">100 × 26</span>
+          <span class="how">Same surface, same keys, more columns. The desktop is not a different app.</span>
+        </figcaption>
+        <div class="term"><pre><!--S:find-desktop--></pre></div>
+      </figure>
+    </div>
+  </section>
+
+  <footer>
+    <span>Rendered on an exact character grid — widths computed, not drawn.</span>
+    <span>Spec: REWRITE-UI.md §1–§4</span>
+    <span>2 of 3: Behind the Colon · 3 of 3: How It Answers</span>
+  </footer>
+</div>

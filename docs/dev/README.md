@@ -22,6 +22,9 @@ The v3 rewrite ([`../../REWRITE.md`](../../REWRITE.md)) adds two measurement rec
 
 - **[startup-timing.md](startup-timing.md)** — the R0.1 protocol and the Python
   baseline the rewrite has to beat (phone cold 1053 ms usable, warm ≈ 670 ms).
+- **[mockups/](mockups/)** — the approved R-UI mockups: three published pages showing
+  what the finished TUI looks like, on an exact character grid. The reference the
+  built product gets compared against.
 - **[spike-r02.md](spike-r02.md)** — the R0.2 Ratatui spike: how to build and run it on
   the phone, the measurement + terminal-behaviour checklist, results, and the findings
   (including the "no NDK, no zig" musl toolchain answer).

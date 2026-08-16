@@ -121,6 +121,28 @@ collapse; the watch *mode* (now `:expiring`, a filter); per-surface modal screen
 (everything is a stack push); the header ⭘ icon and the touch Commands button's
 special-casing (the bar is always present).
 
+## 7a. Mockups — the reference to match (approved 2026-08-16)
+
+Three published pages render this plan as real terminal screens on an exact
+character grid: **the Find surface**, **the surfaces behind `:`**, and **the
+interaction model**. Sources and links in
+[`docs/dev/mockups/`](docs/dev/mockups/); they are kept so the finished TUI can
+be compared against them and refined where it does not match.
+
+User calls from that review, binding on R3–R5:
+
+- **Two-line phone rows confirmed** — 35 columns of name, location and tags
+  underneath, twelve documents visible at 45×28. The trade against density is
+  accepted.
+- **Detail density confirmed for now** — notes, files, bundles and succession on
+  one phone screen.
+- **Filing card approved, with one item deferred:** it should also be able to
+  *reverse* the succession relationship — marking the proposal as the **older**
+  document the existing one supersedes, rather than the newer. **Not to be
+  implemented until the user confirms it is a real pain point.**
+- Possible follow-up: ship a **Termux colour theme**, if the default palette
+  fights the semantic tokens in practice.
+
 ## 8. Acceptance checklist (R3–R5 must satisfy)
 
 1. Every REWRITE.md §4.5 invariant, verified per surface.

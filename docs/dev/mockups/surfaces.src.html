@@ -1,0 +1,138 @@
+<title>Behind the Colon</title>
+<style>/*CSS*/</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">dossier v3 · R-UI mockup 2 of 3</p>
+    <h1>Behind the Colon</h1>
+    <p class="standfirst">
+      Everything that is not finding a document lives behind a <code>:</code> command,
+      pushed onto a back-stack that <code>Esc</code> pops. That is what keeps the base
+      list letter-free — and it is what makes the whole app reachable from a phone
+      keyboard that has no function keys.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Reached by</b> :review · :file · :bundles · :expiring · :settings · ?</span>
+    <span><b>Hotkeys</b> ctrl+x expiring · ctrl+q quit</span>
+    <span><b>Stack</b> Esc pops exactly one layer</span>
+  </div>
+
+  <section>
+    <h2>The command line <span class="tag">U4</span></h2>
+    <p class="lede">
+      <code>:</code> switches the bottom bar from search to commands, in place — no
+      modal palette floating over the screen. Prefix-matched with completion, so
+      <code>:re</code> is enough. Every letter verb in the app has a command
+      equivalent, which is the rule that makes a function-key-less phone a
+      first-class citizen rather than a degraded one.
+    </p>
+    <div class="specimens">
+      <figure>
+        <figcaption>
+          <h3>command mode</h3>
+          <span class="size">45 × 28 · phone</span>
+          <span class="how">Same bar, same place. The list stays behind it, so you never lose your position.</span>
+        </figcaption>
+        <div class="term phone"><pre><!--S:command-phone--></pre></div>
+      </figure>
+
+      <figure>
+        <figcaption>
+          <h3>:expiring</h3>
+          <span class="size">45 × 28 · phone · ctrl+x</span>
+          <span class="how">A filter with a header count, not a mode — Esc clears it and you are back in the same list. Superseded and ignored documents are hidden.</span>
+        </figcaption>
+        <div class="term phone"><pre><!--S:expiring-phone--></pre></div>
+      </figure>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="k">§3</span><p>The expiry watch is <b>a filter, not a surface</b>. v2 had a whole mode for it; the count in the header does that job now.</p></div>
+      <div class="note"><span class="k">inv 4</span><p>One shared command catalog, and a <b>check_action-style gate</b> decides what is actionable right now — so the footer never advertises a verb that would fail.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Filing the backlog <span class="tag">D11</span></h2>
+    <p class="lede">
+      612 files have been dropped and never filed. The desktop reads each scan with a
+      vision model and proposes fields; the phone never runs a model, it just shows
+      the proposal and takes a yes. <b>Triage by exception</b> — you see a card when
+      the answer is ambiguous, not for every file.
+    </p>
+    <div class="specimens">
+      <figure>
+        <figcaption>
+          <h3>:file — a proposal card</h3>
+          <span class="size">45 × 28 · phone</span>
+          <span class="how">One decision per screen, three keys wide: accept, edit first, skip. The counter tells you how deep the backlog is.</span>
+        </figcaption>
+        <div class="term phone"><pre><!--S:file-phone--></pre></div>
+      </figure>
+
+      <figure>
+        <figcaption>
+          <h3>:review — five tabs</h3>
+          <span class="size">45 × 28 · phone</span>
+          <span class="how">Orphans, missing files, duplicates, succession, integrity. No conflicts tab: single-writer journals make sync conflicts structurally impossible.</span>
+        </figcaption>
+        <div class="term phone"><pre><!--S:review-phone--></pre></div>
+      </figure>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="k">D8</span><p><b>No model ever runs on the phone.</b> The desktop reads scans and syncs the reading; the phone reads the answer. That constraint is permanent.</p></div>
+      <div class="note"><span class="k">D11</span><p>Auto-filing high-confidence proposals is <b>deferred</b> — desktop-only if ever, never on mobile. A wrong auto-file is worse than a backlog.</p></div>
+      <div class="note"><span class="k">§3</span><p><code>h</code> restores a dismissed orphan. Review state is <b>per-key last-write-wins</b>, so a restore is expressible — a monotone union could only ever add dismissals.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Bundles <span class="tag">§3</span></h2>
+    <p class="lede">
+      A bundle is the set you gather for a joining, a visa interview, a revalidation.
+      Enter scopes the Find list to it; readiness is a <em>count</em>, not a checklist
+      — the templates and validity rules from v2 are dropped.
+    </p>
+    <div class="specimens">
+      <figure style="flex: 1 1 100%;">
+        <figcaption>
+          <h3>:bundles</h3>
+          <span class="size">100 × 24 · desktop</span>
+          <span class="how">Dated, chronological, with what is expiring before the date that matters.</span>
+        </figcaption>
+        <div class="term"><pre><!--S:bundles-desktop--></pre></div>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>The router <span class="tag">porcelain</span></h2>
+    <p class="lede">
+      <code>ds status</code> is the one place that tells you what needs you, git-status
+      style — and every line names the verb that fixes it. It absorbs v2's
+      <code>doctor</code>, <code>reconcile</code>, <code>syncthing status</code> and
+      <code>expiring</code>.
+    </p>
+    <div class="specimens">
+      <figure style="flex: 1 1 100%;">
+        <figcaption>
+          <h3>ds status</h3>
+          <span class="size">84 × 13 · any terminal</span>
+          <span class="how">With --quiet it keeps the exact v2 cron contract: silent when clean, exit 1 only for expiry findings, exit 2 if the tool itself is broken.</span>
+        </figcaption>
+        <div class="term"><pre><!--S:status-desktop--></pre></div>
+      </figure>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="k">R1</span><p>“Journal healthy” is a real check, not a reassurance: it counts malformed lines, orphaned ops and duplicate writer keys, and watches for a high-water mark that went <b>backwards</b> — the signature of a file reverted behind Syncthing's back.</p></div>
+      <div class="note"><span class="k">§4.1</span><p>Five daily verbs, and no more: <code>ds</code>, <code>ds open</code>, <code>ds file</code>, <code>ds status</code>, <code>ds export</code>.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Rendered on an exact character grid — widths computed, not drawn.</span>
+    <span>Spec: REWRITE-UI.md §3, REWRITE.md §4.1</span>
+    <span>1 of 3: The Find Surface · 3 of 3: How It Answers</span>
+  </footer>
+</div>
