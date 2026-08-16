@@ -1,0 +1,8 @@
+{
+  "name": "enrich-payload-lww",
+  "why": "Enrich entries (scan readings, intake proposals) are keyed by file path or fingerprint rather than by document id, and replace wholesale. They live in their own namespace so the hot startup fold never parses transcripts.",
+  "files": [
+    "{\"v\":1,\"ts\":10,\"w\":\"desk-lab\",\"op\":\"reading\",\"ent\":\"reading\",\"id\":\"inbox/passport.pdf\",\"val\":{\"text\":\"first pass\",\"pages\":2}}\n{\"v\":1,\"ts\":20,\"w\":\"desk-lab\",\"op\":\"reading\",\"ent\":\"reading\",\"id\":\"inbox/passport.pdf\",\"val\":{\"text\":\"second pass\",\"pages\":2}}\n"
+  ],
+  "canonical": "{\"enrich\":{\"reading\":{\"inbox/passport.pdf\":{\"pages\":2,\"text\":\"second pass\"}}},\"entities\":{},\"states\":{},\"tombstones\":{}}"
+}

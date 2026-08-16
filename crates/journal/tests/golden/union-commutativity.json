@@ -1,0 +1,9 @@
+{
+  "name": "union-commutativity",
+  "why": "Two writers, two files, interleaved timestamps. The state is the fold of the union in (ts, w) order, so which file was read first cannot matter - the harness folds every vector in both directions to prove it.",
+  "files": [
+    "{\"v\":1,\"ts\":10,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"passport\"}\n{\"v\":1,\"ts\":30,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"name\",\"val\":\"Passport\"}\n",
+    "{\"v\":1,\"ts\":20,\"w\":\"phone-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"name\",\"val\":\"Passport (renewed)\"}\n{\"v\":1,\"ts\":40,\"w\":\"phone-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"passport\",\"f\":\"slot\",\"val\":4}\n"
+  ],
+  "canonical": "{\"enrich\":{},\"entities\":{\"doc\":{\"passport\":{\"name\":\"Passport\",\"slot\":4}}},\"states\":{},\"tombstones\":{}}"
+}

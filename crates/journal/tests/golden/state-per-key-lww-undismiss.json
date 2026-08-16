@@ -1,0 +1,8 @@
+{
+  "name": "state-per-key-lww-undismiss",
+  "why": "Review entries are per-key LWW, not a monotone union, because v2 ships restore verbs: `h` un-dismisses an orphan. A union could only ever add dismissals.",
+  "files": [
+    "{\"v\":1,\"ts\":10,\"w\":\"desk-core\",\"op\":\"state\",\"ent\":\"review\",\"id\":\"orphan:inbox/scan.pdf\",\"val\":\"dismissed\"}\n{\"v\":1,\"ts\":20,\"w\":\"phone-core\",\"op\":\"state\",\"ent\":\"review\",\"id\":\"orphan:inbox/scan.pdf\",\"val\":\"active\"}\n{\"v\":1,\"ts\":15,\"w\":\"desk-core\",\"op\":\"state\",\"ent\":\"review\",\"id\":\"missing:coc-2019\",\"val\":\"dismissed\"}\n"
+  ],
+  "canonical": "{\"enrich\":{},\"entities\":{},\"states\":{\"review\":{\"missing:coc-2019\":\"dismissed\",\"orphan:inbox/scan.pdf\":\"active\"}},\"tombstones\":{}}"
+}

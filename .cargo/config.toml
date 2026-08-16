@@ -1,0 +1,12 @@
+# Cross-compilation for the phone target (REWRITE.md §4.4).
+#
+# The R0.2 spike established that a fully static `aarch64-unknown-linux-musl`
+# binary needs **no external toolchain**: Rust ships musl's libc and crt objects
+# for that target, and `rust-lld` — already installed by rustup — links them. No
+# NDK, no `musl-gcc`, no `cargo-zigbuild`.
+#
+# `rustup target add aarch64-unknown-linux-musl` is the whole setup. See
+# docs/dev/spike-r02.md §5 for the measurement that settled it.
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes"]

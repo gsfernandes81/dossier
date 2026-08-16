@@ -1,0 +1,90 @@
+# The v3 Rust workspace (REWRITE.md §10) — `crates/*`.
+#
+# Separate from `spike.yml` on purpose: that workflow guards a throwaway that
+# gets deleted at the end of R0.2, while this one guards the code the rewrite is
+# actually built from. Same shape, so the habits transfer.
+name: rust
+
+on:
+  push:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rustfmt.toml"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rustfmt.toml"
+      - ".github/workflows/rust.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Lint + format are platform-independent: once is enough.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (with fmt + clippy)
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      # Pedantic is denied, and its findings are triaged in place rather than
+      # allowed wholesale (REWRITE.md §4.6). Unlike the spike, this crate handles
+      # real user data, so the numeric-cast lints stay on.
+      - name: Clippy (pedantic, denied)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # Tests on both desktop platforms. Windows is a shipping target, and it is
+  # where path and integer-width assumptions go to die.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Release, because the perf gate only asserts in release — a debug build
+      # is an order of magnitude slower for reasons unrelated to the design.
+      # `--nocapture` so the measured numbers land in the CI log as a record.
+      - name: Test
+        run: cargo test --workspace --release -- --nocapture
+
+  # The journal crate is pure logic, so this is quick — but it is also the crate
+  # the phone's startup path depends on, and a cross-build that only ever runs
+  # on a developer's machine is a cross-build that breaks in the week nobody
+  # tried it.
+  phone:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + the Android/Termux target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cross-build (static, aarch64 musl)
+        run: cargo build --workspace --release --target aarch64-unknown-linux-musl

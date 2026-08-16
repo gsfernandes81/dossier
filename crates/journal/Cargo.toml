@@ -1,0 +1,26 @@
+[package]
+name = "journal"
+description = "The dossier v3 journal store: op model, fold, and the format contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The format is JSONL and the contract (REWRITE.md §3) is shared with a Python
+# implementation, so the serializer is not an implementation detail — it is half
+# the interoperability story. serde_json's default map is a BTreeMap, which
+# gives the sorted-key canonical output §10's golden vectors compare on.
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Typed errors at the library boundary: a caller has to be able to tell "this
+# directory has no journal" from "this line is malformed" without string
+# matching. `anyhow` belongs in the binary, not here.
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# REWRITE.md §10 names property tests for the fold invariants. They are the only
+# way to state "fold(A ∪ B) ≡ fold(B ∪ A)" as a claim about *all* op streams
+# rather than about the three the author thought of.
+proptest = "1"

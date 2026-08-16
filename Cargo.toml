@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = ["crates/journal"]
+# The R0.2 spike is a throwaway with its own profile settings and its own CI
+# workflow (REWRITE.md §6 R0.2). Excluding it keeps a `cargo test` at the root
+# from building it, and keeps its `[profile.release]` legal — Cargo only honours
+# profiles at a workspace root, so a member crate declaring one is an error.
+exclude = ["spike"]
+
+# Shared by every crate so a dependency bump happens in one place.
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.89"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# What the real binary ships with, so measurements taken here transfer.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,11 @@
+{
+  "name": "tombstone-then-newer-set",
+  "why": "A set that arrives after a tombstone - from a device that had not yet seen the delete - must not resurrect the document, not even partially. The stray op is counted as orphaned so `ds status` can mention it.",
+  "files": [
+    "{\"v\":1,\"ts\":10,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"x\"}\n{\"v\":1,\"ts\":20,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"x\",\"f\":\"name\",\"val\":\"X\"}\n{\"v\":1,\"ts\":30,\"w\":\"desk-core\",\"op\":\"delete\",\"ent\":\"doc\",\"id\":\"x\"}\n{\"v\":1,\"ts\":40,\"w\":\"phone-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"x\",\"f\":\"name\",\"val\":\"zombie\"}\n"
+  ],
+  "canonical": "{\"enrich\":{},\"entities\":{},\"states\":{},\"tombstones\":{\"doc\":[\"x\"]}}",
+  "stats": {
+    "orphaned": 1
+  }
+}

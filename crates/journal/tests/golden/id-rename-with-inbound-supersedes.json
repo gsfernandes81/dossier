@@ -1,0 +1,8 @@
+{
+  "name": "id-rename-with-inbound-supersedes",
+  "why": "An id rename is create-new + copy fields + reference fixups + delete-old, emitted as one consecutive run from one writer. The fixup is part of the contract: an inbound `supersedes` must point at the new id afterwards, or the succession link dangles at a tombstone.",
+  "files": [
+    "{\"v\":1,\"ts\":10,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"coc-2019\"}\n{\"v\":1,\"ts\":11,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"coc-2019\",\"f\":\"name\",\"val\":\"COC 2019\"}\n{\"v\":1,\"ts\":12,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"coc-2025\"}\n{\"v\":1,\"ts\":13,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"coc-2025\",\"f\":\"name\",\"val\":\"COC 2025\"}\n{\"v\":1,\"ts\":14,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"coc-2025\",\"f\":\"supersedes\",\"val\":\"coc-2019\"}\n{\"v\":1,\"ts\":20,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"coc-2019-in\"}\n{\"v\":1,\"ts\":21,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"coc-2019-in\",\"f\":\"name\",\"val\":\"COC 2019\"}\n{\"v\":1,\"ts\":22,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"coc-2025\",\"f\":\"supersedes\",\"val\":\"coc-2019-in\"}\n{\"v\":1,\"ts\":23,\"w\":\"desk-core\",\"op\":\"delete\",\"ent\":\"doc\",\"id\":\"coc-2019\"}\n"
+  ],
+  "canonical": "{\"enrich\":{},\"entities\":{\"doc\":{\"coc-2019-in\":{\"name\":\"COC 2019\"},\"coc-2025\":{\"name\":\"COC 2025\",\"supersedes\":\"coc-2019-in\"}}},\"states\":{},\"tombstones\":{\"doc\":[\"coc-2019\"]}}"
+}

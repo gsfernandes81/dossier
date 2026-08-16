@@ -1,0 +1,11 @@
+{
+  "name": "mid-file-garbage",
+  "why": "A broken line in the middle of a file is skipped, counted and preserved verbatim through compaction - never silently discarded, and never a reason to abandon the rest of the file.",
+  "files": [
+    "{\"v\":1,\"ts\":10,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"x\"}\n{\"v\":1,\"ts\":15,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\"\n{\"v\":1,\"ts\":20,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"x\",\"f\":\"name\",\"val\":\"X\"}\n"
+  ],
+  "canonical": "{\"enrich\":{},\"entities\":{\"doc\":{\"x\":{\"name\":\"X\"}}},\"states\":{},\"tombstones\":{}}",
+  "stats": {
+    "malformed": 1
+  }
+}

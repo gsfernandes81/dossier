@@ -8,14 +8,15 @@
 > [`REWRITE-UI.md`](REWRITE-UI.md); phase R0.2's spike lives in [`spike/`](spike/) with
 > its protocol and findings in [`docs/dev/spike-r02.md`](docs/dev/spike-r02.md).
 >
-> **Rust local gate** (mirror it before pushing, same discipline as the Python one — CI
-> runs it as the separate `spike` workflow):
+> **Rust local gate** (mirror it before pushing, same discipline as the Python one).
+> The workspace (`crates/*`, CI: `rust` workflow) and the throwaway spike (`spike/`,
+> CI: `spike` workflow) are separate cargo trees — run both if you touched both:
 > ```bash
-> cd spike
-> cargo fmt --check
-> cargo clippy --all-targets -- -D warnings   # pedantic is on; triage, never silence
-> cargo test --release
-> cargo build --release --target aarch64-unknown-linux-musl   # the phone target
+> cargo fmt --all --check
+> cargo clippy --workspace --all-targets -- -D warnings  # pedantic on; triage, never silence
+> cargo test --workspace --release -- --nocapture        # perf gates assert in release only
+> cargo build --workspace --release --target aarch64-unknown-linux-musl   # the phone target
+> (cd spike && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --release)
 > ```
 
 A cross-platform **TUI** for tracking personal documents — physical **and** digital — on

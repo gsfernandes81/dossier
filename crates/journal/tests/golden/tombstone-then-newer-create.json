@@ -1,0 +1,8 @@
+{
+  "name": "tombstone-then-newer-create",
+  "why": "A create newer than the tombstone is a legitimate recreate of the same id. It starts from empty fields: inheriting the dead document's fields would be a resurrection by another name.",
+  "files": [
+    "{\"v\":1,\"ts\":10,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"x\"}\n{\"v\":1,\"ts\":20,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"x\",\"f\":\"name\",\"val\":\"old\"}\n{\"v\":1,\"ts\":30,\"w\":\"desk-core\",\"op\":\"delete\",\"ent\":\"doc\",\"id\":\"x\"}\n{\"v\":1,\"ts\":40,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"x\"}\n{\"v\":1,\"ts\":50,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"x\",\"f\":\"slot\",\"val\":7}\n"
+  ],
+  "canonical": "{\"enrich\":{},\"entities\":{\"doc\":{\"x\":{\"slot\":7}}},\"states\":{},\"tombstones\":{}}"
+}

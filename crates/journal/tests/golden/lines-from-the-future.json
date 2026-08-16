@@ -1,0 +1,12 @@
+{
+  "name": "lines-from-the-future",
+  "why": "An unknown format version and an unknown verb are both preserved and ignored, not treated as damage. This is the entire forward-compatibility story: an older build reading a newer journal degrades instead of corrupting.",
+  "files": [
+    "{\"v\":1,\"ts\":10,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"x\"}\n{\"v\":2,\"ts\":15,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"x\",\"f\":\"name\",\"val\":\"from v2\"}\n{\"v\":1,\"ts\":16,\"w\":\"desk-core\",\"op\":\"teleport\",\"ent\":\"doc\",\"id\":\"x\"}\n{\"v\":1,\"ts\":20,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"x\",\"f\":\"name\",\"val\":\"X\"}\n"
+  ],
+  "canonical": "{\"enrich\":{},\"entities\":{\"doc\":{\"x\":{\"name\":\"X\"}}},\"states\":{},\"tombstones\":{}}",
+  "stats": {
+    "opaque": 2,
+    "malformed": 0
+  }
+}

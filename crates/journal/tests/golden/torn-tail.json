@@ -1,0 +1,11 @@
+{
+  "name": "torn-tail",
+  "why": "A process that died mid-write leaves a final line with no trailing newline. It was never durable, so it is dropped rather than reported as damage - and a writer must truncate it before appending, or the next op is glued onto it.",
+  "files": [
+    "{\"v\":1,\"ts\":10,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\"id\":\"x\"}\n{\"v\":1,\"ts\":20,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"x\",\"f\":\"name\",\"val\":\"X\"}\n{\"v\":1,\"ts\":30,\"w\":\"desk-co"
+  ],
+  "canonical": "{\"enrich\":{},\"entities\":{\"doc\":{\"x\":{\"name\":\"X\"}}},\"states\":{},\"tombstones\":{}}",
+  "torn": [
+    "{\"v\":1,\"ts\":30,\"w\":\"desk-co"
+  ]
+}

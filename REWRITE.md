@@ -364,6 +364,33 @@ until the cutover step the user personally green-lights.
   property tests (union-commutativity, compaction-preserves-fold, tombstone
   supremacy); **golden test vectors** checked in as JSON fixtures; synthetic perf
   test (fold 1k docs / 50k ops < 20 ms in CI with generous margin). Freeze §3.
+  - **Slice 1 done (2026-08-16):** `crates/journal` with the op model
+    (parse/classify/round-trip, torn tails, unknown-`v`/unknown-`op` preserved as
+    opaque, malformed lines counted and kept), the fold with all three §3.3 rules,
+    the frozen filename grammar, 9 golden vectors plus their cross-language schema
+    (`crates/journal/tests/golden/README.md`), 6 property tests, and the perf gate.
+    35 tests; `clippy::pedantic` denied and triaged in place.
+  - **Measured (x86_64 dev box, release, 50k ops / 1k docs):** fold **16 ms**,
+    parse **40 ms**, canonical serialization 2 ms. Two corrections to §3.3's sizing
+    note, both worth carrying into R3:
+    1. **Parse dominates, not fold** — 2.5× the fold, and it was not in the budget
+       at all. The obvious "parse to `Value`, inspect, then deserialize" walks every
+       line twice; a fast-path deserialize straight into `Op`, with a slow path only
+       for lines that fail it, cut parse from 58 ms. `#[serde(flatten)]` for
+       unknown-field preservation costs a further 18% (40 vs 32.7 ms) and is
+       **kept** — 7 ms is a fair price for not silently deleting a future version's
+       fields during compaction.
+    2. **The fold's cost was allocation, not algorithm** — keying the working maps
+       by `(&str, &str)` borrowed from the ops and materializing owned keys once at
+       the end took it from 20 ms to 16 ms; it had been allocating three `String`s
+       per op, 150k of them.
+    At the *real* store size (~948 docs, ~15k ops) that is ≈17 ms parse+fold on this
+    machine. The phone is slower, so R3's first on-device run should check it against
+    the 100 ms budget before anything else joins the startup path.
+  - **Still to come in R1:** the reader (directory discovery, per-file high-water
+    marks), the appending writer (HLC, advisory lock via std's `File::try_lock`,
+    torn-tail repair before append), and compaction with its
+    `compaction-preserves-fold` golden vector.
 - **R2 — Exporter + parity (Python).** One-shot v2-store → journal converter using
   the existing trusted `store.py` reader: docs + locations + bundles + reconcile +
   suggestions + scans + intake sidecars **and the synced `config.toml` → settings
