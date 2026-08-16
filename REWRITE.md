@@ -450,6 +450,24 @@ until the cutover step the user personally green-lights.
   golden vectors. **All R2–R6 test journals live *outside* the synced tree**
   (scratch/local dirs) — anything created inside the Syncthing folder syncs by
   default, and half-built journals must never reach the phone early.
+  - **Slice 1 done (2026-08-16):** `dossier/journal.py` — the Python fold, written
+    against the **same** fixture files the Rust crate runs
+    (`crates/journal/tests/golden/`), not a copy of them. It parses and classifies
+    lines identically (folded / opaque / malformed), folds by the three §3.3 rules,
+    produces the canonical JSON, and implements the compaction plan the satellite
+    needs for its own `enrich/` file. `dossier/tests/test_journal.py` runs all ten
+    shared vectors plus both-file-orders, torn tails, health counters and
+    compaction-preserves-fold. **All ten matched byte-for-byte on the first run** —
+    which is the useful result: the canonical form (sorted keys, compact
+    separators, `ensure_ascii=False`, integers only) really is reproducible across
+    `serde_json` and `json.dumps`, so §10's cross-language comparison is sound
+    rather than aspirational. The drift risk §11 lists is now closed by a test that
+    fails in *both* languages the moment either fold changes.
+  - **Still to come in R2:** the v2-store → journal exporter (docs, locations,
+    bundles, reconcile, suggestions, scans, intake sidecars **and** the synced
+    `config.toml` → settings ops), and the parity harness against the real ~948
+    docs (read-only, run by the user — no real store exists in the dev container).
+
 - **R3 — Read-only core** *(needs R-UI)*: browse + search (exact→fuzzy, ctrl+t
   content search) + open + `ds status` (counts, syncthing REST checks) + `ds open`.
   Daily-usable read-only against an exported copy of the real store.
