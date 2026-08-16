@@ -56,6 +56,14 @@ KEYS = {
     "end": "\x1b[F",
     "pageup": "\x1b[5~",
     "pagedown": "\x1b[6~",
+    # Function keys (xterm/VT220 forms crossterm and Textual both parse). F1-F4
+    # are SS3-prefixed, F5+ switch to CSI ~ — an xterm quirk, not a typo.
+    "f1": "\x1bOP",
+    "f2": "\x1bOQ",
+    "f3": "\x1bOR",
+    "f4": "\x1bOS",
+    "f5": "\x1b[15~",
+    "f6": "\x1b[17~",
 }
 
 
@@ -201,7 +209,17 @@ class PtyTerm:
 
     def text(self):
         with self._lock:
-            return "\n".join(self.screen.display)
+            try:
+                return "\n".join(self.screen.display)
+            except IndexError:
+                # pyte's `display` asks `wcwidth(char[0])` and blows up on a cell
+                # whose data is the empty string — which is what it writes for the
+                # trailing half of a wide glyph (CJK, emoji). Rebuild the screen
+                # from the buffer instead of losing the whole capture.
+                return "\n".join(
+                    "".join(self.screen.buffer[y][x].data or " " for x in range(self.cols))
+                    for y in range(self.rows)
+                )
 
     def cell(self, row, col):
         """``(char, fg, bg, bold, reverse)`` for one cell — lets tests assert colour."""
