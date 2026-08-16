@@ -418,40 +418,60 @@ fn draw_events(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
+/// Width of the glyph table's right-hand rule.
+const GLYPH_COL: usize = 34;
+
+/// The rows of the glyph + width check.
+///
+/// Shared with the `--glyphs` CLI mode, which exists because **Termux has no
+/// function keys** — the phone run found the F3 panel simply unreachable there.
+/// A check nobody can run is not a check.
+pub fn glyph_samples() -> &'static [&'static str] {
+    &[
+        "ASCII markers:  ! ~ x ·",
+        "box drawing: ┌─┬─┐ │ ├ ┤ └┴┘",
+        "arrows/verbs: ⏎ → ← ▸ ⌨",
+        "status glyphs: ⚠ ✓ ✗ ⭘ ●",
+        "nerd font:      ",
+        "CJK: 海事証明書",
+        "emoji: 🛳 📄 🔒",
+        "devanagari: पैन कार्ड",
+        "cyrillic: Свидетельство",
+        "combining: é vs é  ffi",
+    ]
+}
+
+/// One glyph row as `|sample…| w=N`, padded by display width.
+///
+/// If the terminal's idea of a character's width differs from
+/// `unicode-width`'s, the right-hand bars stop lining up — the fastest possible
+/// visual test of "will the columns stay straight on the phone".
+pub fn glyph_row(text: &str) -> String {
+    format!(" |{}| w={}", pad_right(text, GLYPH_COL), text.width())
+}
+
 fn draw_glyphs(frame: &mut Frame, area: Rect) {
-    // Every line ends with a `|` placed by display-width arithmetic. If the
-    // terminal's idea of a character's width differs from `unicode-width`'s,
-    // the right-hand bars stop lining up — which is the fastest possible visual
-    // test of "will the columns stay straight on the phone".
-    const COL: usize = 34;
     let sample = |text: &str| -> Line<'static> {
         Line::from(vec![
             Span::raw(" |"),
-            Span::raw(pad_right(text, COL)),
+            Span::raw(pad_right(text, GLYPH_COL)),
             Span::raw("| "),
             Span::styled(format!("w={}", text.width()), dim()),
         ])
     };
-    let lines = vec![
+    let mut lines = vec![
         Line::styled(
             " glyph + width check — the right bars must line up",
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Line::raw(""),
-        sample("ASCII markers:  ! ~ x ·"),
-        sample("box drawing: ┌─┬─┐ │ ├ ┤ └┴┘"),
-        sample("arrows/verbs: ⏎ → ← ▸ ⌨"),
-        sample("status glyphs: ⚠ ✓ ✗ ⭘ ●"),
-        sample("nerd font:      "),
-        sample("CJK: 海事証明書"),
-        sample("emoji: 🛳 📄 🔒"),
-        sample("devanagari: पैन कार्ड"),
-        sample("cyrillic: Свидетельство"),
-        sample("combining: é vs é  ffi"),
+    ];
+    lines.extend(glyph_samples().iter().map(|text| sample(text)));
+    lines.extend([
         Line::raw(""),
         Line::styled(" missing/boxy glyphs = font gap (ASCII fallback is mandatory);", dim()),
         Line::styled(" misaligned bars = the terminal disagrees on width.", dim()),
-    ];
+    ]);
     frame.render_widget(Paragraph::new(lines), area);
 }
 

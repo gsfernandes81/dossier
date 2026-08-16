@@ -5,8 +5,11 @@
 > If your task is part of that rewrite, `REWRITE.md` is authoritative and overrides the
 > Python-specific rules below for the Rust crates; the rules below still govern the
 > Python code while it exists. The layout gate is settled in
-> [`REWRITE-UI.md`](REWRITE-UI.md); phase R0.2's spike lives in [`spike/`](spike/) with
-> its protocol and findings in [`docs/dev/spike-r02.md`](docs/dev/spike-r02.md).
+> [`REWRITE-UI.md`](REWRITE-UI.md); **phase R0.2's go/no-go gate is GO** — the phone
+> measured 6.2 ms to usable against the Python app's 1053 ms, with every touch/IME
+> trick intact. The throwaway spike is [`spike/`](spike/); results and findings in
+> [`docs/dev/spike-r02.md`](docs/dev/spike-r02.md). One binding finding from it:
+> **Termux has no function keys**, so nothing user-facing may sit behind one.
 >
 > **Rust local gate** (mirror it before pushing, same discipline as the Python one).
 > The workspace (`crates/*`, CI: `rust` workflow) and the throwaway spike (`spike/`,

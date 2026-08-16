@@ -339,28 +339,38 @@ until the cutover step the user personally green-lights.
     framework imports ~320 ms + first paint ~230 ms; store load only ~95 ms).
     This is the number the rewrite must embarrass. Desktop/Windows numbers are
     optional nice-to-have.
-  - R0.2: **spike built (2026-08-16); awaiting the on-device run.** The code is
-    `spike/` (throwaway); the protocol, results tables and findings are in
-    **[`docs/dev/spike-r02.md`](docs/dev/spike-r02.md)**, and CI (`spike`
-    workflow) uploads a ready-to-copy phone binary. Established so far:
+  - R0.2: **DONE — the gate is GO (2026-08-16, measured on the phone).**
+    Code in `spike/` (throwaway); protocol, full results and findings in
+    **[`docs/dev/spike-r02.md`](docs/dev/spike-r02.md)**.
+    - **Phone, Samsung S24U:** cold **6.2 ms to usable** (10.97 ms wall), warm
+      **4.1 ms** (6.91 ms wall), **RSS 1.2 MB**, worst keystroke→frame **0.33 ms**.
+      Against the R0.1 baseline of 1053 ms cold / ~670 ms warm on the same phone:
+      **170× faster, and 16× inside the 100 ms target**. Nothing is marginal —
+      frame times on the phone match the x86 dev box's, so this workload is
+      nowhere near either machine's limits.
+    - **Every touch/IME finding from DESIGN §14 still holds**, three years on and
+      previously untested: taps arrive as SGR clicks, tap-then-tap opens, drags
+      scroll, the `⌨` affordance raises the soft keyboard, typed text lands in the
+      search bar, and an Esc that dismisses the IME does not quit the app.
     - **Toolchain: nothing extra is needed.** `rustup target add
       aarch64-unknown-linux-musl` + `rust-lld` with `+crt-static` /
-      `link-self-contained=yes` yields a fully static **810 KB** ARM64 binary.
-      No NDK, no `musl-gcc`, no `cargo-zigbuild` — §4.4's "the spike picks
-      whichever builds cleanly" resolves to *none of them*.
-    - **Performance, dev box (x86_64 Linux):** usable **1.0 ms** (data 0.9 ·
-      term init 0.1 · paint ≤0.2), **RSS 3.0 MB**, worst keystroke→frame
-      **0.86 ms** including re-filtering all 1,000 rows. Under qemu-emulated
-      aarch64 (a ceiling, not a prediction): usable 22 ms, worst
-      keystroke→frame 7.7 ms. Against a 1053 ms baseline and a 100 ms budget.
-    - **Ratatui 0.30 + crossterm 0.29 needed no workarounds**; two dependencies
-      total. The list is hand-virtualized, so frame cost tracks the viewport,
-      not the store. The event loop blocks on input, so idle CPU is zero.
-    - **Still open (needs the phone):** SGR taps/drags under Termux, whether the
-      mouse-mode drop still raises the IME, which glyphs the phone font has, and
-      the real `usable`/RSS. §3 of the spike doc is the checklist to run.
-    The **go/no-go call belongs to the on-device run** — the performance half of
-    the gate looks decided by a wide margin, the interaction half does not.
+      `link-self-contained=yes` yields a fully static **810 KB** binary. No NDK,
+      no `musl-gcc`, no `cargo-zigbuild` — §4.4's "the spike picks whichever
+      builds cleanly" resolves to *none of them*.
+    - **Binding finding for R3: Termux has no function keys.** The spike bound
+      its diagnostic panels to F2–F5 to keep every letter free for find-fast, and
+      on the phone they turned out to be unreachable. So the `⌨` button in the
+      touch action bar is the *only* route to the IME affordance (REWRITE-UI.md
+      §5 keeps it — this is why), and **nothing in R3 may sit behind a function
+      key**. REWRITE-UI.md §3 already routes secondary surfaces through `:`
+      commands, so the plan is sound; the spike proved the failure mode rather
+      than assuming it.
+    - Ratatui 0.30 + crossterm 0.29 needed no workarounds; two dependencies
+      total. The list is hand-virtualized, so frame cost tracks the viewport, not
+      the store, and the event loop blocks on input so idle CPU is zero.
+    - Open but non-blocking: which glyphs the phone's font has (`ds-spike
+      --glyphs`), and Windows startup/interactive behaviour (CI already covers
+      the renderer and the budget there).
 - **R-UI — TUI layout plan (gate, D12).** **Done (2026-08-16): see
   [`REWRITE-UI.md`](REWRITE-UI.md)** — user-approved: single-list drill-down stack,
   flat list (no location headers; location = row data + filter), sticky-toggle

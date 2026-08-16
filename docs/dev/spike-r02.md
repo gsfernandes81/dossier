@@ -15,10 +15,12 @@ median ≈ 670 ms**, against a budget of **< 100 ms (150 ms acceptable)**.
 
 ## 1. Getting a binary
 
-**From CI (easiest, and the only route to a phone binary without a PC):** the
-`spike` workflow uploads three artifacts per run — `ds-spike-aarch64-musl` (the
-phone), `ds-spike-windows-latest`, `ds-spike-ubuntu-latest`. It can be started by
-hand from the Actions tab (`workflow_dispatch`).
+**From CI:** the `spike` workflow uploads three artifacts per run —
+`ds-spike-aarch64-musl` (the phone), `ds-spike-windows-latest`,
+`ds-spike-ubuntu-latest`. **Caveat found in practice:** the "Run workflow"
+button (`workflow_dispatch`) only appears once the workflow file is on the
+repository's **default branch** — until this work merges, the only runs are the
+push-triggered ones, and the artifact must be taken from an existing run.
 
 **From a PC:**
 
@@ -126,24 +128,43 @@ prediction; what they prove is that the cross-compiled binary genuinely runs.
 | frame, 45×28 (median / p95) | 1.29 / 2.21 ms |
 | worst keystroke→frame | 7.70 ms |
 
-### 4.3 Phone (Termux) — **to be filled in on the device**
+### 4.3 Phone (Termux) — **measured 2026-08-16, Samsung S24U**
 
-| Run | Condition | Shell total | usable | data | term init | first paint | exec→main | RSS |
-|---|---|---|---|---|---|---|---|---|
-| 1 | cold | | | | | | | |
-| 2 | warm | | | | | | | |
-| 3 | warm | | | | | | | |
-| 4 | warm | | | | | | | |
+| Run | Condition | Shell total | usable | data | term init | first paint | RSS |
+|---|---|---|---|---|---|---|---|
+| 1 | cold | **10.97 ms** | **6.2 ms** | 1.3 ms | 0.4 ms | 4.6 ms | 1.2 MB |
+| 2 | warm | **6.91 ms** | **4.1 ms** | 0.8 ms | 0.2 ms | 3.1 ms | 1.2 MB |
 
-`ds-spike --bench` on the phone:
+`ds-spike --bench` on the phone (1,000 docs built in 0.86 ms):
 
 | Shape | median | p95 | max | worst key→frame |
 |---|---|---|---|---|
-| 45×28 | | | | |
-| 80×24 | | | | |
-| 120×40 | | | | |
+| 45×28 | 0.11 ms | 0.14 ms | 0.36 ms | 0.23 ms |
+| 80×24 | 0.12 ms | 0.14 ms | 0.30 ms | 0.20 ms |
+| 120×40 | 0.25 ms | 0.29 ms | 0.45 ms | 0.33 ms |
 
-Checklist §3 results (1–15): _pending_
+**Against the R0.1 Python baseline on the same phone:**
+
+| Metric | Python v2 | Rust spike | Budget | |
+|---|---|---|---|---|
+| cold, launch → usable | 1053 ms | **6.2 ms** | < 100 ms | **170× faster, 16× inside budget** |
+| cold, shell total | 1.43 s | **10.97 ms** | — | 130× faster |
+| warm, launch → usable | ~670 ms | **4.1 ms** | < 100 ms | 163× faster |
+| RSS | — | **1.2 MB** | < 30 MB | 25× inside |
+| keystroke → frame | — | **0.33 ms** | < 16 ms | 48× inside |
+
+Checklist §3 results:
+
+| # | Check | Result |
+|---|---|---|
+| 1 | tap selects, tap-on-selected opens | **pass** |
+| 2 | drag / swipe scrolls the list | **pass** — "scrolls correctly" |
+| 3–4 | the app owns scrolling | **pass** (implied by 2) |
+| 5–6 | `⌨` affordance raises the IME; typing lands in the search bar | **pass** — "text lands" |
+| 7–9 | find-fast, `Enter`, `Esc` peel | **pass** |
+| 10 | Esc dismissing the IME does not quit | **pass** |
+| 12 | glyph / width check | **blocked** — see below; re-run with `--glyphs` |
+| 13–15 | resize, floor, clean exit | not separately reported |
 
 ### 4.4 Windows — **to be filled in**
 
@@ -215,26 +236,59 @@ phone run.
    `TestBackend` for headless rendering. Two dependencies total (`ratatui` and
    `unicode-width`), 810 KB static.
 
-### Open until the device runs
+### Answered by the device run (2026-08-16)
 
-- Whether Termux delivers taps as SGR clicks, and drags as scrolls or drags
-  (checklist 1–4).
-- Whether the mouse-mode drop actually raises the IME on the current Termux
-  build (checklist 5–6) — DESIGN §14 says it should; nothing since has retested.
-- Which glyph rows render as boxes on the phone's font (checklist 12) — decides
-  how much the ASCII fallback carries.
-- Real phone `usable` and RSS.
+9. **The phone is 170× faster than the Python app, and 16× inside budget.**
+   Cold 6.2 ms usable / 10.97 ms wall against 1053 ms / 1.43 s. Frame times on
+   the phone (0.11 ms median at 45×28) are indistinguishable from the x86 dev
+   box's — this workload is nowhere near either machine's limits. RSS 1.2 MB,
+   *lower* than the dev box's 3.0 MB.
+10. **Every touch and IME finding from DESIGN §14 still holds.** Taps arrive as
+    SGR clicks, tap-then-tap opens, drags scroll the list, the `⌨` affordance
+    raises the soft keyboard and typed text lands in the search bar, and an Esc
+    that dismisses the IME does not quit the app. The v2 research was three
+    years old and nothing had retested it; it survives.
+11. **Termux has no function keys.** The spike bound its diagnostic panels to
+    F2/F3/F4/F5 precisely to keep every letter free for find-fast — and on the
+    phone that made them unreachable. Two consequences:
+    - The `⌨ Keys` button in the touch action bar is not a convenience, it is
+      the *only* route to the IME affordance on a phone. REWRITE-UI.md §5 keeps
+      it; this is why.
+    - **R3 must not put anything behind a function key.** REWRITE-UI.md §3
+      already routes secondary surfaces through `:` commands, so the plan is
+      sound — but the spike proved the failure mode rather than assuming it.
+    - The glyph check got a `--glyphs` flag that prints the same table with no
+      terminal at all. A check nobody can run is not a check.
+12. **`exec→main` reads `n/a` on Android.** `/proc/uptime` is not readable
+    there (SELinux), so the in-process probe cannot compute process age. Not
+    worth chasing: the protocol's `time` wrapper is authoritative, and the gap
+    it shows (10.97 − 6.2 ≈ 4.8 ms cold) is the whole of exec + dynamic
+    loading + argument parsing.
 
-## 6. Go / no-go
+### Still open
 
-The gate is REWRITE.md §9's phone budget plus the terminal tricks. A **go** needs
-`usable` on the phone within 150 ms (target 100 ms), keystroke→frame within
-33 ms, RSS under 50 MB, and checklist items 1–11 passing or having a workable
-answer. On the evidence so far — a 1 ms desktop paint, a 22 ms *emulated* ARM
-paint, a static 810 KB binary that runs — the performance half of the gate looks
-decided by a wide margin; the interaction half needs the phone.
+- Glyph/width rendering on the phone's font (checklist 12) — re-run with
+  `ds-spike --glyphs`. It decides how much work the ASCII fallback has to do,
+  and cannot change the go/no-go.
+- Windows startup and interactive behaviour (§4.4) — CI already covers the
+  renderer and the budget there.
 
-A **no-go** would look like: taps not arriving under Termux's SGR reporting, the
-IME affordance no longer working (making the app unusable one-handed), or a phone
-`usable` over 150 ms. None of these are visible yet, and only the phone can rule
-them out.
+## 6. Go / no-go — **GO** (2026-08-16)
+
+The gate was REWRITE.md §9's phone budget plus the terminal tricks. Both halves
+are answered, on the real device:
+
+| Gate | Required | Measured | |
+|---|---|---|---|
+| launch → usable | < 100 ms target, 150 ms acceptable | **6.2 ms cold** | 16× inside target |
+| keystroke → frame | < 16 ms target, 33 ms acceptable | **0.33 ms** | 48× inside |
+| RSS | < 30 MB target, 50 MB acceptable | **1.2 MB** | 25× inside |
+| taps, drags, IME, Esc | must work | **all pass** | |
+| musl toolchain | must exist | `rustup target add` + `rust-lld`, nothing else | |
+
+Nothing is marginal. The one unanswered check — which glyphs the phone's font
+has — cannot change the verdict: it decides how much the (already mandatory)
+ASCII fallback carries, not whether the approach works.
+
+**Phase R0.2 is closed. The rewrite is go.** The spike directory can be deleted
+once R3 renders its own list; the findings above are what survive it.

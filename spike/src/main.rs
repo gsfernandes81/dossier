@@ -30,6 +30,7 @@
 //! ds-spike                 the TUI (the thing to actually use on the phone)
 //! ds-spike --bench         headless frame/keystroke timings, prints and exits
 //! ds-spike --paint-once    paint one frame, print the timing line, exit
+//! ds-spike --glyphs        print the glyph/width check as plain text, exit
 //! ds-spike --docs N        store size (default 1000)
 //! DS_SPIKE_TIMING=1        print the startup line to stderr on the first frame
 //! DS_SPIKE_TIMING=exit     …and quit immediately (for a shell `time` wrapper)
@@ -86,17 +87,29 @@ use app::{App, Panel};
 use timing::{Slot, Startup};
 
 /// How the process was asked to run.
+///
+/// Four independent mode flags rather than one enum: `--assert-budget` implies
+/// `--bench`, and the rest are genuinely orthogonal, so an enum would have to
+/// encode combinations that do not exist.
+#[allow(clippy::struct_excessive_bools)]
 struct Options {
     docs: usize,
     bench: bool,
     assert_budget: bool,
     paint_once: bool,
+    glyphs: bool,
     rounds: usize,
 }
 
 fn parse_args() -> Result<Options, String> {
-    let mut opts =
-        Options { docs: 1000, bench: false, assert_budget: false, paint_once: false, rounds: 60 };
+    let mut opts = Options {
+        docs: 1000,
+        bench: false,
+        assert_budget: false,
+        paint_once: false,
+        glyphs: false,
+        rounds: 60,
+    };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         // rust: `args.next()` returns `Option<String>`; `ok_or` turns the
@@ -118,6 +131,7 @@ fn parse_args() -> Result<Options, String> {
                 opts.assert_budget = true;
             }
             "--paint-once" => opts.paint_once = true,
+            "--glyphs" => opts.glyphs = true,
             "-h" | "--help" => {
                 println!("{HELP}");
                 std::process::exit(0);
@@ -132,13 +146,15 @@ const HELP: &str = "\
 ds-spike — dossier v3 Phase R0.2 spike (throwaway)
 
 USAGE:
-    ds-spike [--docs N] [--bench [--assert-budget] [--rounds N]] [--paint-once]
+    ds-spike [--docs N] [--bench [--assert-budget] [--rounds N]] [--paint-once] [--glyphs]
 
 MODES:
     (none)           interactive TUI: 1000-row list, search, detail, panels
     --bench          headless frame + keystroke timings, then exit
     --assert-budget  as --bench, but exit 1 if keystroke->frame exceeds 33ms
     --paint-once     paint one frame, print the timing line, exit
+    --glyphs         print the glyph + width check as plain text, then exit
+                     (the same table as F3 — Termux has no function keys)
 
 ENV:
     DS_SPIKE_TIMING=1     print the startup breakdown to stderr at first paint
@@ -150,6 +166,8 @@ IN THE TUI:
     right/left    open/close detail        up/down/pgup/pgdn/home/end  move
     F2/F3/F4      input events / glyph+width check / diagnostics
     F5            drop mouse reporting so Termux raises the keyboard
+                  (Termux has no function keys - use the on-screen action bar,
+                   and `--glyphs` for the width check)
     ctrl+t        toggle the search-in-scans chip
     esc           peel one layer; twice at base quits    ctrl+q  quit
     tap           select; tap the selected row to open; drag/wheel scrolls
@@ -167,6 +185,19 @@ fn main() {
             std::process::exit(2);
         }
     };
+
+    // Termux has no function keys, so the F3 panel is unreachable on the phone —
+    // found on the real device. The check exists to be run, so it also has a
+    // no-terminal mode.
+    if opts.glyphs {
+        println!("glyph + width check — the right-hand bars must line up");
+        println!("(missing or boxy glyphs = a font gap; the ASCII fallback must carry those rows)");
+        println!();
+        for sample in ui::glyph_samples() {
+            println!("{}", ui::glyph_row(sample));
+        }
+        return;
+    }
 
     if opts.bench {
         match bench::run(opts.docs, opts.rounds, opts.assert_budget) {
