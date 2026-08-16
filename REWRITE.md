@@ -368,9 +368,16 @@ until the cutover step the user personally green-lights.
     - Ratatui 0.30 + crossterm 0.29 needed no workarounds; two dependencies
       total. The list is hand-virtualized, so frame cost tracks the viewport, not
       the store, and the event loop blocks on input so idle CPU is zero.
-    - Open but non-blocking: which glyphs the phone's font has (`ds-spike
-      --glyphs`), and Windows startup/interactive behaviour (CI already covers
-      the renderer and the budget there).
+    - **The column arithmetic is right on the device**: every glyph row's
+      right-hand rule lines up — CJK at two cells, emoji, Devanagari with
+      zero-width combining marks, Cyrillic, combining `é`. Termux and the
+      `unicode-width` crate agree because both follow the Unicode East Asian
+      Width table. **Nerd Font glyphs are absent** on the phone's default font,
+      so the optional icon set stays optional and the ASCII/Unicode set must
+      carry every signal (§4.5.5 already requires this). Emoji get one cell
+      despite painting wider — never put one in a width-sensitive column.
+    - Open but non-blocking: Windows startup/interactive behaviour (CI already
+      covers the renderer and the budget there).
 - **R-UI — TUI layout plan (gate, D12).** **Done (2026-08-16): see
   [`REWRITE-UI.md`](REWRITE-UI.md)** — user-approved: single-list drill-down stack,
   flat list (no location headers; location = row data + filter), sticky-toggle

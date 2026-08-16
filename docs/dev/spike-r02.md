@@ -163,7 +163,7 @@ Checklist §3 results:
 | 5–6 | `⌨` affordance raises the IME; typing lands in the search bar | **pass** — "text lands" |
 | 7–9 | find-fast, `Enter`, `Esc` peel | **pass** |
 | 10 | Esc dismissing the IME does not quit | **pass** |
-| 12 | glyph / width check | **blocked** — see below; re-run with `--glyphs` |
+| 12 | glyph / width check | **pass** — every right-hand bar aligns; one font gap (below) |
 | 13–15 | resize, floor, clean exit | not separately reported |
 
 ### 4.4 Windows — **to be filled in**
@@ -265,13 +265,31 @@ phone run.
     it shows (10.97 − 6.2 ≈ 4.8 ms cold) is the whole of exec + dynamic
     loading + argument parsing.
 
+13. **The column arithmetic is correct on the device** (checklist 12, run via
+    `--glyphs`). Every right-hand bar lines up: ASCII, box drawing, arrows,
+    status glyphs, CJK at two cells each, emoji, Devanagari with its zero-width
+    combining marks, Cyrillic, and precomposed-vs-decomposed `é`. Termux's cell
+    arithmetic agrees with the `unicode-width` crate, because both follow the
+    same Unicode East Asian Width table — which is *why* it works, and the
+    reason to keep using that crate rather than anything cleverer.
+14. **Nerd Font glyphs are absent** — that row rendered completely blank on the
+    phone's default font. So the optional icon set is exactly that, optional:
+    **every signal must be carried by the ASCII/Unicode set**, which is what
+    REWRITE.md §4.5.5 already requires. The glyphs that *did* render — `⚠ ✓ ✗
+    ⭘ ●`, `⏎ → ← ▸ ⌨`, and the box-drawing set — are safe to use on the phone.
+15. **Emoji are a width trap, though not one that bit here.** Their East Asian
+    Width is Neutral, so `unicode-width` (and Termux) allot them **one** cell
+    while the glyph paints wider — it can overflow visually without shifting the
+    columns. Harmless in the sample; a reason never to put emoji in a
+    width-sensitive position such as a right-aligned row column. The ASCII-first
+    markers already rule that out. (A cosmetic aside: the font draws a
+    dotted-circle placeholder inside one Devanagari cluster — a font artifact,
+    not a width error.)
+
 ### Still open
 
-- Glyph/width rendering on the phone's font (checklist 12) — re-run with
-  `ds-spike --glyphs`. It decides how much work the ASCII fallback has to do,
-  and cannot change the go/no-go.
 - Windows startup and interactive behaviour (§4.4) — CI already covers the
-  renderer and the budget there.
+  renderer and the budget there, so this is polish, not a gate.
 
 ## 6. Go / no-go — **GO** (2026-08-16)
 
@@ -286,9 +304,9 @@ are answered, on the real device:
 | taps, drags, IME, Esc | must work | **all pass** | |
 | musl toolchain | must exist | `rustup target add` + `rust-lld`, nothing else | |
 
-Nothing is marginal. The one unanswered check — which glyphs the phone's font
-has — cannot change the verdict: it decides how much the (already mandatory)
-ASCII fallback carries, not whether the approach works.
+Nothing is marginal, and the checklist is complete: the glyph/width check passed
+too — every column lines up on the device, with one font gap (no Nerd Font
+glyphs) that the mandatory ASCII fallback already covers.
 
 **Phase R0.2 is closed. The rewrite is go.** The spike directory can be deleted
 once R3 renders its own list; the findings above are what survive it.
