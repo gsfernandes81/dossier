@@ -67,9 +67,20 @@ canonical string to make a test pass.
 `tombstone-then-newer-create`, `id-rename-with-inbound-supersedes`,
 `state-per-key-lww-undismiss`, `torn-tail`, `mid-file-garbage`,
 `lines-from-the-future`, `enrich-payload-lww`,
-`compaction-preserves-fold`.
+`compaction-preserves-fold`, `v2-export-shape`.
 
-The last one carries the two compaction rules that are easiest to get wrong: an
-`unset` survives even when the `set` it cancelled is dropped (the *other* writer
-may have set that field earlier, and the unset is what keeps it removed), and a
-line from a newer format version is retained verbatim rather than rewritten.
+`compaction-preserves-fold` carries the two compaction rules that are easiest to
+get wrong: an `unset` survives even when the `set` it cancelled is dropped (the
+*other* writer may have set that field earlier, and the unset is what keeps it
+removed), and a line from a newer format version is retained verbatim rather than
+rewritten.
+
+`v2-export-shape` is different in kind from the rest. The others are hand-written
+probes of one rule each; that one is a real `dossier/export_journal.py` output —
+nested `files` objects, a unicode name, ISO dates, a settings entity, a
+namespaced review state, and an enrich payload whose float confidence became an
+integer `confidence_permille`. Its canonical string was produced by the Python
+fold and independently confirmed byte-for-byte by the Rust fold, so it records an
+agreement between two implementations rather than one implementation's output. It
+exists so a change to the exporter's shape fails in **both** language suites and
+has to be a decision.
