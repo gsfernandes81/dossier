@@ -511,6 +511,37 @@ until the cutover step the user personally green-lights.
 - **R3 — Read-only core** *(needs R-UI)*: browse + search (exact→fuzzy, ctrl+t
   content search) + open + `ds status` (counts, syncthing REST checks) + `ds open`.
   Daily-usable read-only against an exported copy of the real store.
+  - **Slice 1 done (2026-08-16):** `crates/ds` as a library first — `doc.rs` turns
+    a fold into documents (shelf order with every tiebreaker explicit, expiry
+    standing, the file `Enter` opens, a pre-folded search haystack) and `search.rs`
+    ports v2's fuzz contract unchanged (exact always wins; budget 0/1/2 edits by
+    term length so a short query never fuzzes; OSA so a thumb transposition costs
+    one; terms `AND`ed). No index: R0.2 measured 0.33 ms for filter-plus-repaint at
+    store scale on the phone, so an index would be complexity bought with nothing.
+  - **Slice 2 done (2026-08-16):** the Find surface, runnable. The Elm loop is
+    fixed as REWRITE.md §11 prescribes — `app.rs` is `update` (message in, state
+    changed, [`Effect`] out), `find.rs`/`detail.rs` are `view`, `input.rs` is the
+    only module that knows crossterm exists. Every §4.5 invariant is a rule with a
+    test beside it: find-fast with the first character kept, `Enter`-opens-file
+    falling through to the record, one-layer `Esc` peeling (search → surface →
+    filter → arm → quit), tap-then-tap, the mouse-drop IME affordance that
+    restores itself on the next key. The list is hand-virtualized and every column
+    is measured in cells. Rendering is checked against a `TestBackend` at 45×28 and
+    100×26 — the mockups' own sizes — including that the status marker shares one
+    column in every row and that `NO_COLOR` changes not one character of text.
+    - **Two layout calls worth recording.** The two-line row switch keys off the
+      *terminal* width, not the list pane's: when detail splits at ≥100 cols the
+      list pane is ~55 columns but its rows stay single-line, which is what the
+      approved split mockup shows. And the touch action bar's third quarter is
+      `^x Expiry`, not `: Cmds`, until command mode exists — a button for
+      something that does not work yet is exactly v2's `check_action` lesson.
+    - **Measured (x86_64 dev container, release, 950 docs / 6,650 ops):**
+      `read 4.5ms · fold 3.0ms · build 4.1ms · terminal 0.6ms · **usable 12.3ms**`
+      via `DS_TIMING=exit`, which mirrors v2's probe and the spike's so the three
+      are comparable on the same phone. The store build (fold → documents, sorted)
+      costs about as much as the fold itself and is now on the startup path; the
+      phone number is the one that decides, and R3's first on-device run should
+      take it before anything else joins that path.
 - **R4 — Editing**: detail editing via ops, undo (inverse ops), slots with
   insert-and-shift, supersession, bundle membership, settings ops, `ds init`/`reset`.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs),

@@ -7,11 +7,34 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "ds"
+path = "src/main.rs"
+
 [dependencies]
 # The store. Everything this crate shows is a fold of it.
 journal = { path = "../journal" }
+# The TUI. Ratatui re-exports the crossterm it was built against
+# (`ratatui::crossterm`), so this is one dependency and not two — no version
+# skew between backend and frontend. R0.2 proved the pair on the phone: SGR
+# mouse reporting, taps, the IME trick and 6.2 ms to first paint.
+ratatui = "0.30"
+# Today's date, and the warn window's far edge. Everything else about dates is
+# string comparison on ISO values, which is why this is the only date use in the
+# crate.
+#
+# `tzdb-bundle-always` embeds the zone database in the binary: the phone build is
+# a static musl binary running under Termux, which has no `/usr/share/zoneinfo`
+# for a system lookup to find. Getting the zone wrong would move "expired" by a
+# day near midnight, which is exactly the signal this app exists to give.
+jiff = { version = "0.2", features = ["tzdb-bundle-always"] }
+# Argument parsing. `ds` grows subcommands (`status`, `open`) in later slices;
+# derive keeps their definitions next to the types they fill in.
+clap = { version = "4", features = ["derive"] }
 # `val` payloads arrive as JSON values and stay that way until a field is read.
 serde_json = { workspace = true }
+# Error types that carry what to do about them — the opener's whole job.
+thiserror = { workspace = true }
 # Search folds accents so `résumé` matches `resume`, which needs NFKD
 # decomposition — the one thing std's `to_lowercase` cannot do. Ported from v2's
 # `fuzz.fold`, whose behaviour the golden expectations here depend on.

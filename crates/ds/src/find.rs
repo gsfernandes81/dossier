@@ -1,0 +1,343 @@
+// Copyright © 2026-present gsfernandes81
+//
+// This file is part of "dossier".
+//
+// dossier is free software: you can redistribute it and/or modify it under the
+// terms of the GNU Affero General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option) any later version.
+//
+// dossier is distributed in the hope that it will be useful, but WITHOUT ANY
+// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+// PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License along with
+// dossier. If not, see <https://www.gnu.org/licenses/>.
+
+//! The view half of the loop: the Find surface.
+//!
+//! REWRITE-UI.md §1 — *"the app is a finder that happens to have management
+//! surfaces behind it"*. One full-width list, no location headers (U2), the
+//! search bar docked at the **bottom** where a thumb reaches it, and the counts
+//! that matter in the header. The approved mockups in `docs/dev/mockups/` are
+//! the reference this is measured against, down to the column counts.
+//!
+//! Two properties are load-bearing:
+//!
+//! 1. **The list is virtualized by hand.** Only rows that fit on screen are
+//!    built. Handing a widget 948 pre-built rows and letting it slice would make
+//!    frame time scale with the store rather than the viewport — precisely the
+//!    property the rewrite exists to avoid.
+//! 2. **Every column is measured in cells, never characters** ([`crate::layout`]).
+//!
+//! The renderer decides nothing: it reads [`Model`] and writes back only the
+//! geometry it drew, so taps hit-test against the layout that is really on
+//! screen.
+
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::Frame;
+
+use crate::app::{Filter, ListGeometry, Model};
+use crate::layout::{fit, pad_left, short_date, truncate, width};
+use crate::theme::{Theme, Tone};
+use crate::{Doc, Status};
+
+/// The status cell is a fixed seven columns — `! 09-26` — so the marker lands on
+/// the same screen column in every row, which is what makes a list of dates
+/// scannable at a glance.
+const STATUS_COLS: usize = 7;
+
+/// Above this width a single-line row has room for a tags column as well.
+const TAGS_COLS: u16 = 90;
+
+/// Draw one frame of the Find surface.
+///
+/// rust: `&mut Model` for the one write-back described in the module header —
+/// the row rectangle. Everything else here only reads.
+pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
+    let area = frame.area();
+    model.cols = area.width;
+    model.rows_on_screen = area.height;
+
+    if crate::layout::too_small(area.width, area.height) {
+        model.list = ListGeometry::default();
+        draw_too_small(frame, area, theme);
+        return;
+    }
+
+    let mut constraints = vec![Constraint::Length(1), Constraint::Min(1)];
+    if crate::layout::touch_bar(area.width) {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Length(1));
+    constraints.push(Constraint::Length(1));
+    let chunks =
+        Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
+
+    let (body, rest) = (chunks[1], &chunks[2..]);
+    draw_header(frame, chunks[0], model, theme);
+    draw_body(frame, body, model, theme);
+    if crate::layout::touch_bar(area.width) {
+        draw_action_bar(frame, rest[0], model, theme);
+        draw_search(frame, rest[1], model, theme);
+        draw_footer(frame, rest[2], model, theme);
+    } else {
+        draw_search(frame, rest[0], model, theme);
+        draw_footer(frame, rest[1], model, theme);
+    }
+}
+
+/// Below the floor, say so. A layout that renders half a row and clips the rest
+/// looks like a crash; this looks like an instruction.
+fn draw_too_small(frame: &mut Frame, area: Rect, theme: Theme) {
+    let (cols, rows) = crate::layout::FLOOR;
+    let notice = Paragraph::new(vec![
+        Line::styled("terminal too small", theme.style(Tone::Title)),
+        Line::styled(
+            format!("need ≥ {cols}×{rows}, have {}×{}", area.width, area.height),
+            theme.style(Tone::Muted),
+        ),
+    ])
+    .wrap(Wrap { trim: true });
+    frame.render_widget(notice, area);
+}
+
+/// Title on the left, attention counts on the right.
+///
+/// Both halves shed detail as the terminal narrows — found the hard way in a
+/// 45-column run during R0.2, where a full-width header ran straight through the
+/// count and the terminal clipped it mid-word. At phone width the counts are the
+/// only thing worth keeping, so the title goes first.
+fn draw_header(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+    let wide = area.width >= 72;
+    let attention = model.attention_count();
+    let total = model.store.docs.len();
+    let left = " dossier";
+    let right = if wide {
+        format!("! {attention} expiring · {total} docs ")
+    } else {
+        format!("! {attention} exp · {total} docs ")
+    };
+    let right = truncate(&right, (area.width as usize).saturating_sub(width(left) + 1));
+    let gap = (area.width as usize).saturating_sub(width(left) + width(&right));
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(left, theme.style(Tone::Title)),
+            Span::raw(" ".repeat(gap)),
+            // The count names a command (`:expiring`), so it is an accent, not
+            // decoration — REWRITE-UI.md §1.
+            Span::styled(right, theme.style(Tone::Accent)),
+        ])),
+        area,
+    );
+}
+
+/// The list, and the detail pane beside or instead of it (U3).
+fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
+    let (list_area, detail_area) = match (model.detail, crate::layout::splits(area.width)) {
+        (true, true) => {
+            let split = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .split(area);
+            (Some(split[0]), Some(split[1]))
+        }
+        // Narrow: the record is a full-screen push, and `Esc` pops back with the
+        // cursor where it was.
+        (true, false) => (None, Some(area)),
+        (false, _) => (Some(area), None),
+    };
+
+    match list_area {
+        Some(list_area) => draw_list(frame, list_area, model, theme),
+        None => model.list = ListGeometry::default(),
+    }
+    if let Some(detail_area) = detail_area {
+        crate::detail::draw(frame, detail_area, model, theme);
+    }
+}
+
+fn draw_list(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
+    let row_height = crate::layout::row_height(model.cols);
+    let visible = (area.height / row_height).max(1) as usize;
+    model.scroll_into_view(visible);
+    model.list = ListGeometry { top: area.y, height: area.height, row_height };
+
+    if model.rows.is_empty() {
+        let message = if model.query.is_empty() {
+            "  no documents yet — `ds init` and the filing surface fill this"
+        } else {
+            "  nothing matches"
+        };
+        frame.render_widget(Paragraph::new(Line::styled(message, theme.style(Tone::Muted))), area);
+        return;
+    }
+
+    // *** The virtualization: only the visible window is built. ***
+    let mut lines: Vec<Line> = Vec::with_capacity(visible * row_height as usize);
+    for slot in 0..visible {
+        let Some(&index) = model.rows.get(model.offset + slot) else { break };
+        let doc = &model.store.docs[index];
+        let selected = model.offset + slot == model.cursor;
+        let status = model.status(doc);
+        if row_height == 1 {
+            lines.push(single_line_row(doc, status, area.width, selected, theme));
+        } else {
+            let (first, second) = two_line_row(doc, status, area.width, selected, theme);
+            lines.push(first);
+            lines.push(second);
+        }
+    }
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// `! 09-26` — marker and month-year, always seven columns.
+fn status_cell(doc: &Doc, status: Status) -> String {
+    match (status, doc.expiry_date.as_deref()) {
+        (Status::Untracked, _) | (_, None) => "   ·   ".to_string(),
+        (_, Some(iso)) => format!("{} {}", status.marker(), fit(&short_date(iso), 5)),
+    }
+}
+
+/// The cursor column. Selection is reverse video and the marker never shifts the
+/// row: an indent shift makes the whole list twitch as the cursor moves.
+fn cursor_cell(selected: bool) -> &'static str {
+    if selected {
+        "▸ "
+    } else {
+        "  "
+    }
+}
+
+/// Wide layout: name, tags, location, status — each in a fixed column.
+fn single_line_row(
+    doc: &Doc,
+    status: Status,
+    cols: u16,
+    selected: bool,
+    theme: Theme,
+) -> Line<'static> {
+    let total = cols as usize;
+    let (tags_cols, place_cols) =
+        if cols >= TAGS_COLS { (20usize, 18usize) } else { (0usize, 12usize) };
+    let name_cols = total.saturating_sub(2 + tags_cols + place_cols + 3 + STATUS_COLS).max(8);
+
+    let mut spans = vec![Span::raw(cursor_cell(selected)), Span::raw(fit(&doc.name, name_cols))];
+    if tags_cols > 0 {
+        spans.push(Span::styled(fit(&doc.tags.join(" "), tags_cols), theme.style(Tone::Muted)));
+    }
+    spans.push(Span::styled(pad_left(&doc.place(), place_cols), theme.style(Tone::Muted)));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(status_cell(doc, status), theme.status(status)));
+
+    let line = Line::from(spans);
+    if selected {
+        line.style(theme.selected())
+    } else {
+        line
+    }
+}
+
+/// Narrow layout: name and status, then location and tags underneath.
+///
+/// The user confirmed this in the mockup review — twelve documents visible at
+/// 45×28, the trade against density accepted.
+fn two_line_row(
+    doc: &Doc,
+    status: Status,
+    cols: u16,
+    selected: bool,
+    theme: Theme,
+) -> (Line<'static>, Line<'static>) {
+    let total = cols as usize;
+    let name_cols = total.saturating_sub(2 + STATUS_COLS + 1).max(8);
+    let mut first = Line::from(vec![
+        Span::raw(cursor_cell(selected)),
+        Span::raw(fit(&doc.name, name_cols)),
+        Span::styled(status_cell(doc, status), theme.status(status)),
+    ]);
+
+    let place = doc.place();
+    let tags = doc.tags.join(" ");
+    let under = match (place.is_empty(), tags.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => place,
+        (true, false) => tags,
+        (false, false) => format!("{place} · {tags}"),
+    };
+    let mut second = Line::styled(
+        format!("    {}", fit(&under, total.saturating_sub(4))),
+        theme.style(Tone::Muted),
+    );
+
+    if selected {
+        first = first.style(theme.selected());
+        second = second.style(theme.selected());
+    }
+    (first, second)
+}
+
+/// The one row of chrome touch gets (REWRITE-UI.md §5), in four equal quarters
+/// so the hit test needs no per-label geometry.
+fn draw_action_bar(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+    let quarter = (area.width as usize / 4).max(1);
+    let detail = if model.detail { "← Back" } else { "→ Detail" };
+    // Short enough that a quarter of a 45-column phone screen holds the whole
+    // label — a truncated button is a button nobody trusts.
+    let labels = ["⏎ Open", detail, "^x Expiry", "⌨ Keys"];
+    // The keyboard affordance flashes while reporting is dropped, so the state
+    // is visible rather than mysterious.
+    let tone = if model.keyboard_hint { Tone::Armed } else { Tone::Muted };
+    let spans: Vec<Span> = labels
+        .iter()
+        .map(|label| Span::styled(fit(&format!(" {label}"), quarter), theme.style(tone)))
+        .collect();
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// The docked search bar: prompt, query, filter chips, `matched/total`.
+fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+    let count = format!("{}/{} ", model.rows.len(), model.store.docs.len());
+    let mut chips = String::new();
+    if model.filter == Filter::Expiring {
+        chips.push_str("  [expiring]");
+    }
+    if model.scans {
+        chips.push_str("  [scans]");
+    }
+    if !model.mouse_on {
+        chips.push_str("  [tap to raise the keyboard]");
+    }
+    let typed = format!("{}_", model.query);
+    let room = (area.width as usize).saturating_sub(width(&count) + 3);
+    let body = truncate(&format!("{typed}{chips}"), room);
+    let gap = (area.width as usize).saturating_sub(2 + width(&body) + width(&count));
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" > ", theme.style(Tone::Accent)),
+            Span::raw(body),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(count, theme.style(Tone::Muted)),
+        ])),
+        area,
+    );
+}
+
+/// Per-surface hints only — never another surface's verbs (v2's `check_action`
+/// lesson). A verb appears here when it works, and not before.
+fn draw_footer(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+    let line = if let Some(flash) = &model.flash {
+        Line::styled(
+            format!(" {}", truncate(flash, area.width as usize - 1)),
+            theme.style(Tone::Flash),
+        )
+    } else if model.esc_armed {
+        Line::styled(" esc again to quit", theme.style(Tone::Armed))
+    } else if model.detail {
+        Line::styled(" ⏎ open  ← close  esc back  ^q quit", theme.style(Tone::Muted))
+    } else {
+        Line::styled(" ⏎ open  → detail  ^x expiring  ^q quit", theme.style(Tone::Muted))
+    };
+    frame.render_widget(Paragraph::new(line), area);
+}

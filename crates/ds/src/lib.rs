@@ -21,18 +21,28 @@
 //! `docs/dev/mockups/` are the reference the finished surface is measured
 //! against.
 //!
-//! # Why this is a library first
+//! # Why this is a library, with a thin binary on top
 //!
-//! Everything above the journal splits cleanly into *what the data means* and
-//! *what the screen does*, and only the second needs a terminal. This slice is
-//! the first half — the view model and search — so the rules that decide what a
-//! row says can be tested directly, at speed, without a `TestBackend` in the
-//! way. The binary and the TUI arrive on top of it.
+//! Everything above the journal splits cleanly into *what the data means*, *what
+//! the screen does*, and *what the terminal does*. Only the last needs a
+//! terminal, so only that is in `main.rs`; the rest is here, where the rules can
+//! be tested directly and at speed.
 //!
 //! - [`doc`] — a folded journal turned into documents: shelf order, expiry
 //!   standing, the file `Enter` opens, the search haystack.
 //! - [`search`] — v2's typo-tolerant matching contract, ported: exact always
 //!   wins, and a short query never fuzzes.
+//! - [`app`] — the Elm-style loop's update half: `Msg` in, state changed,
+//!   [`app::Effect`] out. Every REWRITE.md §4.5 interaction invariant is a rule
+//!   in here and a test beside it.
+//! - [`find`] / [`detail`] — the view half: the Find surface and the record,
+//!   laid out to match the approved mockups.
+//! - [`input`] — terminal events to messages; the only module that knows
+//!   crossterm exists.
+//! - [`layout`] / [`theme`] — the responsive thresholds and cell-width
+//!   arithmetic, and the semantic colour tokens.
+//! - [`open`] — handing a file to the platform's opener, with the guidance that
+//!   makes a missing opener fixable.
 //!
 //! # Reading this code
 //!
@@ -44,7 +54,16 @@
 #![warn(clippy::pedantic)]
 #![forbid(unsafe_code)]
 
+pub mod app;
+pub mod detail;
 pub mod doc;
+pub mod find;
+pub mod input;
+pub mod layout;
+pub mod open;
 pub mod search;
+pub mod theme;
 
+pub use app::{update, Effect, Model, Msg};
 pub use doc::{Doc, FileRef, Location, Status, Store};
+pub use theme::Theme;
