@@ -1,11 +1,21 @@
-"""Render the C+D merge candidates for the search bar.
+"""Render the merged search bar — one geometry, three ways to express it.
 
-Same discipline as ``screens.py`` and ``searchbar.py``: every line is padded to
-its pane's real column count using display widths, and an over-wide line raises
-rather than wrapping. Markup is «class|text».
+Same discipline as ``screens.py``: every line is padded to its pane's real
+column count using display widths, and an over-wide line raises rather than
+wrapping. Markup is «class|text».
 
-The four candidates differ in one thing only — how strictly the two textures
-(reverse video, underline) are made to mean one thing each.
+The geometry is the point of this page. A row of four buttons on a 45-column
+screen has three separate ways to look uneven, and all three are arithmetic:
+
+* 45 does not divide by 4, so equal quarters leave a stray column;
+* the keys are not the same width (``⏎`` and ``→`` are one cell, ``^x`` and
+  ``^t`` are two), so content anchored after the key starts in four different
+  places;
+* labels differ in length, so centring them scatters the anchors instead.
+
+The fix is one tiling — ``1 + (10 + 1) × 4 = 45`` — with the key cap padded to a
+common width and **left-anchored in its cell**, so the four caps land on a fixed
+rhythm and the ragged ends fall in the gutters where nothing shows.
 """
 
 from __future__ import annotations
@@ -19,6 +29,13 @@ from wcwidth import wcswidth
 MARK = re.compile(r"«([a-z]+)\|([^»]*)»")
 PHONE = 45
 DESK = 100
+
+# The tiling: a one-column gutter, then four cells with a one-column separator
+# between and after each. 1 + (10 + 1) * 4 = 45, exactly.
+GUTTER = 1
+CELL = 10
+SEP = 1
+CELLS = 4
 
 
 def plain(s: str) -> str:
@@ -53,6 +70,11 @@ def rpad(text: str, cols: int) -> str:
     return text + " " * max(0, cols - wcswidth(text))
 
 
+def centre(text: str, cols: int) -> str:
+    left = max(0, (cols - wcswidth(text)) // 2)
+    return rpad(" " * left + text, cols)
+
+
 def block(lines: list[str], cols: int = PHONE) -> str:
     return "\n".join(to_html(pad(line, cols)) for line in lines)
 
@@ -70,90 +92,137 @@ LIST = [
 QUERY = "coc"
 COUNT = "3/24"
 HINTS = "esc back  ^q quit"
-# key, label — the key is what a keyboard presses, the label what a thumb reads.
+# key, label. Every key is padded to two cells so the caps are all four wide and
+# land on the same rhythm — the single change that fixes the ragged row.
 BUTTONS = [("⏎", "Open"), ("→", "Detail"), ("^x", "Expiry"), ("^t", "Scans")]
-QUARTER = PHONE // 4
+KEY_COLS = 2
 
 
-def buttons(style: str, active: str = "") -> str:
-    """One action bar row, in one of three treatments."""
-    out = []
-    for key, label in BUTTONS:
-        mark = "•" if label.lower().startswith(active) and active else ""
+def lpad(text: str, cols: int) -> str:
+    return " " * max(0, cols - wcswidth(text)) + text
+
+
+def cap(key: str) -> str:
+    """A key cap of a fixed four columns, with the key **right-aligned** in its
+    two-cell slot — so a one-cell `⏎` and a two-cell `^x` both end on the same
+    column and the label after them starts on the same one."""
+    return f" {lpad(key, KEY_COLS)} "
+
+
+def old_row() -> str:
+    """The row as it ships: equal quarters, content left-aligned, keys of two
+    different widths — three sources of unevenness in one line."""
+    quarter = PHONE // CELLS
+    return "".join(
+        f"«dim|{rpad(f' {key} {label}', quarter)}»" for key, label in BUTTONS
+    )
+
+
+def old_ruler() -> str:
+    """Where the labels actually start under the old row."""
+    quarter = PHONE // CELLS
+    marks = ""
+    for key, _ in BUTTONS:
+        offset = 1 + wcswidth(key) + 1
+        marks += " " * offset + "▲" + " " * (quarter - offset - 1)
+    return f"«rule|{rpad(marks, PHONE)}»"
+
+
+def new_ruler() -> str:
+    """Where the caps start under the new tiling: a fixed rhythm."""
+    marks = " " * GUTTER
+    for _ in BUTTONS:
+        marks += "▲" + " " * (CELL - 1) + " " * SEP
+    return f"«rule|{rpad(marks, PHONE)}»"
+
+
+def row(style: str, active: str = "", divider: bool = False) -> str:
+    """One action bar row on the fixed tiling."""
+    out = " " * GUTTER
+    for i, (key, label) in enumerate(BUTTONS):
+        mark = "•" if active and label.lower().startswith(active) else ""
         if style == "chip":
-            # The whole button reversed.
-            text = f" {key} {label}{mark} "[: QUARTER - 1]
-            out.append(f"«chip|{text}»" + " " * (QUARTER - wcswidth(text)))
-        elif style == "cap":
-            # Reverse on the key only — a cap you press, then a plain label.
-            cap = f" {key} "
-            out.append(f"«cap|{cap}»" + rpad(f" {label}{mark}", QUARTER - wcswidth(cap)))
+            # The chip *is* the cell, so its content is centred inside it.
+            out += f"«chip|{centre(f'{key} {label}{mark}', CELL)}»"
         else:
-            out.append(f"«dim|{rpad(f' {key} {label}{mark}', QUARTER)}»")
-    return "".join(out)
+            # Cap left-anchored at the cell edge, label straight after it.
+            out += f"«cap|{cap(key)}»" + rpad(f"{label}{mark}", CELL - width(cap(key)))
+        # Separators go *between* cells; the last one would be a rule against
+        # the screen edge, which reads as a border rather than a division.
+        last = i == len(BUTTONS) - 1
+        out += "«rule|│»" if divider and not last else " " * SEP
+    return out
 
 
 def field(prompt: str, tail: str, cols: int = PHONE, query: str = QUERY) -> str:
-    """The query row: prompt, then the typable span, then the tail.
+    """The query row: prompt, the typable span, then the tail.
 
-    The space between the prompt and the text belongs to the *underlined* span,
-    so the field reads as a box that starts right after the prompt rather than
-    as a rule floating a column away from it.
+    The space after the prompt belongs to the *underlined* span, so the field
+    reads as a box starting right after the prompt rather than a rule floating a
+    column away from it. Both ends sit on the same one-column gutter as the
+    buttons above.
     """
     typed = f" {query}█"
     span = cols - width(prompt) - width(tail)
     return prompt + f"«uline|{rpad(typed, span)}»" + tail
 
 
-def info(cols: int = PHONE, hints: str = HINTS) -> str:
-    left = f" {COUNT}  «dim|[scans]»"
-    gap = cols - width(left) - wcswidth(hints) - 1
-    return left + " " * gap + f"«dim|{hints}» "
+def info(cols: int = PHONE, hints: str = HINTS, count: str = COUNT, chip: bool = True) -> str:
+    left = f" {count}" + ("  «dim|[scans]»" if chip else "")
+    gap = cols - width(left) - wcswidth(hints) - GUTTER
+    return left + " " * gap + f"«dim|{hints}»" + " " * GUTTER
 
 
 SPECIMENS: dict[str, str] = {}
 
-# ── M1 · two textures, strictly ─────────────────────────────────────────────
-SPECIMENS["m1"] = block(
-    LIST + [buttons("chip"), field("«acc| >»", "«dim| ⌨ »"), info()]
-)
-
-# ── M2 · anchored: the keyboard glyph is a button, so it is a chip ──────────
-SPECIMENS["m2"] = block(
-    LIST + [buttons("chip"), field("«acc| >»", "«chip| ⌨ »"), info()]
-)
-
-# ── M3 · key caps: reverse marks the key, not the whole button ─────────────
-SPECIMENS["m3"] = block(
-    LIST + [buttons("cap"), field("«acc| >»", "«cap| ⌨ »"), info()]
-)
-
-# ── M4 · full weight: the field is underlined *and* filled ─────────────────
-SPECIMENS["m4"] = block(
-    LIST
+# ── the diagnosis ───────────────────────────────────────────────────────────
+SPECIMENS["before"] = block(
+    LIST[2:]
     + [
-        buttons("chip"),
-        "«slab| > »" + f"«slabline|{rpad(f' {QUERY}█', PHONE - 6)}»" + "«slab| ⌨ »",
+        old_row(),
+        old_ruler(),
+        field("«acc| >»", "«dim| ⌨ »" + " " * GUTTER),
         info(),
     ]
 )
 
-# ── the empty state: what launch looks like ────────────────────────────────
-SPECIMENS["m3-empty"] = block(
-    LIST
+SPECIMENS["after"] = block(
+    LIST[2:]
     + [
-        buttons("cap"),
-        field("«acc| >»", "«cap| ⌨ »", query=""),
-        f" «dim|24/24»" + " " * (PHONE - 7 - len(HINTS) - 1) + f"«dim|{HINTS}» ",
+        row("cap"),
+        new_ruler(),
+        field("«acc| >»", "«cap| ⌨ »" + " " * GUTTER),
+        info(),
     ]
 )
 
-# ── M3, active toggle ──────────────────────────────────────────────────────
-SPECIMENS["m3-active"] = block(
-    LIST + [buttons("cap", active="scans"), field("«acc| >»", "«cap| ⌨ »"), info()]
+# ── three expressions of the same tiling ────────────────────────────────────
+SPECIMENS["air"] = block(
+    LIST + [row("cap"), field("«acc| >»", "«cap| ⌨ »" + " " * GUTTER), info()]
 )
 
-# ── M3 whole screen ────────────────────────────────────────────────────────
+SPECIMENS["divider"] = block(
+    LIST + [row("cap", divider=True), field("«acc| >»", "«cap| ⌨ »" + " " * GUTTER), info()]
+)
+
+SPECIMENS["filled"] = block(
+    LIST + [row("chip"), field("«acc| >»", "«chip| ⌨ »" + " " * GUTTER), info()]
+)
+
+# ── the chosen one, in the states that matter ───────────────────────────────
+SPECIMENS["empty"] = block(
+    LIST
+    + [
+        row("cap"),
+        field("«acc| >»", "«cap| ⌨ »" + " " * GUTTER, query=""),
+        info(count="24/24", chip=False),
+    ]
+)
+
+SPECIMENS["active"] = block(
+    LIST + [row("cap", active="scans"), field("«acc| >»", "«cap| ⌨ »" + " " * GUTTER), info()]
+)
+
 FULL = [
     " «hd|dossier»                   «acc|! 3 exp · 24 docs» ",
     "«sel|▸ COC Certificate (Master)           ! 09-26 »",
@@ -166,23 +235,23 @@ FULL = [
     "«dim|    softcopy · marine»",
 ]
 FULL += ["" for _ in range(25 - len(FULL))]
-SPECIMENS["m3-full"] = block(
-    FULL + [buttons("cap"), field("«acc| >»", "«cap| ⌨ »"), info()]
+SPECIMENS["full"] = block(
+    FULL + [row("cap"), field("«acc| >»", "«cap| ⌨ »" + " " * GUTTER), info()]
 )
 
-# ── the same rule on the keyboard layout, where there are no buttons ───────
+# ── the same rule where there are no buttons at all ─────────────────────────
 DESK_LIST = [
     "  Ship Security Awareness            marine                     cert-file 6    02-30 ",
     "«sel|▸ COC Certificate (Master)         marine                     cert-file 8  ! 09-26 »",
     "  COC Certificate 2019                marine                     cert-file 9     ·    ",
     "  COC Endorsement — Panama            marine                    cert-file 10    12-26 ",
 ]
-SPECIMENS["m3-desk"] = block(
+SPECIMENS["desk"] = block(
     DESK_LIST
     + [
         "",
         field("«acc| >»", f"«dim|{COUNT} »", cols=DESK),
-        f" «dim|{'⏎ open  → detail  ^x expiring  ^q quit'}»",
+        " «dim|⏎ open  → detail  ^x expiring  ^q quit»",
     ],
     cols=DESK,
 )
