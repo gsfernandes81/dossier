@@ -176,13 +176,15 @@ fn the_phone_screen_matches_the_approved_mockup() {
     assert_eq!(ds::layout::visible_rows(45, 28), 12);
 
     let bar = &lines[25];
-    assert!(bar.contains("⏎ Open") && bar.contains("→ Detail") && bar.contains("^t Scans"));
+    assert!(bar.contains("→ Detail") && bar.contains("^x Expiry") && bar.contains("^t Scans"));
+    assert!(!bar.contains("Open"), "Enter opens; a button for it duplicates a tap: {bar:?}");
     // The search bar is docked at the bottom and is **two rows** on touch: the
     // query, then the count and hints. Both rows are the keyboard target.
     assert!(lines[26].starts_with(" > █"), "the query row: {:?}", lines[26]);
     assert!(lines[26].contains('⌨'), "and carries the keyboard glyph: {:?}", lines[26]);
     assert!(lines[27].trim_start().starts_with("14/14"), "matched/total: {:?}", lines[27]);
-    assert!(lines[27].contains("^q quit"), "and the hints the buttons do not carry");
+    assert!(lines[27].contains("⏎ open"), "the hint line teaches what the bar dropped");
+    assert!(lines[27].contains("^q quit"), "and the verbs no button carries");
 }
 
 /// **Every line is exactly the terminal's width, and the status column lands on
@@ -292,7 +294,7 @@ fn the_action_bar_is_four_filled_cells_on_the_tiling() {
     let reversed = modifier_columns(&mut m, 45, 28, 25, ratatui::style::Modifier::REVERSED);
 
     let mut expected: Vec<u16> = Vec::new();
-    for (start, w) in ds::layout::cells(45, 4) {
+    for (start, w) in ds::layout::cells(45, ds::layout::ACTIONS) {
         expected.extend(start..start + w);
     }
     assert_eq!(reversed, expected, "filled cells, exactly where the hit test looks");
@@ -300,7 +302,7 @@ fn the_action_bar_is_four_filled_cells_on_the_tiling() {
     // And the labels are centred in them: the padding on the two sides differs
     // by at most the one column that cannot be split.
     let lines = screen(&mut m, 45, 28);
-    for (start, w) in ds::layout::cells(45, 4) {
+    for (start, w) in ds::layout::cells(45, ds::layout::ACTIONS) {
         let cell: String = lines[25].chars().skip(start as usize).take(w as usize).collect();
         let left = cell.len() - cell.trim_start().len();
         let right = cell.len() - cell.trim_end().len();

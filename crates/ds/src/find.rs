@@ -44,11 +44,6 @@ use crate::layout::{fit, pad_left, short_date, truncate, width};
 use crate::theme::{Theme, Tone};
 use crate::{Doc, Status};
 
-/// Verbs on the touch action bar.
-const ACTIONS: usize = 4;
-/// The same count, as the geometry wants it.
-const ACTIONS_U16: u16 = 4;
-
 /// The status cell is a fixed seven columns — `! 09-26` — so the marker lands on
 /// the same screen column in every row, which is what makes a list of dates
 /// scannable at a glance.
@@ -299,13 +294,15 @@ fn two_line_row(
 /// This surface's verbs, as buttons.
 ///
 /// The keys are what a keyboard presses and the labels what a thumb reads, so
-/// both are on the button — and the last two are the verbs whose keys are
-/// modifier combinations, which are the ones a phone keyboard is least reliable
-/// at delivering.
-fn button_labels(model: &Model) -> [String; ACTIONS] {
+/// both are on the button. **`Enter` is not here**: it opens the highlighted
+/// document, and a thumb opens by tapping the selected row a second time, so a
+/// button for it would duplicate a gesture you already have — and cost a third
+/// of the bar to do it. The three that remain are the verbs a thumb has no other
+/// way to reach, two of them behind modifier combinations that a phone keyboard
+/// is least reliable at delivering.
+fn button_labels(model: &Model) -> [String; crate::layout::ACTIONS as usize] {
     [
-        "⏎ Open".to_string(),
-        if model.detail { "← Back".into() } else { "→ Detail".into() },
+        if model.detail { "← Back".into() } else { "→ Detail".to_string() },
         "^x Expiry".to_string(),
         if model.scan_search == ScanSearch::Off {
             "^t Scans".to_string()
@@ -328,9 +325,9 @@ fn button_labels(model: &Model) -> [String; ACTIONS] {
 /// truncated word is a button nobody trusts; a bare key still says what it does
 /// to anyone who has seen it once.
 fn draw_action_bar(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
-    let cells = crate::layout::cells(area.width, ACTIONS_U16);
+    let cells = crate::layout::cells(area.width, crate::layout::ACTIONS);
     let labels = button_labels(model);
-    let mut spans: Vec<Span> = Vec::with_capacity(ACTIONS * 2);
+    let mut spans: Vec<Span> = Vec::with_capacity(crate::layout::ACTIONS as usize * 2);
     let mut column = 0usize;
 
     for ((start, cell), label) in cells.into_iter().zip(labels.iter()) {
@@ -463,7 +460,10 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
         return ("esc again to quit".into(), Tone::Armed);
     }
     let hints = match (touch, model.detail) {
-        (true, _) => "esc back  ^q quit",
+        // With `⏎ Open` off the bar, the hint line is where `Enter` is taught —
+        // the buttons carry the verbs a thumb cannot otherwise reach, and the
+        // text carries the ones the keyboard already has.
+        (true, _) => "⏎ open  esc back  ^q quit",
         (false, true) => "⏎ open  ← close  esc back  ^q quit",
         (false, false) => "⏎ open  → detail  ^x expiring  ^q quit",
     };

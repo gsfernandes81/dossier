@@ -430,7 +430,7 @@ impl Model {
         (index < self.rows.len()).then_some(index)
     }
 
-    /// The touch action bar: `⏎ Open · → Detail · ^x Expiry · ^t Scans`.
+    /// The touch action bar: `→ Detail · ^x Expiry · ^t Scans`.
     ///
     /// The cell is found with [`crate::layout::cell_at`] — **the same tiling the
     /// renderer drew with**. Dividing the width by four here instead would put
@@ -443,16 +443,15 @@ impl Model {
     /// that used to sit here moved to the search bar, where tapping to type is
     /// the universal phone idiom; see [`Model::raise_keyboard`].
     fn tap_action_bar(&mut self, col: u16) -> Effect {
-        let Some(cell) = crate::layout::cell_at(self.cols, 4, col) else {
+        let Some(cell) = crate::layout::cell_at(self.cols, crate::layout::ACTIONS, col) else {
             return Effect::Idle;
         };
         match cell {
-            0 => self.activate(),
-            1 => {
+            0 => {
                 self.detail = !self.detail;
                 Effect::Redraw
             }
-            2 => update(self, Msg::ToggleExpiring),
+            1 => update(self, Msg::ToggleExpiring),
             _ => update(self, Msg::ToggleScans),
         }
     }
@@ -803,30 +802,45 @@ mod tests {
     #[test]
     fn every_button_cell_hits_its_own_verb() {
         let bar = model().rows_on_screen - 3;
-        let cells = crate::layout::cells(45, 4);
+        let cells = crate::layout::cells(45, crate::layout::ACTIONS);
         for (index, (start, w)) in cells.into_iter().enumerate() {
             for col in [start, start + w - 1] {
                 let mut m = model();
                 let effect = update(&mut m, Msg::Tap { col, row: bar });
                 match index {
-                    0 => assert_eq!(effect, Effect::Open("Marine/coc.pdf".into()), "col {col}"),
-                    1 => assert!(m.detail, "col {col} opens the record"),
-                    2 => assert_eq!(m.filter, Filter::Expiring, "col {col} filters"),
+                    0 => assert!(m.detail, "col {col} opens the record"),
+                    1 => assert_eq!(m.filter, Filter::Expiring, "col {col} filters"),
                     _ => assert_eq!(effect, Effect::LoadScans, "col {col} searches scans"),
                 }
             }
         }
     }
 
-    /// A tap in the left gutter is not a button — it is the one column of the
-    /// row that belongs to nothing, and guessing there would mean guessing wrong
-    /// half the time.
+    /// **`Enter` has no button**, and does not need one: a thumb opens the
+    /// highlighted row by tapping it a second time, which is the gesture the
+    /// button would have duplicated.
     #[test]
-    fn the_gutter_is_not_a_button() {
+    fn opening_needs_no_button() {
         let mut m = model();
-        let bar = m.rows_on_screen - 3;
-        assert_eq!(update(&mut m, Msg::Tap { col: 0, row: bar }), Effect::Idle);
-        assert!(m.flash.is_none());
+        m.list = ListGeometry { top: 1, height: 24, row_height: 2 };
+        update(&mut m, Msg::Tap { col: 5, row: 1 });
+        assert_eq!(
+            update(&mut m, Msg::Tap { col: 5, row: 1 }),
+            Effect::Open("Marine/coc.pdf".into()),
+            "tap, then tap again"
+        );
+    }
+
+    /// A tap in the margin at either end is not a button — that is the edge of
+    /// the row, and guessing there would be guessing.
+    #[test]
+    fn the_margins_are_not_buttons() {
+        let bar = model().rows_on_screen - 3;
+        for col in [0, 1, 44] {
+            let mut m = model();
+            assert_eq!(update(&mut m, Msg::Tap { col, row: bar }), Effect::Idle, "col {col}");
+            assert!(m.flash.is_none());
+        }
     }
 
     /// **Tapping the search bar is the keyboard affordance** (REWRITE-UI.md §5).

@@ -101,8 +101,11 @@ The v2 findings port as-is (REWRITE.md invariant 6): SGR mouse on; tap selects,
 tap-on-selected opens; **tapping the search bar** drops mouse reporting so the
 next tap raises the IME, restored on the next keypress; the app owns scrolling.
 Touch mode shows a one-row action bar above the search bar — the only extra
-chrome touch gets — carrying this surface's four verbs (Open · Detail · Expiry ·
-Scans). Below it the **search bar is two rows on a touch layout** (query, then
+chrome touch gets — carrying the verbs a thumb has **no other way to reach**
+(Detail · Expiry · Scans). `Enter` is not among them: it opens the highlighted
+document, a thumb opens by tapping the selected row a second time, and a button
+that duplicates a gesture you already have costs a third of the bar for nothing.
+The hint line under the field teaches `⏎` instead. Below it the **search bar is two rows on a touch layout** (query, then
 count + chips + the hints the buttons do not carry), sitting against the bottom
 edge: the whole block is the keyboard target, and one terminal row is too small
 a thing to ask a thumb to hit when the row above it opens files. It costs no

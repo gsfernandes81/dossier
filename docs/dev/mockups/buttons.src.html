@@ -1,0 +1,234 @@
+<title>Glyphs or Keys</title>
+<style>
+/*CSS*/
+
+/* ── button-label specimens ───────────────────────────────────────────── */
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.uline {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+
+.term.mono .acc,
+.term.mono .exp,
+.term.mono .soon,
+.term.mono .ok { color: var(--term-fg); }
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 2.5rem 2rem;
+  margin: 1.5rem 0 0;
+}
+.option { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+.option h3 { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+.option h3 .letter {
+  font-size: .68rem;
+  letter-spacing: .12em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .12rem .4rem;
+  border-radius: 2px;
+}
+.option h3 .flag {
+  font-family: var(--sans);
+  font-size: .7rem;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--term-sel-fg);
+  background: var(--accent);
+  padding: .1rem .45rem;
+  border-radius: 2px;
+}
+.option .cost { font-family: var(--mono); font-size: .72rem; color: var(--faint); }
+.option p { font-size: .9rem; color: var(--muted); margin: 0; max-width: 48ch; }
+.option p + p { margin-top: .5rem; }
+.option p b { color: var(--ink); font-weight: 600; }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.5rem 0 0; }
+
+.risk {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.1rem 2rem;
+  margin: 1.8rem 0 0;
+  padding-top: 1.3rem;
+  border-top: 1px solid var(--rule);
+}
+.risk > div { display: flex; gap: .7rem; align-items: flex-start; }
+.risk .g {
+  font-family: var(--mono);
+  font-size: 1.15rem;
+  width: 1.6rem;
+  text-align: center;
+  flex: none;
+  color: var(--ink);
+}
+.risk p { margin: 0; font-size: .88rem; color: var(--muted); max-width: 40ch; }
+.risk p b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-size: .84rem; }
+
+.verdict {
+  border-left: 3px solid var(--accent);
+  padding: .2rem 0 .2rem 1.1rem;
+  margin: 1.8rem 0 0;
+}
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .6rem; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · action bar · labels</p>
+    <h1>Glyphs or Keys</h1>
+    <p class="standfirst">
+      <code>⏎ Open</code> is gone — <code>Enter</code> opens, and a thumb opens by
+      tapping the selected row a second time, so the button only duplicated a
+      gesture you already had. Three cells remain, and each is now <b>13 columns
+      wide instead of 10</b>. That extra room is what makes the question live:
+      with space for a whole word, does a button still need a key on it?
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Surface</b> Find, touch layout</span>
+    <span><b>Pane</b> 45×28 · portrait Termux</span>
+    <span><b>Cells</b> 3 × 13, centred</span>
+    <span><b>Constraint</b> every glyph must exist in the phone's font</span>
+  </div>
+
+  <section>
+    <h2>Four vocabularies</h2>
+    <p class="lede">
+      Same tiling, same field, same list above. Only what is written inside the
+      three cells changes — and, with it, what the hint line has left to teach.
+    </p>
+
+    <div class="options">
+      <div class="option">
+        <h3><span class="letter">K</span> Keys</h3>
+        <span class="cost">as it ships now · hints carry ⏎ and ^q</span>
+        <div class="term phone"><pre><!--S:keys--></pre></div>
+        <p>The button shows the key a keyboard would press. It teaches the
+          binding every time you look at it, which is worth something on a device
+          you drive both ways.</p>
+        <p>It also shows <code>^x</code> and <code>^t</code> to a thumb that has
+          no control key — two of the three buttons are labelled in a language
+          the toucher cannot speak.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">G</span> Glyph + word</h3>
+        <span class="cost">keys move to the hint line</span>
+        <div class="term phone"><pre><!--S:glyphs--></pre></div>
+        <p>A touch-shaped mark instead of a key: <code>›</code> for the record,
+          <code>!</code> for expiry — the same mark the expired rows already
+          carry — and <code>⌕</code> for searching inside scans.</p>
+        <p>Reads as an app rather than as a cheat sheet. But it spends a column
+          on decoration in a cell that has a word in it already, and it puts a
+          third glyph in the font's way.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">W</span> Words <span class="flag">recommended</span></h3>
+        <span class="cost">nothing but the label</span>
+        <div class="term phone"><pre><!--S:words--></pre></div>
+        <p>The cell is thirteen columns and the longest word is six. A centred
+          word with room around it is the most legible thing this bar can hold,
+          and it needs no font support at all.</p>
+        <p>The keys move to the hint line, where they were always going to be
+          taught anyway — and the line has room for all of them now.</p>
+      </div>
+
+      <div class="option">
+        <h3><span class="letter">M</span> Marks</h3>
+        <span class="cost">glyph alone</span>
+        <div class="term phone"><pre><!--S:marks--></pre></div>
+        <p>The most compact, and the only one that would still fit if a fourth
+          and fifth verb ever arrived.</p>
+        <p>Also the only one you have to <em>learn</em>. Three unlabelled marks
+          on a surface used a few times a week is three things to re-derive every
+          time.</p>
+      </div>
+    </div>
+
+    <div class="risk">
+      <div>
+        <span class="g">›</span>
+        <p><b>U+203A</b> single angle quote. Common in terminal fonts, but not
+          one R0.2 checked on the phone.</p>
+      </div>
+      <div>
+        <span class="g">!</span>
+        <p><b>U+0021</b> ASCII. Already the expired marker in every row, so it
+          carries the right meaning and cannot be missing.</p>
+      </div>
+      <div>
+        <span class="g">⌕</span>
+        <p><b>U+2315</b> the search mark. <b>Unverified on Termux</b> — a missing
+          glyph renders as a box, and a box on a button is worse than no button.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Words, in the places that test it</h2>
+    <p class="lede">
+      The whole screen, the terminal floor where cells shrink to eleven columns,
+      and the same frame with no colour at all.
+    </p>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:words-full--></pre></div>
+        <figcaption>
+          <span class="size">45×28 · whole screen</span>
+          <span class="how">Twelve documents, three buttons, the field.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre><!--S:words-full--></pre></div>
+        <figcaption>
+          <span class="size">45×28 · NO_COLOR</span>
+          <span class="how">Words survive what glyphs would: nothing here
+            depends on a hue or a font.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <figure style="margin-top:1.75rem">
+      <div class="term phone"><pre><!--S:words-floor--></pre></div>
+      <figcaption>
+        <span class="size">38 columns · the floor</span>
+        <span class="how">Cells drop to eleven and the words still fit with room
+          around them. A glyph-and-word label would be the first thing to have to
+          shed something here.</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>W — words.</b> Dropping <code>⏎ Open</code> bought three columns per
+        cell, and the most useful thing to spend them on is legibility, not a
+        second mark. A word needs no font, no legend and no learning, and it is
+        the one label that reads the same to a thumb and to someone who has never
+        opened the app before.</p>
+      <p>The keys are not lost — they move to the hint line directly under the
+        buttons, which now reads <code>⏎ open · → detail · ^x scans · ^q quit</code>.
+        That is the right division: <b>the buttons say what happens, the line
+        says how to do it faster</b>.</p>
+      <p>If you want the visual anchors, G is the same code with a prefix — but
+        I would only take it after checking <code>›</code> and <code>⌕</code> on
+        the phone, and <code>ds-spike --glyphs</code> exists for exactly that. A
+        box where a search mark should be is worse than no mark at all.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/buttons.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>

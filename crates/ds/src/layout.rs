@@ -110,12 +110,21 @@ pub fn visible_rows(cols: u16, rows: u16) -> usize {
 /// edge instead of three of each.
 pub const GUTTER: u16 = 1;
 
+/// Verbs on the touch action bar, and therefore cells in its row.
+///
+/// **`Enter` is not one of them.** It opens the highlighted document, a thumb
+/// opens by tapping the selected row a second time, and a button that duplicates
+/// a gesture you already have is a button that costs a third of the bar for
+/// nothing.
+pub const ACTIONS: u16 = 3;
+
 /// Where the action bar's cells begin and how wide they are: `(start, width)`.
 ///
-/// The row is tiled as `gutter + (cell + gutter) × n`, with any remainder left
-/// at the right-hand end rather than distributed — a stray column inside the row
-/// would put one cell half a step out of rhythm, which is exactly the fault this
-/// function exists to remove.
+/// The row is tiled as `n` equal cells with a one-column separator between them,
+/// and the whole block is **centred**, so any remainder becomes margin split
+/// evenly between the two ends rather than a stray column hanging off one side.
+/// At 45 columns and three cells that is a 13-wide cell with two columns of
+/// margin; at four it was 10 wide with one.
 ///
 /// **The renderer and the hit test both call this.** They drew and read the same
 /// row, so they must agree about where it is; the alternative is a tap near a
@@ -125,24 +134,29 @@ pub fn cells(cols: u16, n: u16) -> Vec<(u16, u16)> {
     if n == 0 {
         return Vec::new();
     }
-    let usable = cols.saturating_sub(GUTTER);
-    let cell = (usable / n).saturating_sub(GUTTER).max(1);
-    (0..n).map(|i| (GUTTER + i * (cell + GUTTER), cell)).collect()
+    let inner = cols.saturating_sub(2 * GUTTER);
+    let cell = (inner.saturating_sub((n - 1) * GUTTER) / n).max(1);
+    let block = n * cell + (n - 1) * GUTTER;
+    let left = (cols.saturating_sub(block)) / 2;
+    (0..n).map(|i| (left + i * (cell + GUTTER), cell)).collect()
 }
 
 /// Which cell a column falls in, for a tap.
 ///
-/// A tap in a gutter belongs to the cell on its left rather than to nothing: a
-/// thumb landing between two buttons meant one of them, and the one it was
-/// leaving is the better guess than no answer at all.
+/// A tap in the separator between two cells belongs to the one on its left: a
+/// thumb landing in a one-column gap meant a button, and the one it was leaving
+/// is a better answer than none. A tap in the **margin** at either end is not a
+/// button at all — that is the edge of the row, and guessing there would be
+/// guessing.
 #[must_use]
 pub fn cell_at(cols: u16, n: u16, col: u16) -> Option<usize> {
-    if n == 0 || col < GUTTER {
+    let cells = cells(cols, n);
+    let (first, cell) = *cells.first()?;
+    let (last, _) = *cells.last()?;
+    if col < first || col >= last + cell {
         return None;
     }
-    let cell = cells(cols, n).first()?.1;
-    let index = (col - GUTTER) / (cell + GUTTER);
-    Some((index as usize).min(n as usize - 1))
+    Some(((col - first) / (cell + GUTTER)) as usize)
 }
 
 /// Display width in terminal cells.
@@ -309,21 +323,22 @@ mod tests {
     /// **The tiling has one owner.** The renderer and the hit test read the same
     /// cells, so a tap can never land a button away from what was drawn.
     #[test]
-    fn the_action_bar_tiles_without_a_remainder_inside_it() {
-        // The phone: 1 + (10 + 1) x 4 = 45, exactly.
-        let cells = cells(45, 4);
-        assert_eq!(cells, [(1, 10), (12, 10), (23, 10), (34, 10)]);
+    fn the_action_bar_tiles_evenly_and_centres_the_remainder() {
+        // Three cells on the phone: 13 wide, two columns of margin each side.
+        let cells = cells(45, ACTIONS);
+        assert_eq!(cells, [(2, 13), (16, 13), (30, 13)]);
         let (last_start, last_width) = *cells.last().unwrap();
-        assert!(last_start + last_width <= 45 - GUTTER, "a gutter at the right edge too");
+        assert_eq!(45 - (last_start + last_width), 2, "margins match at both ends");
 
         // Every cell start reads back as its own cell, and so does its last
         // column — the two places a rounding mistake shows up first.
         for (i, (start, w)) in cells.iter().enumerate() {
-            assert_eq!(cell_at(45, 4, *start), Some(i), "start of cell {i}");
-            assert_eq!(cell_at(45, 4, start + w - 1), Some(i), "end of cell {i}");
+            assert_eq!(cell_at(45, ACTIONS, *start), Some(i), "start of cell {i}");
+            assert_eq!(cell_at(45, ACTIONS, start + w - 1), Some(i), "end of cell {i}");
         }
-        assert_eq!(cell_at(45, 4, 0), None, "the left gutter belongs to no cell");
-        assert_eq!(cell_at(45, 4, 44), Some(3), "past the last cell clamps to it");
+        assert_eq!(cell_at(45, ACTIONS, 15), Some(0), "a separator goes to the cell it left");
+        assert_eq!(cell_at(45, ACTIONS, 1), None, "the margin is not a button");
+        assert_eq!(cell_at(45, ACTIONS, 44), None, "and neither is the far edge");
     }
 
     /// The same arithmetic at the floor and at the widest touch layout: cells
@@ -331,12 +346,17 @@ mod tests {
     #[test]
     fn the_tiling_holds_at_every_touch_width() {
         for cols in FLOOR.0..SPLIT_COLS {
-            let cells = cells(cols, 4);
-            assert_eq!(cells.len(), 4);
+            let cells = cells(cols, ACTIONS);
+            assert_eq!(cells.len(), ACTIONS as usize);
             let widths: Vec<u16> = cells.iter().map(|(_, w)| *w).collect();
             assert!(widths.windows(2).all(|p| p[0] == p[1]), "equal cells at {cols}");
+            let (first, _) = *cells.first().unwrap();
             let (start, w) = *cells.last().unwrap();
             assert!(start + w <= cols, "the row fits at {cols}: {start}+{w}");
+            assert!(
+                first.abs_diff(cols - (start + w)) <= 1,
+                "margins match within a column at {cols}"
+            );
         }
     }
 
