@@ -114,14 +114,35 @@ below.
 `⌨ Keys` button. Termux's own extra-keys row can carry a keyboard toggle, so a
 second button for it wasted a quarter of the only touch chrome there is. The
 keyboard affordance is now the search bar itself — which is what the sentence
-above always said, and what a thumb does anyway when it wants to type — marked
-with a dim `⌨` beside the count. The freed quarter went to `^t Scans`: with
-`^x Expiry` beside it, the two touch buttons are exactly the verbs whose keys are
-modifier combinations, which are the ones a phone keyboard is least reliable at
-delivering.
+above always said, and what a thumb does anyway when it wants to type. The freed
+quarter went to `^t Scans`: with `^x Expiry` beside it, the two touch buttons are
+exactly the verbs whose keys are modifier combinations, which are the ones a
+phone keyboard is least reliable at delivering.
+
+**The geometry is fixed, and shared.** The bar is tiled `gutter 1 + (cell +
+gutter) × n`, any remainder left at the right-hand end, with the label centred in
+its cell. **The renderer and the hit test call the same function** (`layout::cells`
+/ `layout::cell_at`); dividing the width by four in the hit test instead put the
+boundaries a column out wherever the width did not divide evenly, and a tap near
+an edge opened a file when it meant to filter. Three separate faults made the
+first version look randomly spaced — 45 does not divide by four; `⏎`/`→` are one
+cell wide while `^x`/`^t` are two, so anything placed after the key started in
+two different columns; and the labels differ in length, so aligning them either
+way scattered the anchors. The tiling removes all three, and a label too wide for
+its cell keeps its key and drops the word rather than being truncated.
 
 ## 6. Visual language
 
+- **Three textures, one meaning each** (settled 2026-08-16 after two device
+  rounds; the four alternatives and the merge are recorded in
+  [`docs/dev/mockups/`](docs/dev/mockups/)):
+  **reverse video = you can press this** — the action bar's filled cells and the
+  `⌨` at the end of the field, nothing else; **underline = you can type here** —
+  one span per surface, running the field's full width so an empty query reads as
+  waiting; **dim = information only** — counts, chips, hints. All three are
+  terminal *attributes*, so the whole scheme survives `NO_COLOR` with nothing
+  structural lost, which is why the bar is built from them rather than from a
+  background colour.
 - **Semantic color tokens** only (`status.expired`, `text.muted`, `accent`), mapped
   to terminal ANSI colors by default so the user's terminal theme carries the
   palette; `NO_COLOR` honored; every color signal paired with a glyph/letter
@@ -159,13 +180,15 @@ User calls from that review, binding on R3–R5:
   implemented until the user confirms it is a real pain point.**
 - Possible follow-up: ship a **Termux colour theme**, if the default palette
   fights the semantic tokens in practice.
-- **Diverges from the mockups, deliberately (2026-08-16, first device runs of
-  the real app):** the touch action bar's fourth quarter is `^t Scans`, not
-  `⌨ Keys`; the keyboard affordance moved to the search bar; and that bar is
-  **two rows** on touch, having absorbed the hint line — see §5. Both changes
-  came from the phone: a redundant button, then a target too small for a thumb.
-  The published mockup pages still show the old one-row bar with `⌨ Keys`;
-  everything else on them still holds.
+- **Diverges from the mockups, deliberately (2026-08-16, three device rounds):**
+  the touch action bar's fourth quarter is `^t Scans`, not `⌨ Keys`; the keyboard
+  affordance moved to the search bar; that bar is **two rows** on touch, having
+  absorbed the hint line; and the buttons are **filled cells on a fixed tiling**
+  with the field underlined across its width — see §5 and §6. Each change came
+  from using it: a redundant button, then a target too small for a thumb, then
+  spacing that read as random because it was. Two follow-up pages record the
+  options and the reasoning (`searchbar.html`, `searchbar-merge.html` in
+  `docs/dev/mockups/`); the three original pages still hold everywhere else.
 
 ## 8. Acceptance checklist (R3–R5 must satisfy)
 

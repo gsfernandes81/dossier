@@ -52,8 +52,8 @@ so the user's own terminal theme carries the palette.
 
 ## Known divergence
 
-Two changes came out of running the real binary on the phone, and these pages
-predate both:
+Three changes came out of running the real binary on the phone, and these pages
+predate all of them:
 
 1. The touch action bar reads `⏎ Open · → Detail · ^x Expiry · ^t Scans`. The
    `⌨ Keys` button is gone — Termux's own extra-keys row can carry a keyboard
@@ -62,6 +62,23 @@ predate both:
    hints) and sits against the bottom edge, because one row is too small a tap
    target. It absorbed the separate hint line, so the document count is
    unchanged at twelve.
+3. The buttons are **filled cells on a fixed tiling** and the query row is an
+   **underlined field**, settled in `searchbar.html` and `searchbar-merge.html`
+   below. Reverse video means pressable, underline means typable, dim means
+   information — and all three are attributes, so `NO_COLOR` loses nothing.
 
 REWRITE-UI.md §5 and §7a record the reasoning. Nothing else on these pages has
 been superseded.
+
+## The follow-up pages
+
+- `searchbar.py` → **The Bar, Four Ways** — four treatments for a bar that read
+  as indistinct on the device, with what each costs in document rows.
+- `searchbar-merge.py` → **Press and Type** — merging the two the user liked,
+  which meant deciding what each texture means, then fixing the button row's
+  geometry: `gutter 1 + (cell + gutter) × 4`, remainder at the right, renderer
+  and hit test sharing one function.
+
+Both are self-contained: each reads `style.css`, renders its own screens on the
+exact character grid, and writes its finished page. Run them with
+`uv run --with wcwidth python searchbar.py`.

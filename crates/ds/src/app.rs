@@ -430,12 +430,12 @@ impl Model {
         (index < self.rows.len()).then_some(index)
     }
 
-    /// The touch action bar: `⏎ Open · → Detail · ^x Expiry · ^t Scans`, in
-    /// quarters.
+    /// The touch action bar: `⏎ Open · → Detail · ^x Expiry · ^t Scans`.
     ///
-    /// Quarters rather than measured labels, so the hit test needs no geometry
-    /// from the renderer beyond the row it sits on — and so a fat thumb always
-    /// lands on something.
+    /// The cell is found with [`crate::layout::cell_at`] — **the same tiling the
+    /// renderer drew with**. Dividing the width by four here instead would put
+    /// the boundaries a column or two off wherever the width does not divide
+    /// evenly, and a tap near an edge would open a file when it meant to filter.
     ///
     /// The last two carry the verbs whose *keys* are modifier combinations —
     /// exactly the ones a phone keyboard is least reliable at delivering (R0.2
@@ -443,8 +443,10 @@ impl Model {
     /// that used to sit here moved to the search bar, where tapping to type is
     /// the universal phone idiom; see [`Model::raise_keyboard`].
     fn tap_action_bar(&mut self, col: u16) -> Effect {
-        let quarter = (self.cols / 4).max(1);
-        match (col / quarter).min(3) {
+        let Some(cell) = crate::layout::cell_at(self.cols, 4, col) else {
+            return Effect::Idle;
+        };
+        match cell {
             0 => self.activate(),
             1 => {
                 self.detail = !self.detail;
@@ -794,23 +796,37 @@ mod tests {
         assert_eq!(m.query, "c", "and the keystroke still counted");
     }
 
-    /// The action bar's quarters are hit-tested without the renderer measuring
-    /// labels: `⏎ Open` on the left, `^t Scans` on the right.
+    /// **The hit test reads the tiling the renderer drew.** Every cell is
+    /// checked at both ends, because a rounding mistake shows up at a boundary
+    /// first — and a tap that opens a file when it meant to filter is the worst
+    /// possible way to find out.
     #[test]
-    fn the_action_bar_is_four_quarters() {
+    fn every_button_cell_hits_its_own_verb() {
+        let bar = model().rows_on_screen - 3;
+        let cells = crate::layout::cells(45, 4);
+        for (index, (start, w)) in cells.into_iter().enumerate() {
+            for col in [start, start + w - 1] {
+                let mut m = model();
+                let effect = update(&mut m, Msg::Tap { col, row: bar });
+                match index {
+                    0 => assert_eq!(effect, Effect::Open("Marine/coc.pdf".into()), "col {col}"),
+                    1 => assert!(m.detail, "col {col} opens the record"),
+                    2 => assert_eq!(m.filter, Filter::Expiring, "col {col} filters"),
+                    _ => assert_eq!(effect, Effect::LoadScans, "col {col} searches scans"),
+                }
+            }
+        }
+    }
+
+    /// A tap in the left gutter is not a button — it is the one column of the
+    /// row that belongs to nothing, and guessing there would mean guessing wrong
+    /// half the time.
+    #[test]
+    fn the_gutter_is_not_a_button() {
         let mut m = model();
         let bar = m.rows_on_screen - 3;
-        assert_eq!(
-            update(&mut m, Msg::Tap { col: 2, row: bar }),
-            Effect::Open("Marine/coc.pdf".into())
-        );
-        update(&mut m, Msg::Tap { col: 24, row: bar });
-        assert_eq!(m.filter, Filter::Expiring, "the third quarter is the expiring filter");
-        assert_eq!(
-            update(&mut m, Msg::Tap { col: 44, row: bar }),
-            Effect::LoadScans,
-            "and the fourth is the content search"
-        );
+        assert_eq!(update(&mut m, Msg::Tap { col: 0, row: bar }), Effect::Idle);
+        assert!(m.flash.is_none());
     }
 
     /// **Tapping the search bar is the keyboard affordance** (REWRITE-UI.md §5).

@@ -112,6 +112,21 @@ fn model(cols: u16, rows: u16) -> Model {
     Model::new(sample_store(), "2026-10-20".into(), "2027-01-18".into(), cols, rows)
 }
 
+/// Which cells of one screen row carry a modifier — the way to check that a
+/// *texture* landed where it was meant to, since text alone cannot show it.
+fn modifier_columns(
+    model: &mut Model,
+    cols: u16,
+    rows: u16,
+    row: u16,
+    modifier: ratatui::style::Modifier,
+) -> Vec<u16> {
+    let mut terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
+    terminal.draw(|frame| find::draw(frame, model, Theme { color: true })).expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    (0..cols).filter(|x| buffer[(*x, row)].style().add_modifier.contains(modifier)).collect()
+}
+
 /// Render one frame and read the screen back as lines of text.
 fn screen(model: &mut Model, cols: u16, rows: u16) -> Vec<String> {
     render_with(model, cols, rows, Theme { color: true }).0
@@ -164,7 +179,7 @@ fn the_phone_screen_matches_the_approved_mockup() {
     assert!(bar.contains("⏎ Open") && bar.contains("→ Detail") && bar.contains("^t Scans"));
     // The search bar is docked at the bottom and is **two rows** on touch: the
     // query, then the count and hints. Both rows are the keyboard target.
-    assert!(lines[26].starts_with(" > _"), "the query row: {:?}", lines[26]);
+    assert!(lines[26].starts_with(" > █"), "the query row: {:?}", lines[26]);
     assert!(lines[26].contains('⌨'), "and carries the keyboard glyph: {:?}", lines[26]);
     assert!(lines[27].trim_start().starts_with("14/14"), "matched/total: {:?}", lines[27]);
     assert!(lines[27].contains("^q quit"), "and the hints the buttons do not carry");
@@ -267,6 +282,56 @@ fn no_color_loses_nothing_but_colour() {
     assert!(without_color.iter().any(|l| l.contains('!')), "the expired marker is text");
 }
 
+/// **The buttons are filled cells on one tiling** — reverse video, because in
+/// this design reverse means "you can press this". The cells are exactly the
+/// ones the hit test reads, and the gutters between them carry nothing, which is
+/// what gives the row a rhythm instead of four differently-spaced labels.
+#[test]
+fn the_action_bar_is_four_filled_cells_on_the_tiling() {
+    let mut m = model(45, 28);
+    let reversed = modifier_columns(&mut m, 45, 28, 25, ratatui::style::Modifier::REVERSED);
+
+    let mut expected: Vec<u16> = Vec::new();
+    for (start, w) in ds::layout::cells(45, 4) {
+        expected.extend(start..start + w);
+    }
+    assert_eq!(reversed, expected, "filled cells, exactly where the hit test looks");
+
+    // And the labels are centred in them: the padding on the two sides differs
+    // by at most the one column that cannot be split.
+    let lines = screen(&mut m, 45, 28);
+    for (start, w) in ds::layout::cells(45, 4) {
+        let cell: String = lines[25].chars().skip(start as usize).take(w as usize).collect();
+        let left = cell.len() - cell.trim_start().len();
+        let right = cell.len() - cell.trim_end().len();
+        assert!(left.abs_diff(right) <= 1, "centred within a column: {cell:?}");
+        assert!(cell.trim().chars().count() > 1, "and it says something: {cell:?}");
+    }
+}
+
+/// **The field is underlined across its whole width, not just under the text.**
+/// That is what makes an empty query read as waiting rather than as a blank row
+/// — and underline is an attribute, so it survives NO_COLOR untouched.
+#[test]
+fn the_query_row_is_an_underlined_field() {
+    let mut m = model(45, 28);
+    let underlined = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::UNDERLINED);
+    assert_eq!(underlined.first(), Some(&2), "starts right after the prompt");
+    assert_eq!(underlined.last(), Some(&40), "and runs to the keyboard chip");
+    assert_eq!(underlined.len(), 39, "one unbroken span, empty query and all: {underlined:?}");
+
+    // Typing does not change the field's extent, only what is in it.
+    for c in "coc".chars() {
+        update(&mut m, Msg::Char(c));
+    }
+    let after = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::UNDERLINED);
+    assert_eq!(after, underlined, "the field is the same size once it has text");
+
+    // The keyboard target at the end is a chip, because it is a button.
+    let reversed = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::REVERSED);
+    assert_eq!(reversed, [41, 42, 43], "⌨ is reverse, with a gutter after it");
+}
+
 /// **The keyboard affordance lives on the search bar, not in the action bar.**
 /// Termux's own extra-keys row can carry a keyboard toggle, so a second button
 /// for it wastes a quarter of the only touch chrome there is — and tapping the
@@ -307,7 +372,7 @@ fn typing_narrows_the_list_and_the_count() {
     }
     let lines = screen(&mut m, 45, 28);
     assert!(lines[1].contains("COC Certificate"));
-    assert!(lines[26].contains("coc_"), "the query is shown with a cursor: {:?}", lines[26]);
+    assert!(lines[26].contains("coc█"), "the query is shown with a cursor: {:?}", lines[26]);
     assert!(lines[27].trim_start().starts_with("1/14"), "matched/total: {:?}", lines[27]);
 }
 

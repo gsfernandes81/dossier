@@ -34,6 +34,7 @@
 //! screen.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
@@ -42,6 +43,11 @@ use crate::app::{Filter, ListGeometry, Model, ScanSearch};
 use crate::layout::{fit, pad_left, short_date, truncate, width};
 use crate::theme::{Theme, Tone};
 use crate::{Doc, Status};
+
+/// Verbs on the touch action bar.
+const ACTIONS: usize = 4;
+/// The same count, as the geometry wants it.
+const ACTIONS_U16: u16 = 4;
 
 /// The status cell is a fixed seven columns — `! 09-26` — so the marker lands on
 /// the same screen column in every row, which is what makes a list of dates
@@ -290,22 +296,55 @@ fn two_line_row(
     (first, second)
 }
 
-/// The one row of chrome touch gets (REWRITE-UI.md §5), in four equal quarters
-/// so the hit test needs no per-label geometry.
+/// This surface's verbs, as buttons.
+///
+/// The keys are what a keyboard presses and the labels what a thumb reads, so
+/// both are on the button — and the last two are the verbs whose keys are
+/// modifier combinations, which are the ones a phone keyboard is least reliable
+/// at delivering.
+fn button_labels(model: &Model) -> [String; ACTIONS] {
+    [
+        "⏎ Open".to_string(),
+        if model.detail { "← Back".into() } else { "→ Detail".into() },
+        "^x Expiry".to_string(),
+        if model.scan_search == ScanSearch::Off {
+            "^t Scans".to_string()
+        } else {
+            // A dot, not a different colour: the state has to survive NO_COLOR.
+            "^t Scans•".to_string()
+        },
+    ]
+}
+
+/// The one row of chrome touch gets (REWRITE-UI.md §5).
+///
+/// **Each button is a filled cell**, on the tiling [`crate::layout::cells`]
+/// defines — reverse video, because in this design reverse means *you can press
+/// this* and nothing else does. The cells are the rhythm: equal widths, equal
+/// gutters, and the label centred inside, so a label's length can never move the
+/// button it sits in.
+///
+/// A cell too narrow for the whole label keeps the key and drops the word. A
+/// truncated word is a button nobody trusts; a bare key still says what it does
+/// to anyone who has seen it once.
 fn draw_action_bar(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
-    let quarter = (area.width as usize / 4).max(1);
-    let detail = if model.detail { "← Back" } else { "→ Detail" };
-    let scan_label = if model.scan_search == ScanSearch::Off { "^t Scans" } else { "^t Scans•" };
-    // Short enough that a quarter of a 45-column phone screen holds the whole
-    // label — a truncated button is a button nobody trusts. The last two are the
-    // verbs whose keys are modifier combinations, which is what a thumb most
-    // needs a button for; the keyboard affordance moved to the search bar.
-    let labels = ["⏎ Open", detail, "^x Expiry", scan_label];
-    let tone = Tone::Muted;
-    let spans: Vec<Span> = labels
-        .iter()
-        .map(|label| Span::styled(fit(&format!(" {label}"), quarter), theme.style(tone)))
-        .collect();
+    let cells = crate::layout::cells(area.width, ACTIONS_U16);
+    let labels = button_labels(model);
+    let mut spans: Vec<Span> = Vec::with_capacity(ACTIONS * 2);
+    let mut column = 0usize;
+
+    for ((start, cell), label) in cells.into_iter().zip(labels.iter()) {
+        let cell = cell as usize;
+        let gutter = (start as usize).saturating_sub(column);
+        spans.push(Span::raw(" ".repeat(gutter)));
+        let text = if width(label) <= cell {
+            label.clone()
+        } else {
+            label.split_whitespace().next().unwrap_or_default().to_string()
+        };
+        spans.push(Span::styled(crate::layout::centre(&text, cell), theme.selected()));
+        column = start as usize + cell;
+    }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
@@ -356,17 +395,34 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
         return;
     }
 
-    // Row one: the query, with the keyboard glyph at the far end so the block
-    // reads as tappable. It lights up while reporting is dropped, so the state
-    // is visible rather than mysterious.
-    let key_tone = if model.keyboard_hint { Tone::Armed } else { Tone::Muted };
-    let typed = truncate(&format!("{}_", model.query), cols.saturating_sub(6));
-    let gap = cols.saturating_sub(3 + width(&typed) + 3);
+    // Row one: the query as a field. **Underline means you can type here** — the
+    // one texture that says it without filling anything, and one that survives
+    // NO_COLOR because it is an attribute rather than a colour. The underline
+    // runs the width of the field, not the width of the text, which is what
+    // makes an empty query read as waiting rather than as a blank row.
+    //
+    // The keyboard target closes the right-hand end as a chip: it is a button,
+    // and reverse video is what buttons look like here. It reverses harder while
+    // reporting is dropped, so the state is visible rather than mysterious.
+    let gutter = crate::layout::GUTTER as usize;
+    let key = " ⌨ ";
+    let prompt = " >";
+    let span = cols.saturating_sub(width(prompt) + width(key) + gutter);
     let query_row = Line::from(vec![
-        Span::styled(" > ", theme.style(Tone::Accent)),
-        Span::raw(typed),
-        Span::raw(" ".repeat(gap)),
-        Span::styled("⌨ ", theme.style(key_tone)),
+        Span::styled(prompt, theme.style(Tone::Accent)),
+        Span::styled(
+            fit(&format!(" {}█", model.query), span),
+            Style::default().add_modifier(Modifier::UNDERLINED),
+        ),
+        Span::styled(
+            key,
+            if model.keyboard_hint {
+                theme.style(Tone::Armed).add_modifier(Modifier::REVERSED)
+            } else {
+                theme.selected()
+            },
+        ),
+        Span::raw(" ".repeat(gutter)),
     ]);
 
     // Row two: what the search found, and what is filtering it — or, when there
@@ -374,16 +430,19 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     // moment; a message nobody reads is worth nothing.
     let (message, tone) = status_text(model, true);
     let info_row = if model.flash.is_some() || model.esc_armed {
-        Line::styled(format!(" {}", fit(&message, cols.saturating_sub(1))), theme.style(tone))
+        Line::styled(format!(" {}", fit(&message, cols.saturating_sub(gutter))), theme.style(tone))
     } else {
+        // Count and chips left, hints right, both on the same gutter as the
+        // buttons above — one left edge and one right edge for the whole block.
         let left = format!(" {count}{}", chips(model));
-        let room = cols.saturating_sub(width(&left) + 1);
+        let room = cols.saturating_sub(width(&left) + gutter);
         let hint = if width(&message) <= room { message } else { String::new() };
-        let gap = cols.saturating_sub(width(&left) + width(&hint) + 1);
+        let gap = cols.saturating_sub(width(&left) + width(&hint) + gutter);
         Line::from(vec![
             Span::styled(left, theme.style(Tone::Muted)),
             Span::raw(" ".repeat(gap)),
-            Span::styled(format!("{hint} "), theme.style(Tone::Muted)),
+            Span::styled(hint, theme.style(Tone::Muted)),
+            Span::raw(" ".repeat(gutter)),
         ])
     };
 
