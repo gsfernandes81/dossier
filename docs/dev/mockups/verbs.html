@@ -391,6 +391,28 @@ footer {
 .kind.orphan { background: var(--term-exp); color: var(--term-sel-fg); }
 .kind.teach { border: 1px solid var(--term-soon); color: var(--term-soon); }
 .kind.inco { border: 1px solid var(--muted); color: var(--muted); }
+.kind.retract { background: var(--muted); color: var(--term-sel-fg); }
+.finding.dead h3 { text-decoration: line-through; text-decoration-color: var(--faint); }
+.finding.dead > p { opacity: .62; }
+.finding .why {
+  border-left: 2px solid var(--accent);
+  padding-left: .8rem;
+  margin-top: .7rem !important;
+  opacity: 1 !important;
+}
+.finding .why b { color: var(--accent); }
+.inv .row { color: var(--term-ok); }
+.inv .norow { color: var(--term-exp); }
+.banner {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: .9rem 1.1rem;
+  margin: 1.6rem 0 0;
+}
+.banner p { margin: 0; font-size: .93rem; color: var(--ink); max-width: 70ch; }
+.banner p + p { margin-top: .5rem; color: var(--muted); }
+.banner code { font-family: var(--mono); font-size: .85rem; }
 .finding p { margin: 0; font-size: .93rem; color: var(--muted); max-width: 68ch; }
 .finding p + p { margin-top: .5rem; }
 .finding p b { color: var(--ink); font-weight: 600; }
@@ -409,37 +431,57 @@ footer {
     <p class="standfirst">
       <code>⏎ Open</code> was a button for a gesture you already had, and it
       shipped anyway. This is every verb the Find surface offers, what invokes it
-      by key and by thumb, and where it is taught — followed by the four kinds of
-      fault that turns up.
+      by key and by thumb, and where it is taught — followed by the kinds of fault
+      that turns up.
     </p>
   </header>
+
+  <div class="banner">
+    <p><b>Revised.</b> This audit was first written against a thumb with no keys.
+      That thumb does not exist: Termux pins an <b>extra-keys row above the
+      terminal</b>, and the phone this is built for carries
+      <code>CTRL·ESC</code>, <code>◀▲▼▶</code> and <code>KEYBOARD·ENTER</code> on
+      it. Two findings below are <b>retracted</b> because of it, and one new
+      duplication takes their place.</p>
+    <p>The reachability column and every retraction are marked. Nothing else has
+      changed — the duplications, the vanishing hints and the leaking stack are
+      all still true, and none of them are fixed by a key row.</p>
+  </div>
 
   <div class="meta">
     <span><b>Read from</b> input.rs · app.rs · find.rs</span>
     <span><b>Checked against</b> the running binary at 45×28</span>
     <span><b>Verbs</b> 11</span>
-    <span><b>Faults</b> 3 duplications · 4 orphans · 4 teaching gaps</span>
+    <span><b>Faults</b> 4 duplications · 2 orphans · 4 teaching gaps</span>
+    <span><b>Retracted</b> 2, by the key row</span>
   </div>
 
   <section>
     <h2>The inventory</h2>
+    <p class="lede">
+      The <b>key row</b> column is the revision. It reads against the recommended
+      row, noting where stock Termux's own default gives the same thing. Two rows
+      are red, and they are the whole design problem: with the soft keyboard down
+      there is no letter for <code>CTRL</code> to latch onto, so the two filter
+      toggles are the only verbs on this surface a thumb genuinely cannot produce.
+    </p>
     <div class="scroller">
       <table class="inv">
         <thead>
-          <tr><th>Verb</th><th>Key</th><th>Thumb</th><th>Taught where</th></tr>
+          <tr><th>Verb</th><th>Key</th><th>Key row</th><th>Thumb, in-app</th><th>Taught where</th></tr>
         </thead>
         <tbody>
-          <tr><td class="v">Open file</td><td><code>Enter</code></td><td>tap the selected row again</td><td>hint says <code>⏎ open</code> — <span class="none">the gesture, nowhere</span></td></tr>
-          <tr><td class="v">Open detail</td><td><code>→</code></td><td>bar cell 1</td><td>the button</td></tr>
-          <tr><td class="v">Close detail</td><td><code>←</code> <em>and</em> <code>Esc</code></td><td>same cell, relabelled <code>← Back</code></td><td>the button; hint <code>esc back</code></td></tr>
-          <tr><td class="v">Type a query</td><td>any printable</td><td>tap either search row</td><td>the underline, and <code>⌨</code></td></tr>
-          <tr><td class="v">Rub out</td><td><code>Backspace</code></td><td>via the soft keyboard</td><td><span class="none">nowhere</span></td></tr>
-          <tr><td class="v">Clear / pop / arm</td><td><code>Esc</code></td><td><span class="none">nothing</span></td><td>hint <code>esc back</code></td></tr>
-          <tr><td class="v">Move the cursor</td><td>arrows · PgUp/Dn · Home/End</td><td>tap a row · scroll</td><td><span class="none">nowhere</span></td></tr>
-          <tr><td class="v">Expiring filter</td><td><code>ctrl+x</code></td><td>bar cell 2</td><td>button; state in a separate chip</td></tr>
-          <tr><td class="v">Search scans</td><td><code>ctrl+t</code></td><td>bar cell 3</td><td>button; <span class="none">no desktop hint at all</span></td></tr>
-          <tr><td class="v">Raise the keyboard</td><td>— (correctly)</td><td>tap either search row</td><td>the <code>⌨</code> chip</td></tr>
-          <tr><td class="v">Quit</td><td><code>ctrl+q</code> · <code>ctrl+c</code> · <code>Esc·Esc</code></td><td><span class="none">nothing</span></td><td>hint <code>^q quit</code></td></tr>
+          <tr><td class="v">Open file</td><td><code>Enter</code></td><td class="row">swipe ⌨</td><td>tap the selected row again</td><td>hint says <code>⏎ open</code> — <span class="none">the gesture, nowhere</span></td></tr>
+          <tr><td class="v">Open detail</td><td><code>→</code></td><td class="row">▶ · stock too</td><td>bar cell 1</td><td>the button</td></tr>
+          <tr><td class="v">Close detail</td><td><code>←</code> <em>and</em> <code>Esc</code></td><td class="row">◀ · swipe CTRL</td><td>same cell, relabelled <code>← Back</code></td><td>the button; hint <code>esc back</code></td></tr>
+          <tr><td class="v">Type a query</td><td>any printable</td><td class="row">⌨ raises the IME</td><td>tap either search row</td><td>the underline, and <code>⌨</code></td></tr>
+          <tr><td class="v">Rub out</td><td><code>Backspace</code></td><td class="norow">—</td><td>via the soft keyboard</td><td><span class="none">nowhere</span></td></tr>
+          <tr><td class="v">Clear / pop / arm</td><td><code>Esc</code></td><td class="row">swipe CTRL · stock ESC</td><td><span class="none">nothing</span></td><td>hint <code>esc back</code></td></tr>
+          <tr><td class="v">Move the cursor</td><td>arrows · PgUp/Dn · Home/End</td><td class="row">▲▼ · swipe for paging</td><td>tap a row · scroll</td><td><span class="none">nowhere</span></td></tr>
+          <tr><td class="v">Expiring filter</td><td><code>ctrl+x</code></td><td class="norow">only with the IME up</td><td>bar cell 2</td><td>button; state in a separate chip</td></tr>
+          <tr><td class="v">Search scans</td><td><code>ctrl+t</code></td><td class="norow">only with the IME up</td><td>bar cell 3</td><td>button; <span class="none">no desktop hint at all</span></td></tr>
+          <tr><td class="v">Raise the keyboard</td><td>— (correctly)</td><td class="row">KEYBOARD</td><td>tap either search row</td><td>the <code>⌨</code> chip</td></tr>
+          <tr><td class="v">Quit</td><td><code>ctrl+q</code> · <code>ctrl+c</code> · <code>Esc·Esc</code></td><td class="row">swipe CTRL twice</td><td><span class="none">nothing</span></td><td>hint <code>^q quit</code></td></tr>
         </tbody>
       </table>
     </div>
@@ -449,8 +491,8 @@ footer {
     <h2>What is wrong</h2>
 
     <div class="findings">
-      <div class="finding">
-        <h3><span class="kind orphan">orphan</span> Esc has no thumb</h3>
+      <div class="finding dead">
+        <h3><span class="kind retract">retracted</span> Esc has no thumb</h3>
         <p>The entire peel machinery — clear the query, pop the surface, drop the
           filter, arm, quit — is <b>keyboard-only</b>. On a phone with no keyboard
           raised there is no way to clear a search or back out of a filter; the
@@ -459,6 +501,24 @@ footer {
           direction: not a verb with two affordances, but a verb with none.
           <b>Quit</b> is the same story, though Android's task switcher makes it
           survivable.</p>
+        <p class="why"><b>Wrong.</b> Swiping up on the key row's <code>CTRL</code>
+          sends Esc, and stock Termux ships a bare <code>ESC</code> key. Twice is
+          quit. Both "orphans" were reachable the whole time — the audit reasoned
+          about the phone instead of looking at it, which is the exact failure
+          R0.2 was run to avoid. It stays on the page rather than being deleted,
+          because a retraction is more useful than a tidy list.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind dup">duplication</span> <code>→ Detail</code> is ⏎ Open again</h3>
+        <p>A third of the touch bar is a cell for <code>→</code>. The key row has
+          <b>▶</b>, and so does stock Termux's default. It is the same fault as
+          <code>⏎ Open</code>, one round later: <b>a button for a key the thumb
+          already holds</b>, spending a quarter and now a third of the only touch
+          chrome there is.</p>
+        <p>Which leaves the bar's charter — <em>a cell exists only for a verb a
+          thumb has no other route to</em> — satisfied by exactly two verbs, both
+          of them toggles whose state is already drawn a row below.</p>
       </div>
 
       <div class="finding">
@@ -537,6 +597,11 @@ footer {
           press any of them. Meanwhile the gesture a thumb <em>must</em> learn —
           tap the selected row a second time to open it — appears nowhere at all,
           and has appeared nowhere since the <code>⏎ Open</code> button left.</p>
+        <p class="why"><b>Half retracted.</b> A thumb <em>can</em> press all three,
+          from the key row — so the hints are not addressed to nobody, they are a
+          legend for the row above the terminal, which is a reasonable thing for
+          them to be. The second half stands unchanged: <b>tap-to-open is still
+          taught nowhere</b>, and it is the one verb the key row cannot teach.</p>
       </div>
 
       <div class="finding">
@@ -577,10 +642,17 @@ footer {
         the underline its query row is currently missing.</p>
       <p>The rest are structural, and they point the same way: a toggle should be
         <b>one object</b> that both shows its state and accepts a press, and a bar
-        cell should exist only for a verb a thumb has no other route to. Six
-        directions built on that reading are in the companion page.</p>
-      <p>The one finding no direction resolves on its own: <b>Esc still has no
-        thumb</b>. Whatever ships, that needs an answer.</p>
+        cell should exist only for a verb a thumb has no other route to.</p>
+      <p>Applied against the key row, that second rule empties the bar. Detail is
+        ▶; Open is Enter or a second tap; Esc and quit are a swipe. What is left is
+        <code>ctrl+x</code> and <code>ctrl+t</code> — <b>two toggles, whose state
+        this surface already draws</b>. So the answer is not a better bar but no
+        bar: make the state chips pressable and give the row back. The companion
+        page works that through, with the <code>termux.properties</code> rows to
+        put in the install notes.</p>
+      <p>And the finding that survived the revision intact: <b>tap-to-open is taught
+        nowhere</b>. It is the one verb no key row supplies, and it needs a sentence
+        somewhere the first time a row is selected.</p>
     </div>
   </section>
 

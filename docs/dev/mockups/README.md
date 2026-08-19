@@ -89,15 +89,46 @@ After `⏎ Open` turned out to be a button for a gesture that already existed, t
 whole verb surface was audited with a Fable design advisor:
 
 - `verbs.py` → **The Verb Audit** — every verb, how it is reached by key and by
-  thumb, where it is taught, and the four kinds of fault that turns up. The
-  specimens are reproductions of what the shipped binary renders, checked in a
-  PTY at 45×28 rather than imagined.
-- `bottombars.py` → **Six Bottom Bars** — six directions for the bar and the
-  field together, since they compete for the same four rows.
+  thumb, where it is taught, and the faults that turns up. The specimens are
+  reproductions of what the shipped binary renders, checked in a PTY at 45×28
+  rather than imagined.
+- `bottombars.py` → **Two Chips and a Quiet Row** — the bottom chrome, drawn
+  against the phone's actual Termux key row.
 
 Findings worth carrying whatever ships: hints must degrade item by item rather
 than vanishing whole (two filters currently erase the entire hint line); the
 Find chrome must go inert while a pushed record covers the list; the keyboard
 layout's query row is missing its underline and `ctrl+t` appears in no desktop
-hint; and **`Esc` has no touch affordance at all** — the peel machinery the whole
-interaction model rests on is keyboard-only.
+hint; and **tap-to-open is taught nowhere**.
+
+## Revised against the Termux key row (2026-08-19)
+
+Both pages above were first written against a thumb with no keys. That thumb
+does not exist — Termux pins an **extra-keys row above the terminal**, and the
+phone this is built for carries `CTRL·ESC`, `◀▲▼▶` and `KEYBOARD·ENTER` on it.
+Swipe-up sends the popup key; long-press auto-repeats; `CTRL` is a one-shot
+latch; and the row is an Android view, so mouse reporting never touches it.
+
+What that changes:
+
+- **Two findings retracted.** `Esc` and quit were never orphans — swipe-up on
+  `CTRL` is Esc, and twice is quit. Stock Termux's own default row ships a bare
+  `ESC` key too. The audit reasoned about the phone instead of looking at it.
+- **One new duplication.** `→ Detail` is `⏎ Open` again: a bar cell for `▶`,
+  which the key row (and the stock default) already gives the thumb.
+- **The bar's charter empties.** Applying "a cell exists only for a verb a thumb
+  has no other route to" leaves exactly `ctrl+x` and `ctrl+t` — two toggles
+  whose state the surface already draws a row below. The recommendation is
+  therefore **no bar**: make the two state chips pressable, and spend the freed
+  row on a gutter that is blank until the app has something to say.
+- **The in-app touch affordances still all survive**, because stock Termux has
+  no `KEYBOARD` key and no `ENTER`: tapping the field to raise the IME, and
+  tapping a row twice to open it, are a first-run device's only paths.
+
+`bottombars.html` carries the `termux.properties` rows to put in the install
+notes once the design lands — a *minimum* (a subset of the stock default, so a
+fresh install is already fully operable) and the *recommended* row verbatim from
+the phone. Three of its mechanics come from Termux's documentation rather than
+from a measurement — that popups fire on swipe-up, that `CTRL` latches one-shot
+into the IME, and the contents of the stock default row — and are worth a
+thirty-second check on the device before they are written into the docs.

@@ -1,4 +1,4 @@
-<title>Six Bottom Bars</title>
+<title>Two Chips and a Quiet Row</title>
 <style>
 /*CSS*/
 
@@ -13,6 +13,54 @@
 .term.mono .exp,
 .term.mono .soon,
 .term.mono .ok { color: var(--term-fg); }
+
+/* ── the Termux key row, drawn as an Android view rather than as cells ── */
+.keyrow {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: .3rem;
+  background: var(--term-bg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: .45rem;
+  margin: 1.4rem 0 .6rem;
+  box-shadow: var(--shadow);
+}
+.keyrow .key {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .18rem;
+  padding: .5rem .1rem .35rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--term-fg) 12%, transparent);
+  min-width: 0;
+}
+.keyrow .key .base {
+  font-family: var(--mono);
+  font-size: .82rem;
+  color: var(--term-fg);
+  line-height: 1;
+}
+.keyrow .key .pop {
+  font-family: var(--mono);
+  font-size: .6rem;
+  letter-spacing: .02em;
+  color: var(--term-dim);
+  line-height: 1;
+  white-space: nowrap;
+}
+.keyrow .key.dead { opacity: .45; }
+.keylegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem 1.4rem;
+  font-family: var(--mono);
+  font-size: .73rem;
+  color: var(--faint);
+  margin: 0 0 1.4rem;
+}
+.keylegend b { color: var(--muted); font-weight: 500; }
 
 .options { display: flex; flex-direction: column; gap: 3rem; margin: 1.5rem 0 0; }
 .option {
@@ -43,17 +91,6 @@
   padding: .1rem .45rem;
   border-radius: 2px;
 }
-.option h3 .no {
-  font-family: var(--sans);
-  font-size: .7rem;
-  font-weight: 500;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--term-exp);
-  border: 1px solid var(--term-exp);
-  padding: .06rem .4rem;
-  border-radius: 2px;
-}
 .option p { font-size: .92rem; color: var(--muted); margin: 0 0 .7rem; max-width: 54ch; }
 .option p b { color: var(--ink); font-weight: 600; }
 .option .thesis { color: var(--ink); font-size: .98rem; }
@@ -78,289 +115,534 @@
 }
 .risk b { color: var(--term-exp); font-weight: 600; }
 
-.jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.2rem 2rem; margin: 1.6rem 0 0; }
-.jobs > div { border-top: 2px solid var(--accent); padding-top: .6rem; }
-.jobs h4 { font-family: var(--mono); font-size: .84rem; margin: 0 0 .25rem; font-weight: 600; }
-.jobs p { margin: 0; font-size: .88rem; color: var(--muted); }
-
 .states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.5rem 0 0; }
+
+.kv td.no { color: var(--term-exp); }
+.kv td.yes { color: var(--term-ok); }
+.kv code { font-family: var(--mono); font-size: .84em; }
+
+pre.props {
+  font-family: var(--mono);
+  font-size: .8rem;
+  line-height: 1.5;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: .8rem .9rem;
+  overflow-x: auto;
+  margin: 1rem 0 .3rem;
+  white-space: pre;
+}
+pre.props .c { color: var(--term-dim); }
+
 .verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.8rem 0 0; }
 .verdict p { margin: 0; max-width: 62ch; }
 .verdict p + p { margin-top: .6rem; }
+
+.caveat {
+  border: 1px dashed var(--term-exp);
+  border-radius: 3px;
+  padding: .8rem 1rem;
+  margin: 1.6rem 0 0;
+}
+.caveat p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 66ch; }
+.caveat p b { color: var(--term-exp); font-weight: 600; }
 </style>
 
 <div class="wrap">
   <header class="masthead">
-    <p class="eyebrow">R-UI · bottom chrome · directions</p>
-    <h1>Six Bottom Bars</h1>
+    <p class="eyebrow">R-UI · bottom chrome · revised against the key row</p>
+    <h1>Two Chips and a Quiet Row</h1>
     <p class="standfirst">
-      <code>⏎ Open</code> left the bar because it duplicated a gesture. Auditing
-      the rest of the verb surface turned up more of the same — a control and its
-      own state rendered twice, two rows apart, and a bar cell reserved for a verb
-      the header is already scheduled to carry. Six directions for the bar and the
-      field together, since they compete for the same four rows.
+      The six directions on the previous page were drawn for a thumb with no keys
+      at all. That thumb does not exist: Termux pins an <b>extra-keys row above the
+      terminal</b>, and with arrows, Esc, Enter and a Ctrl latch already under it,
+      the action bar's charter — <em>verbs a thumb has no other way to reach</em> —
+      collapses to two toggles. Two toggles do not earn a row. They earn being
+      pressable where their state is already drawn.
     </p>
   </header>
 
   <div class="meta">
     <span><b>Surface</b> Find, touch layout</span>
     <span><b>Pane</b> 45×28 · portrait Termux</span>
-    <span><b>Budget</b> 4 chrome rows · 12 documents</span>
+    <span><b>Budget</b> 3 chrome rows + gutter · 12 documents</span>
     <span><b>Textures</b> reverse = pressable · underline = typable · dim = information</span>
   </div>
 
   <section>
-    <h2>What the bottom chrome is for</h2>
+    <h2>The eight keys above the terminal</h2>
     <p class="lede">
-      Four jobs. Every direction below is a different answer to which of them
-      deserve a row of their own.
+      The row this design is now drawn against — the one actually configured on
+      the phone. Base label above, swipe-up popup below.
     </p>
-    <div class="jobs">
-      <div>
-        <h4>The typing target</h4>
-        <p>One underlined span, fat enough for a thumb, that raises the keyboard.
-          Non-negotiable and device-proven.</p>
-      </div>
-      <div>
-        <h4>Truth about the result</h4>
-        <p>The count, which filters are on, and anything the app needs to say.</p>
-      </div>
-      <div>
-        <h4>Verbs the input can't reach</h4>
-        <p>For a thumb: detail, and two toggles behind modifier keys. For a
-          keyboard: <b>nothing</b> — every verb already has a key.</p>
-      </div>
-      <div>
-        <h4>Teaching</h4>
-        <p>Today this is a hint line that shows a thumb three keyboard verbs, and
-          vanishes entirely once two filters are on.</p>
-      </div>
+
+    <div class="keyrow">
+      <div class="key"><span class="base">CTRL</span><span class="pop">ESC</span></div>
+      <div class="key dead"><span class="base">ALT</span><span class="pop">TAB</span></div>
+      <div class="key"><span class="base">SPACE</span><span class="pop">&nbsp;</span></div>
+      <div class="key"><span class="base">◀</span><span class="pop">HOME</span></div>
+      <div class="key"><span class="base">▲</span><span class="pop">PGUP</span></div>
+      <div class="key"><span class="base">▼</span><span class="pop">PGDN</span></div>
+      <div class="key"><span class="base">▶</span><span class="pop">END</span></div>
+      <div class="key"><span class="base">⌨</span><span class="pop">ENTER</span></div>
+    </div>
+    <div class="keylegend">
+      <span><b>swipe up</b> sends the popup key</span>
+      <span><b>long press</b> auto-repeats the base key</span>
+      <span><b>CTRL</b> is a one-shot latch on the next key, from the row or the IME</span>
+      <span><b>the row is an Android view</b> — mouse reporting never touches it</span>
+    </div>
+
+    <p class="lede">
+      Three consequences, and they are the whole revision. <b>▶ opens the detail
+      pane</b> — so a <code>→ Detail</code> button is the <code>⏎ Open</code>
+      mistake again, a cell spent on a key the thumb already has.
+      <b>Swipe-up on CTRL is Esc</b>, and Esc twice is quit — so the previous
+      audit's two "orphan" verbs were never orphans on this device.
+      <b>Enter is a swipe away</b>, so opening never needed a button either.
+      What is left with the soft keyboard down and no letter source is exactly
+      <code>ctrl+x</code> and <code>ctrl+t</code>.
+    </p>
+
+    <div class="scroller">
+      <table class="kv">
+        <tr>
+          <th>Verb</th><th>Key</th><th>This row</th><th>Stock Termux</th><th>In-app touch</th>
+        </tr>
+        <tr>
+          <td class="k">open</td><td>Enter</td>
+          <td class="yes">swipe ⌨</td><td class="no">—</td>
+          <td>tap the selected row again</td>
+        </tr>
+        <tr>
+          <td class="k">detail</td><td>→</td>
+          <td class="yes">▶</td><td class="yes">→</td>
+          <td>none needed</td>
+        </tr>
+        <tr>
+          <td class="k">close / peel</td><td>Esc</td>
+          <td class="yes">swipe CTRL</td><td class="yes">ESC</td>
+          <td>none needed</td>
+        </tr>
+        <tr>
+          <td class="k">move</td><td>↑ ↓</td>
+          <td class="yes">▲ ▼ (long-press repeats)</td><td class="yes">↑ ↓</td>
+          <td>tap a row</td>
+        </tr>
+        <tr>
+          <td class="k">quit</td><td>Esc·Esc / ^q</td>
+          <td class="yes">swipe CTRL ×2</td><td class="yes">ESC ×2</td>
+          <td>none needed</td>
+        </tr>
+        <tr>
+          <td class="k">expiring</td><td>^x</td>
+          <td class="no">only with the IME up</td><td class="no">only with the IME up</td>
+          <td><b>chip — and it shows the state</b></td>
+        </tr>
+        <tr>
+          <td class="k">scans</td><td>^t</td>
+          <td class="no">only with the IME up</td><td class="no">only with the IME up</td>
+          <td><b>chip — and it shows the state</b></td>
+        </tr>
+        <tr>
+          <td class="k">type</td><td>—</td>
+          <td class="yes">⌨ toggles the IME</td><td class="no">—</td>
+          <td>tap the field (drops mouse reporting)</td>
+        </tr>
+      </table>
+    </div>
+
+    <p class="lede" style="margin-top:1.4rem">
+      The <b>Stock Termux</b> column is why the in-app affordances do not simply
+      disappear. A fresh install ships Esc, Ctrl and all four arrows — so the
+      minimum this design assumes is already satisfied out of the box — but it has
+      no <code>KEYBOARD</code> key and no <code>ENTER</code>. Tapping the field to
+      raise the IME, and tapping a row twice to open it, are the only paths a
+      first-run device has, and both stay.
+    </p>
+  </section>
+
+  <section>
+    <h2>What the key row does to the six directions</h2>
+    <p class="lede">
+      Every one of them was sized around a bar. Read against the row, four of the
+      six lose their content and the fifth folds into the sixth.
+    </p>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Direction</th><th>Then</th><th>Now</th></tr>
+        <tr>
+          <td class="k">A · repair in place</td>
+          <td>three cells: Detail, Expiring, Scans</td>
+          <td class="no">Detail duplicates ▶; the header count is scheduled to
+            duplicate Expiring. A one-cell bar. <b>Dead.</b></td>
+        </tr>
+        <tr>
+          <td class="k">B · two buttons</td>
+          <td>Detail + Scans, wider cells</td>
+          <td class="no">Half of it is ▶. <b>Dead.</b></td>
+        </tr>
+        <tr>
+          <td class="k">C · chips are the buttons</td>
+          <td>three chips, one of them Detail</td>
+          <td class="yes">Sheds Detail and <b>improves</b> — the two survivors are
+            precisely the IME-locked verbs, and they are toggles, so the chip's
+            second job is load-bearing. <b>Recommended.</b></td>
+        </tr>
+        <tr>
+          <td class="k">D · the dock</td>
+          <td>three tall slabs beside a short field</td>
+          <td>Survives re-formed around two. The big-target fallback.</td>
+        </tr>
+        <tr>
+          <td class="k">E · the ascetic field</td>
+          <td>no bar; an invisible swipe for detail</td>
+          <td>The invisible gesture is pointless now ▶ exists. <b>Folds into C.</b></td>
+        </tr>
+        <tr>
+          <td class="k">F · contextual bar</td>
+          <td>the bar changes with the surface</td>
+          <td class="no">Rejected before, with less to be contextual about now.
+            <b>Dead.</b></td>
+        </tr>
+      </table>
     </div>
   </section>
 
   <section>
-    <h2>The directions</h2>
+    <h2>The recommendation</h2>
     <p class="lede">
-      Each drawn at exactly 45 columns, on the tiling the app really uses. Two
-      documents of context above every one, so the boundary between list and
-      chrome is comparable.
+      Header, a normally-blank gutter, the query row, the truth row. No bar. The
+      two chips in the truth row are reversed, so by the three-texture rule they
+      read as pressable — and they are the only pressable things left, because
+      they are the only verbs a thumb cannot otherwise produce.
     </p>
 
     <div class="options">
       <div class="option">
         <div class="spec">
-          <div class="term phone"><pre><!--S:a--></pre></div>
+          <div class="term phone"><pre><!--S:quiet--></pre></div>
           <div class="facts">
-            <span><b>rows</b> 4 · 12 docs</span>
-            <span><b>new mechanisms</b> none</span>
+            <span><b>chrome</b> 3 rows + gutter</span>
+            <span><b>docs</b> 12</span>
+            <span><b>type target</b> row + slack</span>
+            <span><b>chips</b> 13 + 10 cols</span>
           </div>
         </div>
         <div>
-          <h3><span class="letter">A</span> Repair in place</h3>
-          <p class="thesis">Keep the shipped geometry; fix every incoherence the
-            audit found and spend nothing.</p>
-          <p>One state grammar — a <code>•</code> on the button and nowhere else,
-            so the <code>[expiring]</code> and <code>[scans]</code> chips are
-            deleted. <b>Expiry</b> becomes <b>Expiring</b> everywhere. The hint
-            turns gesture-first: <code>tap again opens ⏎</code>, which is both
-            what a thumb needs and short enough that it can never be squeezed
-            out.</p>
-          <p class="risk"><b>Risk:</b> it leaves the strategy alone. The bar
-            still spends a row on three verbs, one of which the header is
-            scheduled to duplicate — this is maintenance, not design.</p>
+          <h3><span class="letter">C′</span> Two chips and a quiet row <span class="flag">recommended</span></h3>
+          <p class="thesis">The bar row is deleted and given back as a gutter that
+            is blank until the app has something to say.</p>
+          <p>The chips reserve their state column whether or not the dot is lit, so
+            <b>a chip never changes width when it is toggled</b>. A row that reflows
+            on a tap is a row whose next tap lands somewhere else.</p>
+          <p>The <code>→ detail</code> hint sits in the truth row's slack, dim:
+            information, not a control. It teaches the key that ▶ sends.</p>
         </div>
       </div>
 
       <div class="option">
         <div class="spec">
-          <div class="term phone"><pre><!--S:b--></pre></div>
+          <div class="term phone"><pre><!--S:quiet-on--></pre></div>
           <div class="facts">
-            <span><b>rows</b> 4 · 12 docs</span>
-            <span><b>cells</b> 2 × 21</span>
+            <span><b>both filters on</b></span>
+            <span><b>count</b> 14/24</span>
+            <span><b>hint</b> survives</span>
           </div>
         </div>
         <div>
-          <h3><span class="letter">B</span> Earn your cell</h3>
-          <p class="thesis">A verb keeps a cell only if a thumb has no other path
-            to it.</p>
-          <p>The plan already says the header's counts are tappable. Implement
-            that, and <code>Expiring</code> is evicted from the bar — leaving the
-            two survivors at 21 columns each, the largest touch targets in any
-            direction that keeps a bar.</p>
-          <p class="risk"><b>Risk:</b> a count reads as information even in
-            reverse, so the filter gets harder to find — and its off-switch moves
-            to the top corner, the furthest point from a thumb. Two 21-wide cells
-            around eight letters also look like a bar waiting to die.</p>
+          <h3>Both toggles lit</h3>
+          <p>Two dots and a wider count, and the hint still fits — the old
+            three-cell bar dropped its whole hint line in this state, which is what
+            made the filters feel like they cost something.</p>
+          <p>State and control are the same object. There is no second place where
+            "expiring is on" is written, so there is nothing to drift.</p>
         </div>
       </div>
 
       <div class="option">
         <div class="spec">
-          <div class="term phone"><pre><!--S:c--></pre></div>
-          <div class="term phone"><pre><!--S:c-message--></pre></div>
-          <div class="facts">
-            <span><b>rows</b> 3 + a message row · 12 docs</span>
-            <span><b>action bar</b> deleted</span>
-          </div>
+          <div class="term phone"><pre><!--S:quiet-message--></pre></div>
+          <div class="facts"><span><b>gutter</b> one-shot teaching</span></div>
         </div>
         <div>
-          <h3><span class="letter">C</span> Chips are the buttons <span class="flag">recommended</span></h3>
-          <p class="thesis">A toggle's control and its state are one object, so
-            draw them once.</p>
-          <p>The action bar dissolves into the truth row: the chips become
-            pressable, carry their own <code>•</code>, and sit beside the count
-            they modify. The freed row above the field is normally blank and
-            speaks only when there is something to say — a flash, the armed quit,
-            or a one-shot <em>tap the row again to open it</em>. Today a message
-            <b>replaces</b> the chips row; here it has somewhere of its own to
-            go, which is the second specimen.</p>
-          <p class="risk"><b>Risk:</b> the verbs go back to one-row targets — the
-            exact thing two rounds on the device rejected. The mitigations are
-            real (bottom edge below, a harmless neighbour above, all three verbs
-            non-destructive) but they are reasoning, and the two-row rule was
-            measurement.</p>
+          <h3>The gutter, speaking</h3>
+          <p>What the freed row buys. Shown once, the first time a row is selected
+            on a touch layout: the tap-to-open gesture is the one thing here that
+            nothing else advertises.</p>
         </div>
       </div>
 
       <div class="option">
         <div class="spec">
-          <div class="term phone"><pre><!--S:d--></pre></div>
-          <div class="facts">
-            <span><b>rows</b> 3 + a message row · 12 docs</span>
-            <span><b>slabs</b> 2 × 11 × 2 rows</span>
-          </div>
+          <div class="term phone"><pre><!--S:quiet-armed--></pre></div>
+          <div class="facts"><span><b>gutter</b> the armed state</span></div>
         </div>
         <div>
-          <h3><span class="letter">D</span> The dock</h3>
-          <p class="thesis">If one row is too small a target for a thumb, that is
-            true for buttons too — so make them two rows tall, beside the field
-            rather than above it.</p>
-          <p>Field on the left at 21 columns, two 11-column slabs docked right,
-            both two rows deep. Twenty-two cells per verb: the biggest touch
-            targets here by a distance, and the state lives in the slab's own
-            second row.</p>
-          <p class="risk"><b>Risk:</b> the field shrinks to 19 typable columns,
-            and every mis-tap now crosses an <em>internal</em> boundary — left
-            from Detail raises the keyboard, right from the field opens a record.
-            That is precisely the class of error the tiling work removed by
-            putting the row against the screen edge.</p>
-        </div>
-      </div>
-
-      <div class="option">
-        <div class="spec">
-          <div class="term phone"><pre><!--S:e--></pre></div>
-          <div class="facts">
-            <span><b>rows</b> 3 + a message row · 12 docs</span>
-            <span><b>verbs on screen</b> 1</span>
-          </div>
-        </div>
-        <div>
-          <h3><span class="letter">E</span> The ascetic field</h3>
-          <p class="thesis">Chrome is the field and the truth row; detail becomes
-            a gesture on the selected row's right-hand end.</p>
-          <p>This is the shape the surface wants once a <code>:</code> command
-            line exists — and it is here mostly to mark the floor. Its
-            <code>⌕</code> is a three-column target, and the detail gesture rides
-            a row that moves.</p>
-          <p class="risk"><b>Risk:</b> nothing on screen ever teaches the detail
-            gesture, and a thumb three columns off opens the file instead. It
-            proves the minimum is <em>below</em> the right amount of chrome.</p>
-        </div>
-      </div>
-
-      <div class="option">
-        <div class="spec">
-          <div class="facts" style="border-top: none; padding-top: 0">
-            <span><b>not drawn</b> — rejected on structure, not on looks</span>
-          </div>
-        </div>
-        <div>
-          <h3><span class="letter">F</span> The contextual bar <span class="no">rejected</span></h3>
-          <p class="thesis">The bar's contents follow the selection: no
-            selection, a document, a pushed record — each gets its own verbs.</p>
-          <p>This failure is already in the codebase in miniature. Cell 0 swaps
-            <code>→ Detail</code> for <code>← Back</code> when the record opens,
-            while the other cells keep acting on a list the user can no longer
-            see — <b>tapping <code>^x Expiring</code> inside a pushed record
-            mutates a surface that isn't on screen</b>. A contextual bar
-            multiplies that, on the device with the least precise pointer and no
-            timers to disambiguate with.</p>
-          <p>The lesson worth keeping: when detail covers the list, the Find
-            chrome should yield entirely. Every direction above should adopt it.</p>
+          <h3>Esc, armed</h3>
+          <p>Quit is two Escs, and swipe-up on CTRL is Esc, so quit is thumb-reachable
+            — clumsily, but it exists, and the armed state announces itself in the
+            gutter rather than in a status line nobody reads.</p>
+          <p>This row is also why the IME's back-button dismissal is still a hazard:
+            it sends a real Esc. The arming protection stays regardless of the key row.</p>
         </div>
       </div>
     </div>
   </section>
 
   <section>
-    <h2>C, in the places that decide it</h2>
+    <h2>Two runners-up, if the chips fail on the device</h2>
     <p class="lede">
-      The whole screen, the same frame with no colour, the 38-column floor, and
-      the keyboard layout — where the same chips reappear on the hint line, one
-      object in both layouts.
+      The one measured lesson from the last round was that a one-row target is too
+      small. The chips are one row tall. They sit on the bottom edge with harmless
+      neighbours and non-destructive verbs, which is the argument for accepting it —
+      but it is an argument, not a measurement, so here is what to fall back to.
+    </p>
+
+    <div class="options">
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre><!--S:dock--></pre></div>
+          <div class="facts">
+            <span><b>field</b> 21 cols</span>
+            <span><b>slabs</b> 2 × 11 × 2 rows</span>
+            <span><b>docs</b> 12</span>
+          </div>
+        </div>
+        <div>
+          <h3><span class="letter">D′</span> The toggle dock</h3>
+          <p class="thesis">Same three rows, but the two toggles become two-row
+            slabs beside a shortened field — targets the equal of the field itself.</p>
+          <p><code>^x Expiring</code> is exactly eleven columns, so the field takes
+            21 and the two slabs take 11 each with single-column gaps: 45 on the
+            nose. The second slab row carries the state dot.</p>
+          <p>Costs nineteen typable columns, which is fine for the find-fast queries
+            this surface is built around, and adds an internal boundary between the
+            field and the first slab that a wide thumb can straddle.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre><!--S:twocell--></pre></div>
+          <div class="facts">
+            <span><b>cells</b> 2 × 21, centred</span>
+            <span><b>chrome</b> 3 rows, no gutter</span>
+          </div>
+        </div>
+        <div>
+          <h3><span class="letter">B′</span> The two-cell bar</h3>
+          <p class="thesis">The conservative retreat: keep a bar row, put the two
+            surviving toggles on it, and lose the gutter.</p>
+          <p class="risk"><b>Only if both others fail.</b> This buys <em>width</em>
+            over the chips — 21 columns against 13 — and nothing else. The cells are
+            the same one row tall, so if the chips miss because they are short, this
+            misses too; and it spends the whole message row to do it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The recommendation, where it is tested</h2>
+    <p class="lede">
+      Twelve documents at the phone size, the same frame with no colour at all, the
+      terminal floor, and the desk layout where the chips become mouse targets.
     </p>
     <div class="states">
       <figure>
-        <div class="term phone"><pre><!--S:c-full--></pre></div>
+        <div class="term phone"><pre><!--S:quiet-full--></pre></div>
         <figcaption>
           <span class="size">45×28 · whole screen</span>
-          <span class="how">Twelve documents. The blank row above the field is
-            the message line, waiting.</span>
+          <span class="how">Twelve documents, one header, three chrome rows and the
+            blank gutter. The budget is met with the bar gone, not despite it.</span>
         </figcaption>
       </figure>
       <figure>
-        <div class="term phone mono"><pre><!--S:c-full--></pre></div>
+        <div class="term phone mono"><pre><!--S:quiet-full--></pre></div>
         <figcaption>
           <span class="size">45×28 · NO_COLOR</span>
-          <span class="how">Chips are reverse, the field underlined, the markers
-            carry status. Nothing structural is lost.</span>
-        </figcaption>
-      </figure>
-    </div>
-
-    <div class="states">
-      <figure>
-        <div class="term phone"><pre><!--S:c-floor--></pre></div>
-        <figcaption>
-          <span class="size">38 columns · the floor</span>
-          <span class="how">The chips shed their keys before they shed their
-            words — a thumb needs the word, and a floor-width terminal is not
-            where a keyboard user is.</span>
+          <span class="how">Reverse, underline and dim are attributes, not hues.
+            Nothing here is only a colour, so nothing here is lost.</span>
         </figcaption>
       </figure>
     </div>
 
     <figure style="margin-top:1.75rem">
-      <div class="term"><pre><!--S:c-desk--></pre></div>
+      <div class="term phone"><pre><!--S:quiet-floor--></pre></div>
       <figcaption>
-        <span class="size">100 columns · keyboard layout</span>
-        <span class="how">Three rows as before, and the two fixes the audit
-          demands: the query row is finally underlined here too, and
-          <code>^t scans</code> — a verb that appears in no desktop hint today —
-          is taught.</span>
+        <span class="size">38 columns · the floor, both filters on</span>
+        <span class="how">The <code>→ detail</code> hint sheds first and the chips
+          keep their keys — item by item, never a whole line at once. The old
+          three-cell bar could not do this: at the floor its cells dropped to
+          eleven and the labels went with them.</span>
+      </figcaption>
+    </figure>
+
+    <figure style="margin-top:1.75rem" class="scroller">
+      <div class="term"><pre><!--S:quiet-desk--></pre></div>
+      <figcaption>
+        <span class="size">100 columns · the desk layout</span>
+        <span class="how">One object, both layouts: the hint line teaches every key,
+          and the same two chips render at its right-hand end where a mouse can
+          click them. The count moves into the field's tail because there is room.</span>
       </figcaption>
     </figure>
   </section>
 
   <section>
+    <h2>The Termux keys to document</h2>
+    <p class="lede">
+      Two rows for <code>~/.termux/termux.properties</code>, to go in the install
+      notes once the design lands. Reload with <code>termux-reload-settings</code>.
+    </p>
+
+    <h3>Minimum — what the interaction model assumes</h3>
+    <p>This is a <b>subset of Termux's own default row</b>, which is the sentence
+      that matters: a fresh install is already fully operable, and nothing needs
+      configuring before the app works.</p>
+    <pre class="props"><span class="c"># ~/.termux/termux.properties — the stock default already covers this</span>
+extra-keys = [[ \
+  {key: ESC}, \
+  {key: CTRL}, \
+  {key: LEFT}, \
+  {key: UP}, \
+  {key: DOWN}, \
+  {key: RIGHT} \
+]]</pre>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Key</th><th>What it serves</th></tr>
+        <tr><td class="k">ESC</td><td>The peel — clear the query, pop the surface,
+          clear a filter, arm, quit. The single most-pressed key in the app.</td></tr>
+        <tr><td class="k">CTRL</td><td>The one-shot latch. With the IME raised,
+          <code>CTRL</code> then <code>x</code>/<code>t</code>/<code>q</code> reaches
+          both filters and quit.</td></tr>
+        <tr><td class="k">LEFT / RIGHT</td><td>The record pair — <code>→</code> opens
+          the detail pane, <code>←</code> closes it.</td></tr>
+        <tr><td class="k">UP / DOWN</td><td>Moving the cursor without raising the
+          keyboard. Long-press auto-repeats, which is how you cross a long list.</td></tr>
+      </table>
+    </div>
+
+    <h3 style="margin-top:2rem">Recommended — the row this design was drawn against</h3>
+    <p>Verbatim from the phone the layout was measured on.</p>
+    <pre class="props">extra-keys = [[ \
+  {key: CTRL, popup: ESC}, \
+  {key: ALT, popup: TAB}, \
+  {key: SPACE}, \
+  {key: LEFT, popup: HOME, display: "◀"}, \
+  {key: UP, popup: PGUP, display: "▲"}, \
+  {key: DOWN, popup: PGDN, display: "▼"}, \
+  {key: RIGHT, popup: END, display: "▶"}, \
+  {key: KEYBOARD, popup: ENTER} \
+]]</pre>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Key</th><th>What it serves</th></tr>
+        <tr><td class="k">CTRL · ESC</td><td>The latch for <code>^x</code>/<code>^t</code>/<code>^q</code>;
+          swipe up for the peel, and twice to quit.</td></tr>
+        <tr><td class="k">ALT · TAB</td><td>Nothing in dossier today. Tab is the
+          candidate for cycling review tabs later, and this row is why Tab is a safer
+          future binding than any new control combination.</td></tr>
+        <tr><td class="k">SPACE</td><td>Multi-word queries without reaching into the
+          IME's bottom row.</td></tr>
+        <tr><td class="k">◀ ▲ ▼ ▶</td><td>Cursor, paging (swipe up), and the
+          detail pair. Long-press repeats.</td></tr>
+        <tr><td class="k">KEYBOARD · ENTER</td><td>Raise or dismiss the IME without
+          touching the terminal surface, and open the highlighted document without
+          raising it at all. Note this dismissal does <b>not</b> send Esc, unlike the
+          Android back button — this row produces fewer stray Escs, not more.</td></tr>
+      </table>
+    </div>
+
+    <h3 style="margin-top:2rem">Optional, and not urged</h3>
+    <p>A second row of macros puts the two filters on the key row:</p>
+    <pre class="props">[{macro: "CTRL x", display: "exp"}, {macro: "CTRL t", display: "scan"}]</pre>
+    <p>It works. It is also global to every Termux session, costs a document row's
+      worth of screen height <em>everywhere</em>, and — the reason it does not replace
+      the chips — <b>a macro can send a verb but can never show its state</b>. If you
+      add it, the chips stop being your controls and go on being your state display,
+      which is not the <code>⏎ Open</code> class of duplication.</p>
+
+    <h3 style="margin-top:2rem">What the row makes unnecessary, and what survives anyway</h3>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>In-app decision</th><th>With the recommended row</th><th>Keep?</th></tr>
+        <tr>
+          <td class="k">⌨ chip, mouse-drop for the IME</td>
+          <td>redundant — the KEYBOARD key does it</td>
+          <td class="yes"><b>Keep.</b> Stock has no KEYBOARD key; this is the only
+            fresh-device path to typing.</td>
+        </tr>
+        <tr>
+          <td class="k">Esc-arm protection</td>
+          <td>still needed</td>
+          <td class="yes"><b>Keep.</b> IME back-button dismissal still sends Esc.</td>
+        </tr>
+        <tr>
+          <td class="k">tap the row again to open</td>
+          <td>near-redundant — swipe ⌨ is Enter</td>
+          <td class="yes"><b>Keep.</b> Free, and stock has no ENTER.</td>
+        </tr>
+        <tr>
+          <td class="k"><code>→ Detail</code> as a control</td>
+          <td>redundant — ▶, on stock too</td>
+          <td class="no"><b>Drop.</b> Keep only the dim <code>→ detail</code> hint.</td>
+        </tr>
+        <tr>
+          <td class="k">Expiring / Scans touch affordances</td>
+          <td>duplicated only by optional macros</td>
+          <td class="yes"><b>Keep.</b> Fresh devices have neither, and the chips are
+            the state display.</td>
+        </tr>
+        <tr>
+          <td class="k">Two-row IME tap target</td>
+          <td>redundant — the KEYBOARD key</td>
+          <td class="yes"><b>Keep.</b> Stock devices tap the field.</td>
+        </tr>
+        <tr>
+          <td class="k">Find-fast, no letter keys</td>
+          <td>unaffected</td>
+          <td class="yes">Always.</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
     <h2>What I would build</h2>
     <div class="verdict">
-      <p><b>C, with A's grammar repairs folded in.</b> It fixes the two findings
-        that matter by <em>deleting the objects that caused them</em> rather than
-        policing them: a toggle stops being two things in two textures two rows
-        apart, and the bar stops holding a cell that the header is about to
-        duplicate. It costs no documents, and it is stable when the
-        <code>:</code> line arrives — where the current bar keeps melting, having
-        already lost two of its four cells in two rounds.</p>
-      <p><b>The strongest argument against it:</b> it puts touch verbs back on
-        one-row targets, and "one row is too small" is the one thing here that
-        was <em>measured</em> rather than reasoned. If a week of thumb use shows
-        mis-taps, the fallback is D's dock — and only the phone can tell you.</p>
-      <p>Either way, three fixes are unconditional: the keyboard layout's query
-        row gets its underline, hints degrade item by item instead of vanishing
-        whole, and the Find chrome goes inert while a pushed record covers the
-        list.</p>
+      <p><b>C′ — no bar.</b> Delete the action row, make the two state chips
+        pressable, and spend the freed row on a gutter that is blank until the app
+        has something to say. The bar was right when it was designed against a thumb
+        with no keys; the device this runs on has eight pinned above the terminal,
+        and the design should stand on that.</p>
+      <p>Three fixes ride along regardless of which direction wins: hints shed
+        <b>item by item</b> rather than a line at a time, the bottom chrome goes
+        <b>inert while a record is pushed</b> so a tap cannot filter a list you
+        cannot see, and the desk layout gains the underline and the missing
+        <code>^t scans</code> hint.</p>
+      <p>Reachability, end to end: Expiring is chip / <code>^x</code> / (planned)
+        header-count tap; Scans is chip / <code>^t</code>; Detail is ▶ or
+        <code>→</code>, taught by the dim hint; Open is tap-tap or Enter, taught once
+        in the gutter; Esc and quit are the key row, with the armed state in the
+        gutter.</p>
+    </div>
+
+    <div class="caveat">
+      <p><b>Check on the device before this is documented.</b> Three mechanics here
+        are drawn from Termux's documented behaviour, not from a measurement on this
+        phone: that <code>popup:</code> fires on <b>swipe-up</b> while long-press
+        auto-repeats, that <code>CTRL</code> latches one-shot into the next key from
+        <em>either</em> the row or the IME, and that stock Termux's default row
+        carries ESC, CTRL and the arrows. Each is a thirty-second check, and R0.2's
+        rule was that we measure the phone rather than reason about it. One in-app
+        note too: <code>input.rs</code> matches <code>KeyCode::Right</code> with no
+        modifier guard, so <code>ctrl+→</code> currently acts as plain
+        <code>→</code> — harmless, but not deliberate.</p>
     </div>
   </section>
 
