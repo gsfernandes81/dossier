@@ -105,30 +105,44 @@ hint; and **tap-to-open is taught nowhere**.
 
 Both pages above were first written against a thumb with no keys. That thumb
 does not exist — Termux pins an **extra-keys row above the terminal**, and the
-phone this is built for carries `CTRL·ESC`, `◀▲▼▶` and `KEYBOARD·ENTER` on it.
-Swipe-up sends the popup key; long-press auto-repeats; `CTRL` is a one-shot
-latch; and the row is an Android view, so mouse reporting never touches it.
+phone this is built for carries `CTRL·ESC`, `ALT·TAB`, `◀▲▼▶` and
+`KEYBOARD·ENTER` on it. **`CTRL` and `ALT` are held modifiers** that compose
+with soft-keyboard letters and with each other (device-verified), so
+`ctrl+x`, `ctrl+t` and `ctrl+alt+letter` are ordinary two-finger presses.
 
-What that changes:
+A modifier still needs a letter, and the only letter source is the soft
+keyboard — so the reachability question splits by keyboard state. Termux
+*resizes* the terminal when the keyboard raises rather than covering it, which
+makes these two layouts rather than one layout half-hidden: **browsing** at
+45×28 with the keyboard down, **querying** at roughly 45×14 with it up.
 
-- **Two findings retracted.** `Esc` and quit were never orphans — swipe-up on
-  `CTRL` is Esc, and twice is quit. Stock Termux's own default row ships a bare
-  `ESC` key too. The audit reasoned about the phone instead of looking at it.
-- **One new duplication.** `→ Detail` is `⏎ Open` again: a bar cell for `▶`,
-  which the key row (and the stock default) already gives the thumb.
-- **The bar's charter empties.** Applying "a cell exists only for a verb a thumb
-  has no other route to" leaves exactly `ctrl+x` and `ctrl+t` — two toggles
-  whose state the surface already draws a row below. The recommendation is
-  therefore **no bar**: make the two state chips pressable, and spend the freed
-  row on a gutter that is blank until the app has something to say.
-- **The in-app touch affordances still all survive**, because stock Termux has
-  no `KEYBOARD` key and no `ENTER`: tapping the field to raise the IME, and
-  tapping a row twice to open it, are a first-run device's only paths.
+What that settles:
 
-`bottombars.html` carries the `termux.properties` rows to put in the install
-notes once the design lands — a *minimum* (a subset of the stock default, so a
-fresh install is already fully operable) and the *recommended* row verbatim from
-the phone. Three of its mechanics come from Termux's documentation rather than
-from a measurement — that popups fire on swipe-up, that `CTRL` latches one-shot
-into the IME, and the contents of the stock default row — and are worth a
-thirty-second check on the device before they are written into the docs.
+- **Three findings retracted.** `Esc` and quit were never orphans (swipe-up on
+  `CTRL`, twice for quit). And `^t Scans` never needed a touch affordance:
+  `app.rs:298` only widens the search into scan text when the query is
+  non-empty, so the toggle is meaningless until you are typing — and while you
+  are typing, the keyboard is up and `ctrl+t` works.
+- **One new duplication.** `→ Detail` is `⏎ Open` again: a bar cell for `▶`.
+- **One orphan survives.** `ctrl+x` with the keyboard down. "Show me what is
+  expiring" is a browsing act, and browsing has no letters. One verb, one state.
+- **So: no bar, and no pressable chips either.** `find.rs:349` emits
+  `[expiring]` only when the filter is already on, so a chip can turn a filter
+  off and never on. The affordance is the **tappable header count** —
+  REWRITE-UI §1 already specifies it, `app.rs` does not implement it (row 0
+  falls through to `Idle`), and it costs no rows. Deleting the bar keeps twelve
+  documents at 45×28 (3 chrome, 25 list) and adds one visible result while
+  querying.
+- **A bug fell out of it.** `input.rs:71` guards only `CONTROL`, so on this
+  phone `alt`+letter types into the query and `ctrl+alt+x` is
+  indistinguishable from `ctrl+x`. Measured against the built binary.
+
+`bottombars.html` carries the `termux.properties` rows for the install notes,
+tagged by evidence tier — device-verified, measured here, or documentation that
+still wants a look at the phone. Two Termux claims are in that last tier and
+must be checked before publishing: the **contents of the stock default row**
+(the previous revision asserted it and was not entitled to), and the
+**keyboard-up terminal size** — if a taller keyboard drops the pane under
+twelve rows, the app refuses to draw mid-query. Worth testing at the same time:
+whether held `CTRL` composes with the row's *arrows*, since that would give a
+keyboard-down modifier tier with no letters at all.

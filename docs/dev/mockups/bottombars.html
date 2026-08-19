@@ -1,4 +1,4 @@
-<title>Two Chips and a Quiet Row</title>
+<title>Tap the Number</title>
 <style>
 /* dossier v3 — R-UI mockups.
    The page is a technical datasheet: monospace carries the headings because the
@@ -390,12 +390,11 @@ footer {
 .keyrow .key .pop {
   font-family: var(--mono);
   font-size: .6rem;
-  letter-spacing: .02em;
   color: var(--term-dim);
   line-height: 1;
   white-space: nowrap;
 }
-.keyrow .key.dead { opacity: .45; }
+.keyrow .key.mod { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 .keylegend {
   display: flex;
   flex-wrap: wrap;
@@ -466,6 +465,20 @@ footer {
 .kv td.yes { color: var(--term-ok); }
 .kv code { font-family: var(--mono); font-size: .84em; }
 
+.tier {
+  font-family: var(--sans);
+  font-size: .66rem;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: .1rem .45rem;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.tier.measured { background: var(--term-ok); color: var(--term-sel-fg); }
+.tier.told { background: var(--accent); color: var(--term-sel-fg); }
+.tier.docs { border: 1px solid var(--term-soon); color: var(--term-soon); }
+
 pre.props {
   font-family: var(--mono);
   font-size: .8rem;
@@ -491,41 +504,71 @@ pre.props .c { color: var(--term-dim); }
   padding: .8rem 1rem;
   margin: 1.6rem 0 0;
 }
-.caveat p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 66ch; }
+.caveat p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 68ch; }
+.caveat p + p { margin-top: .55rem; }
 .caveat p b { color: var(--term-exp); font-weight: 600; }
 </style>
 
 <div class="wrap">
   <header class="masthead">
-    <p class="eyebrow">R-UI · bottom chrome · revised against the key row</p>
-    <h1>Two Chips and a Quiet Row</h1>
+    <p class="eyebrow">R-UI · bottom chrome · second revision</p>
+    <h1>Tap the Number</h1>
     <p class="standfirst">
-      The six directions on the previous page were drawn for a thumb with no keys
-      at all. That thumb does not exist: Termux pins an <b>extra-keys row above the
-      terminal</b>, and with arrows, Esc, Enter and a held <code>CTRL</code> already
-      under it, the action bar's charter — <em>verbs a thumb has no other way to
-      reach</em> — collapses to two toggles. Two toggles do not earn a row. They
-      earn being pressable where their state is already drawn.
+      The last page said Termux's <code>CTRL</code> was a fragile one-shot latch,
+      and built a pair of pressable chips on the back of it. It is a <b>held
+      modifier</b>, it composes with <code>ALT</code>, and <code>ctrl+x</code> /
+      <code>ctrl+t</code> are ordinary two-finger presses. That does not weaken
+      the case for deleting the action bar — it strengthens it, and it takes the
+      chips with it. One verb is left needing a thumb, and the plan already
+      contains the right affordance for it: <b>the header count that told you
+      there were three</b>.
     </p>
   </header>
 
   <div class="meta">
     <span><b>Surface</b> Find, touch layout</span>
     <span><b>Pane</b> 45×28 · portrait Termux</span>
-    <span><b>Budget</b> 3 chrome rows + gutter · 12 documents</span>
+    <span><b>Chrome</b> 3 rows, no bar · 12 documents</span>
     <span><b>Textures</b> reverse = pressable · underline = typable · dim = information</span>
   </div>
 
   <section>
+    <h2>Evidence, and how sure we are of it</h2>
+    <p class="lede">
+      Two rounds of this have now been wrong about the phone, both times by
+      reasoning instead of looking. Everything on this page is tagged.
+    </p>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Tier</th><th>Meaning</th></tr>
+        <tr>
+          <td class="k"><span class="tier measured">measured</span></td>
+          <td>Run against the built binary or computed from the code in this
+            repository. Reproducible here.</td>
+        </tr>
+        <tr>
+          <td class="k"><span class="tier told">device</span></td>
+          <td>Reported by the user from the actual phone.</td>
+        </tr>
+        <tr>
+          <td class="k"><span class="tier docs">check it</span></td>
+          <td>Termux behaviour taken from documentation. <b>Not verified on this
+            device.</b> Two claims in this tier have already turned out wrong.</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
     <h2>The eight keys above the terminal</h2>
     <p class="lede">
-      The row this design is now drawn against — the one actually configured on
-      the phone. Base label above, swipe-up popup below.
+      The row actually configured on the phone. Base label above, swipe-up popup
+      below; the two modifier keys are tinted.
     </p>
 
     <div class="keyrow">
-      <div class="key"><span class="base">CTRL</span><span class="pop">ESC</span></div>
-      <div class="key dead"><span class="base">ALT</span><span class="pop">TAB</span></div>
+      <div class="key mod"><span class="base">CTRL</span><span class="pop">ESC</span></div>
+      <div class="key mod"><span class="base">ALT</span><span class="pop">TAB</span></div>
       <div class="key"><span class="base">SPACE</span><span class="pop">&nbsp;</span></div>
       <div class="key"><span class="base">◀</span><span class="pop">HOME</span></div>
       <div class="key"><span class="base">▲</span><span class="pop">PGUP</span></div>
@@ -534,561 +577,595 @@ pre.props .c { color: var(--term-dim); }
       <div class="key"><span class="base">⌨</span><span class="pop">ENTER</span></div>
     </div>
     <div class="keylegend">
-      <span><b>swipe up</b> sends the popup key</span>
-      <span><b>long press</b> auto-repeats the base key</span>
-      <span><b>CTRL</b> is a held modifier — <code>ctrl</code>, <code>alt</code> and <code>ctrl+alt</code> all compose with IME letters</span>
-      <span><b>the row is an Android view</b> — mouse reporting never touches it</span>
+      <span><span class="tier told">device</span> <b>CTRL and ALT are held modifiers</b> — ctrl+letter, alt+letter and ctrl+alt+letter all reach the app</span>
+      <span><span class="tier docs">check it</span> swipe up sends the popup key; long press auto-repeats</span>
+      <span><span class="tier docs">check it</span> the row is an Android view, drawn in both keyboard states</span>
     </div>
 
     <p class="lede">
-      Three consequences, and they are the whole revision. <b>▶ opens the detail
-      pane</b> — so a <code>→ Detail</code> button is the <code>⏎ Open</code>
-      mistake again, a cell spent on a key the thumb already has.
-      <b>Swipe-up on CTRL is Esc</b>, and Esc twice is quit — so the previous
-      audit's two "orphan" verbs were never orphans on this device.
-      <b>Enter is a swipe away</b>, so opening never needed a button either.
-      <code>CTRL</code> is a <b>held modifier</b>, and composes with <code>ALT</code>
-      — so <code>ctrl+x</code> and <code>ctrl+t</code> are ordinary two-finger
-      presses <em>whenever the soft keyboard is up</em>. With it down there is no
-      letter for the modifier to take, and those two are what is left.
+      A modifier still needs something to modify, and the only letter source on
+      this phone is the soft keyboard. So the question is not "can a thumb press
+      <code>ctrl+x</code>" — it can — but <b>in which of the two states</b>, and
+      those two states are not what I assumed either.
     </p>
 
+    <div class="caveat">
+      <p><b>The keyboard does not cover the screen — the terminal resizes.</b>
+        <span class="tier docs">check it</span> Termux uses Android's
+        <code>adjustResize</code>, so raising the IME delivers a SIGWINCH and the
+        app re-lays out at roughly 45×14 rather than hiding half of itself. Our
+        <code>Msg::Resize</code> already handles it. That makes "IME up" a
+        <em>different layout</em>, not an occlusion — and at 45×14 the floor
+        (38×12) is only two rows away, so it is worth checking with
+        <code>stty size</code> on the device that a taller keyboard cannot push
+        the app below its own minimum mid-query.</p>
+    </div>
+
+    <h3 style="margin-top:2rem">Every verb, in both states</h3>
     <div class="scroller">
       <table class="kv">
-        <tr>
-          <th>Verb</th><th>Key</th><th>This row</th><th>Stock Termux</th><th>In-app touch</th>
-        </tr>
-        <tr>
-          <td class="k">open</td><td>Enter</td>
-          <td class="yes">swipe ⌨</td><td class="no">—</td>
-          <td>tap the selected row again</td>
-        </tr>
-        <tr>
-          <td class="k">detail</td><td>→</td>
-          <td class="yes">▶</td><td class="yes">→</td>
-          <td>none needed</td>
-        </tr>
-        <tr>
-          <td class="k">close / peel</td><td>Esc</td>
-          <td class="yes">swipe CTRL</td><td class="yes">ESC</td>
-          <td>none needed</td>
-        </tr>
-        <tr>
-          <td class="k">move</td><td>↑ ↓</td>
-          <td class="yes">▲ ▼ (long-press repeats)</td><td class="yes">↑ ↓</td>
-          <td>tap a row</td>
-        </tr>
-        <tr>
-          <td class="k">quit</td><td>Esc·Esc / ^q</td>
-          <td class="yes">swipe CTRL ×2</td><td class="yes">ESC ×2</td>
-          <td>none needed</td>
-        </tr>
-        <tr>
-          <td class="k">expiring</td><td>^x</td>
-          <td class="no">only with the IME up</td><td class="no">only with the IME up</td>
-          <td><b>chip — and it shows the state</b></td>
-        </tr>
-        <tr>
-          <td class="k">scans</td><td>^t</td>
-          <td class="no">only with the IME up</td><td class="no">only with the IME up</td>
-          <td><b>chip — and it shows the state</b></td>
-        </tr>
-        <tr>
-          <td class="k">type</td><td>—</td>
-          <td class="yes">⌨ toggles the IME</td><td class="no">—</td>
-          <td>tap the field (drops mouse reporting)</td>
-        </tr>
+        <tr><th>Verb</th><th>Keyboard down · browsing · 45×28</th><th>Keyboard up · querying · ~45×14</th></tr>
+        <tr><td class="k">type / backspace</td><td class="no">no letter source</td><td class="yes">the IME</td></tr>
+        <tr><td class="k">open</td><td class="yes">swipe ⌨ · or tap the row again</td><td class="yes">Enter</td></tr>
+        <tr><td class="k">detail / close</td><td class="yes">▶ ◀</td><td class="yes">▶ ◀</td></tr>
+        <tr><td class="k">peel</td><td class="yes">swipe CTRL</td><td class="yes">swipe CTRL</td></tr>
+        <tr><td class="k">move / page</td><td class="yes">▲ ▼ and their popups</td><td class="yes">▲ ▼</td></tr>
+        <tr><td class="k">quit</td><td class="yes">swipe CTRL twice</td><td class="yes"><code>ctrl+q</code></td></tr>
+        <tr><td class="k"><code>ctrl+t</code> scans</td><td class="no">no letter to hold CTRL against</td><td class="yes"><b>hold CTRL, tap t</b></td></tr>
+        <tr><td class="k"><code>ctrl+x</code> expiring</td><td class="no"><b>the one real gap</b></td><td class="yes"><b>hold CTRL, tap x</b></td></tr>
       </table>
     </div>
 
     <p class="lede" style="margin-top:1.4rem">
-      The <b>Stock Termux</b> column is why the in-app affordances do not simply
-      disappear. A fresh install ships Esc, Ctrl and all four arrows — so the
-      minimum this design assumes is already satisfied out of the box — but it has
-      no <code>KEYBOARD</code> key and no <code>ENTER</code>. Tapping the field to
-      raise the IME, and tapping a row twice to open it, are the only paths a
-      first-run device has, and both stay.
+      Read the two red cells carefully, because they are not equal.
+      <b><code>ctrl+t</code> is a querying verb by construction</b>
+      <span class="tier measured">measured</span> — <code>app.rs:298</code> only
+      widens the search into scan text when the query is non-empty, so the toggle
+      does nothing until you are typing, and while you are typing the keyboard is
+      up and <code>ctrl+t</code> works. The correction restores that verb outright
+      in the only state it means anything.
     </p>
-  </section>
-
-  <section>
-    <h2>What the key row does to the six directions</h2>
     <p class="lede">
-      Every one of them was sized around a bar. Read against the row, four of the
-      six lose their content and the fifth folds into the sixth.
+      <b><code>ctrl+x</code> is the residue.</b> "Cold start, show me what is
+      expiring" is a browsing act, done with the keyboard down, and with the
+      keyboard down there is no letter. The workaround is to raise the IME, hold
+      CTRL, tap <code>x</code>, then dismiss the IME again — four or five touches
+      and two re-layouts, to reach the app's most-used filter. <b>One verb, in one
+      state.</b> That is the entire remaining case for a touch control, and it is
+      not a case for three of them.
     </p>
-    <div class="scroller">
-      <table class="kv">
-        <tr><th>Direction</th><th>Then</th><th>Now</th></tr>
-        <tr>
-          <td class="k">A · repair in place</td>
-          <td>three cells: Detail, Expiring, Scans</td>
-          <td class="no">Detail duplicates ▶; the header count is scheduled to
-            duplicate Expiring. A one-cell bar. <b>Dead.</b></td>
-        </tr>
-        <tr>
-          <td class="k">B · two buttons</td>
-          <td>Detail + Scans, wider cells</td>
-          <td class="no">Half of it is ▶. <b>Dead.</b></td>
-        </tr>
-        <tr>
-          <td class="k">C · chips are the buttons</td>
-          <td>three chips, one of them Detail</td>
-          <td class="yes">Sheds Detail and <b>improves</b> — the two survivors are
-            precisely the IME-locked verbs, and they are toggles, so the chip's
-            second job is load-bearing. <b>Recommended.</b></td>
-        </tr>
-        <tr>
-          <td class="k">D · the dock</td>
-          <td>three tall slabs beside a short field</td>
-          <td>Survives re-formed around two. The big-target fallback.</td>
-        </tr>
-        <tr>
-          <td class="k">E · the ascetic field</td>
-          <td>no bar; an invisible swipe for detail</td>
-          <td>The invisible gesture is pointless now ▶ exists. <b>Folds into C.</b></td>
-        </tr>
-        <tr>
-          <td class="k">F · contextual bar</td>
-          <td>the bar changes with the surface</td>
-          <td class="no">Rejected before, with less to be contextual about now.
-            <b>Dead.</b></td>
-        </tr>
-      </table>
-    </div>
   </section>
 
   <section>
     <h2>The recommendation</h2>
     <p class="lede">
-      Header, a normally-blank gutter, the query row, the truth row. No bar. The
-      two chips in the truth row are reversed, so by the three-texture rule they
-      read as pressable — and they are the only pressable things left, because
-      they are the only verbs a thumb cannot otherwise produce.
+      Delete the action bar. Make the header's expiring count the touch control it
+      was already specified to be. Leave the truth row entirely dim.
     </p>
 
     <div class="options">
       <div class="option">
         <div class="spec">
-          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
-<span class="dim">    cert-file 8 · marine</span>                     
-  COC Certificate 2019                  ·    
+          <div class="term phone"><pre> <span class="hd">dossier</span>                  <span class="dim">24 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
 <span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt              <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                        
                                              
 <span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
- 3/24  <span class="dim">→ detail</span>   <span class="chip"> ^x Expiring  </span> <span class="chip"> ^t Scans  </span> </pre></div>
+ 3/24            <span class="dim">⏎ open  ^x expiry  ^t scans</span> </pre></div>
           <div class="facts">
-            <span><b>chrome</b> 3 rows + gutter</span>
+            <span><b>chrome</b> 3 rows</span>
             <span><b>docs</b> 12</span>
-            <span><b>type target</b> row + slack</span>
-            <span><b>chips</b> 13 + 10 cols</span>
+            <span><b>pressable</b> 2 things</span>
           </div>
         </div>
         <div>
-          <h3><span class="letter">C′</span> Two chips and a quiet row <span class="flag">recommended</span></h3>
-          <p class="thesis">The bar row is deleted and given back as a gutter that
-            is blank until the app has something to say.</p>
-          <p>The chips reserve their state column whether or not the dot is lit, so
-            <b>a chip never changes width when it is toggled</b>. A row that reflows
-            on a tap is a row whose next tap lands somewhere else.</p>
-          <p>The <code>→ detail</code> hint sits in the truth row's slack, dim:
-            information, not a control. It teaches the key that ▶ sends.</p>
+          <h3><span class="letter">H</span> The header count <span class="flag">recommended</span></h3>
+          <p class="thesis">You tap the number that told you there are three.
+            There is no more discoverable affordance available for "show me the
+            expiring ones", and it costs no rows at all.</p>
+          <p>It is not a new idea — <b>REWRITE-UI §1 already specifies it</b>
+            ("each count names its <code>:</code> command; on touch, tapping a
+            count jumps there") and it is simply not implemented: taps currently
+            test the search zone, the bar row and the list, and row 0 falls
+            through to <code>Idle</code>. <span class="tier measured">measured</span></p>
+          <p>Build it as a <em>toggle</em>, not a jump, so a second tap peels it
+            off and it means exactly what <code>ctrl+x</code> means. Reverse video
+            on the count, because reverse is what this app has decided pressable
+            looks like.</p>
         </div>
       </div>
 
       <div class="option">
         <div class="spec">
-          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
-<span class="dim">    cert-file 8 · marine</span>                     
-  COC Certificate 2019                  ·    
+          <div class="term phone"><pre> <span class="hd">dossier</span>                  <span class="dim">24 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
 <span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt              <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                        
                                              
-<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
- 14/24  <span class="dim">→ detail</span>  <span class="chip"> ^x Expiring• </span> <span class="chip"> ^t Scans• </span> </pre></div>
+<span class="acc"> &gt;</span><span class="uline"> █                                     </span><span class="chip"> ⌨ </span> 
+ 3/24  <span class="dim">[expiring]</span>        <span class="dim">^x expiry  ^t scans</span> </pre></div>
           <div class="facts">
-            <span><b>both filters on</b></span>
-            <span><b>count</b> 14/24</span>
-            <span><b>hint</b> survives</span>
+            <span><b>filter</b> live</span>
+            <span><b>hints</b> shed one</span>
           </div>
         </div>
         <div>
-          <h3>Both toggles lit</h3>
-          <p>Two dots and a wider count, and the hint still fits — the old
-            three-cell bar dropped its whole hint line in this state, which is what
-            made the filters feel like they cost something.</p>
-          <p>State and control are the same object. There is no second place where
-            "expiring is on" is written, so there is nothing to drift.</p>
+          <h3>The filter on</h3>
+          <p>The <code>[expiring]</code> chip appears where it always did, in the
+            dim row, and the hints shed <b>one item</b> to make room rather than
+            the whole line. Today two live filters erase the hint line completely
+            — at the moment the user has the most state and the most reason to
+            want a way back.</p>
         </div>
       </div>
 
       <div class="option">
         <div class="spec">
-          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
-<span class="dim">    cert-file 8 · marine</span>                     
-  COC Certificate 2019                  ·    
+          <div class="term phone"><pre> <span class="hd">dossier</span>                  <span class="dim">24 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
 <span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt              <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                        
 <span class="acc"> tap the row again to open it</span>                
 <span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
- 3/24  <span class="dim">→ detail</span>   <span class="chip"> ^x Expiring  </span> <span class="chip"> ^t Scans  </span> </pre></div>
-          <div class="facts"><span><b>gutter</b> one-shot teaching</span></div>
+ 3/24            <span class="dim">⏎ open  ^x expiry  ^t scans</span> </pre></div>
+          <div class="facts"><span><b>spare row</b> teaching</span></div>
         </div>
         <div>
-          <h3>The gutter, speaking</h3>
-          <p>What the freed row buys. Shown once, the first time a row is selected
-            on a touch layout: the tap-to-open gesture is the one thing here that
-            nothing else advertises.</p>
-        </div>
-      </div>
-
-      <div class="option">
-        <div class="spec">
-          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
-<span class="dim">    cert-file 8 · marine</span>                     
-  COC Certificate 2019                  ·    
-<span class="dim">    cert-file 9 · marine</span>                     
-<span class="soon"> esc again to quit</span>                           
-<span class="acc"> &gt;</span><span class="uline"> █                                     </span><span class="chip"> ⌨ </span> 
- 24/24  <span class="dim">→ detail</span>  <span class="chip"> ^x Expiring  </span> <span class="chip"> ^t Scans  </span> </pre></div>
-          <div class="facts"><span><b>gutter</b> the armed state</span></div>
-        </div>
-        <div>
-          <h3>Esc, armed</h3>
-          <p>Quit is two Escs, and swipe-up on CTRL is Esc, so quit is thumb-reachable
-            — clumsily, but it exists, and the armed state announces itself in the
-            gutter rather than in a status line nobody reads.</p>
-          <p>This row is also why the IME's back-button dismissal is still a hazard:
-            it sends a real Esc. The arming protection stays regardless of the key row.</p>
+          <h3>The spare row</h3>
+          <p>Three chrome rows leaves twenty-five for a list that uses
+            twenty-four, so one row is free. It is not a thirteenth document —
+            it is somewhere for flashes, <code>esc again to quit</code>, and the
+            one-shot that teaches the gesture nothing else advertises.</p>
         </div>
       </div>
     </div>
+
+    <h3 style="margin-top:2.5rem">Why not the chips this page recommended last week</h3>
+    <p>Because a state chip cannot be the control. <span class="tier measured">measured</span>
+      — <code>find.rs:349</code> emits <code>[expiring]</code> only when the
+      filter is already on, so a pressable chip can turn a filter <em>off</em> and
+      the affordance to turn it <em>on</em> does not exist:</p>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre>  COC Certificate (Master)           <span class="exp">! 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
+ 3/24            <span class="dim">⏎ open  ^x expiry  ^t scans</span> </pre></div>
+        <figcaption>
+          <span class="size">filter off · nothing to press</span>
+          <span class="how">The row a user would reach for is empty.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre>  COC Certificate (Master)           <span class="exp">! 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="acc"> &gt;</span><span class="uline"> █                                     </span><span class="chip"> ⌨ </span> 
+ 3/24  <span class="dim">[expiring]</span>        <span class="dim">^x expiry  ^t scans</span> </pre></div>
+        <figcaption>
+          <span class="size">filter on · now there is a chip</span>
+          <span class="how">An affordance that appears only after you have used
+            the thing it affords.</span>
+        </figcaption>
+      </figure>
+    </div>
+    <p style="margin-top:1.2rem">Fixing that means always-visible chips carrying a
+      state dot — which is an action bar smuggled into the truth row, with reverse
+      video bleeding into the one row whose texture is meant to be purely
+      informational. The header count has none of that problem.</p>
   </section>
 
   <section>
-    <h2>Two runners-up, if the chips fail on the device</h2>
+    <h2>What deleting the bar actually buys</h2>
     <p class="lede">
-      The one measured lesson from the last round was that a one-row target is too
-      small. The chips are one row tall. They sit on the bottom edge with harmless
-      neighbours and non-destructive verbs, which is the argument for accepting it —
-      but it is an argument, not a measurement, so here is what to fall back to.
+      Not density, mostly. The honest accounting, computed from
+      <code>layout.rs</code> rather than asserted. <span class="tier measured">measured</span>
     </p>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>At</th><th>With the bar</th><th>Without</th><th>Difference</th></tr>
+        <tr>
+          <td class="k">45×28 · browsing</td>
+          <td>4 chrome, 24 list</td><td>3 chrome, 25 list</td>
+          <td><b>12 documents either way</b>, plus one spare row. No thirteenth.</td>
+        </tr>
+        <tr>
+          <td class="k">~45×14 · querying</td>
+          <td>4 chrome, 10 list → 5</td><td>3 chrome, 11 list → 5</td>
+          <td>Parity-dependent; at 45×13 it is 4 against 5 — one more result in
+            the state where rows are scarcest.</td>
+        </tr>
+        <tr>
+          <td class="k">mis-taps</td>
+          <td>an overshoot up from the field lands on a button that opens a
+            record or flips a filter</td>
+          <td>it lands on the list's last row</td>
+          <td class="yes">A stray tap only moves the selection — opening needs
+            the row to be selected already.</td>
+        </tr>
+        <tr>
+          <td class="k">textures</td>
+          <td>three reverse cells, a reverse chip, dim chips, dim hints</td>
+          <td>one reverse count, one reverse <code>⌨</code></td>
+          <td class="yes">Exactly two pressable things on the screen.</td>
+        </tr>
+      </table>
+    </div>
 
+    <figure style="margin-top:2rem">
+      <div class="term phone"><pre> <span class="hd">dossier</span>                    <span class="dim">24 docs</span>  <span class="acc">! 3 exp</span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt              <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                        
+  <span class="chip">  → Detail   </span> <span class="chip">  ^x Expiry  </span> <span class="chip">  ^t Scans•  </span>  
+<span class="acc"> &gt;</span><span class="uline"> █                                     </span><span class="chip"> ⌨ </span> 
+ 3/24  <span class="dim">[expiring]  [scans]</span>                   </pre></div>
+      <figcaption>
+        <span class="size">45×28 · the bar as it ships today, for comparison</span>
+        <span class="how">Every cell duplicates a key the thumb already holds:
+          <code>→ Detail</code> is ▶, and both toggles are two-finger presses
+          whenever the keyboard is up. The truth row below shows today's
+          all-or-nothing hint drop — two filters, no hints.</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Where it is tested</h2>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre> <span class="hd">dossier</span>                  <span class="dim">24 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt              <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                        
+  Seaman&#x27;s Book                        <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                     
+  Passport                             <span class="ok">11-31</span> 
+<span class="dim">    wallet-doc 2 · identity</span>                  
+  Yellow Fever Certificate             <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 4 · medical</span>                    
+  Medical Fitness (ILO)              <span class="soon">~ 10-26</span> 
+<span class="dim">    cert-file 5 · medical</span>                    
+  Basic Safety Training                <span class="ok">02-30</span> 
+<span class="dim">    cert-file 6 · marine</span>                     
+  Ship Security Awareness              <span class="ok">02-30</span> 
+<span class="dim">    cert-file 7 · marine</span>                     
+  Driving Licence                      <span class="ok">07-33</span> 
+<span class="dim">    wallet-doc 3 · identity</span>                  
+  Birth Certificate                    <span class="dim">  ·  </span> 
+<span class="dim">    folder-home 1 · identity</span>                 
+                                             
+<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
+ 3/24            <span class="dim">⏎ open  ^x expiry  ^t scans</span> </pre></div>
+        <figcaption>
+          <span class="size">45×28 · browsing</span>
+          <span class="how">Twelve documents and a spare row, with three chrome
+            rows instead of four.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre> <span class="hd">dossier</span>                  <span class="dim">24 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt              <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                        
+  Seaman&#x27;s Book                        <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                     
+  Passport                             <span class="ok">11-31</span> 
+<span class="dim">    wallet-doc 2 · identity</span>                  
+  Yellow Fever Certificate             <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 4 · medical</span>                    
+  Medical Fitness (ILO)              <span class="soon">~ 10-26</span> 
+<span class="dim">    cert-file 5 · medical</span>                    
+  Basic Safety Training                <span class="ok">02-30</span> 
+<span class="dim">    cert-file 6 · marine</span>                     
+  Ship Security Awareness              <span class="ok">02-30</span> 
+<span class="dim">    cert-file 7 · marine</span>                     
+  Driving Licence                      <span class="ok">07-33</span> 
+<span class="dim">    wallet-doc 3 · identity</span>                  
+  Birth Certificate                    <span class="dim">  ·  </span> 
+<span class="dim">    folder-home 1 · identity</span>                 
+                                             
+<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
+ 3/24            <span class="dim">⏎ open  ^x expiry  ^t scans</span> </pre></div>
+        <figcaption>
+          <span class="size">45×28 · NO_COLOR</span>
+          <span class="how">Reverse, underline and dim are attributes. The
+            pressable count is still visibly pressable with no hues at all.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre> <span class="hd">dossier</span>                  <span class="dim">24 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt              <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                        
+  Seaman&#x27;s Book                        <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                     
+                                             
+<span class="acc"> &gt;</span><span class="uline"> coc c█                                </span><span class="chip"> ⌨ </span> 
+ 2/24            <span class="dim">⏎ open  ^x expiry  ^t scans</span> </pre></div>
+        <figcaption>
+          <span class="size">~45×14 · querying, keyboard up</span>
+          <span class="how">The state the correction is really about: five
+            documents, and both <code>ctrl+x</code> and <code>ctrl+t</code>
+            reachable as two-finger presses.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre> <span class="hd">dossier</span>           <span class="dim">24 docs</span>  <span class="chip"> ! 3 exp </span> 
+  COC Certificate (Maste…     <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>              
+  COC Certificate 2019          <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>              
+<span class="acc"> &gt;</span><span class="uline"> coc█                           </span><span class="chip"> ⌨ </span> 
+ 3/24  <span class="dim">[expiring]</span>            <span class="dim">^t scans</span> </pre></div>
+        <figcaption>
+          <span class="size">38 columns · the floor, filter live</span>
+          <span class="how">Hints shed one at a time — <code>⏎ open</code> goes,
+            then <code>^x expiry</code>, and <code>^t scans</code> survives.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <figure style="margin-top:1.75rem" class="scroller">
+      <div class="term"><pre> <span class="hd">dossier</span>                                                                           <span class="dim">24 docs</span>  <span class="acc">! 3 exp</span> 
+  Ship Security Awareness             marine        cert-file 6        02-30                        
+<span class="sel">▸ COC Certificate (Master)            marine        cert-file 8      ! 09-26                        </span>
+  COC Certificate 2019                marine        cert-file 9            ·                        
+<span class="acc"> &gt;</span><span class="uline"> coc█                                                                                        </span><span class="dim">3/24</span> 
+ <span class="dim">⏎ open  → detail  ^x expiring  ^t scans  ^q quit</span>                                                   </pre></div>
+      <figcaption>
+        <span class="size">100 columns · the desk layout</span>
+        <span class="how">No touch, so no reverse count and no chips — just the
+          underlined field the desktop layout is currently missing, and a hint
+          line that now teaches <code>^t scans</code> instead of omitting it.</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>The runner-up, and what would promote it</h2>
     <div class="options">
       <div class="option">
         <div class="spec">
-          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
-<span class="dim">    cert-file 8 · marine</span>                     
-  COC Certificate 2019                  ·    
+          <div class="term phone"><pre> <span class="hd">dossier</span>                  <span class="dim">24 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                 <span class="dim">  ·  </span> 
 <span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt              <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                        
                                              
-<span class="acc"> &gt;</span><span class="uline"> coc█              </span> <span class="chip">^x Expiring</span> <span class="chip"> ^t Scans  </span>
- 3/24                 <span class="chip">     •     </span> <span class="chip">           </span></pre></div>
-          <div class="facts">
-            <span><b>field</b> 21 cols</span>
-            <span><b>slabs</b> 2 × 11 × 2 rows</span>
-            <span><b>docs</b> 12</span>
-          </div>
-        </div>
-        <div>
-          <h3><span class="letter">D′</span> The toggle dock</h3>
-          <p class="thesis">Same three rows, but the two toggles become two-row
-            slabs beside a shortened field — targets the equal of the field itself.</p>
-          <p><code>^x Expiring</code> is exactly eleven columns, so the field takes
-            21 and the two slabs take 11 each with single-column gaps: 45 on the
-            nose. The second slab row carries the state dot.</p>
-          <p>Costs nineteen typable columns, which is fine for the find-fast queries
-            this surface is built around, and adds an internal boundary between the
-            field and the first slab that a wide thumb can straddle.</p>
-        </div>
-      </div>
-
-      <div class="option">
-        <div class="spec">
-          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
-<span class="dim">    cert-file 8 · marine</span>                     
-  COC Certificate 2019                  ·    
-<span class="dim">    cert-file 9 · marine</span>                     
- <span class="chip">    ^x Expiring•     </span> <span class="chip">      ^t Scans       </span> 
 <span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
- 3/24                 <span class="dim">tap again opens  ⏎</span>     </pre></div>
+ 3/24          <span class="dim">⏎ open  ^t scans</span> <span class="chip"> ^x expiry  </span> </pre></div>
           <div class="facts">
-            <span><b>cells</b> 2 × 21, centred</span>
-            <span><b>chrome</b> 3 rows, no gutter</span>
+            <span><b>chip</b> always visible</span>
+            <span><b>state</b> a dot</span>
           </div>
         </div>
         <div>
-          <h3><span class="letter">B′</span> The two-cell bar</h3>
-          <p class="thesis">The conservative retreat: keep a bar row, put the two
-            surviving toggles on it, and lose the gutter.</p>
-          <p class="risk"><b>Only if both others fail.</b> This buys <em>width</em>
-            over the chips — 21 columns against 13 — and nothing else. The cells are
-            the same one row tall, so if the chips miss because they are short, this
-            misses too; and it spends the whole message row to do it.</p>
+          <h3><span class="letter">C1</span> One always-visible chip</h3>
+          <p class="thesis">A single <code>^x expiry</code> chip, reversed and
+            anchored bottom-right, showing its state with a dot — the bottom of
+            a portrait screen, where the thumb already is.</p>
+          <p>This is the fallback, not the pick, and the reason is reach: the
+            header count sits at the <b>top</b> of a portrait phone, which is
+            the far corner for a one-handed grip. The entire design docked search
+            at the bottom for exactly that reason, and putting the one remaining
+            touch verb at the top cuts against it.</p>
+          <p class="risk"><b>That is an empirical question the device answers in
+            two seconds</b>, so it should be answered rather than argued. If the
+            reach is bad, this is what ships instead.</p>
         </div>
       </div>
+    </div>
+
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>What would change the recommendation</th><th>To</th></tr>
+        <tr>
+          <td>Hold-CTRL + IME letter proving flaky under a different keyboard app
+            — the whole derivation rests on that one mechanic</td>
+          <td>C1, immediately</td>
+        </tr>
+        <tr>
+          <td>The header tap slipping out of R3 — then <code>ctrl+x</code> has no
+            keyboard-down path at all, and shipping no affordance for an
+            unreachable verb is its own kind of dishonesty</td>
+          <td>C1 as the floor</td>
+        </tr>
+        <tr>
+          <td>R4 giving the detail surface a touch bar of its own (save and
+            discard may demand one)</td>
+          <td>Re-litigate Find's chrome as part of the stack, not alone</td>
+        </tr>
+      </table>
     </div>
   </section>
 
   <section>
-    <h2>The recommendation, where it is tested</h2>
-    <p class="lede">
-      Twelve documents at the phone size, the same frame with no colour at all, the
-      terminal floor, and the desk layout where the chips become mouse targets.
-    </p>
-    <div class="states">
-      <figure>
-        <div class="term phone"><pre> <span class="hd">dossier</span>                   <span class="acc">! 3 exp · 24 docs</span> 
-<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
-<span class="seldim">    cert-file 8 · marine                     </span>
-  COC Certificate 2019                 <span class="dim">  ·  </span> 
-<span class="dim">    cert-file 9 · marine</span>                     
-  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
-<span class="dim">    cert-file 10 · marine</span>                    
-  COC Application Receipt              <span class="dim">  ·  </span> 
-<span class="dim">    softcopy · marine</span>                        
-  Seaman&#x27;s Book                        <span class="ok">04-29</span> 
-<span class="dim">    cert-file 1 · marine</span>                     
-  Passport                             <span class="ok">11-31</span> 
-<span class="dim">    wallet-doc 2 · identity</span>                  
-  Yellow Fever Certificate             <span class="dim">  ·  </span> 
-<span class="dim">    cert-file 4 · medical</span>                    
-  Medical Fitness (ILO)              <span class="soon">~ 10-26</span> 
-<span class="dim">    cert-file 5 · medical</span>                    
-  Basic Safety Training                <span class="ok">02-30</span> 
-<span class="dim">    cert-file 6 · marine</span>                     
-  Ship Security Awareness              <span class="ok">02-30</span> 
-<span class="dim">    cert-file 7 · marine</span>                     
-  Driving Licence                      <span class="ok">07-33</span> 
-<span class="dim">    wallet-doc 3 · identity</span>                  
-  Birth Certificate                    <span class="dim">  ·  </span> 
-<span class="dim">    folder-home 1 · identity</span>                 
-                                             
-<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
- 3/24  <span class="dim">→ detail</span>   <span class="chip"> ^x Expiring  </span> <span class="chip"> ^t Scans• </span> </pre></div>
-        <figcaption>
-          <span class="size">45×28 · whole screen</span>
-          <span class="how">Twelve documents, one header, three chrome rows and the
-            blank gutter. The budget is met with the bar gone, not despite it.</span>
-        </figcaption>
-      </figure>
-      <figure>
-        <div class="term phone mono"><pre> <span class="hd">dossier</span>                   <span class="acc">! 3 exp · 24 docs</span> 
-<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
-<span class="seldim">    cert-file 8 · marine                     </span>
-  COC Certificate 2019                 <span class="dim">  ·  </span> 
-<span class="dim">    cert-file 9 · marine</span>                     
-  COC Endorsement — Panama           <span class="soon">~ 12-26</span> 
-<span class="dim">    cert-file 10 · marine</span>                    
-  COC Application Receipt              <span class="dim">  ·  </span> 
-<span class="dim">    softcopy · marine</span>                        
-  Seaman&#x27;s Book                        <span class="ok">04-29</span> 
-<span class="dim">    cert-file 1 · marine</span>                     
-  Passport                             <span class="ok">11-31</span> 
-<span class="dim">    wallet-doc 2 · identity</span>                  
-  Yellow Fever Certificate             <span class="dim">  ·  </span> 
-<span class="dim">    cert-file 4 · medical</span>                    
-  Medical Fitness (ILO)              <span class="soon">~ 10-26</span> 
-<span class="dim">    cert-file 5 · medical</span>                    
-  Basic Safety Training                <span class="ok">02-30</span> 
-<span class="dim">    cert-file 6 · marine</span>                     
-  Ship Security Awareness              <span class="ok">02-30</span> 
-<span class="dim">    cert-file 7 · marine</span>                     
-  Driving Licence                      <span class="ok">07-33</span> 
-<span class="dim">    wallet-doc 3 · identity</span>                  
-  Birth Certificate                    <span class="dim">  ·  </span> 
-<span class="dim">    folder-home 1 · identity</span>                 
-                                             
-<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
- 3/24  <span class="dim">→ detail</span>   <span class="chip"> ^x Expiring  </span> <span class="chip"> ^t Scans• </span> </pre></div>
-        <figcaption>
-          <span class="size">45×28 · NO_COLOR</span>
-          <span class="how">Reverse, underline and dim are attributes, not hues.
-            Nothing here is only a colour, so nothing here is lost.</span>
-        </figcaption>
-      </figure>
+    <h2>A bug this correction exposed</h2>
+    <div class="caveat">
+      <p><b><code>alt</code> + any letter types that letter into the query.</b>
+        <span class="tier measured">measured</span> — probed against the built
+        binary:</p>
+      <pre class="props">alt+x        -> Char('x')        <span class="c"># types into the query</span>
+ctrl+alt+x   -> ToggleExpiring   <span class="c"># identical to ctrl+x</span>
+ctrl+alt+z   -> None
+alt+Right    -> OpenDetail       <span class="c"># identical to plain Right</span>
+alt+Enter    -> Enter</pre>
+      <p>One line causes all of it — <code>input.rs:71</code> is
+        <code>KeyCode::Char(c) if !ctrl</code>, and <code>ctrl</code> is
+        <code>contains(CONTROL)</code>. There is no <code>ALT</code> guard
+        anywhere. <b>Exclude ALT from the printable fall-through</b> whether or
+        not we ever bind an alt verb: on this phone, holding ALT and typing
+        currently pollutes the search.</p>
+      <p>It also means <code>ctrl+alt+letter</code> is <b>not</b> a distinct
+        namespace — it is aliased onto <code>ctrl+letter</code>. Which is just as
+        well: <code>ctrl+alt</code> is claimed by Termux's own hardware-keyboard
+        shortcuts and by desktop window managers, so it is poisoned for anything
+        primary regardless.</p>
     </div>
 
-    <figure style="margin-top:1.75rem">
-      <div class="term phone"><pre>  COC Certificate (Maste…  <span class="soon">~ 09-26</span>    
-<span class="dim">    cert-file 8 · marine</span>              
-                                      
-<span class="acc"> &gt;</span><span class="uline"> coc█                           </span><span class="chip"> ⌨ </span> 
- 3/24      <span class="chip"> ^x Expiring• </span> <span class="chip"> ^t Scans• </span> </pre></div>
-      <figcaption>
-        <span class="size">38 columns · the floor, both filters on</span>
-        <span class="how">The <code>→ detail</code> hint sheds first and the chips
-          keep their keys — item by item, never a whole line at once. The old
-          three-cell bar could not do this: at the floor its cells dropped to
-          eleven and the labels went with them.</span>
-      </figcaption>
-    </figure>
+    <p style="margin-top:1.6rem">What the freed space is worth: <b>on Find, almost
+      nothing, deliberately.</b> The verb set is complete and the keys are
+      published. The one thing worth reserving is the readline convention users'
+      fingers already know — <code>alt+b</code>, <code>alt+f</code>,
+      <code>alt+d</code>, <code>alt+backspace</code> for word motion and deletion,
+      should the query ever grow a cursor. Where it pays is <b>R4</b>: the detail
+      surface is not search-as-you-type, so bare letters are its primary
+      namespace, and <code>alt+letter</code> becomes the in-edit mirror — <code>s</code>
+      outside a field, <code>alt+s</code> while typing in one. One table, two
+      states, nothing new to memorise. Keep alt verbs non-destructive: on legacy
+      encodings alt is an ESC prefix, and over a laggy link an <code>Esc</code>
+      followed quickly by a letter can arrive as alt+letter. A wrong navigation is
+      recoverable; a wrong delete is not.</p>
 
-    <figure style="margin-top:1.75rem" class="scroller">
-      <div class="term"><pre>  Ship Security Awareness             marine        cert-file 6        02-30                        
-<span class="sel">▸ COC Certificate (Master)            marine        cert-file 8      ! 09-26                        </span>
-  COC Certificate 2019                marine        cert-file 9          ·                          
-                                                                                                    
-<span class="acc"> &gt;</span><span class="uline"> coc█                                                                                        </span><span class="dim">3/24</span> 
- <span class="dim">⏎ open  → detail  ^x expiring  ^t scans  ^q quit</span>                        <span class="chip"> ^x Expiring  </span> <span class="chip"> ^t Scans• </span> </pre></div>
-      <figcaption>
-        <span class="size">100 columns · the desk layout</span>
-        <span class="how">One object, both layouts: the hint line teaches every key,
-          and the same two chips render at its right-hand end where a mouse can
-          click them. The count moves into the field's tail because there is room.</span>
-      </figcaption>
-    </figure>
+    <p><b>Also never bind</b> <code>ctrl+h</code>, <code>ctrl+i</code>,
+      <code>ctrl+m</code> or <code>ctrl+[</code> as distinct verbs — on the legacy
+      encodings Termux uses they are byte-identical to Backspace, Tab, Enter and
+      Esc. And when R4 wants <code>ctrl+s</code> for save, it should not have it:
+      that is XON/XOFF flow control, and a save key that silently does nothing on
+      some SSH stacks is the worst possible failure.</p>
   </section>
 
   <section>
     <h2>The Termux keys to document</h2>
     <p class="lede">
-      Two rows for <code>~/.termux/termux.properties</code>, to go in the install
-      notes once the design lands. Reload with <code>termux-reload-settings</code>.
+      For <code>~/.termux/termux.properties</code>; reload with
+      <code>termux-reload-settings</code>. <span class="tier docs">check it</span>
     </p>
 
-    <h3>Minimum — what the interaction model assumes</h3>
-    <p>This is a <b>subset of Termux's own default row</b>, which is the sentence
-      that matters: a fresh install is already fully operable, and nothing needs
-      configuring before the app works.</p>
-    <pre class="props"><span class="c"># ~/.termux/termux.properties — the stock default already covers this</span>
-extra-keys = [[ \
-  {key: ESC}, \
-  {key: CTRL}, \
-  {key: LEFT}, \
-  {key: UP}, \
-  {key: DOWN}, \
-  {key: RIGHT} \
+    <h3>Minimum — what browsing needs with the keyboard down</h3>
+    <p>The previous page claimed this was a subset of Termux's stock default row,
+      so a fresh install would already be fully operable. <b>That claim is
+      unverified and should not be published until someone looks at a fresh
+      install</b> — check what a device with no <code>termux.properties</code>
+      actually shows.</p>
+    <pre class="props">extra-keys = [[ \
+  {key: ESC}, {key: CTRL}, \
+  {key: LEFT, display: "◀"}, {key: UP, display: "▲"}, \
+  {key: DOWN, display: "▼"}, {key: RIGHT, display: "▶"}, \
+  {key: KEYBOARD} \
 ]]</pre>
     <div class="scroller">
       <table class="kv">
         <tr><th>Key</th><th>What it serves</th></tr>
-        <tr><td class="k">ESC</td><td>The peel — clear the query, pop the surface,
-          clear a filter, arm, quit. The single most-pressed key in the app.</td></tr>
-        <tr><td class="k">CTRL</td><td>The one-shot latch. With the IME raised,
-          <code>CTRL</code> then <code>x</code>/<code>t</code>/<code>q</code> reaches
-          both filters and quit.</td></tr>
-        <tr><td class="k">LEFT / RIGHT</td><td>The record pair — <code>→</code> opens
-          the detail pane, <code>←</code> closes it.</td></tr>
-        <tr><td class="k">UP / DOWN</td><td>Moving the cursor without raising the
-          keyboard. Long-press auto-repeats, which is how you cross a long list.</td></tr>
+        <tr><td class="k">ESC</td><td>Peels one layer; twice quits. Without it the
+          app cannot be backed out of while browsing.</td></tr>
+        <tr><td class="k">CTRL</td><td>The held modifier for <code>ctrl+x</code>,
+          <code>ctrl+t</code> and <code>ctrl+q</code>. Useless on its own, and
+          mandatory.</td></tr>
+        <tr><td class="k">◀ ▲ ▼ ▶</td><td>Close detail, move, open detail — the
+          whole browse loop, and the reason no <code>→ Detail</code> button is
+          needed.</td></tr>
+        <tr><td class="k">KEYBOARD</td><td>Toggles the IME. The app's <code>⌨</code>
+          affordance covers <em>raising</em> it; <em>dismissing</em> it needs
+          this key.</td></tr>
+        <tr><td class="k">no ENTER</td><td>Not required — tapping the selected row
+          again opens it, and the IME carries its own enter.</td></tr>
       </table>
     </div>
 
-    <h3 style="margin-top:2rem">Recommended — the row this design was drawn against</h3>
-    <p>Verbatim from the phone the layout was measured on.</p>
+    <h3 style="margin-top:2rem">Recommended — the row this was drawn against</h3>
+    <p>The user's current configuration, verbatim. The correction changes nothing
+      in it: it already covers every verb in both keyboard states.</p>
     <pre class="props">extra-keys = [[ \
-  {key: CTRL, popup: ESC}, \
-  {key: ALT, popup: TAB}, \
-  {key: SPACE}, \
-  {key: LEFT, popup: HOME, display: "◀"}, \
-  {key: UP, popup: PGUP, display: "▲"}, \
-  {key: DOWN, popup: PGDN, display: "▼"}, \
-  {key: RIGHT, popup: END, display: "▶"}, \
+  {key: CTRL, popup: ESC}, {key: ALT, popup: TAB}, {key: SPACE}, \
+  {key: LEFT, popup: HOME, display: "◀"}, {key: UP, popup: PGUP, display: "▲"}, \
+  {key: DOWN, popup: PGDN, display: "▼"}, {key: RIGHT, popup: END, display: "▶"}, \
   {key: KEYBOARD, popup: ENTER} \
 ]]</pre>
     <div class="scroller">
       <table class="kv">
         <tr><th>Key</th><th>What it serves</th></tr>
-        <tr><td class="k">CTRL · ESC</td><td>The latch for <code>^x</code>/<code>^t</code>/<code>^q</code>;
-          swipe up for the peel, and twice to quit.</td></tr>
-        <tr><td class="k">ALT · TAB</td><td>Nothing in dossier today. Tab is the
-          candidate for cycling review tabs later, and this row is why Tab is a safer
-          future binding than any new control combination.</td></tr>
-        <tr><td class="k">SPACE</td><td>Multi-word queries without reaching into the
-          IME's bottom row.</td></tr>
-        <tr><td class="k">◀ ▲ ▼ ▶</td><td>Cursor, paging (swipe up), and the
-          detail pair. Long-press repeats.</td></tr>
-        <tr><td class="k">KEYBOARD · ENTER</td><td>Raise or dismiss the IME without
-          touching the terminal surface, and open the highlighted document without
-          raising it at all. Note this dismissal does <b>not</b> send Esc, unlike the
-          Android back button — this row produces fewer stray Escs, not more.</td></tr>
+        <tr><td class="k">CTRL · ESC</td><td>Hold for the filter toggles and quit;
+          the swipe puts Esc one gesture away with the keyboard down, which is
+          what makes <code>Esc·Esc</code> an honest quit path.</td></tr>
+        <tr><td class="k">ALT · TAB</td><td>Nothing in dossier today. Hold is the
+          R4 in-edit tier; the swipe delivers Tab for R4 field navigation without
+          raising the keyboard — which is why Tab is a safer future binding than
+          any new control combination.</td></tr>
+        <tr><td class="k">SPACE</td><td>Multi-word queries without reaching into
+          the keyboard's bottom row.</td></tr>
+        <tr><td class="k">◀ · HOME</td><td>Close detail; jump to the top.</td></tr>
+        <tr><td class="k">▲ ▼ · PGUP/PGDN</td><td>Cursor and paging through the
+          twelve rows.</td></tr>
+        <tr><td class="k">▶ · END</td><td>Open detail; jump to the bottom.</td></tr>
+        <tr><td class="k">KEYBOARD · ENTER</td><td>Toggle the keyboard; swipe to
+          open the highlighted document without raising it.</td></tr>
       </table>
     </div>
 
     <h3 style="margin-top:2rem">Optional, and not urged</h3>
-    <p>A second row of macros puts the two filters on the key row:</p>
-    <pre class="props">[{macro: "CTRL x", display: "exp"}, {macro: "CTRL t", display: "scan"}]</pre>
-    <p>It works. It is also global to every Termux session, costs a document row's
-      worth of screen height <em>everywhere</em>, and — the reason it does not replace
-      the chips — <b>a macro can send a verb but can never show its state</b>. If you
-      add it, the chips stop being your controls and go on being your state display,
-      which is not the <code>⏎ Open</code> class of duplication.</p>
-
-    <h3 style="margin-top:2rem">What the row makes unnecessary, and what survives anyway</h3>
-    <div class="scroller">
-      <table class="kv">
-        <tr><th>In-app decision</th><th>With the recommended row</th><th>Keep?</th></tr>
-        <tr>
-          <td class="k">⌨ chip, mouse-drop for the IME</td>
-          <td>redundant — the KEYBOARD key does it</td>
-          <td class="yes"><b>Keep.</b> Stock has no KEYBOARD key; this is the only
-            fresh-device path to typing.</td>
-        </tr>
-        <tr>
-          <td class="k">Esc-arm protection</td>
-          <td>still needed</td>
-          <td class="yes"><b>Keep.</b> IME back-button dismissal still sends Esc.</td>
-        </tr>
-        <tr>
-          <td class="k">tap the row again to open</td>
-          <td>near-redundant — swipe ⌨ is Enter</td>
-          <td class="yes"><b>Keep.</b> Free, and stock has no ENTER.</td>
-        </tr>
-        <tr>
-          <td class="k"><code>→ Detail</code> as a control</td>
-          <td>redundant — ▶, on stock too</td>
-          <td class="no"><b>Drop.</b> Keep only the dim <code>→ detail</code> hint.</td>
-        </tr>
-        <tr>
-          <td class="k">Expiring / Scans touch affordances</td>
-          <td>duplicated only by optional macros</td>
-          <td class="yes"><b>Keep.</b> Fresh devices have neither, and the chips are
-            the state display.</td>
-        </tr>
-        <tr>
-          <td class="k">Two-row IME tap target</td>
-          <td>redundant — the KEYBOARD key</td>
-          <td class="yes"><b>Keep.</b> Stock devices tap the field.</td>
-        </tr>
-        <tr>
-          <td class="k">Find-fast, no letter keys</td>
-          <td>unaffected</td>
-          <td class="yes">Always.</td>
-        </tr>
-      </table>
-    </div>
+    <p>A second row of macros —
+      <code>[{macro: "CTRL x", display: "exp"}, {macro: "CTRL t", display: "scan"}]</code>
+      — puts both toggles under the thumb in every state. It is global to every
+      Termux session and costs a document row's worth of screen height
+      everywhere, which is a steep price for one verb in one state; and it can
+      send a verb but never show one. If the header count works, nobody needs it.</p>
   </section>
 
   <section>
     <h2>What I would build</h2>
     <div class="verdict">
-      <p><b>C′ — no bar.</b> Delete the action row, make the two state chips
-        pressable, and spend the freed row on a gutter that is blank until the app
-        has something to say. The bar was right when it was designed against a thumb
-        with no keys; the device this runs on has eight pinned above the terminal,
-        and the design should stand on that.</p>
-      <p>Three fixes ride along regardless of which direction wins: hints shed
-        <b>item by item</b> rather than a line at a time, the bottom chrome goes
-        <b>inert while a record is pushed</b> so a tap cannot filter a list you
-        cannot see, and the desk layout gains the underline and the missing
-        <code>^t scans</code> hint.</p>
-      <p>Reachability, end to end: Expiring is chip / <code>^x</code> / (planned)
-        header-count tap; Scans is chip / <code>^t</code>; Detail is ▶ or
-        <code>→</code>, taught by the dim hint; Open is tap-tap or Enter, taught once
-        in the gutter; Esc and quit are the key row, with the armed state in the
-        gutter.</p>
-    </div>
-
-    <div class="caveat">
-      <p><b>Check on the device before this is documented.</b> Three mechanics here
-        are drawn from Termux's documented behaviour, not from a measurement on this
-        phone: that <code>popup:</code> fires on <b>swipe-up</b> while long-press
-        auto-repeats, that <code>CTRL</code> latches one-shot into the next key from
-        <em>either</em> the row or the IME, and that stock Termux's default row
-        carries ESC, CTRL and the arrows. Each is a thirty-second check, and R0.2's
-        rule was that we measure the phone rather than reason about it. One in-app
-        note too: <code>input.rs</code> matches <code>KeyCode::Right</code> with no
-        modifier guard, so <code>ctrl+→</code> currently acts as plain
-        <code>→</code> — harmless, but not deliberate.</p>
+      <p><b>Delete the action bar; implement the tappable header count as a
+        toggle; leave the truth row purely dim.</b> The bar was designed for a
+        thumb with no keys. This thumb has eight, two of them modifiers, and the
+        only verb it cannot reach while browsing is the expiring filter — which
+        already has a better affordance specified than any button: the number
+        that reports it.</p>
+      <p>Riding along, unconditional: hints shed <b>item by item</b>; the Find
+        chrome goes <b>inert while a record is pushed</b>; the desktop layout
+        gains its missing underline and its missing <code>^t scans</code> hint;
+        and <code>input.rs</code> stops letting <code>alt</code>+letter type into
+        the query.</p>
+      <p>Two things to settle on the device before any of it is written into the
+        install notes: the <b>keyboard-up terminal size</b> (expect ~45×14 — if a
+        taller keyboard drops it under 12 rows the app refuses to draw
+        mid-query), and whether <b>held CTRL composes with the row's arrows</b>.
+        If it does, a keyboard-down modifier tier exists with no letters at all,
+        and the residue verb stops being a residue.</p>
     </div>
   </section>
 

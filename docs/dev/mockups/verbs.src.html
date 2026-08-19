@@ -28,6 +28,7 @@
 .inv td { color: var(--muted); }
 .inv code { font-family: var(--mono); font-size: .84rem; color: var(--ink); }
 .inv .none { color: var(--term-exp); font-style: italic; }
+.inv td.gap { color: var(--term-exp); }
 .scroller { overflow-x: auto; }
 
 .findings { display: flex; flex-direction: column; gap: 2.2rem; margin: 1.5rem 0 0; }
@@ -92,51 +93,52 @@
   </header>
 
   <div class="banner">
-    <p><b>Revised.</b> This audit was first written against a thumb with no keys.
-      That thumb does not exist: Termux pins an <b>extra-keys row above the
-      terminal</b>, and the phone this is built for carries
-      <code>CTRL·ESC</code>, <code>◀▲▼▶</code> and <code>KEYBOARD·ENTER</code> on
-      it, with <code>CTRL</code> a held modifier that composes with <code>ALT</code>. Two findings below are <b>retracted</b> because of it, and one new
-      duplication takes their place.</p>
-    <p>The reachability column and every retraction are marked. Nothing else has
-      changed — the duplications, the vanishing hints and the leaking stack are
-      all still true, and none of them are fixed by a key row.</p>
+    <p><b>Revised twice.</b> This audit was first written against a thumb with no
+      keys. That thumb does not exist: Termux pins an <b>extra-keys row above the
+      terminal</b>, and the phone this is built for carries <code>CTRL·ESC</code>,
+      <code>ALT·TAB</code>, <code>◀▲▼▶</code> and <code>KEYBOARD·ENTER</code> on
+      it — with <code>CTRL</code> and <code>ALT</code> as <b>held modifiers</b>
+      that compose with soft-keyboard letters, and with each other.</p>
+    <p>Two findings are <b>retracted</b>, one is <b>half retracted</b>, and one new
+      duplication takes their place. The reachability columns below are split by
+      keyboard state, because that split is the whole design question: a modifier
+      needs a letter, and the only letter source is the soft keyboard.</p>
   </div>
 
   <div class="meta">
     <span><b>Read from</b> input.rs · app.rs · find.rs</span>
     <span><b>Checked against</b> the running binary at 45×28</span>
     <span><b>Verbs</b> 11</span>
-    <span><b>Faults</b> 4 duplications · 2 orphans · 4 teaching gaps</span>
-    <span><b>Retracted</b> 2, by the key row</span>
+    <span><b>Faults</b> 4 duplications · 1 orphan · 4 teaching gaps</span>
+    <span><b>Retracted</b> 3, over two revisions</span>
   </div>
 
   <section>
     <h2>The inventory</h2>
     <p class="lede">
-      The <b>key row</b> column is the revision. It reads against the recommended
-      row, noting where stock Termux's own default gives the same thing. Two rows
-      are red, and they are the whole design problem: with the soft keyboard down
-      there is no letter for <code>CTRL</code> to latch onto, so the two filter
-      toggles are the only verbs on this surface a thumb genuinely cannot produce.
+      Split by keyboard state, because Termux <em>resizes</em> the terminal when
+      the soft keyboard raises rather than covering it — so these are two layouts,
+      not one layout half-hidden. Browsing happens with the keyboard down at
+      45×28; querying happens with it up at roughly 45×14. Exactly one cell is
+      red, and it is the whole remaining design problem.
     </p>
     <div class="scroller">
       <table class="inv">
         <thead>
-          <tr><th>Verb</th><th>Key</th><th>Key row</th><th>Thumb, in-app</th><th>Taught where</th></tr>
+          <tr><th>Verb</th><th>Key</th><th>Thumb · keyboard down</th><th>Thumb · keyboard up</th><th>Taught where</th></tr>
         </thead>
         <tbody>
-          <tr><td class="v">Open file</td><td><code>Enter</code></td><td class="row">swipe ⌨</td><td>tap the selected row again</td><td>hint says <code>⏎ open</code> — <span class="none">the gesture, nowhere</span></td></tr>
-          <tr><td class="v">Open detail</td><td><code>→</code></td><td class="row">▶ · stock too</td><td>bar cell 1</td><td>the button</td></tr>
-          <tr><td class="v">Close detail</td><td><code>←</code> <em>and</em> <code>Esc</code></td><td class="row">◀ · swipe CTRL</td><td>same cell, relabelled <code>← Back</code></td><td>the button; hint <code>esc back</code></td></tr>
-          <tr><td class="v">Type a query</td><td>any printable</td><td class="row">⌨ raises the IME</td><td>tap either search row</td><td>the underline, and <code>⌨</code></td></tr>
-          <tr><td class="v">Rub out</td><td><code>Backspace</code></td><td class="norow">—</td><td>via the soft keyboard</td><td><span class="none">nowhere</span></td></tr>
-          <tr><td class="v">Clear / pop / arm</td><td><code>Esc</code></td><td class="row">swipe CTRL · stock ESC</td><td><span class="none">nothing</span></td><td>hint <code>esc back</code></td></tr>
-          <tr><td class="v">Move the cursor</td><td>arrows · PgUp/Dn · Home/End</td><td class="row">▲▼ · swipe for paging</td><td>tap a row · scroll</td><td><span class="none">nowhere</span></td></tr>
-          <tr><td class="v">Expiring filter</td><td><code>ctrl+x</code></td><td class="norow">only with the IME up</td><td>bar cell 2</td><td>button; state in a separate chip</td></tr>
-          <tr><td class="v">Search scans</td><td><code>ctrl+t</code></td><td class="norow">only with the IME up</td><td>bar cell 3</td><td>button; <span class="none">no desktop hint at all</span></td></tr>
-          <tr><td class="v">Raise the keyboard</td><td>— (correctly)</td><td class="row">KEYBOARD</td><td>tap either search row</td><td>the <code>⌨</code> chip</td></tr>
-          <tr><td class="v">Quit</td><td><code>ctrl+q</code> · <code>ctrl+c</code> · <code>Esc·Esc</code></td><td class="row">swipe CTRL twice</td><td><span class="none">nothing</span></td><td>hint <code>^q quit</code></td></tr>
+          <tr><td class="v">Open file</td><td><code>Enter</code></td><td>swipe <code>⌨</code>; tap the row again</td><td>the IME's enter</td><td>hint says <code>⏎ open</code> — <span class="none">the gesture, nowhere</span></td></tr>
+          <tr><td class="v">Open detail</td><td><code>→</code></td><td><code>▶</code></td><td><code>▶</code></td><td>the button</td></tr>
+          <tr><td class="v">Close detail</td><td><code>←</code> <em>and</em> <code>Esc</code></td><td><code>◀</code>; swipe <code>CTRL</code></td><td>same</td><td>the button; hint <code>esc back</code></td></tr>
+          <tr><td class="v">Type a query</td><td>any printable</td><td><span class="none">no letter source</span></td><td>the IME</td><td>the underline, and <code>⌨</code></td></tr>
+          <tr><td class="v">Rub out</td><td><code>Backspace</code></td><td><span class="none">nothing</span></td><td>the IME</td><td><span class="none">nowhere</span></td></tr>
+          <tr><td class="v">Clear / pop / arm</td><td><code>Esc</code></td><td>swipe <code>CTRL</code></td><td>same</td><td>hint <code>esc back</code></td></tr>
+          <tr><td class="v">Move the cursor</td><td>arrows · PgUp/Dn · Home/End</td><td><code>▲▼</code> and their popups</td><td>same</td><td><span class="none">nowhere</span></td></tr>
+          <tr><td class="v">Expiring filter</td><td><code>ctrl+x</code></td><td class="gap"><b>nothing — the one real gap</b></td><td>hold <code>CTRL</code>, tap <code>x</code></td><td>button; state in a separate chip</td></tr>
+          <tr><td class="v">Search scans</td><td><code>ctrl+t</code></td><td><em>not meaningful</em> — it only widens a non-empty query</td><td>hold <code>CTRL</code>, tap <code>t</code></td><td>button; <span class="none">no desktop hint at all</span></td></tr>
+          <tr><td class="v">Raise the keyboard</td><td>— (correctly)</td><td><code>KEYBOARD</code>; tap the field</td><td>—</td><td>the <code>⌨</code> chip</td></tr>
+          <tr><td class="v">Quit</td><td><code>ctrl+q</code> · <code>ctrl+c</code> · <code>Esc·Esc</code></td><td>swipe <code>CTRL</code> twice</td><td><code>ctrl+q</code></td><td>hint <code>^q quit</code></td></tr>
         </tbody>
       </table>
     </div>
@@ -157,11 +159,14 @@
           <b>Quit</b> is the same story, though Android's task switcher makes it
           survivable.</p>
         <p class="why"><b>Wrong.</b> Swiping up on the key row's <code>CTRL</code>
-          sends Esc, and stock Termux ships a bare <code>ESC</code> key. Twice is
-          quit. Both "orphans" were reachable the whole time — the audit reasoned
-          about the phone instead of looking at it, which is the exact failure
-          R0.2 was run to avoid. It stays on the page rather than being deleted,
-          because a retraction is more useful than a tidy list.</p>
+          sends Esc, and twice is quit. Both "orphans" were reachable the whole
+          time — the audit reasoned about the phone instead of looking at it,
+          which is the exact failure R0.2 was run to avoid. It stays on the page
+          rather than being deleted, because a retraction is more useful than a
+          tidy list. <b>It was also retracted once for the wrong reason:</b> the
+          first revision described <code>CTRL</code> as a fragile one-shot latch.
+          It is a held modifier, it composes with <code>ALT</code>, and nothing
+          about it is fragile.</p>
       </div>
 
       <div class="finding">
@@ -183,6 +188,35 @@
           cell duplicates a tap the header already gives you — <b>the same
           mistake, and it is in the plan rather than in the code</b>, which is
           why nobody has noticed it yet.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind retract">retracted</span> <code>^t Scans</code> needs a touch affordance</h3>
+        <p>The bar gives scan search a cell because <code>ctrl+t</code> is a
+          control combination, and control combinations were assumed to be the
+          hardest thing for a phone to produce.</p>
+        <p class="why"><b>Wrong twice over.</b> <code>ctrl+t</code> is a held
+          modifier and an IME letter, which is an ordinary two-finger press. And
+          it is a <b>querying verb by construction</b> — <code>app.rs:298</code>
+          only widens the search into scan text when the query is non-empty, so
+          the toggle does nothing at all until you are typing, and while you are
+          typing the keyboard is necessarily up. It is reachable in the only state
+          where pressing it means anything.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind orphan">orphan</span> <code>^x</code> with the keyboard down</h3>
+        <p>The one that survives all of it. "Cold start, show me what is expiring"
+          is a <em>browsing</em> act, done with the keyboard down — and with the
+          keyboard down there is no letter for the modifier to take. Reaching the
+          filter means raising the keyboard, holding <code>CTRL</code>, tapping
+          <code>x</code>, and dismissing the keyboard again: four or five touches
+          and two re-layouts, for the app's most-used filter.</p>
+        <p><b>One verb, in one state.</b> That is the entire case for a touch
+          control on this surface — and the plan already contains a better
+          affordance for it than a button: <b>REWRITE-UI §1's tappable header
+          count</b>, which is specified, approved, and not implemented. You tap
+          the number that told you there were three.</p>
       </div>
 
       <div class="finding">
@@ -287,12 +321,14 @@
         <b>one object</b> that both shows its state and accepts a press, and a bar
         cell should exist only for a verb a thumb has no other route to.</p>
       <p>Applied against the key row, that second rule empties the bar. Detail is
-        ▶; Open is Enter or a second tap; Esc and quit are a swipe. What is left is
-        <code>ctrl+x</code> and <code>ctrl+t</code> — <b>two toggles, whose state
-        this surface already draws</b>. So the answer is not a better bar but no
-        bar: make the state chips pressable and give the row back. The companion
-        page works that through, with the <code>termux.properties</code> rows to
-        put in the install notes.</p>
+        ▶; Open is Enter or a second tap; Esc and quit are a swipe; <code>ctrl+t</code>
+        is reachable wherever it is meaningful. What is left is <b>one verb in one
+        state</b> — the expiring filter, while browsing. So the answer is not a
+        better bar but no bar, and not pressable chips either: a chip does not
+        exist until its filter is already on, so it can turn one off and never on.
+        The affordance is the <b>header count</b>. The companion page works it
+        through, with the <code>termux.properties</code> rows for the install
+        notes.</p>
       <p>And the finding that survived the revision intact: <b>tap-to-open is taught
         nowhere</b>. It is the one verb no key row supplies, and it needs a sentence
         somewhere the first time a row is selected.</p>
