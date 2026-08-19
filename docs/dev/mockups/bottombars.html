@@ -502,10 +502,10 @@ pre.props .c { color: var(--term-dim); }
     <p class="standfirst">
       The six directions on the previous page were drawn for a thumb with no keys
       at all. That thumb does not exist: Termux pins an <b>extra-keys row above the
-      terminal</b>, and with arrows, Esc, Enter and a Ctrl latch already under it,
-      the action bar's charter — <em>verbs a thumb has no other way to reach</em> —
-      collapses to two toggles. Two toggles do not earn a row. They earn being
-      pressable where their state is already drawn.
+      terminal</b>, and with arrows, Esc, Enter and a held <code>CTRL</code> already
+      under it, the action bar's charter — <em>verbs a thumb has no other way to
+      reach</em> — collapses to two toggles. Two toggles do not earn a row. They
+      earn being pressable where their state is already drawn.
     </p>
   </header>
 
@@ -536,7 +536,7 @@ pre.props .c { color: var(--term-dim); }
     <div class="keylegend">
       <span><b>swipe up</b> sends the popup key</span>
       <span><b>long press</b> auto-repeats the base key</span>
-      <span><b>CTRL</b> is a one-shot latch on the next key, from the row or the IME</span>
+      <span><b>CTRL</b> is a held modifier — <code>ctrl</code>, <code>alt</code> and <code>ctrl+alt</code> all compose with IME letters</span>
       <span><b>the row is an Android view</b> — mouse reporting never touches it</span>
     </div>
 
@@ -547,8 +547,10 @@ pre.props .c { color: var(--term-dim); }
       <b>Swipe-up on CTRL is Esc</b>, and Esc twice is quit — so the previous
       audit's two "orphan" verbs were never orphans on this device.
       <b>Enter is a swipe away</b>, so opening never needed a button either.
-      What is left with the soft keyboard down and no letter source is exactly
-      <code>ctrl+x</code> and <code>ctrl+t</code>.
+      <code>CTRL</code> is a <b>held modifier</b>, and composes with <code>ALT</code>
+      — so <code>ctrl+x</code> and <code>ctrl+t</code> are ordinary two-finger
+      presses <em>whenever the soft keyboard is up</em>. With it down there is no
+      letter for the modifier to take, and those two are what is left.
     </p>
 
     <div class="scroller">
