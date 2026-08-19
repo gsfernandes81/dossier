@@ -82,3 +82,22 @@ been superseded.
 Both are self-contained: each reads `style.css`, renders its own screens on the
 exact character grid, and writes its finished page. Run them with
 `uv run --with wcwidth python searchbar.py`.
+
+## The verb audit and the bar directions (2026-08-17)
+
+After `⏎ Open` turned out to be a button for a gesture that already existed, the
+whole verb surface was audited with a Fable design advisor:
+
+- `verbs.py` → **The Verb Audit** — every verb, how it is reached by key and by
+  thumb, where it is taught, and the four kinds of fault that turns up. The
+  specimens are reproductions of what the shipped binary renders, checked in a
+  PTY at 45×28 rather than imagined.
+- `bottombars.py` → **Six Bottom Bars** — six directions for the bar and the
+  field together, since they compete for the same four rows.
+
+Findings worth carrying whatever ships: hints must degrade item by item rather
+than vanishing whole (two filters currently erase the entire hint line); the
+Find chrome must go inert while a pushed record covers the list; the keyboard
+layout's query row is missing its underline and `ctrl+t` appears in no desktop
+hint; and **`Esc` has no touch affordance at all** — the peel machinery the whole
+interaction model rests on is keyboard-only.

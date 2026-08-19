@@ -1,0 +1,815 @@
+<title>Six Bottom Bars</title>
+<style>
+/* dossier v3 — R-UI mockups.
+   The page is a technical datasheet: monospace carries the headings because the
+   subject is a terminal; prose sits in a quiet sans beneath it. Terminal panes
+   follow the viewer's theme, which is the point REWRITE-UI §6 makes — semantic
+   tokens map to ANSI, so the user's own terminal theme carries the palette. */
+
+:root {
+  --ground: #eef1f3;
+  --surface: #ffffff;
+  --ink: #161a1e;
+  --muted: #5d6b77;
+  --faint: #8b98a3;
+  --rule: #d5dbe0;
+  --accent: #12676a;
+  --accent-soft: #d9eaea;
+
+  --term-bg: #fbfbfa;
+  --term-fg: #24292e;
+  --term-dim: #7b8792;
+  --term-sel-bg: #24292e;
+  --term-sel-fg: #fbfbfa;
+  --term-exp: #b83c26;
+  --term-soon: #8a6410;
+  --term-ok: #3a7346;
+  --term-acc: #12676a;
+  --term-btn: #4d5a65;
+
+  --shadow: 0 1px 2px rgba(20, 30, 40, .06), 0 8px 24px -12px rgba(20, 30, 40, .18);
+
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
+    "Roboto Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1418;
+    --surface: #161c22;
+    --ink: #e3e8ec;
+    --muted: #8a98a4;
+    --faint: #6b7883;
+    --rule: #222b33;
+    --accent: #5fb6b9;
+    --accent-soft: #14343a;
+
+    --term-bg: #0b0f13;
+    --term-fg: #d5dde3;
+    --term-dim: #74828d;
+    --term-sel-bg: #d5dde3;
+    --term-sel-fg: #0b0f13;
+    --term-exp: #f0795d;
+    --term-soon: #dda845;
+    --term-ok: #71b77e;
+    --term-acc: #5fb6b9;
+    --term-btn: #93a1ad;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0f1418;
+  --surface: #161c22;
+  --ink: #e3e8ec;
+  --muted: #8a98a4;
+  --faint: #6b7883;
+  --rule: #222b33;
+  --accent: #5fb6b9;
+  --accent-soft: #14343a;
+
+  --term-bg: #0b0f13;
+  --term-fg: #d5dde3;
+  --term-dim: #74828d;
+  --term-sel-bg: #d5dde3;
+  --term-sel-fg: #0b0f13;
+  --term-exp: #f0795d;
+  --term-soon: #dda845;
+  --term-ok: #71b77e;
+  --term-acc: #5fb6b9;
+  --term-btn: #93a1ad;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(2rem, 5vw, 4.5rem) clamp(1rem, 4vw, 2.5rem) 6rem;
+}
+
+/* ── masthead ─────────────────────────────────────────────────────────── */
+.masthead { display: flex; flex-direction: column; gap: .75rem; margin-bottom: 1rem; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: .74rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+h1 {
+  font-family: var(--mono);
+  font-size: clamp(1.7rem, 4.2vw, 2.6rem);
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.standfirst {
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+  margin: 0;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.25rem;
+  font-family: var(--mono);
+  font-size: .76rem;
+  color: var(--faint);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: .7rem 0;
+  margin: 1.5rem 0 3rem;
+}
+.meta b { color: var(--muted); font-weight: 500; }
+
+/* ── sections ─────────────────────────────────────────────────────────── */
+section { margin: 0 0 4.5rem; }
+
+h2 {
+  font-family: var(--mono);
+  font-size: 1.18rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  margin: 0 0 .4rem;
+  display: flex;
+  align-items: baseline;
+  gap: .7rem;
+  flex-wrap: wrap;
+}
+h2 .tag {
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .18rem .5rem;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+h3 {
+  font-family: var(--mono);
+  font-size: .82rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  margin: 0 0 .15rem;
+}
+
+p { max-width: 66ch; margin: 0 0 1rem; }
+p.lede { color: var(--muted); margin-bottom: 1.8rem; }
+
+/* ── terminal specimens ───────────────────────────────────────────────── */
+.specimens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.75rem;
+  align-items: flex-start;
+  margin: 1.5rem 0 0;
+}
+
+figure { margin: 0; display: flex; flex-direction: column; gap: .55rem; min-width: 0; }
+
+figcaption { display: flex; flex-direction: column; gap: .1rem; }
+figcaption .size {
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--faint);
+}
+figcaption .how { font-size: .84rem; color: var(--muted); max-width: 46ch; }
+
+.term {
+  background: var(--term-bg);
+  color: var(--term-fg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  padding: .55rem .6rem;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.term pre {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.34;
+  white-space: pre;
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums;
+  tab-size: 1;
+}
+
+/* the phone pane sits at its true 45-column width */
+.term.phone pre { font-size: 12px; }
+@media (max-width: 620px) { .term pre { font-size: 10.5px; } }
+
+/* terminal semantic tokens — every colour is paired with a glyph, so the
+   monochrome reading survives (REWRITE-UI §6) */
+.hd  { font-weight: 700; }
+.dim { color: var(--term-dim); }
+.exp { color: var(--term-exp); font-weight: 600; }
+.soon { color: var(--term-soon); font-weight: 600; }
+.ok  { color: var(--term-ok); }
+.none { color: var(--term-dim); }
+.acc { color: var(--term-acc); }
+.warn { color: var(--term-exp); font-weight: 600; }
+.btn { color: var(--term-btn); }
+.sel { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.seldim { background: var(--term-sel-bg); color: var(--term-sel-fg); opacity: .72; }
+
+/* ── notes ────────────────────────────────────────────────────────────── */
+.notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.1rem 2rem;
+  margin: 2rem 0 0;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+}
+.note { display: flex; gap: .7rem; align-items: flex-start; }
+.note .k {
+  font-family: var(--mono);
+  font-size: .7rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .12rem .38rem;
+  border-radius: 2px;
+  white-space: nowrap;
+  margin-top: .18rem;
+}
+.note p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 44ch; }
+.note p b { color: var(--ink); font-weight: 600; }
+
+/* ── key/value table ──────────────────────────────────────────────────── */
+.kv { width: 100%; border-collapse: collapse; margin: 1.25rem 0 0; font-size: .9rem; }
+.kv th, .kv td { text-align: left; padding: .55rem .8rem .55rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.kv th { font-family: var(--mono); font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.kv td.k { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+.kv td { color: var(--muted); }
+.kv td b { color: var(--ink); font-weight: 600; }
+.scroller { overflow-x: auto; }
+
+footer {
+  border-top: 1px solid var(--rule);
+  padding-top: 1.4rem;
+  margin-top: 1rem;
+  font-family: var(--mono);
+  font-size: .74rem;
+  color: var(--faint);
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem 1.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .term { transition: box-shadow .2s ease; }
+}
+
+/* ── interaction diagrams (page 3) ────────────────────────────────────── */
+.kbd {
+  font-family: var(--mono);
+  font-size: .78rem;
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: .1rem .42rem;
+  background: var(--surface);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.chain { display: flex; flex-direction: column; gap: 0; margin: 1.5rem 0 0; }
+.chain .layer {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 1rem;
+  align-items: baseline;
+  padding: .7rem 0 .7rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.chain .layer:first-child { border-top: 1px solid var(--rule); }
+.chain .layer .what { font-family: var(--mono); font-size: .82rem; color: var(--ink); }
+.chain .layer .then { font-size: .9rem; color: var(--muted); }
+.chain .layer.arm .what { color: var(--term-soon); }
+.chain .layer.quit .what { color: var(--term-exp); }
+
+.seq { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1.4rem; margin: 1.5rem 0 0; counter-reset: step; }
+.seq > div { border-top: 2px solid var(--accent); padding-top: .7rem; }
+.seq > div::before {
+  counter-increment: step;
+  content: counter(step);
+  display: block;
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--accent);
+  margin-bottom: .3rem;
+}
+.seq h4 { font-family: var(--mono); font-size: .84rem; margin: 0 0 .3rem; font-weight: 600; }
+.seq p { font-size: .88rem; color: var(--muted); margin: 0; max-width: none; }
+
+.swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin: 1.4rem 0 0; }
+.swatch { display: flex; gap: .6rem; align-items: baseline; }
+.swatch .g {
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  width: 1.4rem;
+  text-align: center;
+  flex: none;
+}
+.swatch .t { font-size: .86rem; color: var(--muted); }
+.swatch .t b { color: var(--ink); font-weight: 600; display: block; font-family: var(--mono); font-size: .8rem; }
+
+
+/* ── bottom-chrome specimens ──────────────────────────────────────────── */
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.uline {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+.term.mono .acc,
+.term.mono .exp,
+.term.mono .soon,
+.term.mono .ok { color: var(--term-fg); }
+
+.options { display: flex; flex-direction: column; gap: 3rem; margin: 1.5rem 0 0; }
+.option {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) minmax(260px, 1fr);
+  gap: 1rem 2.5rem;
+  align-items: start;
+}
+@media (max-width: 780px) { .option { grid-template-columns: 1fr; } }
+.option .spec { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+.option h3 { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin: 0 0 .3rem; }
+.option h3 .letter {
+  font-size: .68rem;
+  letter-spacing: .12em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .12rem .4rem;
+  border-radius: 2px;
+}
+.option h3 .flag {
+  font-family: var(--sans);
+  font-size: .7rem;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--term-sel-fg);
+  background: var(--accent);
+  padding: .1rem .45rem;
+  border-radius: 2px;
+}
+.option h3 .no {
+  font-family: var(--sans);
+  font-size: .7rem;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--term-exp);
+  border: 1px solid var(--term-exp);
+  padding: .06rem .4rem;
+  border-radius: 2px;
+}
+.option p { font-size: .92rem; color: var(--muted); margin: 0 0 .7rem; max-width: 54ch; }
+.option p b { color: var(--ink); font-weight: 600; }
+.option .thesis { color: var(--ink); font-size: .98rem; }
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem 1.2rem;
+  font-family: var(--mono);
+  font-size: .73rem;
+  color: var(--faint);
+  border-top: 1px solid var(--rule);
+  padding-top: .55rem;
+  margin-top: .2rem;
+}
+.facts b { color: var(--muted); font-weight: 500; }
+.risk {
+  font-size: .88rem;
+  color: var(--muted);
+  border-left: 2px solid var(--term-exp);
+  padding-left: .8rem;
+  margin: 0;
+}
+.risk b { color: var(--term-exp); font-weight: 600; }
+
+.jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.2rem 2rem; margin: 1.6rem 0 0; }
+.jobs > div { border-top: 2px solid var(--accent); padding-top: .6rem; }
+.jobs h4 { font-family: var(--mono); font-size: .84rem; margin: 0 0 .25rem; font-weight: 600; }
+.jobs p { margin: 0; font-size: .88rem; color: var(--muted); }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.5rem 0 0; }
+.verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.8rem 0 0; }
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .6rem; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · bottom chrome · directions</p>
+    <h1>Six Bottom Bars</h1>
+    <p class="standfirst">
+      <code>⏎ Open</code> left the bar because it duplicated a gesture. Auditing
+      the rest of the verb surface turned up more of the same — a control and its
+      own state rendered twice, two rows apart, and a bar cell reserved for a verb
+      the header is already scheduled to carry. Six directions for the bar and the
+      field together, since they compete for the same four rows.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Surface</b> Find, touch layout</span>
+    <span><b>Pane</b> 45×28 · portrait Termux</span>
+    <span><b>Budget</b> 4 chrome rows · 12 documents</span>
+    <span><b>Textures</b> reverse = pressable · underline = typable · dim = information</span>
+  </div>
+
+  <section>
+    <h2>What the bottom chrome is for</h2>
+    <p class="lede">
+      Four jobs. Every direction below is a different answer to which of them
+      deserve a row of their own.
+    </p>
+    <div class="jobs">
+      <div>
+        <h4>The typing target</h4>
+        <p>One underlined span, fat enough for a thumb, that raises the keyboard.
+          Non-negotiable and device-proven.</p>
+      </div>
+      <div>
+        <h4>Truth about the result</h4>
+        <p>The count, which filters are on, and anything the app needs to say.</p>
+      </div>
+      <div>
+        <h4>Verbs the input can't reach</h4>
+        <p>For a thumb: detail, and two toggles behind modifier keys. For a
+          keyboard: <b>nothing</b> — every verb already has a key.</p>
+      </div>
+      <div>
+        <h4>Teaching</h4>
+        <p>Today this is a hint line that shows a thumb three keyboard verbs, and
+          vanishes entirely once two filters are on.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The directions</h2>
+    <p class="lede">
+      Each drawn at exactly 45 columns, on the tiling the app really uses. Two
+      documents of context above every one, so the boundary between list and
+      chrome is comparable.
+    </p>
+
+    <div class="options">
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+  <span class="chip">  → Detail   </span> <span class="chip">^x Expiring• </span> <span class="chip">  ^t Scans   </span>  
+<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
+ 3/24                     <span class="dim">tap again opens  ⏎</span> </pre></div>
+          <div class="facts">
+            <span><b>rows</b> 4 · 12 docs</span>
+            <span><b>new mechanisms</b> none</span>
+          </div>
+        </div>
+        <div>
+          <h3><span class="letter">A</span> Repair in place</h3>
+          <p class="thesis">Keep the shipped geometry; fix every incoherence the
+            audit found and spend nothing.</p>
+          <p>One state grammar — a <code>•</code> on the button and nowhere else,
+            so the <code>[expiring]</code> and <code>[scans]</code> chips are
+            deleted. <b>Expiry</b> becomes <b>Expiring</b> everywhere. The hint
+            turns gesture-first: <code>tap again opens ⏎</code>, which is both
+            what a thumb needs and short enough that it can never be squeezed
+            out.</p>
+          <p class="risk"><b>Risk:</b> it leaves the strategy alone. The bar
+            still spends a row on three verbs, one of which the header is
+            scheduled to duplicate — this is maintenance, not design.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre> <span class="hd">dossier</span>                      <span class="chip"> ! 3 expiring </span> 
+  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+ <span class="chip">      → Detail       </span> <span class="chip">      ^t Scans•      </span> 
+<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
+ 3/24                     <span class="dim">tap again opens  ⏎</span> </pre></div>
+          <div class="facts">
+            <span><b>rows</b> 4 · 12 docs</span>
+            <span><b>cells</b> 2 × 21</span>
+          </div>
+        </div>
+        <div>
+          <h3><span class="letter">B</span> Earn your cell</h3>
+          <p class="thesis">A verb keeps a cell only if a thumb has no other path
+            to it.</p>
+          <p>The plan already says the header's counts are tappable. Implement
+            that, and <code>Expiring</code> is evicted from the bar — leaving the
+            two survivors at 21 columns each, the largest touch targets in any
+            direction that keeps a bar.</p>
+          <p class="risk"><b>Risk:</b> a count reads as information even in
+            reverse, so the filter gets harder to find — and its off-switch moves
+            to the top corner, the furthest point from a thumb. Two 21-wide cells
+            around eight letters also look like a bar waiting to die.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+                                             
+<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
+ 3/24  <span class="chip"> → Detail  </span><span class="chip"> ^x Expiring  </span><span class="chip"> ^t Scans• </span>  </pre></div>
+          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+<span class="acc"> no file linked — showing the record</span>         
+<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
+ 3/24  <span class="chip"> → Detail  </span><span class="chip"> ^x Expiring• </span><span class="chip"> ^t Scans• </span>  </pre></div>
+          <div class="facts">
+            <span><b>rows</b> 3 + a message row · 12 docs</span>
+            <span><b>action bar</b> deleted</span>
+          </div>
+        </div>
+        <div>
+          <h3><span class="letter">C</span> Chips are the buttons <span class="flag">recommended</span></h3>
+          <p class="thesis">A toggle's control and its state are one object, so
+            draw them once.</p>
+          <p>The action bar dissolves into the truth row: the chips become
+            pressable, carry their own <code>•</code>, and sit beside the count
+            they modify. The freed row above the field is normally blank and
+            speaks only when there is something to say — a flash, the armed quit,
+            or a one-shot <em>tap the row again to open it</em>. Today a message
+            <b>replaces</b> the chips row; here it has somewhere of its own to
+            go, which is the second specimen.</p>
+          <p class="risk"><b>Risk:</b> the verbs go back to one-row targets — the
+            exact thing two rounds on the device rejected. The mitigations are
+            real (bottom edge below, a harmless neighbour above, all three verbs
+            non-destructive) but they are reasoning, and the two-row rule was
+            measurement.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre>  COC Certificate (Master)           <span class="soon">~ 09-26</span> 
+<span class="dim">    cert-file 8 · marine</span>                     
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+                                             
+<span class="acc"> &gt;</span><span class="uline"> coc█              </span> <span class="chip"> → Detail  </span> <span class="chip"> ^t Scans  </span>
+ 3/24                 <span class="chip">           </span> <span class="chip">    •on    </span></pre></div>
+          <div class="facts">
+            <span><b>rows</b> 3 + a message row · 12 docs</span>
+            <span><b>slabs</b> 2 × 11 × 2 rows</span>
+          </div>
+        </div>
+        <div>
+          <h3><span class="letter">D</span> The dock</h3>
+          <p class="thesis">If one row is too small a target for a thumb, that is
+            true for buttons too — so make them two rows tall, beside the field
+            rather than above it.</p>
+          <p>Field on the left at 21 columns, two 11-column slabs docked right,
+            both two rows deep. Twenty-two cells per verb: the biggest touch
+            targets here by a distance, and the state lives in the slab's own
+            second row.</p>
+          <p class="risk"><b>Risk:</b> the field shrinks to 19 typable columns,
+            and every mis-tap now crosses an <em>internal</em> boundary — left
+            from Detail raises the keyboard, right from the field opens a record.
+            That is precisely the class of error the tiling work removed by
+            putting the row against the screen edge.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre><span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+                                             
+<span class="acc"> &gt;</span><span class="uline"> coc█                              </span><span class="chip"> ⌕ </span> <span class="chip"> ⌨ </span> 
+ 3/24                                      <span class="dim">•</span> </pre></div>
+          <div class="facts">
+            <span><b>rows</b> 3 + a message row · 12 docs</span>
+            <span><b>verbs on screen</b> 1</span>
+          </div>
+        </div>
+        <div>
+          <h3><span class="letter">E</span> The ascetic field</h3>
+          <p class="thesis">Chrome is the field and the truth row; detail becomes
+            a gesture on the selected row's right-hand end.</p>
+          <p>This is the shape the surface wants once a <code>:</code> command
+            line exists — and it is here mostly to mark the floor. Its
+            <code>⌕</code> is a three-column target, and the detail gesture rides
+            a row that moves.</p>
+          <p class="risk"><b>Risk:</b> nothing on screen ever teaches the detail
+            gesture, and a thumb three columns off opens the file instead. It
+            proves the minimum is <em>below</em> the right amount of chrome.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="facts" style="border-top: none; padding-top: 0">
+            <span><b>not drawn</b> — rejected on structure, not on looks</span>
+          </div>
+        </div>
+        <div>
+          <h3><span class="letter">F</span> The contextual bar <span class="no">rejected</span></h3>
+          <p class="thesis">The bar's contents follow the selection: no
+            selection, a document, a pushed record — each gets its own verbs.</p>
+          <p>This failure is already in the codebase in miniature. Cell 0 swaps
+            <code>→ Detail</code> for <code>← Back</code> when the record opens,
+            while the other cells keep acting on a list the user can no longer
+            see — <b>tapping <code>^x Expiring</code> inside a pushed record
+            mutates a surface that isn't on screen</b>. A contextual bar
+            multiplies that, on the device with the least precise pointer and no
+            timers to disambiguate with.</p>
+          <p>The lesson worth keeping: when detail covers the list, the Find
+            chrome should yield entirely. Every direction above should adopt it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>C, in the places that decide it</h2>
+    <p class="lede">
+      The whole screen, the same frame with no colour, the 38-column floor, and
+      the keyboard layout — where the same chips reappear on the hint line, one
+      object in both layouts.
+    </p>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre> <span class="hd">dossier</span>                   <span class="acc">! 3 exp · 24 docs</span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama             12-26 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt               ·    
+<span class="dim">    softcopy · marine</span>                        
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
+ 3/24  <span class="chip"> → Detail  </span><span class="chip"> ^x Expiring  </span><span class="chip"> ^t Scans• </span>  </pre></div>
+        <figcaption>
+          <span class="size">45×28 · whole screen</span>
+          <span class="how">Twelve documents. The blank row above the field is
+            the message line, waiting.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre> <span class="hd">dossier</span>                   <span class="acc">! 3 exp · 24 docs</span> 
+<span class="sel">▸ COC Certificate (Master)           ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                     </span>
+  COC Certificate 2019                  ·    
+<span class="dim">    cert-file 9 · marine</span>                     
+  COC Endorsement — Panama             12-26 
+<span class="dim">    cert-file 10 · marine</span>                    
+  COC Application Receipt               ·    
+<span class="dim">    softcopy · marine</span>                        
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+<span class="acc"> &gt;</span><span class="uline"> coc█                                  </span><span class="chip"> ⌨ </span> 
+ 3/24  <span class="chip"> → Detail  </span><span class="chip"> ^x Expiring  </span><span class="chip"> ^t Scans• </span>  </pre></div>
+        <figcaption>
+          <span class="size">45×28 · NO_COLOR</span>
+          <span class="how">Chips are reverse, the field underlined, the markers
+            carry status. Nothing structural is lost.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre>  COC Certificate (Maste…  <span class="soon">~ 09-26</span>    
+<span class="dim">    cert-file 8 · marine</span>              
+                                      
+<span class="acc"> &gt;</span><span class="uline"> coc█                           </span><span class="chip"> ⌨ </span> 
+ 3/24 <span class="chip"> Detail </span><span class="chip"> Expiring  </span><span class="chip"> Scans• </span>     </pre></div>
+        <figcaption>
+          <span class="size">38 columns · the floor</span>
+          <span class="how">The chips shed their keys before they shed their
+            words — a thumb needs the word, and a floor-width terminal is not
+            where a keyboard user is.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <figure style="margin-top:1.75rem">
+      <div class="term"><pre>  Ship Security Awareness            marine                     cert-file 6    02-30                
+<span class="sel">▸ COC Certificate (Master)         marine                     cert-file 8  ! 09-26 </span>                 
+  COC Certificate 2019                marine                     cert-file 9     ·                  
+                                                                                                    
+<span class="acc"> &gt;</span><span class="uline"> coc█                                                                                        </span><span class="dim">3/24</span> 
+ <span class="dim">⏎ open  → detail  ^x expiring  ^t scans  ^q quit</span>                         <span class="chip"> ^x Expiring  </span><span class="chip"> ^t Scans• </span> </pre></div>
+      <figcaption>
+        <span class="size">100 columns · keyboard layout</span>
+        <span class="how">Three rows as before, and the two fixes the audit
+          demands: the query row is finally underlined here too, and
+          <code>^t scans</code> — a verb that appears in no desktop hint today —
+          is taught.</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>C, with A's grammar repairs folded in.</b> It fixes the two findings
+        that matter by <em>deleting the objects that caused them</em> rather than
+        policing them: a toggle stops being two things in two textures two rows
+        apart, and the bar stops holding a cell that the header is about to
+        duplicate. It costs no documents, and it is stable when the
+        <code>:</code> line arrives — where the current bar keeps melting, having
+        already lost two of its four cells in two rounds.</p>
+      <p><b>The strongest argument against it:</b> it puts touch verbs back on
+        one-row targets, and "one row is too small" is the one thing here that
+        was <em>measured</em> rather than reasoned. If a week of thumb use shows
+        mis-taps, the fallback is D's dock — and only the phone can tell you.</p>
+      <p>Either way, three fixes are unconditional: the keyboard layout's query
+        row gets its underline, hints degrade item by item instead of vanishing
+        whole, and the Find chrome goes inert while a pushed record covers the
+        list.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/bottombars.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>

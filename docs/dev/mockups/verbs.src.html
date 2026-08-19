@@ -1,0 +1,235 @@
+<title>The Verb Audit</title>
+<style>
+/*CSS*/
+
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.uline {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+
+.inv { width: 100%; border-collapse: collapse; margin: 1.3rem 0 0; font-size: .9rem; }
+.inv th, .inv td {
+  text-align: left;
+  padding: .5rem .8rem .5rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+.inv th {
+  font-family: var(--mono);
+  font-size: .72rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  font-weight: 500;
+}
+.inv td.v { font-weight: 600; color: var(--ink); white-space: nowrap; }
+.inv td { color: var(--muted); }
+.inv code { font-family: var(--mono); font-size: .84rem; color: var(--ink); }
+.inv .none { color: var(--term-exp); font-style: italic; }
+.scroller { overflow-x: auto; }
+
+.findings { display: flex; flex-direction: column; gap: 2.2rem; margin: 1.5rem 0 0; }
+.finding { display: flex; flex-direction: column; gap: .5rem; }
+.finding h3 { display: flex; align-items: baseline; gap: .6rem; margin: 0; }
+.finding h3 .kind {
+  font-family: var(--sans);
+  font-size: .68rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: .1rem .45rem;
+  border-radius: 2px;
+  font-weight: 500;
+}
+.kind.dup { background: var(--accent-soft); color: var(--accent); }
+.kind.orphan { background: var(--term-exp); color: var(--term-sel-fg); }
+.kind.teach { border: 1px solid var(--term-soon); color: var(--term-soon); }
+.kind.inco { border: 1px solid var(--muted); color: var(--muted); }
+.finding p { margin: 0; font-size: .93rem; color: var(--muted); max-width: 68ch; }
+.finding p + p { margin-top: .5rem; }
+.finding p b { color: var(--ink); font-weight: 600; }
+.finding code { font-family: var(--mono); font-size: .85rem; color: var(--ink); }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1rem 0 .4rem; }
+.verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.8rem 0 0; }
+.verdict p { margin: 0; max-width: 64ch; }
+.verdict p + p { margin-top: .6rem; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · Find surface · audit</p>
+    <h1>The Verb Audit</h1>
+    <p class="standfirst">
+      <code>⏎ Open</code> was a button for a gesture you already had, and it
+      shipped anyway. This is every verb the Find surface offers, what invokes it
+      by key and by thumb, and where it is taught — followed by the four kinds of
+      fault that turns up.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Read from</b> input.rs · app.rs · find.rs</span>
+    <span><b>Checked against</b> the running binary at 45×28</span>
+    <span><b>Verbs</b> 11</span>
+    <span><b>Faults</b> 3 duplications · 4 orphans · 4 teaching gaps</span>
+  </div>
+
+  <section>
+    <h2>The inventory</h2>
+    <div class="scroller">
+      <table class="inv">
+        <thead>
+          <tr><th>Verb</th><th>Key</th><th>Thumb</th><th>Taught where</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="v">Open file</td><td><code>Enter</code></td><td>tap the selected row again</td><td>hint says <code>⏎ open</code> — <span class="none">the gesture, nowhere</span></td></tr>
+          <tr><td class="v">Open detail</td><td><code>→</code></td><td>bar cell 1</td><td>the button</td></tr>
+          <tr><td class="v">Close detail</td><td><code>←</code> <em>and</em> <code>Esc</code></td><td>same cell, relabelled <code>← Back</code></td><td>the button; hint <code>esc back</code></td></tr>
+          <tr><td class="v">Type a query</td><td>any printable</td><td>tap either search row</td><td>the underline, and <code>⌨</code></td></tr>
+          <tr><td class="v">Rub out</td><td><code>Backspace</code></td><td>via the soft keyboard</td><td><span class="none">nowhere</span></td></tr>
+          <tr><td class="v">Clear / pop / arm</td><td><code>Esc</code></td><td><span class="none">nothing</span></td><td>hint <code>esc back</code></td></tr>
+          <tr><td class="v">Move the cursor</td><td>arrows · PgUp/Dn · Home/End</td><td>tap a row · scroll</td><td><span class="none">nowhere</span></td></tr>
+          <tr><td class="v">Expiring filter</td><td><code>ctrl+x</code></td><td>bar cell 2</td><td>button; state in a separate chip</td></tr>
+          <tr><td class="v">Search scans</td><td><code>ctrl+t</code></td><td>bar cell 3</td><td>button; <span class="none">no desktop hint at all</span></td></tr>
+          <tr><td class="v">Raise the keyboard</td><td>— (correctly)</td><td>tap either search row</td><td>the <code>⌨</code> chip</td></tr>
+          <tr><td class="v">Quit</td><td><code>ctrl+q</code> · <code>ctrl+c</code> · <code>Esc·Esc</code></td><td><span class="none">nothing</span></td><td>hint <code>^q quit</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>What is wrong</h2>
+
+    <div class="findings">
+      <div class="finding">
+        <h3><span class="kind orphan">orphan</span> Esc has no thumb</h3>
+        <p>The entire peel machinery — clear the query, pop the surface, drop the
+          filter, arm, quit — is <b>keyboard-only</b>. On a phone with no keyboard
+          raised there is no way to clear a search or back out of a filter; the
+          one key the whole interaction model rests on is invisible to touch.</p>
+        <p>This is a bigger hole than <code>⏎ Open</code> was, and in the opposite
+          direction: not a verb with two affordances, but a verb with none.
+          <b>Quit</b> is the same story, though Android's task switcher makes it
+          survivable.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind dup">duplication</span> The next ⏎ Open is already scheduled</h3>
+        <p>The layout plan says the header's counts are tappable and each names
+          its command. The moment that ships, the bar's <code>^x Expiry</code>
+          cell duplicates a tap the header already gives you — <b>the same
+          mistake, and it is in the plan rather than in the code</b>, which is
+          why nobody has noticed it yet.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind inco">incoherence</span> One toggle, two objects, two rows apart</h3>
+        <p>The thing you press (<code>^t Scans</code>, reverse video) and the
+          thing that says it is on (<code>[scans]</code>, dim) are separate
+          objects in separate rows in different textures. A user has to learn the
+          mapping between them. The button also grows its <code>•</code> while
+          the scan text is still <em>loading</em>, when the chip below is still
+          honestly saying <code>[scans…]</code>.</p>
+        <p>Worse, the dim chips sit inside the tap-to-type zone: <b>tapping
+          <code>[scans]</code> — a token about the scans toggle — raises the
+          keyboard</b>. Three kinds of object in two rows, one of which does
+          something unrelated when pressed.</p>
+        <div class="states">
+          <figure>
+            <div class="term phone"><pre><!--S:twice--></pre></div>
+            <figcaption>
+              <span class="size">45 columns</span>
+              <span class="how">The dot on the button and the chip below say the
+                same thing twice.</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind teach">teaching gap</span> The hints vanish exactly when they are needed</h3>
+        <p>The hint is shown only if the whole string fits, and dropped entirely
+          otherwise. One filter still fits. <b>Two filters and the teaching
+          disappears</b> — at the moment the user has the most state live and the
+          most reason to want a way back.</p>
+        <p>Verified on the running binary, not inferred: <code>ctrl+x</code> then
+          <code>ctrl+t</code> at 45×28 leaves the row below empty of hints.</p>
+        <div class="states">
+          <figure>
+            <div class="term phone"><pre><!--S:hint-one--></pre></div>
+            <figcaption>
+              <span class="size">one filter · the hint fits, just</span>
+            </figcaption>
+          </figure>
+          <figure>
+            <div class="term phone"><pre><!--S:hint-none--></pre></div>
+            <figcaption>
+              <span class="size">two filters · the hint is gone</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind teach">teaching gap</span> The touch hint teaches keys to a thumb</h3>
+        <p>The hint line on the touch layout reads <code>⏎ open · esc back · ^q
+          quit</code> — three keyboard verbs, shown to the one user who cannot
+          press any of them. Meanwhile the gesture a thumb <em>must</em> learn —
+          tap the selected row a second time to open it — appears nowhere at all,
+          and has appeared nowhere since the <code>⏎ Open</code> button left.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind orphan">orphan</span> ctrl+t is unteachable on the desktop</h3>
+        <p>The keyboard layout has no action bar, and its hint line lists
+          <code>⏎ open · → detail · ^x expiring · ^q quit</code>. <b>Content
+          search appears in no desktop hint.</b> The verb exists and is reachable
+          only by prior knowledge — which is nearly excusable, since the desktop
+          is where scan text is written, and nearly is not a design.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind inco">incoherence</span> The stack metaphor leaks</h3>
+        <p>When a record is pushed full-screen over the list, the bar is still
+          drawn and its other two cells still act. <b>Tapping <code>^x Expiry</code>
+          inside a record mutates a surface you cannot see</b> — and a bare
+          printable still edits the hidden query underneath.</p>
+      </div>
+
+      <div class="finding">
+        <h3><span class="kind inco">incoherence</span> Three buttons, three grammars</h3>
+        <p>Detail swaps its label. Scans grows a dot. Expiring shows nothing at
+          all and delegates its state to a chip in another row. One row, three
+          conventions — and the word itself changes between
+          <code>Expiry</code> (button), <code>expiring</code> (hint and chip) and
+          <code>:expiring</code> (the planned command).</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What this implies</h2>
+    <div class="verdict">
+      <p>Three of these are unconditional fixes whatever shape the chrome ends up
+        in: <b>hints must degrade item by item</b> rather than vanishing whole,
+        the <b>Find chrome must go inert</b> while a record covers the list, and
+        the <b>keyboard layout must teach every verb it has</b> — starting with
+        the underline its query row is currently missing.</p>
+      <p>The rest are structural, and they point the same way: a toggle should be
+        <b>one object</b> that both shows its state and accepts a press, and a bar
+        cell should exist only for a verb a thumb has no other route to. Six
+        directions built on that reading are in the companion page.</p>
+      <p>The one finding no direction resolves on its own: <b>Esc still has no
+        thumb</b>. Whatever ships, that needs an answer.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/verbs.py</span>
+    <span>inventory read from the source; specimens checked against the binary</span>
+  </footer>
+</div>
