@@ -272,3 +272,33 @@ Two things worth keeping in mind when building it:
   because `«class|text»` does not nest; `grid`-style pages now need a combined
   `uldim` class for this. **That constraint is the generator's, not the
   terminal's** — do not let it shape the design.
+
+### The entry line
+
+`minibuffer.py` → **The Minibuffer** — read against Emacs and Vim, which both
+answer the same question the same way: **one line at the bottom that becomes
+whatever is being asked**, with a prompt that names the question, and no box.
+
+Four properties worth taking:
+
+- **The prompt names the question.** `Find file:`, `M-x`, `:` — never a bare
+  marker. Our `>` says nothing, which is exactly why the field needs a
+  placeholder telling you to type; name the prompt and the invitation is
+  redundant.
+- **The prompt is the mode.** Vim's `:` / `/` / `?` are three prompts on one
+  line. Find, command mode and picking-inside-the-sheet are three questions that
+  already share our row.
+- **It is also the echo area.** One place for what you type and what the program
+  says. Our second row already carries flashes; that would become its identity.
+- **Candidates go above it** (Vertico), which the leader sheet already does.
+
+The one that does not transfer: **no box.** Our underline is the settled
+*typable* texture and the visible boundary of the tap target that raises the
+keyboard. Emacs never had a thumb to design for. Keep the box on touch; dropping
+it is only defensible on the desktop layout.
+
+Proposed: name the prompt, fold the match count in beside the input (Vertico's
+move, freeing row two), and let the prompt change with the question. The prize
+is that **command mode arrives for free** — when `:` lands there is nowhere new
+to put it. Costs four typable columns. **Wording is the user's call**: `Find:`,
+`Search:` or `Filter:`, with or without the colon.

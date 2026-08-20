@@ -1,0 +1,279 @@
+<title>The Minibuffer</title>
+<style>
+/*CSS*/
+
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.uline, .uldim {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+.uldim { color: var(--term-dim); }
+.term.mono .acc, .term.mono .exp, .term.mono .soon,
+.term.mono .ok, .term.mono .warn { color: var(--term-fg); }
+
+.lessons { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem 2rem; margin: 1.5rem 0 0; }
+.lesson { border-top: 2px solid var(--accent); padding-top: .65rem; }
+.lesson h3 { font-family: var(--mono); font-size: .82rem; margin: 0 0 .45rem; }
+.lesson p { margin: 0; font-size: .88rem; color: var(--muted); max-width: 42ch; }
+.lesson p + p { margin-top: .5rem; }
+.lesson p b { color: var(--ink); font-weight: 600; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2.2rem 2rem; margin: 1.5rem 0 0; }
+.opt { display: flex; flex-direction: column; gap: .55rem; min-width: 0; }
+.opt h3 { display: flex; align-items: baseline; gap: .55rem; flex-wrap: wrap; margin: 0; font-size: .93rem; }
+.opt h3 .letter { font-size: .68rem; letter-spacing: .12em; color: var(--accent); background: var(--accent-soft); padding: .12rem .4rem; border-radius: 2px; }
+.opt h3 .flag { font-family: var(--sans); font-size: .68rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--term-sel-fg); background: var(--accent); padding: .1rem .45rem; border-radius: 2px; }
+.opt h3 .no { font-family: var(--sans); font-size: .68rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--term-exp); border: 1px solid var(--term-exp); padding: .06rem .4rem; border-radius: 2px; }
+.opt p { margin: 0; font-size: .89rem; color: var(--muted); max-width: 46ch; }
+.opt p + p { margin-top: .45rem; }
+.opt p b { color: var(--ink); font-weight: 600; }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.4rem 0 0; align-items: flex-start; }
+.kv code { font-family: var(--mono); font-size: .84em; }
+.kv td.yes { color: var(--term-ok); }
+.kv td.no { color: var(--term-exp); }
+
+.verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.6rem 0 0; }
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .55rem; }
+
+.ask { border: 1px dashed var(--accent); border-radius: 3px; padding: .85rem 1.05rem; margin: 1.6rem 0 0; }
+.ask p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 66ch; }
+.ask p + p { margin-top: .5rem; }
+.ask p b { color: var(--accent); font-weight: 600; }
+
+.srcs { font-size: .82rem; color: var(--faint); margin-top: 2rem; }
+.srcs a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · the entry line</p>
+    <h1>The Minibuffer</h1>
+    <p class="standfirst">
+      Emacs does not have a search box. It has <b>one line at the bottom of the
+      frame that becomes whatever is being asked right now</b>, with a prompt
+      that names the question — and the same line is where the program talks
+      back. Vim's answer is the same shape: <code>:</code>, <code>/</code> and
+      <code>?</code> are prompts, and the prompt <em>is</em> the mode. Neither
+      draws a box.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Pane</b> 47 columns</span>
+    <span><b>Now</b> a generic <code>&gt;</code> and a full-width underline</span>
+    <span><b>Borrowed from</b> Emacs · Vertico · Vim</span>
+  </div>
+
+  <section>
+    <h2>What the minibuffer actually is</h2>
+    <div class="lessons">
+      <div class="lesson">
+        <h3>The prompt names the question</h3>
+        <p>Never a bare marker. <code>Find file:</code>, <code>M-x</code>,
+          <code>Switch to buffer (default main):</code> — the prompt is
+          read-only text inside the buffer, and it says what will happen to what
+          you type.</p>
+        <p><b>Here:</b> <code>&gt;</code> says nothing, which is precisely why
+          the field needs a placeholder telling you to type. Name the prompt and
+          the placeholder is redundant.</p>
+      </div>
+      <div class="lesson">
+        <h3>The prompt is the mode</h3>
+        <p>Vim's <code>:</code>, <code>/</code> and <code>?</code> are three
+          prompts on one line. You know what you are typing into by looking at
+          the first column, and nothing else has to be drawn.</p>
+        <p><b>Here:</b> find, command and picking-in-the-sheet are three
+          questions that already share a row. The prompt can carry which.</p>
+      </div>
+      <div class="lesson">
+        <h3>It is also the echo area</h3>
+        <p>When nothing is being asked, that same line is where Emacs says
+          things. One place for "what I am telling you" and "what you are
+          telling me", never two.</p>
+        <p><b>Here:</b> the row under the field already carries flashes and
+          <code>esc again to quit</code>. Emacs would call that its identity
+          rather than an interruption.</p>
+      </div>
+      <div class="lesson">
+        <h3>Candidates go above it</h3>
+        <p>Classic Emacs opens a <code>*Completions*</code> window; Vertico
+          draws a vertical list of up to ten candidates directly above the
+          prompt line, and moving the selection up to the prompt is how you keep
+          your literal input.</p>
+        <p><b>Here:</b> the leader sheet already sits above the entry line and
+          already filters as you type. That part is done.</p>
+      </div>
+      <div class="lesson">
+        <h3>No box, ever</h3>
+        <p>There is no border, no field, no underline. The prompt plus the
+          cursor is the whole affordance — because a keyboard user is already
+          looking at the cursor.</p>
+        <p><b>Here:</b> the underline is not decoration, it is the
+          <em>typable</em> texture and the touch target's boundary. Emacs never
+          had a thumb to design for.</p>
+      </div>
+      <div class="lesson">
+        <h3>The count rides along</h3>
+        <p>Vertico and Icomplete put the match count next to the input, not on a
+          line of its own — the number belongs to what you just typed.</p>
+        <p><b>Here:</b> the count is on the row below, which is a row that could
+          be doing something else.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Where it is now</h2>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:now--></pre></div>
+        <figcaption>
+          <span class="size">47×24 · as built</span>
+          <span class="how">The placeholder exists to compensate for the prompt.
+            <code>&gt;</code> is a marker, not a question.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:now-typed--></pre></div>
+        <figcaption>
+          <span class="size">typed</span>
+          <span class="how">And once you type, the row says nothing at all about
+            what it is for.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Four ways to make it a minibuffer</h2>
+    <div class="grid">
+      <div class="opt">
+        <h3><span class="letter">A</span> Name the prompt <span class="flag">recommended</span></h3>
+        <div class="term phone"><pre><!--S:named--></pre></div>
+        <div class="term phone"><pre><!--S:named-typed--></pre></div>
+        <p><code>Find:</code> instead of <code>&gt;</code>. Six columns, and it
+          replaces fourteen: <b>the invitation is redundant the moment the prompt
+          says what it is</b>, so the row gets shorter and clearer at once.</p>
+        <p>It still reads as a question once you have typed, which
+          <code>&gt; coc</code> does not. And it leaves room for the signpost
+          that finishes on the chip.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">B</span> Drop the box <span class="no">not on a phone</span></h3>
+        <div class="term phone"><pre><!--S:bare--></pre></div>
+        <p>Pure Emacs: prompt, cursor, nothing else. On a keyboard this is
+          right — the underline is telling a keyboard user something they can
+          already see.</p>
+        <p>On touch it costs two things at once. The underline is the settled
+          <em>typable</em> texture, and it is the visible boundary of the tap
+          target that raises the keyboard. <b>Emacs never had a thumb to design
+          for.</b> Worth taking on the desktop layout alone, if anywhere.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">C</span> Fold the count in <span class="flag">recommended</span></h3>
+        <div class="term phone"><pre><!--S:counted--></pre></div>
+        <div class="term phone"><pre><!--S:counted-echo--></pre></div>
+        <p>Vertico's move: <code>4/24</code> belongs beside what you typed,
+          because it is the answer to it. That leaves the row below carrying
+          only hints — <b>and makes it honestly an echo area</b>, whose default
+          content happens to be a hint line.</p>
+        <p>The second specimen is the same row saying something. Nothing had to
+          be displaced to make room, because saying things is now what the row is
+          for.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">D</span> The prompt carries the question</h3>
+        <div class="term phone"><pre><!--S:command--></pre></div>
+        <div class="term phone"><pre><!--S:picking--></pre></div>
+        <p>Vim's <code>:</code> for a command; the sheet's breadcrumb as the
+          prompt when you are picking inside it. <b>One line, three questions,
+          and the first column tells you which</b> — so command mode needs no new
+          chrome when it lands, and the picker stops being a special case.</p>
+        <p>Note the chip goes when the question is not "find": there is nothing
+          to open a sheet <em>from</em> inside a sheet, and a command line is
+          typed, not tapped.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What that costs</h2>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th></th><th>Now</th><th>A + C + D</th></tr>
+        <tr>
+          <td class="k">field width</td>
+          <td>37 typable columns</td>
+          <td class="no">33 — the prompt costs four more than <code>&gt;</code></td>
+        </tr>
+        <tr>
+          <td class="k">the empty row</td>
+          <td><code>&gt; █ Type to search   For more, hit</code></td>
+          <td class="yes"><code>Find: █          For more, hit</code> — one
+            sentence instead of two, and the one that survives is the one the
+            prompt cannot say</td>
+        </tr>
+        <tr>
+          <td class="k">the typed row</td>
+          <td>says nothing about itself</td>
+          <td class="yes">still a question, and now answers itself with the
+            count</td>
+        </tr>
+        <tr>
+          <td class="k">row two</td>
+          <td>count, chips, hints — three jobs</td>
+          <td class="yes">chips and hints, and messages without displacing
+            anything</td>
+        </tr>
+        <tr>
+          <td class="k">command mode</td>
+          <td>needs a decision later</td>
+          <td class="yes">already has one: it is the same line with
+            <code>:</code></td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>A + C + D.</b> Name the prompt, fold the count in beside what you
+        typed, and let the prompt change with the question. Keep the underline
+        on touch — that is the one place Emacs's answer does not transfer, and
+        it is not a close call: the box is the tap target.</p>
+      <p>The prize is not tidiness. It is that <b>command mode arrives for
+        free</b>: when <code>:</code> lands there is nowhere new to put it, and
+        the sheet's picker stops being a special-cased row and becomes the same
+        entry line with a different prompt.</p>
+    </div>
+
+    <div class="ask">
+      <p><b>Your call on the word.</b> <code>Find:</code> is what Emacs would
+        write and what §1 calls the surface. <code>Search:</code> is more
+        literal about what typing does. <code>Filter:</code> is the most
+        accurate — the list is already there and typing narrows it — but it is
+        the least like an invitation.</p>
+      <p>And whether it keeps a colon. <code>Find:</code> reads as a prompt;
+        <code>Find</code> reads as a label; <code>&gt;</code> stays available as
+        a second glyph if you want the prompt to be short on the desktop, where
+        the hint line is already teaching every verb.</p>
+    </div>
+
+    <p class="srcs">Checked against
+      <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Text-from-Minibuffer.html">the Emacs Lisp manual on reading from the minibuffer</a>
+      and <a href="https://github.com/minad/vertico">Vertico</a>.</p>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/minibuffer.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>
