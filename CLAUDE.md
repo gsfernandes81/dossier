@@ -37,6 +37,11 @@ Markdown files. Full design in **`DESIGN.md`** — **read it before writing feat
 Python 3.11+, mostly synchronous; the TUI layer (Textual) is async. Data is flat
 Markdown + YAML files (one per document) plus a couple of TOML files; there is no database.
 
+> **Picking up the Rust port?** Start at
+> [`docs/dev/state-of-the-port.md`](docs/dev/state-of-the-port.md) — where the port
+> stands, what the phone measurably *is*, what is settled versus open, and the
+> traps already paid for. It is an index to the specs, not a replacement for them.
+>
 > **Working *on* dossier?** [`docs/dev/`](docs/dev/) is the "why is it like this" context —
 > project constraints and performance decisions that must not be undone
 > ([project-context.md](docs/dev/project-context.md)), how to verify CI honestly
