@@ -1,0 +1,927 @@
+<title>The Leader Key</title>
+<style>
+/* dossier v3 — R-UI mockups.
+   The page is a technical datasheet: monospace carries the headings because the
+   subject is a terminal; prose sits in a quiet sans beneath it. Terminal panes
+   follow the viewer's theme, which is the point REWRITE-UI §6 makes — semantic
+   tokens map to ANSI, so the user's own terminal theme carries the palette. */
+
+:root {
+  --ground: #eef1f3;
+  --surface: #ffffff;
+  --ink: #161a1e;
+  --muted: #5d6b77;
+  --faint: #8b98a3;
+  --rule: #d5dbe0;
+  --accent: #12676a;
+  --accent-soft: #d9eaea;
+
+  --term-bg: #fbfbfa;
+  --term-fg: #24292e;
+  --term-dim: #7b8792;
+  --term-sel-bg: #24292e;
+  --term-sel-fg: #fbfbfa;
+  --term-exp: #b83c26;
+  --term-soon: #8a6410;
+  --term-ok: #3a7346;
+  --term-acc: #12676a;
+  --term-btn: #4d5a65;
+
+  --shadow: 0 1px 2px rgba(20, 30, 40, .06), 0 8px 24px -12px rgba(20, 30, 40, .18);
+
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
+    "Roboto Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1418;
+    --surface: #161c22;
+    --ink: #e3e8ec;
+    --muted: #8a98a4;
+    --faint: #6b7883;
+    --rule: #222b33;
+    --accent: #5fb6b9;
+    --accent-soft: #14343a;
+
+    --term-bg: #0b0f13;
+    --term-fg: #d5dde3;
+    --term-dim: #74828d;
+    --term-sel-bg: #d5dde3;
+    --term-sel-fg: #0b0f13;
+    --term-exp: #f0795d;
+    --term-soon: #dda845;
+    --term-ok: #71b77e;
+    --term-acc: #5fb6b9;
+    --term-btn: #93a1ad;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0f1418;
+  --surface: #161c22;
+  --ink: #e3e8ec;
+  --muted: #8a98a4;
+  --faint: #6b7883;
+  --rule: #222b33;
+  --accent: #5fb6b9;
+  --accent-soft: #14343a;
+
+  --term-bg: #0b0f13;
+  --term-fg: #d5dde3;
+  --term-dim: #74828d;
+  --term-sel-bg: #d5dde3;
+  --term-sel-fg: #0b0f13;
+  --term-exp: #f0795d;
+  --term-soon: #dda845;
+  --term-ok: #71b77e;
+  --term-acc: #5fb6b9;
+  --term-btn: #93a1ad;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(2rem, 5vw, 4.5rem) clamp(1rem, 4vw, 2.5rem) 6rem;
+}
+
+/* ── masthead ─────────────────────────────────────────────────────────── */
+.masthead { display: flex; flex-direction: column; gap: .75rem; margin-bottom: 1rem; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: .74rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+h1 {
+  font-family: var(--mono);
+  font-size: clamp(1.7rem, 4.2vw, 2.6rem);
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.standfirst {
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+  margin: 0;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.25rem;
+  font-family: var(--mono);
+  font-size: .76rem;
+  color: var(--faint);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: .7rem 0;
+  margin: 1.5rem 0 3rem;
+}
+.meta b { color: var(--muted); font-weight: 500; }
+
+/* ── sections ─────────────────────────────────────────────────────────── */
+section { margin: 0 0 4.5rem; }
+
+h2 {
+  font-family: var(--mono);
+  font-size: 1.18rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  margin: 0 0 .4rem;
+  display: flex;
+  align-items: baseline;
+  gap: .7rem;
+  flex-wrap: wrap;
+}
+h2 .tag {
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .18rem .5rem;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+h3 {
+  font-family: var(--mono);
+  font-size: .82rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  margin: 0 0 .15rem;
+}
+
+p { max-width: 66ch; margin: 0 0 1rem; }
+p.lede { color: var(--muted); margin-bottom: 1.8rem; }
+
+/* ── terminal specimens ───────────────────────────────────────────────── */
+.specimens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.75rem;
+  align-items: flex-start;
+  margin: 1.5rem 0 0;
+}
+
+figure { margin: 0; display: flex; flex-direction: column; gap: .55rem; min-width: 0; }
+
+figcaption { display: flex; flex-direction: column; gap: .1rem; }
+figcaption .size {
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--faint);
+}
+figcaption .how { font-size: .84rem; color: var(--muted); max-width: 46ch; }
+
+.term {
+  background: var(--term-bg);
+  color: var(--term-fg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  padding: .55rem .6rem;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.term pre {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.34;
+  white-space: pre;
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums;
+  tab-size: 1;
+}
+
+/* the phone pane sits at its true 45-column width */
+.term.phone pre { font-size: 12px; }
+@media (max-width: 620px) { .term pre { font-size: 10.5px; } }
+
+/* terminal semantic tokens — every colour is paired with a glyph, so the
+   monochrome reading survives (REWRITE-UI §6) */
+.hd  { font-weight: 700; }
+.dim { color: var(--term-dim); }
+.exp { color: var(--term-exp); font-weight: 600; }
+.soon { color: var(--term-soon); font-weight: 600; }
+.ok  { color: var(--term-ok); }
+.none { color: var(--term-dim); }
+.acc { color: var(--term-acc); }
+.warn { color: var(--term-exp); font-weight: 600; }
+.btn { color: var(--term-btn); }
+.sel { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.seldim { background: var(--term-sel-bg); color: var(--term-sel-fg); opacity: .72; }
+
+/* ── notes ────────────────────────────────────────────────────────────── */
+.notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.1rem 2rem;
+  margin: 2rem 0 0;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+}
+.note { display: flex; gap: .7rem; align-items: flex-start; }
+.note .k {
+  font-family: var(--mono);
+  font-size: .7rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: .12rem .38rem;
+  border-radius: 2px;
+  white-space: nowrap;
+  margin-top: .18rem;
+}
+.note p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 44ch; }
+.note p b { color: var(--ink); font-weight: 600; }
+
+/* ── key/value table ──────────────────────────────────────────────────── */
+.kv { width: 100%; border-collapse: collapse; margin: 1.25rem 0 0; font-size: .9rem; }
+.kv th, .kv td { text-align: left; padding: .55rem .8rem .55rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.kv th { font-family: var(--mono); font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.kv td.k { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+.kv td { color: var(--muted); }
+.kv td b { color: var(--ink); font-weight: 600; }
+.scroller { overflow-x: auto; }
+
+footer {
+  border-top: 1px solid var(--rule);
+  padding-top: 1.4rem;
+  margin-top: 1rem;
+  font-family: var(--mono);
+  font-size: .74rem;
+  color: var(--faint);
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem 1.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .term { transition: box-shadow .2s ease; }
+}
+
+/* ── interaction diagrams (page 3) ────────────────────────────────────── */
+.kbd {
+  font-family: var(--mono);
+  font-size: .78rem;
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: .1rem .42rem;
+  background: var(--surface);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.chain { display: flex; flex-direction: column; gap: 0; margin: 1.5rem 0 0; }
+.chain .layer {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 1rem;
+  align-items: baseline;
+  padding: .7rem 0 .7rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.chain .layer:first-child { border-top: 1px solid var(--rule); }
+.chain .layer .what { font-family: var(--mono); font-size: .82rem; color: var(--ink); }
+.chain .layer .then { font-size: .9rem; color: var(--muted); }
+.chain .layer.arm .what { color: var(--term-soon); }
+.chain .layer.quit .what { color: var(--term-exp); }
+
+.seq { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1.4rem; margin: 1.5rem 0 0; counter-reset: step; }
+.seq > div { border-top: 2px solid var(--accent); padding-top: .7rem; }
+.seq > div::before {
+  counter-increment: step;
+  content: counter(step);
+  display: block;
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--accent);
+  margin-bottom: .3rem;
+}
+.seq h4 { font-family: var(--mono); font-size: .84rem; margin: 0 0 .3rem; font-weight: 600; }
+.seq p { font-size: .88rem; color: var(--muted); margin: 0; max-width: none; }
+
+.swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin: 1.4rem 0 0; }
+.swatch { display: flex; gap: .6rem; align-items: baseline; }
+.swatch .g {
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  width: 1.4rem;
+  text-align: center;
+  flex: none;
+}
+.swatch .t { font-size: .86rem; color: var(--muted); }
+.swatch .t b { color: var(--ink); font-weight: 600; display: block; font-family: var(--mono); font-size: .8rem; }
+
+
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.uline {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+.term.mono .acc, .term.mono .exp, .term.mono .soon,
+.term.mono .ok, .term.mono .warn { color: var(--term-fg); }
+
+.lessons { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.6rem 2rem; margin: 1.6rem 0 0; }
+.lesson { border-top: 2px solid var(--accent); padding-top: .7rem; }
+.lesson h3 { font-family: var(--mono); font-size: .84rem; margin: 0 0 .1rem; }
+.lesson .src { font-family: var(--mono); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); display: block; margin-bottom: .5rem; }
+.lesson p { margin: 0 0 .6rem; font-size: .89rem; color: var(--muted); max-width: 42ch; }
+.lesson .take { font-size: .89rem; color: var(--ink); border-left: 2px solid var(--rule); padding-left: .7rem; margin: 0; }
+.lesson .take b { color: var(--accent); font-weight: 600; }
+
+.options { display: flex; flex-direction: column; gap: 3rem; margin: 1.5rem 0 0; }
+.option { display: grid; grid-template-columns: minmax(280px, 400px) minmax(260px, 1fr); gap: 1rem 2.5rem; align-items: start; }
+@media (max-width: 780px) { .option { grid-template-columns: 1fr; } }
+.option .spec { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+.option h3 { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin: 0 0 .35rem; font-size: .95rem; }
+.option h3 .letter { font-size: .68rem; letter-spacing: .12em; color: var(--accent); background: var(--accent-soft); padding: .12rem .4rem; border-radius: 2px; }
+.option h3 .flag { font-family: var(--sans); font-size: .7rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--term-sel-fg); background: var(--accent); padding: .1rem .45rem; border-radius: 2px; }
+.option h3 .no { font-family: var(--sans); font-size: .7rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--term-exp); border: 1px solid var(--term-exp); padding: .06rem .4rem; border-radius: 2px; }
+.option p { font-size: .92rem; color: var(--muted); margin: 0 0 .7rem; max-width: 54ch; }
+.option p b { color: var(--ink); font-weight: 600; }
+.option .thesis { color: var(--ink); font-size: .98rem; }
+.option .cost { font-family: var(--mono); font-size: .73rem; color: var(--faint); border-top: 1px solid var(--rule); padding-top: .5rem; }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.4rem 0 0; align-items: flex-start; }
+
+.kv td.k2 { font-family: var(--mono); color: var(--ink); white-space: nowrap; }
+.kv td.free { color: var(--term-ok); }
+.kv td.taken { color: var(--term-exp); }
+.kv code { font-family: var(--mono); font-size: .84em; }
+
+.tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1.3rem 2rem; margin: 1.5rem 0 0; }
+.tiers > div { background: var(--surface); border: 1px solid var(--rule); border-radius: 3px; padding: .9rem 1rem; }
+.tiers h4 { font-family: var(--mono); font-size: .8rem; margin: 0 0 .1rem; }
+.tiers .rule { font-size: .8rem; color: var(--faint); display: block; margin-bottom: .6rem; }
+.tiers ul { margin: 0; padding-left: 1.1rem; }
+.tiers li { font-size: .87rem; color: var(--muted); margin-bottom: .2rem; }
+.tiers li code { font-family: var(--mono); font-size: .82rem; color: var(--ink); }
+
+.verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.8rem 0 0; }
+.verdict p { margin: 0; max-width: 64ch; }
+.verdict p + p { margin-top: .6rem; }
+
+.caveat { border: 1px dashed var(--term-exp); border-radius: 3px; padding: .8rem 1rem; margin: 1.6rem 0 0; }
+.caveat p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 68ch; }
+.caveat p + p { margin-top: .5rem; }
+.caveat p b { color: var(--term-exp); font-weight: 600; }
+
+.srcs { font-size: .82rem; color: var(--faint); margin-top: 2rem; }
+.srcs a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · where the verbs live</p>
+    <h1>The Leader Key</h1>
+    <p class="standfirst">
+      Find binds no letters — every printable character is search text, and that
+      is the point of the surface. So as the verb set grows there is nowhere
+      obvious to put it. Three editors solved exactly this problem on exactly
+      this constraint, and the answer they converged on is not more keys: it is
+      <b>one prefix, a panel that teaches, and a command line for the long
+      tail</b>.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Surface</b> Find, and later Detail</span>
+    <span><b>Pane</b> 47×45 browsing · 47×24 typing</span>
+    <span><b>Borrowed from</b> Spacemacs · Emacs/Magit · Neovim</span>
+    <span><b>Rule</b> not every verb needs a key</span>
+  </div>
+
+  <section>
+    <h2>What they teach</h2>
+    <p class="lede">
+      Six mechanisms worth stealing, and what each becomes here.
+    </p>
+    <div class="lessons">
+      <div class="lesson">
+        <h3>The leader, and mnemonic groups</h3>
+        <span class="src">Spacemacs · Neovim convention</span>
+        <p>Every binding hangs off <code>SPC</code>, grouped by noun —
+          <code>SPC f</code> is files, <code>SPC b</code> buffers,
+          <code>SPC p</code> projects. Nothing competes with typing because the
+          leader only means "leader" when you are not typing.</p>
+        <p class="take"><b>Here:</b> one prefix, groups named after the things
+          dossier has — filter, shelf, bundle, review, export.</p>
+      </div>
+
+      <div class="lesson">
+        <h3>which-key — the panel that teaches</h3>
+        <span class="src">Spacemacs · which-key.nvim</span>
+        <p>Press the leader, pause, and a panel lists what the next key can be.
+          You never memorise; you read. Fast users beat the delay and never see
+          it at all.</p>
+        <p class="take"><b>Here:</b> the single most valuable import. It means
+          new verbs cost <em>nothing</em> in memorised keys, and on a phone —
+          where nobody has muscle memory — the panel is the interface.</p>
+      </div>
+
+      <div class="lesson">
+        <h3>Transients — a menu that holds state</h3>
+        <span class="src">Magit · transient.el</span>
+        <p>A popup of a prefix, its <em>infixes</em> (toggleable arguments, drawn
+          as checkboxes that persist) and its suffixes (the actions). Temporary
+          chrome that vanishes when you are done.</p>
+        <p class="take"><b>Here:</b> our filters are infixes, not verbs. A
+          checkbox shows on <em>and</em> off — which is the exact problem a
+          status chip cannot solve, because a chip only exists once the filter
+          is on.</p>
+      </div>
+
+      <div class="lesson">
+        <h3>M-x, and <code>:</code></h3>
+        <span class="src">Emacs · Vim</span>
+        <p>The long tail has no key at all. It has a name, and the name is
+          searchable. Nobody binds "sort by expiry ascending"; they type enough
+          of it.</p>
+        <p class="take"><b>Here:</b> confirms the instinct — rare verbs are
+          commands. The important part is that the command list is
+          <em>fuzzy-searchable</em>, or it is a manual, not an interface.</p>
+      </div>
+
+      <div class="lesson">
+        <h3>One picker, reused everywhere</h3>
+        <span class="src">Telescope · Vertico · Helm</span>
+        <p>Files, buffers, symbols, git branches, commands — all the same
+          widget: a filter line, a list, Enter runs it. Learn it once, use it
+          for everything.</p>
+        <p class="take"><b>Here:</b> Find <em>is</em> that widget already. The
+          command list should be the same rows with the same matcher, not a new
+          kind of thing.</p>
+      </div>
+
+      <div class="lesson">
+        <h3>Modes — and what they cost</h3>
+        <span class="src">Vim · Helix</span>
+        <p>Modes free the whole alphabet. They also demand a permanent mode
+          indicator, an escape discipline, and a user who knows which mode they
+          are in before they touch anything.</p>
+        <p class="take"><b>Here:</b> rejected — <code>Esc</code> is already the
+          peel, and "type to search" stops being true the moment there is a mode
+          where it isn't.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What is actually free</h2>
+    <p class="lede">
+      The reason a leader is even possible: a query never usefully begins with a
+      space, so <code>Space</code> on an <b>empty</b> query is unclaimed. Mid-query
+      it types a space, exactly as it does now.
+    </p>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Key</th><th>Empty query</th><th>Mid-query</th></tr>
+        <tr><td class="k2">Space</td><td class="free"><b>free — a leading space means nothing</b></td><td class="taken">types a space (multi-word queries)</td></tr>
+        <tr><td class="k2">:</td><td class="free">free — already the planned command line</td><td class="taken">types a colon</td></tr>
+        <tr><td class="k2">?</td><td class="free">free — help</td><td class="taken">types a question mark</td></tr>
+        <tr><td class="k2">a–z</td><td class="taken">types</td><td class="taken">types</td></tr>
+        <tr><td class="k2">ctrl+letter</td><td class="free">free, but needs the soft keyboard up on a phone</td><td class="free">same</td></tr>
+        <tr><td class="k2">ctrl/alt + arrows</td><td class="free">free, thumb-reachable, undiscoverable</td><td class="free">same</td></tr>
+      </table>
+    </div>
+    <p style="margin-top:1.2rem">That "empty query" condition is the whole trick,
+      and it is the same one Spacemacs uses — <code>SPC</code> is a leader in
+      normal mode and a space in insert mode. We get the same split without
+      modes, because <b>the query itself is the mode</b>: empty means you are not
+      typing yet.</p>
+  </section>
+
+  <section>
+    <h2>Five ways to do it</h2>
+
+    <div class="options">
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre> <span class="hd">dossier</span>                    <span class="dim">21 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)             ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                       </span>
+  COC Certificate 2019                   <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                       
+  COC Endorsement — Panama             <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                      
+  COC Application Receipt                <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                          
+  Seaman&#x27;s Book                          <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                       
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+ <span class="dim">─────────────────────────────────────────────</span> 
+ <span class="acc">SPC</span>                            <span class="dim">type to search</span> 
+ <span class="acc">f</span> filter        <span class="acc">g</span> go to         <span class="acc">r</span> review      
+ <span class="acc">s</span> shelf         <span class="acc">b</span> bundle        <span class="acc">e</span> export      
+ <span class="acc">:</span> command       <span class="acc">?</span> help          <span class="acc">q</span> quit        
+<span class="acc"> &gt;</span><span class="uline"> █                                       </span><span class="chip"> ⌨ </span> 
+ 21/21                              <span class="dim">esc closes</span> </pre></div>
+          <span class="cost">costs 0 permanent rows · 5 rows while open</span>
+        </div>
+        <div>
+          <h3><span class="letter">A</span> Leader sheet <span class="flag">recommended base</span></h3>
+          <p class="thesis"><code>Space</code> on an empty query raises a
+            which-key panel over the bottom of the list. Esc closes it.</p>
+          <p>Groups are nouns, not verbs, so the sheet stays the same size as the
+            app grows — new things go <em>inside</em> a group. Nothing is
+            memorised on first use and nothing is memorised on the hundredth
+            either, because the sheet is always one key away.</p>
+          <p>On a keyboard it appears after a short delay, so
+            <code>SPC f x</code> typed quickly never flashes a panel. On touch it
+            appears at once: there is no muscle memory to preserve and the panel
+            <em>is</em> the affordance.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre> <span class="hd">dossier</span>                    <span class="dim">21 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)             ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                       </span>
+  COC Certificate 2019                   <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                       
+  COC Endorsement — Panama             <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                      
+  COC Application Receipt                <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                          
+  Seaman&#x27;s Book                          <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                       
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+ <span class="dim">─────────────────────────────────────────────</span> 
+ <span class="acc">SPC f</span>                                  <span class="dim">filter</span> 
+ <span class="chip"> ✓ </span>  expiring only                         <span class="dim">^x</span> 
+ <span class="chip">   </span>  search scan text                      <span class="dim">^t</span> 
+ <span class="acc">s</span> shelf…        <span class="acc">t</span> tag…          <span class="acc">c</span> clear       
+<span class="acc"> &gt;</span><span class="uline"> █                                       </span><span class="chip"> ⌨ </span> 
+ 21/21                              <span class="dim">esc closes</span> </pre></div>
+          <span class="cost">the same 5 rows, one level down</span>
+        </div>
+        <div>
+          <h3><span class="letter">B</span> Transient toggles inside it <span class="flag">recommended</span></h3>
+          <p class="thesis">A group whose contents are <em>state</em>, drawn as
+            checkboxes — magit's infixes, exactly.</p>
+          <p>This is the piece that earns its keep beyond discoverability.
+            <b>A checkbox shows off as well as on</b>, so the filter has a visible
+            way in <em>and</em> out. The status chip in the truth row could never
+            do that — it does not exist until the filter is already on.</p>
+          <p>It also gives the keyboard shortcut a home that teaches it:
+            <code>^x</code> sits beside the row it fires, so the sheet is where
+            you learn the accelerator you will later use instead of the sheet.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre> <span class="hd">dossier</span>                    <span class="dim">21 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)             ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                       </span>
+  COC Certificate 2019                   <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                       
+  COC Endorsement — Panama             <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                      
+  COC Application Receipt                <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                          
+  Seaman&#x27;s Book                          <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                       
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+ <span class="dim">─────────────────────────────────────────────</span> 
+ <span class="acc">SPC exp</span>                            <span class="dim">3 commands</span> 
+<span class="sel">  expiring only                        SPC f x </span>
+  export csv                           <span class="dim">SPC e c</span> 
+  export markdown                      <span class="dim">SPC e m</span> 
+<span class="acc"> &gt;</span><span class="uline"> █                                       </span><span class="chip"> ⌨ </span> 
+ 21/21                               <span class="dim">⏎ runs it</span> </pre></div>
+          <span class="cost">no new widget — the list, reused</span>
+        </div>
+        <div>
+          <h3><span class="letter">C</span> Type in the sheet and it becomes a picker <span class="flag">recommended</span></h3>
+          <p class="thesis">Don't know the group? Type. The sheet filters to
+            matching commands and shows the chord that would have got you there.</p>
+          <p>This is Telescope and <code>M-x</code> folded into the same object,
+            and it removes the usual leader complaint — that you must know the
+            tree to use it. <b>You either know the chord or you know the word.</b></p>
+          <p>It costs nothing new to build: the same rows, the same fuzzy
+            matcher, the same Enter. And every result teaches its own shortcut,
+            which is how a user graduates from searching to typing
+            <code>SPC f x</code>.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre> <span class="hd">dossier</span>                    <span class="dim">21 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)             ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                       </span>
+  COC Certificate 2019                   <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                       
+  COC Endorsement — Panama             <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                      
+  COC Application Receipt                <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                          
+  Seaman&#x27;s Book                          <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                       
+  Passport                               <span class="ok">11-31</span> 
+<span class="dim">    wallet-doc 2 · identity</span>                    
+                                               
+                                               
+                                               
+                                               
+                                               
+ <span class="dim">─────────────────────────────────────────────</span> 
+ <span class="dim">:expiring</span>        show only what is expiring   
+ <span class="dim">:export csv</span>      write a spreadsheet          
+ <span class="dim">:expired</span>         show what has already lapsed 
+<span class="acc"> :</span><span class="uline"> exp█                                    </span><span class="chip"> ⌨ </span> 
+                           <span class="dim">⏎ runs  esc cancels</span> </pre></div>
+          <span class="cost">already in REWRITE-UI §8</span>
+        </div>
+        <div>
+          <h3><span class="letter">D</span> The command line alone</h3>
+          <p class="thesis"><code>:</code> with completion, and no leader at all —
+            the plan as it already stands.</p>
+          <p>Right for the long tail and wrong as the only route. <b>A command
+            line answers "what is this called", never "what can I do here"</b> —
+            you cannot browse it, so nothing is ever discovered, only recalled.</p>
+          <p>Keep it. It is the third tier, and it is where anything used less
+            than weekly should live. It is also the only tier that scales to a
+            hundred verbs without a single new key.</p>
+        </div>
+      </div>
+
+      <div class="option">
+        <div class="spec">
+          <div class="term phone"><pre> <span class="hd">dossier</span>  <span class="chip"> NORMAL </span>          <span class="dim">21 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)             ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                       </span>
+  COC Certificate 2019                   <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                       
+  COC Endorsement — Panama             <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                      
+  COC Application Receipt                <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                          
+  Seaman&#x27;s Book                          <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                       
+  Passport                               <span class="ok">11-31</span> 
+<span class="dim">    wallet-doc 2 · identity</span>                    
+  Yellow Fever Certificate               <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 4 · medical</span>                      
+  Medical Fitness (ILO)                <span class="soon">~ 10-26</span> 
+<span class="dim">    cert-file 5 · medical</span>                      
+                                               
+                                               
+                                               
+                                               
+                                               
+ <span class="dim">f filter  s shelf  e export  i find  : cmd   </span> 
+ 21/21                     <span class="dim">i types  esc normal</span> </pre></div>
+          <span class="cost">frees 26 keys · costs the premise</span>
+        </div>
+        <div>
+          <h3><span class="letter">E</span> Modal <span class="no">not recommended</span></h3>
+          <p class="thesis">Vim's answer: a normal mode where letters are verbs,
+            <code>i</code> to type, <code>Esc</code> back.</p>
+          <p>It buys the entire alphabet. It costs the thing the app is for:
+            <b>find-fast means you open it and type</b>, and a mode where typing
+            does something else breaks that on the very first keystroke.</p>
+          <p>It also puts a second job on <code>Esc</code>, which already peels
+            four layers and arms the quit, and it needs a permanent mode
+            indicator in a header that is carrying counts.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The same object on a record</h2>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre> <span class="hd">COC Certificate (Master)</span>                      
+                                               
+ <span class="dim">location</span>   cert-file 8                        
+ <span class="dim">expiry</span>     2026-09-28  <span class="exp">! expired 22d</span>          
+ <span class="dim">tags</span>       marine                             
+ <span class="dim">bundles</span>    us-visa · joining-2027             
+ <span class="dim">files</span>      2   <span class="acc">▸</span> coc-master.pdf <span class="dim">(primary)</span>     
+ <span class="dim">renews</span>     <span class="acc">COC Certificate 2019</span>               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+ <span class="dim">─────────────────────────────────────────────</span> 
+ <span class="acc">SPC</span>                  <span class="dim">COC Certificate (Master)</span> 
+ <span class="acc">s</span> supersede     <span class="acc">b</span> bundle        <span class="acc">o</span> open        
+ <span class="acc">r</span> rename        <span class="acc">t</span> tag           <span class="acc">u</span> undo        
+ <span class="acc">d</span> discard       <span class="acc">:</span> command       <span class="acc">?</span> help        
+<span class="acc"> &gt;</span><span class="uline"> █                                       </span><span class="chip"> ⌨ </span> 
+                                    <span class="dim">esc closes</span> </pre></div>
+        <figcaption>
+          <span class="size">47×24 · SPC over an open record</span>
+          <span class="how">The sheet is contextual: on a record it offers what
+            you can do to that record. One mechanism, two surfaces — which is
+            what stops R4 from needing a touch bar of its own.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre> <span class="hd">dossier</span>                    <span class="dim">21 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)             ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                       </span>
+  COC Certificate 2019                   <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                       
+  COC Endorsement — Panama             <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                      
+  COC Application Receipt                <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                          
+  Seaman&#x27;s Book                          <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                       
+  Passport                               <span class="ok">11-31</span> 
+<span class="dim">    wallet-doc 2 · identity</span>                    
+  Yellow Fever Certificate               <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 4 · medical</span>                      
+  Medical Fitness (ILO)                <span class="soon">~ 10-26</span> 
+<span class="dim">    cert-file 5 · medical</span>                      
+  Basic Safety Training                  <span class="ok">02-30</span> 
+<span class="dim">    cert-file 6 · marine</span>                       
+  Ship Security Awareness                <span class="ok">02-30</span> 
+<span class="dim">    cert-file 7 · marine</span>                       
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+                                               
+ <span class="dim">─────────────────────────────────────────────</span> 
+ <span class="acc">SPC</span>                            <span class="dim">type to search</span> 
+ <span class="acc">f</span> filter        <span class="acc">g</span> go to         <span class="acc">r</span> review      
+ <span class="acc">s</span> shelf         <span class="acc">b</span> bundle        <span class="acc">e</span> export      
+ <span class="acc">:</span> command       <span class="acc">?</span> help          <span class="acc">q</span> quit        
+<span class="acc"> &gt;</span><span class="uline"> █                                       </span><span class="chip"> ⌨ </span> 
+ 21/21                              <span class="dim">esc closes</span> </pre></div>
+        <figcaption>
+          <span class="size">47×45 · the sheet at browsing height</span>
+          <span class="how">Five rows over twenty-one documents. It covers two
+            and a half of them while open, and nothing while closed.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Three tiers, and what goes where</h2>
+    <p class="lede">
+      The rule you named, made concrete: a key for what you do every time, a
+      leader chord for what you do sometimes, a command for the rest.
+    </p>
+    <div class="tiers">
+      <div>
+        <h4>A dedicated key</h4>
+        <span class="rule">used every session, muscle memory earns its place</span>
+        <ul>
+          <li><code>Enter</code> open</li>
+          <li><code>→ ←</code> record in, record out</li>
+          <li><code>↑ ↓</code> move</li>
+          <li><code>Esc</code> peel</li>
+          <li><code>^x</code> expiring</li>
+          <li><code>^t</code> scan text</li>
+        </ul>
+      </div>
+      <div>
+        <h4>A leader chord</h4>
+        <span class="rule">weekly, or needs its state shown</span>
+        <ul>
+          <li><code>SPC f</code> filters — a group of toggles</li>
+          <li><code>SPC s</code> shelf</li>
+          <li><code>SPC b</code> bundle</li>
+          <li><code>SPC r</code> review the unfiled</li>
+          <li><code>SPC e</code> export</li>
+          <li><code>SPC g</code> go to</li>
+        </ul>
+      </div>
+      <div>
+        <h4>A command only</h4>
+        <span class="rule">rarer than weekly, or dangerous enough to spell out</span>
+        <ul>
+          <li><code>:doctor</code></li>
+          <li><code>:reconcile</code></li>
+          <li><code>:export csv</code></li>
+          <li><code>:reset</code></li>
+          <li><code>:service install</code></li>
+          <li><code>:dedup</code></li>
+        </ul>
+      </div>
+    </div>
+    <p style="margin-top:1.4rem">Two things fall out of the table. <b>The chord
+      is a shortcut for a command, never a separate thing</b> — <code>SPC f x</code>
+      and <code>:expiring</code> run the same code, and the sheet shows the chord
+      beside the name so the two stay tied. And <b>a destructive verb should be
+      spelled, not chorded</b>: <code>:reset</code> is safer typed out than sat
+      one slip away from <code>SPC r</code>.</p>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>A + B + C — one sheet that teaches, holds state, and filters.</b>
+        <code>Space</code> on an empty query raises it; groups are nouns; filters
+        inside it are checkboxes rather than verbs; typing turns it into the
+        command picker, using the list widget Find already is. <code>:</code>
+        stays as the third tier for everything rarer.</p>
+      <p>It costs <b>no permanent rows</b>, which is the whole reason it beats a
+        bar — the argument that deleted the action bar deletes any replacement
+        for it too. And it is the same mechanism on Find and on a record, so R4
+        gets its verb surface for free rather than inventing one.</p>
+      <p>On touch, <code>Space</code> is not reachable with the keyboard down —
+        so the sheet needs a tap target too. The obvious one is the same header
+        count zone extended: tap the app name to open the sheet. That is one
+        more pressable thing than the current design has, and it replaces the
+        need for anything else ever being added to the bottom.</p>
+    </div>
+
+    <div class="caveat">
+      <p><b>Open, and worth deciding before it is built.</b> Does the sheet
+        appear <em>over</em> the list, or does the list shrink to make room? Over
+        is cheaper and matches every editor that does this; shrinking avoids
+        hiding the row you were looking at.</p>
+      <p>And what does <code>Space</code> do when the query is empty but a filter
+        is live — leader, or is that state "typing"? I would say leader: the
+        query is what decides, not the filters.</p>
+    </div>
+
+    <p class="srcs">Mechanisms checked against their own documentation:
+      <a href="https://www.spacemacs.org/doc/VIMUSERS.html">Spacemacs</a>,
+      <a href="https://github.com/liuchengxu/vim-which-key">vim-which-key</a>,
+      <a href="https://emacsair.me/2019/02/14/transient-0.1/">Transient</a>,
+      <a href="https://www.gnu.org/software/emacs/manual/html_mono/transient.html">the Transient manual</a>.</p>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/leader.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>

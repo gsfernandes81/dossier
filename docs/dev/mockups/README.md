@@ -174,3 +174,39 @@ argument: browsing, typing, a filter live, a record, the armed quit, the touch
 map, the three textures, the key row and the desk layout, every one drawn at
 the size the device reports. This is the page to compare the shipped binary
 against.
+
+## Where the verbs live (2026-08-20)
+
+`leader.py` → **The Leader Key** — five ways to give dossier a verb surface,
+read off Spacemacs, Magit and Neovim, which solved the same problem on the same
+constraint: a surface where the keyboard is already spoken for and the verb set
+keeps growing.
+
+The enabling fact: **a query never usefully begins with a space**, so `Space` on
+an *empty* query is free while mid-query it still types a space. That is
+Spacemacs' normal-vs-insert split without modes — the query is the mode.
+
+The recommendation is one object doing three jobs:
+
+- **A leader sheet** (which-key) over the bottom of the list, groups named after
+  nouns, delayed on a keyboard and immediate on touch. New verbs cost nothing in
+  memorised keys.
+- **Transient toggles inside it** (magit infixes) — filters drawn as checkboxes,
+  which is the only shape that shows *off* as well as on. A status chip cannot:
+  it does not exist until the filter is already on.
+- **Typing turns it into the command picker** (Telescope / `M-x`), reusing the
+  list widget Find already is, with each result showing the chord that would
+  have run it. You either know the chord or you know the word.
+
+`:` commands stay as the third tier. Three tiers, and the rule for sorting a
+verb into one: a key for every session, a chord for weekly or for anything whose
+state must be visible, a command for the rest — and for anything destructive,
+which is safer spelled than chorded. A chord is always a shortcut for a command,
+never a separate code path.
+
+Modal (vim-style) is drawn and rejected: it frees the alphabet and costs the
+premise, since find-fast means you open the app and type.
+
+Open before building: does the sheet cover the list or shrink it, and does
+`Space` still lead when the query is empty but a filter is live (I would say
+yes — the query decides, not the filters).
