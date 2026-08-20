@@ -124,28 +124,35 @@ impl Theme {
         }
     }
 
-    /// The band behind the query row: **the field is a lit strip, not a line
-    /// under one.**
+    /// The lit rule between the list and the entry line.
     ///
-    /// A terminal draws `SGR 4` wherever the font's underline metric says, and
-    /// on the phone that is through the descenders rather than below them —
-    /// nothing here can move it. Emacs marks an editable field the same way this
-    /// does: `widget-field` is a *background* face, not a rule.
+    /// **This is a status line, not a field marking.** It carries the count,
+    /// the live filters and the hints, and it sits directly above the row the
+    /// user types into — which is Vim's arrangement exactly: `StatusLine`
+    /// highlighted, `:` on the plain final line beneath it. The entry row keeps
+    /// the terminal's own background, so nothing is drawn behind the user's own
+    /// text and nothing has to fight it for contrast.
+    ///
+    /// It began as a marking *on* the field, which was worse in three ways at
+    /// once: dim placeholder text over a lit row is the least legible thing on
+    /// the screen, the band had to pin a foreground and so replaced the
+    /// terminal's own, and the list still ran into the chrome with no boundary.
+    /// Dividing is the job a band can do without fighting anything.
     ///
     /// **Both ends are pinned** — ANSI 8 behind, ANSI 15 in front (ratatui's
     /// `DarkGray` and `White` are SGR 100 and 97, the *bright* pair, which is
     /// worth stating because the names do not say so). Setting only a
     /// background would be a coin flip on polarity: ANSI 8 is a light grey on a
     /// dark theme and a near-black on a light one, so a background-only band is
-    /// unreadable on half of them. Naming the pair keeps §6's promise intact —
-    /// the slots are ANSI, so the user's own theme still chooses the two hues.
+    /// unreadable on half of them. ANSI 0 was measured on the device and is
+    /// indistinguishable from the terminal background there, so black is not
+    /// available. Naming the pair keeps §6's promise intact — the slots are
+    /// ANSI, so the user's own theme still chooses the two hues.
     ///
-    /// Under `NO_COLOR` there is no band. That is the honest cost of this
-    /// texture and the reason the prompt has to name the question on its own —
-    /// a marking is decoration over a prompt that already works, never the only
-    /// thing saying what the row is for.
+    /// Under `NO_COLOR` there is no band, and now that costs only a divider
+    /// rather than the one thing marking the field.
     #[must_use]
-    pub fn field(self) -> Style {
+    pub fn band(self) -> Style {
         if self.color {
             Style::default().bg(Color::DarkGray).fg(Color::White)
         } else {

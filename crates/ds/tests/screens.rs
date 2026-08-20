@@ -197,14 +197,15 @@ fn the_phone_screen_matches_the_approved_mockup() {
     assert!(!lines[25].contains("Detail") && !lines[25].contains("Expiry"));
     // The search bar is docked at the bottom and is **two rows** on touch: the
     // query, then the count and hints. Both rows are the keyboard target.
-    assert!(lines[26].starts_with(" > █"), "the query row: {:?}", lines[26]);
-    assert!(lines[26].contains("SPC"), "and carries the leader chip: {:?}", lines[26]);
-    assert!(!lines[26].contains('⌨'), "which replaced the keyboard chip: {:?}", lines[26]);
-    assert!(lines[26].contains("Type to search"), "the empty field says so: {:?}", lines[26]);
-    assert!(lines[26].contains("For more, hit"), "and what the chip is for");
-    assert!(lines[27].trim_start().starts_with("14/14"), "matched/total: {:?}", lines[27]);
-    assert!(lines[27].contains("⏎ open"), "the hint line teaches the verbs");
-    assert!(lines[27].contains("^x expiry") && lines[27].contains("^t scans"));
+    // Status line above, entry line last — Vim's arrangement, and fzf's.
+    assert!(lines[26].trim_start().starts_with("14/14"), "matched/total: {:?}", lines[26]);
+    assert!(lines[26].contains("⏎ open"), "the hint line teaches the verbs");
+    assert!(lines[26].contains("^x expiry") && lines[26].contains("^t scans"));
+    assert!(lines[27].starts_with(" > █"), "the query row is last: {:?}", lines[27]);
+    assert!(lines[27].contains("SPC"), "and carries the leader chip: {:?}", lines[27]);
+    assert!(!lines[27].contains('⌨'), "which replaced the keyboard chip: {:?}", lines[27]);
+    assert!(lines[27].contains("Type to search"), "the empty field says so: {:?}", lines[27]);
+    assert!(lines[27].contains("For more, hit"), "and what the chip is for");
 }
 
 /// **Every line is exactly the terminal's width, and the status column lands on
@@ -275,7 +276,7 @@ fn detail_splits_wide_and_pushes_narrow() {
     // On touch it is the *buttons* that change with the surface — the hint line
     // carries only what they do not (`esc`, `^q`), which is why it can be short
     // enough to share a row with the count.
-    assert!(lines[27].contains("◀ back"), "the hints changed with the surface: {:?}", lines[27]);
+    assert!(lines[26].contains("◀ back"), "the hints changed with the surface: {:?}", lines[26]);
 }
 
 /// Below the floor the app says so instead of drawing something broken.
@@ -337,7 +338,8 @@ fn the_leader_sheet_opens_over_the_list() {
     assert_eq!(open.len(), before.len(), "the pane did not change size");
     assert!(open.iter().any(|l| l.contains("SPC")), "the breadcrumb is up");
     assert!(open.iter().any(|l| l.contains("filter")), "and the groups: {open:?}");
-    assert_eq!(open[26], before[26], "the query row is untouched underneath");
+    assert_eq!(open[27], before[27], "the entry line is untouched underneath");
+    assert_eq!(open[26], before[26], "and so is the status line");
 
     update(&mut m, Msg::Char('f'));
     let group = screen(&mut m, 45, 28);
@@ -352,36 +354,40 @@ fn the_leader_sheet_opens_over_the_list() {
     assert!(on.iter().any(|l| l.contains("[✓]")), "and on, in the same place: {on:?}");
 }
 
-/// **The query row is a lit band, edge to edge** — not a rule under the text.
+/// **The status line is a lit rule between the list and the entry line**, and
+/// the entry line itself is plain.
 ///
-/// A terminal puts `SGR 4` wherever the font's underline metric says, which on
-/// the phone is through the descenders; nothing in the app can move it. Emacs
-/// marks an editable field the same way this now does, with a background rather
-/// than a line. Edge to edge because the band is the row's identity, not a
-/// box drawn around the characters currently in it.
+/// This is Vim's arrangement — `StatusLine` highlighted, `:` on the plain final
+/// row beneath it — and it is why the band works: it divides rather than sitting
+/// behind the user's own text, where it had to pin a foreground and put dim
+/// placeholder text over a lit row.
 #[test]
-fn the_query_row_is_a_band() {
+fn the_status_line_is_a_band_and_the_entry_line_is_not() {
     let mut m = model(45, 28);
     let band = banded_columns(&mut m, 45, 28, 26, Theme { color: true });
     assert_eq!(band.len(), 45, "every column, gutters included: {band:?}");
+    assert!(
+        banded_columns(&mut m, 45, 28, 27, Theme { color: true }).is_empty(),
+        "the row being typed into keeps the terminal's own background"
+    );
 
-    // Typing changes what is on the band, never the band.
+    // Nothing is underlined either — the rule that landed through the
+    // descenders is gone and has not come back as anything else.
+    for row in [26u16, 27] {
+        let underlined =
+            modifier_columns(&mut m, 45, 28, row, ratatui::style::Modifier::UNDERLINED);
+        assert!(underlined.is_empty(), "row {row} carries no rule: {underlined:?}");
+    }
+
+    // Typing changes the count on the band, never the band.
     for c in "coc".chars() {
         update(&mut m, Msg::Char(c));
     }
     assert_eq!(banded_columns(&mut m, 45, 28, 26, Theme { color: true }), band);
 
-    // The row below is the echo area and carries no band of its own — two rows
-    // of tint would read as a block rather than as a field.
-    assert!(banded_columns(&mut m, 45, 28, 27, Theme { color: true }).is_empty());
-
-    // Nothing is underlined any more.
-    let underlined = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::UNDERLINED);
-    assert!(underlined.is_empty(), "the rule is gone: {underlined:?}");
-
-    // The leader chip still closes the right-hand end, reversed *against* the
-    // band — so it inverts rather than disappearing into it.
-    let reversed = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::REVERSED);
+    // The leader chip closes the entry line, reversed against the plain
+    // background rather than against the band.
+    let reversed = modifier_columns(&mut m, 45, 28, 27, ratatui::style::Modifier::REVERSED);
     assert_eq!(reversed, [39, 40, 41, 42, 43], "SPC is reverse, with a gutter after it");
 }
 
@@ -396,8 +402,9 @@ fn a_monochrome_run_loses_the_band_but_not_the_row() {
     assert!(banded_columns(&mut m, 45, 28, 26, Theme { color: false }).is_empty());
 
     let (lines, _) = render_with(&mut m, 45, 28, Theme { color: false });
-    assert!(lines[26].contains("Type to search"), "the words still say it: {:?}", lines[26]);
-    assert!(lines[26].contains("SPC"), "and the button is still there");
+    assert!(lines[27].contains("Type to search"), "the words still say it: {:?}", lines[27]);
+    assert!(lines[27].contains("SPC"), "and the button is still there");
+    assert!(lines[26].contains("⏎ open"), "and the status line still reads: {:?}", lines[26]);
 }
 
 /// **The touch layout has one button, and it says what it is for.**
@@ -411,26 +418,26 @@ fn a_monochrome_run_loses_the_band_but_not_the_row() {
 fn the_touch_layout_has_one_button_and_it_explains_itself() {
     let mut m = model(45, 28);
     let lines = screen(&mut m, 45, 28);
-    assert!(!lines[26].contains('⌨'), "no keyboard chip: {:?}", lines[26]);
+    assert!(!lines[27].contains('⌨'), "no keyboard chip: {:?}", lines[27]);
     // Columns, not bytes: the row carries `█`, so a byte offset is not a column.
-    let row: Vec<char> = lines[26].chars().collect();
+    let row: Vec<char> = lines[27].chars().collect();
     let at = |needle: &str| {
         let needle: Vec<char> = needle.chars().collect();
         (0..row.len()).find(|i| row[*i..].starts_with(&needle))
     };
     let hit = at("For more, hit").expect("the signpost");
     let chip = at("SPC").expect("the chip");
-    assert!(hit < chip, "the sentence runs into the button: {:?}", lines[26]);
+    assert!(hit < chip, "the sentence runs into the button: {:?}", lines[27]);
     let between: String = row[hit + 13..chip].iter().collect();
     assert_eq!(between, "  ", "one plain column, then the chip's own padding");
 
     // Typing takes both phrases away together, and puts them back on the way out.
     update(&mut m, Msg::Char('c'));
     let typed = screen(&mut m, 45, 28);
-    assert!(!typed[26].contains("Type to search"), "{:?}", typed[26]);
-    assert!(!typed[26].contains("For more"), "both halves go together");
+    assert!(!typed[27].contains("Type to search"), "{:?}", typed[27]);
+    assert!(!typed[27].contains("For more"), "both halves go together");
     update(&mut m, Msg::Backspace);
-    assert!(screen(&mut m, 45, 28)[26].contains("Type to search"));
+    assert!(screen(&mut m, 45, 28)[27].contains("Type to search"));
 
     // **Both** rows raise the keyboard, and they sit against the bottom edge —
     // one row is too small a thing to ask a thumb to hit.
@@ -445,10 +452,11 @@ fn the_touch_layout_has_one_button_and_it_explains_itself() {
     // and no signpost — but it does get the underline its query row was missing.
     let mut wide = model(100, 26);
     let lines = screen(&mut wide, 100, 26);
-    assert!(!lines[24].contains("SPC"), "{:?}", lines[24]);
-    assert!(!lines[24].contains("For more"), "nothing to point at: {:?}", lines[24]);
-    assert!(lines[25].contains("space menu"), "the hint names the key: {:?}", lines[25]);
-    assert!(lines[25].contains("^t scans"), "and teaches every verb it has");
+    assert!(!lines[25].contains("SPC"), "{:?}", lines[25]);
+    assert!(!lines[25].contains("For more"), "nothing to point at: {:?}", lines[25]);
+    assert!(lines[25].starts_with(" > "), "the entry line is last here too");
+    assert!(lines[24].contains("space menu"), "the hint names the key: {:?}", lines[24]);
+    assert!(lines[24].contains("^t scans"), "and teaches every verb it has");
 }
 
 /// Typing narrows the list and the count says so — the fzf-style feedback the
@@ -461,8 +469,8 @@ fn typing_narrows_the_list_and_the_count() {
     }
     let lines = screen(&mut m, 45, 28);
     assert!(lines[1].contains("COC Certificate"));
-    assert!(lines[26].contains("coc█"), "the query is shown with a cursor: {:?}", lines[26]);
-    assert!(lines[27].trim_start().starts_with("1/14"), "matched/total: {:?}", lines[27]);
+    assert!(lines[27].contains("coc█"), "the query is shown with a cursor: {:?}", lines[27]);
+    assert!(lines[26].trim_start().starts_with("1/14"), "matched/total: {:?}", lines[26]);
 }
 
 /// The expiring filter shows its chip, so a filtered list can never be mistaken
@@ -473,7 +481,7 @@ fn the_expiring_filter_is_visible_in_the_bar() {
     update(&mut m, Msg::ToggleExpiring);
     assert_eq!(m.filter, Filter::Expiring);
     let lines = screen(&mut m, 45, 28);
-    assert!(lines[27].contains("[expiring]"), "the chip: {:?}", lines[27]);
+    assert!(lines[26].contains("[expiring]"), "the chip: {:?}", lines[26]);
     assert!(lines[1].contains("Motorcycle Insurance"), "soonest first: {:?}", lines[1]);
 }
 
@@ -483,7 +491,7 @@ fn an_empty_store_explains_itself() {
     let mut m = Model::new(Store::default(), "2026-10-20".into(), "2027-01-18".into(), 45, 28);
     let lines = screen(&mut m, 45, 28);
     assert!(lines[1].contains("no documents yet"), "{:?}", lines[1]);
-    assert!(lines[27].trim_start().starts_with("0/0"));
+    assert!(lines[26].trim_start().starts_with("0/0"));
 }
 
 /// A long name is cut with an ellipsis at a **cell** boundary, so a wide-glyph

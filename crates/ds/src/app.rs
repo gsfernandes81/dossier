@@ -789,7 +789,9 @@ fn search_zone(model: &Model) -> (u16, u16) {
     if crate::layout::touch_layout(model.cols) {
         (last.saturating_sub(1), last)
     } else {
-        (last.saturating_sub(1), last.saturating_sub(1))
+        // The entry line is the final row on a keyboard layout too — Emacs's
+        // minibuffer and Vim's `:` both live there, with the status line above.
+        (last, last)
     }
 }
 

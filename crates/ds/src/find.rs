@@ -78,6 +78,10 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
     } else {
         vec![Constraint::Min(1), Constraint::Length(1), Constraint::Length(1)]
     };
+    // **The entry line is last, on both layouts.** Emacs's minibuffer is the
+    // frame's final line, Vim's `:` is the final line below the status line, and
+    // fzf's default layout is results, info, prompt. The row above it carries
+    // the band, so the lit rule divides the list from the thing you type into.
     let split = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(1)])
@@ -90,8 +94,8 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
     if touch {
         draw_search(frame, chunks[1], model, theme);
     } else {
-        draw_search(frame, chunks[1], model, theme);
-        draw_footer(frame, chunks[2], model, theme);
+        draw_footer(frame, chunks[1], model, theme);
+        draw_search(frame, chunks[2], model, theme);
     }
     // The sheet is drawn last and **covers** the list rather than shrinking it:
     // cheaper, and it matches every editor that does this. Nothing under it can
@@ -445,8 +449,7 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
                 Span::styled(prompt, theme.style(Tone::Accent)),
                 Span::raw(fit(&format!("{}{}█", model.query, chips(model)), span)),
                 Span::styled(tail, theme.style(Tone::Muted)),
-            ]))
-            .style(theme.field()),
+            ])),
             area,
         );
         return;
@@ -467,7 +470,6 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let key = " SPC ";
     let prompt = " >";
     let span = cols.saturating_sub(width(prompt) + width(key) + gutter);
-    let band = theme.field();
     let under = Style::default();
     let quiet = theme.style(Tone::Muted);
 
@@ -537,15 +539,16 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         ])
     };
 
-    // Two widgets, not one: only the query row carries the band, and a
-    // `Paragraph`'s style paints its whole area rather than only the cells its
-    // text reaches — which is what makes the band edge to edge.
+    // **Status line above, entry line below**, and only the status line is lit.
+    // Two widgets rather than one, because a `Paragraph`'s style paints its
+    // whole area rather than only the cells its text reaches — which is what
+    // makes the band edge to edge, and what keeps it off the row underneath.
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Length(1)])
         .split(area);
-    frame.render_widget(Paragraph::new(query_row).style(band), rows[0]);
-    frame.render_widget(Paragraph::new(info_row), rows[1]);
+    frame.render_widget(Paragraph::new(info_row).style(theme.band()), rows[0]);
+    frame.render_widget(Paragraph::new(query_row), rows[1]);
 }
 
 /// The hints a touch layout shows, most sheddable first.
@@ -600,9 +603,11 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
 /// The keyboard layout's hint line.
 fn draw_footer(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     let (message, tone) = status_text(model, false);
+    // Lit, like the touch layout's — a keyboard layout has the same two rows in
+    // the same order, and the same rule dividing the list from the entry line.
     let line = Line::styled(
         format!(" {}", truncate(&message, area.width as usize - 1)),
         theme.style(tone),
     );
-    frame.render_widget(Paragraph::new(line), area);
+    frame.render_widget(Paragraph::new(line).style(theme.band()), area);
 }
