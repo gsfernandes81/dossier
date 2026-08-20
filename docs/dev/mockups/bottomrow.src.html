@@ -1,0 +1,284 @@
+<title>The Last Line</title>
+<style>
+/*CSS*/
+
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.band, .banddim, .bandacc, .bandchip {
+  background: var(--term-dim);
+  color: var(--term-bg);
+}
+.banddim { color: color-mix(in srgb, var(--term-bg) 55%, var(--term-dim)); }
+.bandacc { color: var(--term-bg); font-weight: 700; }
+.bandchip { background: var(--term-bg); color: var(--term-dim); }
+.term.mono .band, .term.mono .banddim, .term.mono .bandacc { background: transparent; color: var(--term-fg); }
+.term.mono .banddim { color: var(--term-dim); }
+.term.mono .bandchip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.term.mono .acc, .term.mono .exp, .term.mono .soon,
+.term.mono .ok, .term.mono .warn { color: var(--term-fg); }
+
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 1.8rem 2rem; margin: 1.4rem 0 0; }
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.4rem 0 0; align-items: flex-start; }
+
+.why { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.4rem 2rem; margin: 1.5rem 0 0; }
+.why > div { border-top: 2px solid var(--accent); padding-top: .6rem; }
+.why h3 { font-family: var(--mono); font-size: .82rem; margin: 0 0 .35rem; }
+.why p { margin: 0; font-size: .88rem; color: var(--muted); max-width: 42ch; }
+.why p b { color: var(--ink); font-weight: 600; }
+
+.kv code { font-family: var(--mono); font-size: .84em; }
+.kv td.yes { color: var(--term-ok); }
+.kv td.no { color: var(--term-exp); }
+
+.tier { font-family: var(--sans); font-size: .66rem; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; padding: .1rem .45rem; border-radius: 2px; white-space: nowrap; }
+.tier.docs { border: 1px solid var(--term-soon); color: var(--term-soon); }
+
+.verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.6rem 0 0; }
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .55rem; }
+
+.caveat { border: 1px dashed var(--term-exp); border-radius: 3px; padding: .85rem 1.05rem; margin: 1.5rem 0 0; }
+.caveat p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 68ch; }
+.caveat p + p { margin-top: .5rem; }
+.caveat p b { color: var(--term-exp); font-weight: 600; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · the bottom two rows</p>
+    <h1>The Last Line</h1>
+    <p class="standfirst">
+      The query row sits second from the bottom, with the count and hints under
+      it. Swapping them puts the entry line against the screen edge — which is
+      where <b>every keyboard-driven finder this design has borrowed from
+      already puts it</b>. There is no reason to avoid it, one thing to check on
+      the device, and two small consequences worth naming.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Pane</b> 47×45 browsing · 47×24 typing</span>
+    <span><b>Changes</b> row order only — no row is gained or lost</span>
+    <span><b>Tap zones</b> unchanged: both rows still raise the keyboard</span>
+  </div>
+
+  <section>
+    <h2>The two orders</h2>
+    <div class="pair">
+      <figure>
+        <div class="term phone"><pre><!--S:now--></pre></div>
+        <figcaption>
+          <span class="size">as built</span>
+          <span class="how">The band is a lit strip with a row underneath it.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:swapped--></pre></div>
+        <figcaption>
+          <span class="size">swapped</span>
+          <span class="how">The band is docked against the edge, and the chip
+            lands in the bottom-right corner.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:now-typed--></pre></div>
+        <figcaption><span class="size">as built · typed</span></figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:swapped-typed--></pre></div>
+        <figcaption>
+          <span class="size">swapped · typed</span>
+          <span class="how">The count is now above the cursor rather than below
+            it — which is exactly where fzf puts it.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why it is the conventional order</h2>
+    <div class="why">
+      <div>
+        <h3>Emacs</h3>
+        <p>The minibuffer <b>is the last line of the frame</b>. Nothing is ever
+          drawn beneath it, because there is nothing beneath it.</p>
+      </div>
+      <div>
+        <h3>Vim</h3>
+        <p><code>:</code> and <code>/</code> take over the final line, below the
+          status line. The status line is what sits <em>above</em> the entry —
+          which is our count-and-hints row exactly.</p>
+      </div>
+      <div>
+        <h3>fzf</h3>
+        <p>Default layout is bottom-up: results, then the info line
+          <code>4/24</code>, then the prompt on the last row. <b>The layout we
+          would be moving to is fzf's default</b>, and this surface has been
+          called fzf-shaped since §1.</p>
+      </div>
+      <div>
+        <h3>The thumb</h3>
+        <p>The row you touch most — tap to type, tap the chip — becomes the
+          closest to the bottom edge, and the chip takes the corner every phone
+          app puts its primary action in.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What actually changes</h2>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th></th><th>Effect</th></tr>
+        <tr>
+          <td class="k">the band</td>
+          <td class="yes">Stops being a lit strip with a row under it and becomes
+            a bar docked to the edge. This is the whole point.</td>
+        </tr>
+        <tr>
+          <td class="k">the count</td>
+          <td>Moves from directly under the cursor to directly above it. Reading
+            order changes; the distance does not. <b>fzf has always put it
+            there.</b></td>
+        </tr>
+        <tr>
+          <td class="k">messages</td>
+          <td>A flash and <code>esc again to quit</code> now appear above the
+            entry line rather than below. Emacs puts messages <em>on</em> the
+            entry line, which we cannot — either side is a compromise, and above
+            keeps the band clear of text that is not yours.</td>
+        </tr>
+        <tr>
+          <td class="k">tap zones</td>
+          <td class="yes">Unchanged. Both bottom rows still raise the keyboard,
+            and an overshoot downwards still hits the screen edge.</td>
+        </tr>
+        <tr>
+          <td class="k">rows</td>
+          <td class="yes">None gained, none lost. Twenty-one documents browsing,
+            ten while typing, exactly as now.</td>
+        </tr>
+        <tr>
+          <td class="k">the leader sheet</td>
+          <td class="yes">Still opens above the chrome. It now sits above the
+            count row instead of the query row, which puts one more line between
+            the sheet and the thing it filters — no worse.</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="caveat">
+      <p><b>The one thing to check on the device.</b>
+        <span class="tier docs">check it</span> With the swap, the very last cell
+        of the very last row carries a <em>background colour</em> rather than a
+        plain space. On terminals with automatic margins, writing to the
+        bottom-right cell is the classic way to make the screen scroll by a row.
+        Ratatui draws full-width bottom bars all the time and this is normally
+        handled, but "normally" is not a measurement.</p>
+      <p>It is unmissable if it happens: the whole screen judders up one line
+        every repaint. If it does, the fix is one column — leave the final cell
+        unpainted, which nobody would ever see.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The states it has to survive</h2>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:swapped-filter--></pre></div>
+        <figcaption>
+          <span class="size">a filter live</span>
+          <span class="how">The chip and the shed hints sit above the band, which
+            keeps the band carrying only your text.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:swapped-armed--></pre></div>
+        <figcaption>
+          <span class="size">armed</span>
+          <span class="how">The warning is on the row above. The band stays what
+            it is, which is arguably better than the message taking it over.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:swapped-flash--></pre></div>
+        <figcaption>
+          <span class="size">a flash</span>
+          <span class="how">Same place, and the query you typed is still on
+            screen underneath it.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:swapped-sheet--></pre></div>
+        <figcaption>
+          <span class="size">the leader sheet</span>
+          <span class="how">Sheet, then hints, then the band. Three tiers of
+            chrome stacked in the order you reach for them.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre><!--S:swapped--></pre></div>
+        <figcaption>
+          <span class="size">NO_COLOR</span>
+          <span class="how">No band either way, so the swap changes nothing a
+            monochrome run can see. The order still matches the convention.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:swapped-full--></pre></div>
+        <figcaption>
+          <span class="size">47×45 · browsing</span>
+          <span class="how">Twenty-one documents, unchanged.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>The desktop has the same question</h2>
+    <p class="lede">
+      A keyboard layout is query row then hint line. The same swap applies, and
+      the argument is stronger there — a hint line is a status line, and Vim puts
+      the status line above the command line.
+    </p>
+    <div class="pair">
+      <figure>
+        <div class="term phone"><pre><!--S:desk-now--></pre></div>
+        <figcaption><span class="size">as built</span></figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:desk-swapped--></pre></div>
+        <figcaption>
+          <span class="size">swapped</span>
+          <span class="how">Hints above, entry last — <code>:</code> lands here
+            when command mode ships, on the line every terminal user expects it
+            on.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>Swap them, both layouts.</b> I looked for a reason not to and did not
+        find one: no row is gained or lost, no tap zone moves, every state still
+        works, and the resulting layout is what Emacs, Vim and fzf all already
+        do. The band stops floating and becomes a docked bar, which is the thing
+        that prompted the question.</p>
+      <p>The two costs are real and small. The count reads above the cursor
+        instead of below — fzf's arrangement, so it is well-trodden rather than
+        novel. And messages land above the entry line instead of below; Emacs
+        would put them <em>on</em> it, which we cannot, and above at least keeps
+        the band carrying nothing but your own text.</p>
+      <p>The one open item is mechanical, not aesthetic: whether painting the
+        bottom-right cell makes the screen scroll. Cheap to see, cheap to fix,
+        and not a reason to hold the change.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/bottomrow.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>

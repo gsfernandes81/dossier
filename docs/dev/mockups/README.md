@@ -346,3 +346,32 @@ background tint (the only colour-dependent texture on the surface, and the
 palette is the user's) and a short underline (keeps the fault, drops the
 benefit). Kept in the drawer: dim delimiters, if an unmarked row reads as blank
 on the device.
+
+### Which row goes last
+
+`bottomrow.py` → **The Last Line** — the query row currently sits second from
+the bottom with count-and-hints under it. Swapping them puts the entry line
+against the screen edge, which is where every keyboard-driven finder this design
+borrows from already puts it: Emacs's minibuffer *is* the frame's last line,
+Vim's `:` takes the final line below the status line, and **fzf's default layout
+is results, info line, prompt** — the exact arrangement the swap produces.
+
+No row is gained or lost, no tap zone moves, and every state still works
+(filter live, armed, flash, sheet up, both heights, NO_COLOR, desktop). The band
+stops being a lit strip with a row under it and becomes a bar docked to the
+edge; the `SPC` chip lands in the bottom-right corner.
+
+Two real costs, both small: the count reads *above* the cursor rather than below
+(fzf's arrangement, so well-trodden), and messages land above the entry line
+rather than below — Emacs would put them *on* it, which we cannot, and above at
+least keeps the band carrying nothing but the user's own text.
+
+One mechanical thing to check on the device: with the swap, the last cell of the
+last row carries a **background colour** rather than a plain space, and writing
+to the bottom-right cell is the classic way to make a terminal with automatic
+margins scroll by a row. Unmissable if it happens — the screen judders up one
+line every repaint — and the fix is one unpainted column.
+
+Also settled by measurement: **ANSI 0 is off the table for the band.** On this
+phone it is indistinguishable from the terminal background, so the band would
+vanish. It stays ANSI 8 behind, ANSI 15 in front.
