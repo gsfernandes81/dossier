@@ -179,6 +179,21 @@ SPECIMENS["oldbar"] = block(
     ]
 )
 
+# ── the size the phone actually reports ─────────────────────────────────────
+#: `tput cols`/`tput lines` on the device says **47×24**, not the 45×28 every
+#: mockup so far has assumed. Two columns wider and four rows shorter, and four
+#: rows is two documents: ten fit, not twelve. Three chrome rows leave 21, which
+#: is 10 documents and one spare row; the action bar would take that spare and
+#: still show ten.
+REAL = (47, 24)
+
+SPECIMENS["real"] = block(
+    [header(cols=REAL[0])]
+    + docs(DOCS[:10], cols=REAL[0])
+    + ["", field(REAL[0]), truth("3/24", cols=REAL[0])],
+    cols=REAL[0],
+)
+
 # ── the same object at a desk ───────────────────────────────────────────────
 DESK_COLS = (2, 36, 14, 16, 8)  # marker, title, shelf, locator, expiry
 

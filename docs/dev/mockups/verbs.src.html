@@ -102,8 +102,13 @@
       taps rather than a two-finger hold. They compose with each other, too.</p>
     <p>Two findings are <b>retracted</b>, one is <b>half retracted</b>, and one new
       duplication takes their place. The reachability columns below are split by
-      keyboard state, because that split is the whole design question: a modifier
-      needs a letter, and the only letter source is the soft keyboard.</p>
+      keyboard state, because a modifier needs something to modify and the only
+      letter source is the soft keyboard.</p>
+    <p><b>The latch also reaches the row's own arrows</b> — <code>CTRL</code> then
+      <code>▶</code> is <code>ctrl+→</code> — so there is a modifier tier
+      available while browsing with no letters in it at all: twelve combinations,
+      none of them bound to anything. The last orphan below is therefore reachable
+      in principle; what it lacks is a binding anyone would discover.</p>
   </div>
 
   <div class="meta">
@@ -220,6 +225,10 @@
           affordance for it than a button: <b>REWRITE-UI §1's tappable header
           count</b>, which is specified, approved, and not implemented. You tap
           the number that told you there were three.</p>
+        <p>It could also simply be <em>bound</em> into the arrow tier, since
+          <code>ctrl+↑</code> is two thumb taps with the keyboard down. That
+          makes it reachable without making it findable, which is why the count
+          ships first and the binding is an accelerator rather than the answer.</p>
       </div>
 
       <div class="finding">

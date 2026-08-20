@@ -147,12 +147,27 @@ must be checked before publishing: the **contents of the stock default row**
 twelve rows, the app refuses to draw mid-query.
 
 Confirmed on the device: the row is an Android view drawn in both keyboard
-states, swipe-up sends the `popup:` key, and raising the keyboard resizes the
-terminal. **Wrong:** long press does *not* auto-repeat — what it does instead is
-now an open question, and crossing a long list by thumb was resting on it.
+states; swipe-up sends the `popup:` key; raising the keyboard resizes the
+terminal rather than covering it; **the latch reaches the row's own arrows**
+(`CTRL` then `▶` is `ctrl+→`); and long press repeats on ordinary keys but
+*holds* on latching ones, so a long press on `CTRL` is a momentary modifier.
 
-The sharpest open test is whether the `CTRL` latch reaches the row's **own
-arrows**. A latch holds until the next key, and the row is full of keys; if
-`CTRL` then `▶` is `ctrl+→`, then a modifier tier exists with the keyboard down
-and no letters at all — eight combinations — and the one orphan verb becomes
-bindable rather than needing chrome.
+Two consequences:
+
+- **A modifier tier exists with the keyboard down** — ctrl/alt against the four
+  arrows, twelve combinations, none bound to anything, none needing a letter.
+  The one orphan verb could simply be bound there. It still ships as the header
+  count first: `ctrl+↑` is reachable but not discoverable, and the tier is worth
+  keeping in reserve for R4, which needs keyboard-down verbs far more than Find
+  does. Binding anything there needs modifier guards on the arrow arms in
+  `input.rs` — `ctrl+→` currently means plain `→`.
+- **The pane is 47×24, not 45×28.** Two columns wider, four rows shorter, and
+  four rows is two documents: **ten fit, not twelve**. No code depends on it —
+  `layout.rs` is width-driven and 45×28 appears only in tests and these mockups
+  — so this is a promise to correct, not an implementation to change. Which
+  keyboard state that was measured in is still open, and both numbers want
+  recording: the browsing height sets the count the README advertises, the
+  querying height is what the layout must survive above the 38×12 floor.
+
+Still unverified, and now depended on by nothing: the contents of Termux's
+stock default extra-keys row.

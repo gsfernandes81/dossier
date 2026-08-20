@@ -528,8 +528,8 @@ pre.props .c { color: var(--term-dim); }
 
   <div class="meta">
     <span><b>Surface</b> Find, touch layout</span>
-    <span><b>Pane</b> 45×28 · portrait Termux</span>
-    <span><b>Chrome</b> 3 rows, no bar · 12 documents</span>
+    <span><b>Pane</b> the phone reports <b>47×24</b></span>
+    <span><b>Chrome</b> 3 rows, no bar · 10 documents</span>
     <span><b>Textures</b> reverse = pressable · underline = typable · dim = information</span>
   </div>
 
@@ -580,8 +580,22 @@ pre.props .c { color: var(--term-dim); }
         </tr>
         <tr>
           <td>Long press auto-repeats the base key</td>
-          <td class="no"><b>Wrong.</b> It does not. What long press <em>does</em>
-            is now an open question, and this page no longer claims one.</td>
+          <td class="yes"><b>Right, but only half the row.</b> Ordinary keys —
+            the arrows — repeat. <b>Latching keys wait for release</b>, so a long
+            press on <code>CTRL</code> is a momentary hold rather than a repeat.
+            Both halves are useful: repeat crosses a list, hold is the other way
+            to reach a modifier.</td>
+        </tr>
+        <tr>
+          <td>The CTRL latch reaches the row's own arrows</td>
+          <td class="yes"><b>Confirmed</b> — and it is the finding that closes
+            the last gap. See below.</td>
+        </tr>
+        <tr>
+          <td>The pane is 45×28</td>
+          <td class="no"><b>Wrong.</b> The phone reports <b>47×24</b>. Two
+            columns wider and four rows shorter than every mockup, and four rows
+            is two documents.</td>
         </tr>
         <tr>
           <td><code>CTRL</code> is a one-shot latch</td>
@@ -618,7 +632,8 @@ pre.props .c { color: var(--term-dim); }
       <span><span class="tier told">device</span> <b>CTRL and ALT are sticky</b> — tap one, it latches until the next key; ctrl+letter, alt+letter and ctrl+alt+letter all reach the app</span>
       <span><span class="tier told">device</span> swipe up sends the popup key</span>
       <span><span class="tier told">device</span> the row is an Android view, drawn in both keyboard states</span>
-      <span><span class="tier docs">check it</span> what long press does — it is <b>not</b> auto-repeat</span>
+      <span><span class="tier told">device</span> long press repeats on ordinary keys, and <b>holds</b> on latching ones</span>
+      <span><span class="tier told">device</span> the latch reaches the row's <b>own arrows</b> — <code>CTRL</code> then <code>▶</code> is <code>ctrl+→</code></span>
     </div>
 
     <p class="lede">
@@ -674,25 +689,123 @@ pre.props .c { color: var(--term-dim); }
       not a case for three of them.
     </p>
 
+    <p class="lede">
+      Except that it is not, quite, a gap any more.
+    </p>
+  </section>
+
+  <section>
+    <h2>The modifier tier nobody was using</h2>
+    <p class="lede">
+      A sticky modifier latches until the next key — and the extra-keys row is
+      full of keys. <b>The latch reaches the row's own arrows</b>
+      <span class="tier told">device</span>, so tapping <code>CTRL</code> and
+      then <code>▶</code> sends <code>ctrl+→</code>. That is a whole modifier
+      tier available with the keyboard down and no letters anywhere in it.
+    </p>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Combination</th><th>Reached by</th><th>Bound to</th></tr>
+        <tr><td class="k">ctrl+← ↑ ↓ →</td><td>tap CTRL, tap an arrow</td><td class="no">nothing — and <code>ctrl+→</code> currently acts as plain <code>→</code> <span class="tier measured">measured</span></td></tr>
+        <tr><td class="k">alt+← ↑ ↓ →</td><td>tap ALT, tap an arrow</td><td class="no">nothing — same, no modifier guard</td></tr>
+        <tr><td class="k">ctrl+alt+← ↑ ↓ →</td><td>tap both, tap an arrow</td><td class="no">nothing, and indistinguishable from ctrl+arrow today</td></tr>
+      </table>
+    </div>
+    <p class="lede" style="margin-top:1.4rem">
+      Twelve combinations, eight of them clean, reachable by thumb while
+      browsing. <b>The expiring filter could simply be bound there</b> — and then
+      no verb on this surface is unreachable in any state, with no chrome at all.
+    </p>
     <div class="caveat">
-      <p><b>One test could close even that gap.</b> A sticky modifier latches
-        "until the next key" — and the extra-keys row is full of keys. If tapping
-        <code>CTRL</code> and then <code>▶</code> sends <code>ctrl+→</code>, then
-        a <b>modifier tier exists with the keyboard down</b>, built entirely out
-        of the row: <code>ctrl</code> and <code>alt</code> against the four
-        arrows, eight combinations, none of which need a letter.
-        <span class="tier docs">check it</span></p>
-      <p>That would make the residue verb bindable — <code>ctrl+↑</code> or
-        similar for the expiring filter — reachable by thumb while browsing, with
-        no chrome at all. I would still build the header count first: an arrow
-        combination is <em>reachable</em> but not <em>discoverable</em>, and the
-        count is both. But it is the difference between "one verb has no
-        keyboard-down path" and "one verb has no keyboard-down path that anyone
-        would find", which is a much smaller problem.</p>
-      <p>Worth knowing either way: <code>input.rs</code> matches
-        <code>KeyCode::Right</code> with no modifier guard, so
-        <code>ctrl+→</code> currently acts as plain <code>→</code>.
-        <span class="tier measured">measured</span></p>
+      <p><b>Reachable is not discoverable.</b> <code>ctrl+↑</code> for "show me
+        what is expiring" has no mnemonic, appears in no hint that fits, and is
+        the kind of binding a user learns once and forgets twice. The header
+        count is both reachable and discoverable, and it is already in the plan.
+        <b>Build the count; treat the arrow tier as the accelerator, not the
+        affordance</b> — and hold it in reserve for R4, which will want verbs the
+        keyboard-down thumb can reach far more than Find does.</p>
+      <p>Whatever gets bound there, <code>input.rs</code> needs modifier guards
+        on the arrow arms first, or <code>ctrl+→</code> keeps meaning
+        <code>→</code>.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>47×24</h2>
+    <p class="lede">
+      <code>tput cols</code> says <b>47</b>. <code>tput lines</code> says
+      <b>24</b>. <span class="tier told">device</span> Every mockup in this
+      project, this one included, has been drawn at 45×28 — two columns too
+      narrow and <b>four rows too tall</b>. Four rows is two documents.
+    </p>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>At 47×24</th><th>With the bar</th><th>Without</th></tr>
+        <tr>
+          <td class="k">chrome / list rows</td>
+          <td>4 / 20</td><td>3 / 21</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td class="k">documents</td>
+          <td>10</td><td>10, and a spare row</td>
+          <td class="yes">Deleting the bar buys the message row rather than a
+            document — the same conclusion as at 45×28, for the same reason.</td>
+        </tr>
+        <tr>
+          <td class="k">the promise</td>
+          <td colspan="2"><b>"Twelve documents at a glance" is wrong on the real
+            device.</b> It is ten.</td>
+          <td></td>
+        </tr>
+      </table>
+    </div>
+
+    <figure style="margin-top:1.75rem">
+      <div class="term phone"><pre> <span class="hd">dossier</span>                    <span class="dim">24 docs</span>  <span class="chip"> ! 3 exp </span> 
+<span class="sel">▸ COC Certificate (Master)             ! 09-26 </span>
+<span class="seldim">    cert-file 8 · marine                       </span>
+  COC Certificate 2019                   <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 9 · marine</span>                       
+  COC Endorsement — Panama             <span class="soon">~ 12-26</span> 
+<span class="dim">    cert-file 10 · marine</span>                      
+  COC Application Receipt                <span class="dim">  ·  </span> 
+<span class="dim">    softcopy · marine</span>                          
+  Seaman&#x27;s Book                          <span class="ok">04-29</span> 
+<span class="dim">    cert-file 1 · marine</span>                       
+  Passport                               <span class="ok">11-31</span> 
+<span class="dim">    wallet-doc 2 · identity</span>                    
+  Yellow Fever Certificate               <span class="dim">  ·  </span> 
+<span class="dim">    cert-file 4 · medical</span>                      
+  Medical Fitness (ILO)                <span class="soon">~ 10-26</span> 
+<span class="dim">    cert-file 5 · medical</span>                      
+  Basic Safety Training                  <span class="ok">02-30</span> 
+<span class="dim">    cert-file 6 · marine</span>                       
+  Ship Security Awareness                <span class="ok">02-30</span> 
+<span class="dim">    cert-file 7 · marine</span>                       
+                                               
+<span class="acc"> &gt;</span><span class="uline"> coc█                                    </span><span class="chip"> ⌨ </span> 
+ 3/24              <span class="dim">⏎ open  ^x expiry  ^t scans</span> </pre></div>
+      <figcaption>
+        <span class="size">47×24 · what the phone actually reports</span>
+        <span class="how">Ten documents, one spare row, three chrome rows. The
+          two extra columns go where they are least interesting — the title
+          column — which is why nothing else on this page moves.</span>
+      </figcaption>
+    </figure>
+
+    <div class="caveat">
+      <p><b>Which keyboard state was that measured in?</b> It was given in answer
+        to "what is the size with the keyboard up", so it is probably the
+        querying layout — in which case browsing is <em>taller</em> than 24 and
+        ten documents is the pessimistic floor, not the headline. But if 24 is
+        the browsing height, ten is the headline and the querying layout is
+        smaller still.</p>
+      <p>The difference matters enough to measure both, because one of them is
+        the number that goes in the README. Nothing in the code cares —
+        <code>layout.rs</code> is width-driven throughout and 45×28 appears only
+        in tests and in these mockups — so this is a promise to correct, not an
+        implementation to change.</p>
     </div>
   </section>
 
@@ -837,8 +950,10 @@ pre.props .c { color: var(--term-dim); }
   <section>
     <h2>What deleting the bar actually buys</h2>
     <p class="lede">
-      Not density, mostly. The honest accounting, computed from
-      <code>layout.rs</code> rather than asserted. <span class="tier measured">measured</span>
+      Not density, mostly. Computed from <code>layout.rs</code> rather than
+      asserted <span class="tier measured">measured</span> — at the assumed
+      45×28, which the section above corrects to 47×24. The conclusion is
+      identical at both sizes: the freed row is a message row, never a document.
     </p>
     <div class="scroller">
       <table class="kv">
@@ -983,10 +1098,11 @@ pre.props .c { color: var(--term-dim); }
 <span class="acc"> &gt;</span><span class="uline"> coc c█                                </span><span class="chip"> ⌨ </span> 
  2/24            <span class="dim">⏎ open  ^x expiry  ^t scans</span> </pre></div>
         <figcaption>
-          <span class="size">~45×14 · querying, keyboard up</span>
-          <span class="how">The state the correction is really about: five
-            documents, and both <code>ctrl+x</code> and <code>ctrl+t</code>
-            reachable as two taps — CTRL, then the letter.</span>
+          <span class="size">a short pane · querying, keyboard up</span>
+          <span class="how">Drawn at five documents as a pessimistic guess — if
+            47×24 <em>is</em> the keyboard-up size, the real querying layout is
+            twice this. Either way both <code>ctrl+x</code> and
+            <code>ctrl+t</code> are two taps here.</span>
         </figcaption>
       </figure>
       <figure>
@@ -1220,14 +1336,18 @@ alt+Enter    -> Enter</pre>
         gains its missing underline and its missing <code>^t scans</code> hint;
         and <code>input.rs</code> stops letting <code>alt</code>+letter type into
         the query.</p>
-      <p>Three things to settle on the device before any of it is written into
-        the install notes. <b>Does the CTRL latch reach the row's own arrows?</b>
-        If <code>CTRL</code> then <code>▶</code> is <code>ctrl+→</code>, the
-        residue verb becomes bindable with the keyboard down. <b>What is the
-        terminal size with the keyboard up?</b> Expect ~45×14 — if a taller
-        keyboard drops it under twelve rows the app refuses to draw mid-query.
-        And <b>what does long press actually do</b>, now that it is known not to
-        auto-repeat — crossing a long list by thumb was resting on that.</p>
+      <p>One question left, and it is a promise rather than a design:
+        <b>47×24 was measured in which keyboard state?</b> Both numbers want
+        recording — the browsing height sets the document count the README
+        advertises, and the querying height is what the layout has to survive
+        without hitting the 38×12 floor. No code depends on either;
+        <code>layout.rs</code> is width-driven and 45×28 lives only in tests and
+        mockups.</p>
+      <p>Everything else is answered. The latch reaches the arrows, so there is
+        a keyboard-down modifier tier and no verb on this surface is out of
+        reach; long press repeats on the arrows, so crossing a long list by thumb
+        works after all; and the terminal resizes rather than hides, so querying
+        is a smaller layout and not a covered one.</p>
     </div>
   </section>
 
