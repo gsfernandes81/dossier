@@ -1,0 +1,231 @@
+<title>The Empty Field</title>
+<style>
+/*CSS*/
+
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.uline, .uldim {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+.uldim { color: var(--term-dim); }
+.term.mono .acc, .term.mono .exp, .term.mono .soon, .term.mono .ok { color: var(--term-fg); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2.2rem 2rem; margin: 1.5rem 0 0; }
+.opt { display: flex; flex-direction: column; gap: .55rem; min-width: 0; }
+.opt h3 { display: flex; align-items: baseline; gap: .55rem; flex-wrap: wrap; margin: 0; font-size: .93rem; }
+.opt h3 .letter { font-size: .68rem; letter-spacing: .12em; color: var(--accent); background: var(--accent-soft); padding: .12rem .4rem; border-radius: 2px; }
+.opt h3 .flag { font-family: var(--sans); font-size: .68rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--term-sel-fg); background: var(--accent); padding: .1rem .45rem; border-radius: 2px; }
+.opt p { margin: 0; font-size: .89rem; color: var(--muted); max-width: 46ch; }
+.opt p + p { margin-top: .45rem; }
+.opt p b { color: var(--ink); font-weight: 600; }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.4rem 0 0; align-items: flex-start; }
+.kv code { font-family: var(--mono); font-size: .84em; }
+.kv td.yes { color: var(--term-ok); }
+.kv td.no { color: var(--term-exp); }
+
+.verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.6rem 0 0; }
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .55rem; }
+
+.ask { border: 1px dashed var(--accent); border-radius: 3px; padding: .85rem 1.05rem; margin: 1.6rem 0 0; }
+.ask p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 66ch; }
+.ask p + p { margin-top: .5rem; }
+.ask p b { color: var(--accent); font-weight: 600; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · the search field at rest</p>
+    <h1>The Empty Field</h1>
+    <p class="standfirst">
+      The <code>⌨</code> chip is gone — Termux has its own keyboard key, and
+      <code>SPC</code> takes that corner. Which leaves the question of what tells
+      a first-time user that the bottom of the screen is where you type. The
+      field can say it itself: <b>dim text inside the underline, gone the instant
+      you type a character</b>. It costs no rows and needs no first-run state.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Field</b> 39 underlined columns</span>
+    <span><b>Texture</b> underline + dim, two independent attributes</span>
+    <span><b>Cost</b> zero rows, zero state</span>
+  </div>
+
+  <section>
+    <h2>Nothing, for comparison</h2>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:bare--></pre></div>
+        <figcaption>
+          <span class="size">47×24 · no placeholder</span>
+          <span class="how">A cursor and thirty-nine underlined columns. It is
+            not <em>wrong</em> — the underline does mean typable — but on a
+            first run it says nothing at all, and the row it sits above is the
+            one that used to carry <code>⌨</code>.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Five things it could say</h2>
+    <div class="grid">
+      <div class="opt">
+        <h3><span class="letter">A</span> What the search actually does <span class="flag">recommended</span></h3>
+        <div class="term phone"><pre><!--S:part--></pre></div>
+        <p>Twenty-three columns, and it teaches the one thing about this search
+          that is not obvious: <b>it matches anywhere in the name</b>, not just
+          the start. That is the difference between typing <code>coc</code> and
+          giving up because the document is called "Certificate of Competency".</p>
+        <p>It also happens to be the sentence that stops a user reaching for a
+          menu to find a filter, which is the failure mode a search box quietly
+          has.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">B</span> The size of the haystack</h3>
+        <div class="term phone"><pre><!--S:count--></pre></div>
+        <p>Names the store, which is reassuring on a first run — you can see the
+          app found your documents before you type anything.</p>
+        <p>But the count is already in the header <em>and</em> in the truth row
+          below. <b>Three times is twice too many</b>, and this is the copy that
+          teaches the least.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">C</span> Right-aligned, out of the way</h3>
+        <div class="term phone"><pre><!--S:right--></pre></div>
+        <p>Pushed to the far end so the cursor sits alone, which keeps the left
+          edge of the field clean.</p>
+        <p>It reads as a label for the chip beside it rather than as text in the
+          field, and <b>the gap between cursor and hint looks like something
+          failed to load</b>. Left-aligned placeholder is the convention for a
+          reason.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">D</span> Teach the leader too</h3>
+        <div class="term phone"><pre><!--S:both--></pre></div>
+        <p>One line, two lessons: type here, and there is more behind
+          <code>SPC</code>.</p>
+        <p>The chip is <em>right there</em>, four columns away, saying
+          <code>SPC</code> already. <b>Spending half the placeholder to describe
+          a button the eye has landed on anyway</b> is the trade that costs the
+          fuzzy-match lesson, which nothing else teaches.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">E</span> Say it in the truth row instead</h3>
+        <div class="term phone"><pre><!--S:row--></pre></div>
+        <p>Leave the field bare and put the invitation among the hints, where
+          all the other teaching lives.</p>
+        <p>It costs a hint its place, it is a row away from the thing it
+          describes, and <b>it stays visible while you type</b> — telling you to
+          start typing while you are typing. The placeholder's whole virtue is
+          that it knows when to leave.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>It leaves the moment you type</h2>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:typed--></pre></div>
+        <figcaption>
+          <span class="size">one character in</span>
+          <span class="how">No decay rule, no run counter, no "seen it three
+            times" flag — the condition is simply <em>the query is empty</em>,
+            which is the same condition that makes <code>Space</code> the
+            leader.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre><!--S:part--></pre></div>
+        <figcaption>
+          <span class="size">NO_COLOR</span>
+          <span class="how">Dim is an attribute, so the placeholder stays
+            quieter than typed text with no colour involved.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:full--></pre></div>
+        <figcaption>
+          <span class="size">47×45 · browsing</span>
+          <span class="how">Twenty-one documents above it, unchanged.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Does the underline still look right?</h2>
+    <p class="lede">
+      This was the thing worth checking, and it is fine — but for a reason worth
+      writing down.
+    </p>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Concern</th><th>Outcome</th></tr>
+        <tr>
+          <td>Dim text under an underline — do the two fight?</td>
+          <td class="yes"><b>No.</b> They are independent SGR attributes on the
+            same cell: the underline stays at full intensity while the glyphs
+            above it dim. The line reads as one continuous field with quiet text
+            in it, which is exactly what a placeholder is.</td>
+        </tr>
+        <tr>
+          <td>Does the underline still span the whole field?</td>
+          <td class="yes"><b>Yes — all thirty-nine columns, always.</b> The
+            placeholder changes what is drawn on the line, never how long it is,
+            so the field's geometry is identical empty, half-typed and full. A
+            field whose underline grew and shrank would be worse than no
+            underline.</td>
+        </tr>
+        <tr>
+          <td>Can the mockups even draw it?</td>
+          <td class="no">Not until now — the markup does not nest, so
+            "dim inside underlined" needed its own class. Worth noting because
+            <b>the constraint is the generator's, not the terminal's</b>: in
+            Ratatui this is one <code>Style</code> with two modifiers.</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>A, permanently.</b> <code>type any part of a name</code>, dim, inside
+        the underline, whenever the query is empty. Not first-run-only: that
+        needs stored state, a decay rule and a decision about what counts as a
+        run, and it buys nothing — the placeholder is invisible whenever you are
+        actually using the field.</p>
+      <p>It is also the only copy here that teaches something the interface
+        cannot otherwise show. The underline already says <em>typable</em>; what
+        it cannot say is that <code>coc</code> will find "Certificate of
+        Competency".</p>
+    </div>
+
+    <div class="ask">
+      <p><b>Your call on the wording.</b> The mechanism is settled; the sentence
+        is not. <code>type any part of a name</code> is twenty-three columns and
+        there is room for about thirty-five, so there is slack for something
+        longer if it earns it.</p>
+      <p>Alternatives that fit: <code>type part of a name or tag</code> ·
+        <code>type anything from the name</code> ·
+        <code>search names, tags and shelves</code> — the last one promises more
+        than R3 delivers, so it would have to wait for the field to actually
+        search tags.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/emptyfield.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>

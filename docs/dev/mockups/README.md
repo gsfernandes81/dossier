@@ -223,13 +223,39 @@ toggles, and typing turning it into the picker. The sheet **covers** the list
 rather than shrinking it, and `Space` leads whenever the query is empty,
 regardless of live filters.
 
-The chip recommendation is **A, before the prompt** — bottom-left on the query
-row. It is the only placement that puts the two touch targets at opposite ends
-(menu left, keyboard right), it leaves the hint line intact, and it keeps the
-`⌨` hint that tells a first-time user where typing happens. The label is
-`SPC`, not a glyph: ASCII cannot render as a box on an unverified font, and it
-teaches its own key, since the sheet's breadcrumb reads `SPC` too.
+The chip is **E — `SPC` replaces `⌨` at the right end of the query row**.
+Termux has its own keyboard key and tapping the field already raises the IME, so
+`⌨` was a hint rather than a control; with one chip left, the "targets at
+opposite ends" argument for placement A goes with it, and the bottom-right
+corner is where a thumb rests. The label is `SPC`, not a glyph: ASCII cannot
+render as a box on an unverified font, and it teaches its own key, since the
+sheet's breadcrumb reads `SPC` too.
 
 Touch layouts only. A keyboard has a space bar, and drawing a button for a key
 you are already holding is the `⏎ Open` mistake this whole line of work exists
 to stop repeating.
+
+### What the empty field says
+
+`emptyfield.py` → **The Empty Field** — with `⌨` gone, nothing told a
+first-time user that the bottom of the screen is where you type. The field says
+it itself: **dim text inside the underline whenever the query is empty**, gone
+the instant a character is typed. No stored state and no decay rule — the
+condition is just "the query is empty", which is the same condition that makes
+`Space` the leader.
+
+The pick is `type any part of a name`, permanently. It is the only copy that
+teaches something the interface cannot otherwise show: the underline already
+says *typable*; what it cannot say is that `coc` will find "Certificate of
+Competency". **Wording is still the user's call.**
+
+Two things worth keeping in mind when building it:
+
+- The underline spans all 39 columns in every state. The placeholder changes
+  what is drawn on the line, never how long it is, so the field's geometry is
+  identical empty, half-typed and full.
+- Dim under an underline is two independent SGR attributes on one cell — one
+  Ratatui `Style` with two modifiers. The mockup markup could not express it,
+  because `«class|text»` does not nest; `grid`-style pages now need a combined
+  `uldim` class for this. **That constraint is the generator's, not the
+  terminal's** — do not let it shape the design.
