@@ -1,0 +1,181 @@
+<title>Space Without a Spacebar</title>
+<style>
+/*CSS*/
+
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.uline { text-decoration: underline; text-decoration-color: var(--term-dim); text-underline-offset: 3px; }
+.term.mono .acc, .term.mono .exp, .term.mono .soon, .term.mono .ok { color: var(--term-fg); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2.4rem 2rem; margin: 1.5rem 0 0; }
+.opt { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+.opt h3 { display: flex; align-items: baseline; gap: .55rem; flex-wrap: wrap; margin: 0; font-size: .93rem; }
+.opt h3 .letter { font-size: .68rem; letter-spacing: .12em; color: var(--accent); background: var(--accent-soft); padding: .12rem .4rem; border-radius: 2px; }
+.opt h3 .flag { font-family: var(--sans); font-size: .68rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--term-sel-fg); background: var(--accent); padding: .1rem .45rem; border-radius: 2px; }
+.opt h3 .no { font-family: var(--sans); font-size: .68rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--term-exp); border: 1px solid var(--term-exp); padding: .06rem .4rem; border-radius: 2px; }
+.opt p { margin: 0; font-size: .89rem; color: var(--muted); max-width: 46ch; }
+.opt p + p { margin-top: .45rem; }
+.opt p b { color: var(--ink); font-weight: 600; }
+.opt .cost { font-family: var(--mono); font-size: .72rem; color: var(--faint); border-top: 1px solid var(--rule); padding-top: .45rem; margin-top: .15rem; }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.4rem 0 0; align-items: flex-start; }
+.kv code { font-family: var(--mono); font-size: .84em; }
+.kv td.yes { color: var(--term-ok); }
+.kv td.no { color: var(--term-exp); }
+
+.verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.6rem 0 0; }
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .55rem; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · the leader's touch trigger</p>
+    <h1>Space Without a Spacebar</h1>
+    <p class="standfirst">
+      <code>Space</code> on an empty query opens the leader sheet. With the phone
+      keyboard down there is no Space to press — and the header count is at the
+      top of a forty-five-row screen, which is both a long reach and not where
+      anyone looks for a menu. So the touch layout needs one chip at the bottom.
+      Five places to put it, all inside the three chrome rows we already have.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Shown only on touch</b> — a keyboard has Space</span>
+    <span><b>Budget</b> zero new rows</span>
+    <span><b>Label</b> <code>SPC</code>, so the chip teaches its own key</span>
+  </div>
+
+  <section>
+    <h2>Five placements</h2>
+    <div class="grid">
+      <div class="opt">
+        <h3><span class="letter">A</span> Before the prompt <span class="flag">recommended</span></h3>
+        <div class="term phone"><pre><!--S:lead--></pre></div>
+        <p>Bottom-left, on the query row, where the prompt used to start. The
+          field keeps thirty-seven typable columns and the <code>⌨</code> stays
+          where it is.</p>
+        <p><b>The two touch verbs end up at opposite corners</b> — menu left,
+          keyboard right — so a fat thumb cannot confuse them, and the row still
+          reads left-to-right as <em>menu, then type</em>.</p>
+        <span class="cost">field 37 cols · targets 5 and 3 wide, far apart</span>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">B</span> Beside the keyboard chip</h3>
+        <div class="term phone"><pre><!--S:pair--></pre></div>
+        <p>Both chips at the right end, where a right thumb rests.</p>
+        <p><b>Adjacent targets are the whole problem.</b> Five columns and three
+          columns touching, on the bottom row, both hit by the same thumb from
+          the same angle — this is how you open a menu when you meant to type.</p>
+        <span class="cost">field 36 cols · targets adjacent</span>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">C</span> The far corner</h3>
+        <div class="term phone"><pre><!--S:corner--></pre></div>
+        <p>On the truth row instead, hard against the bottom-right corner. The
+          query row is untouched, so the field is at full width.</p>
+        <p>But the truth row is the second half of the tap-to-type zone, and a
+          chip there is a hole in it. It also sits under the hint text it now
+          crowds, which cost <code>^t scans</code> its place.</p>
+        <span class="cost">field 42 cols · hints lose a verb</span>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">D</span> A wide slab</h3>
+        <div class="term phone"><pre><!--S:slab--></pre></div>
+        <p>Eleven columns and a word, for a target nobody can miss.</p>
+        <p><b>"More" is the wrong word</b> — it promises a longer list of the
+          same, not a different mode of operating. And it costs the hint line two
+          of its three verbs to say it.</p>
+        <span class="cost">field 42 cols · hints down to one verb</span>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">E</span> Replacing <code>⌨</code> <span class="no">tempting</span></h3>
+        <div class="term phone"><pre><!--S:swap--></pre></div>
+        <p>One chip, not two: tapping the field already raises the keyboard, so
+          the <code>⌨</code> chip is a hint rather than a control.</p>
+        <p>It is a hint worth keeping. On a first run <b>nothing else says the
+          bottom of the screen is where you type</b> — the underline is quiet and
+          the field is empty. Losing it to save three columns is a bad trade.</p>
+        <span class="cost">field 39 cols · one target, one hint lost</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>A, opened</h2>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:open--></pre></div>
+        <figcaption>
+          <span class="size">47×24 · after tapping SPC</span>
+          <span class="how">The chip stays lit while the sheet is up, so it reads
+            as the thing that opened it. Tapping it again, or Esc, closes it.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre><!--S:open--></pre></div>
+        <figcaption>
+          <span class="size">NO_COLOR</span>
+          <span class="how">Reverse video, not a hue — the chip survives a
+            monochrome terminal.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:desk--></pre></div>
+        <figcaption>
+          <span class="size">a keyboard layout · no chip</span>
+          <span class="how">Nothing pressable, and the hint line simply names
+            <code>space</code> alongside the other keys.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Two details</h2>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Question</th><th>Answer</th></tr>
+        <tr>
+          <td><b>Why <code>SPC</code> and not a glyph?</b></td>
+          <td>It is ASCII, so it cannot render as a box on a font we have not
+            checked — <code>␣</code> and <code>☰</code> are both unverified on
+            this phone, and a box where a menu button should be is worse than no
+            button. <code>SPC</code> also <b>teaches its own key</b>: the sheet's
+            breadcrumb says <code>SPC</code>, so the chip and the keyboard route
+            are visibly the same thing.</td>
+        </tr>
+        <tr>
+          <td><b>Why not just always show it?</b></td>
+          <td>A keyboard has a space bar. Drawing a button for a key you are
+            holding is the <code>⏎ Open</code> mistake, which this whole line of
+            work exists to stop repeating. It appears on the touch layout only —
+            the same test that already decides the two-row search bar.</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>A — the chip before the prompt.</b> It is the only placement that
+        puts the two touch targets at opposite ends of the row, it leaves the
+        hint line intact, and it keeps the <code>⌨</code> hint that tells a
+        first-time user where typing happens.</p>
+      <p>Three touchable things on the whole screen, then: the header count, the
+        <code>SPC</code> chip, and the field. Everything else a thumb needs is on
+        the terminal's own key row.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/leaderchip.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>

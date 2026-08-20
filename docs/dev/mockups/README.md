@@ -210,3 +210,26 @@ premise, since find-fast means you open the app and type.
 Open before building: does the sheet cover the list or shrink it, and does
 `Space` still lead when the query is empty but a filter is live (I would say
 yes — the query decides, not the filters).
+
+### The leader's touch trigger
+
+`leaderchip.py` → **Space Without a Spacebar** — five placements for the chip
+that opens the sheet when the phone keyboard is down and there is no Space to
+press. All five live inside the existing three chrome rows; a trigger that cost
+a row would undo the argument that deleted the action bar.
+
+Settled: **A+B+C from the leader page is the design** — sheet, transient
+toggles, and typing turning it into the picker. The sheet **covers** the list
+rather than shrinking it, and `Space` leads whenever the query is empty,
+regardless of live filters.
+
+The chip recommendation is **A, before the prompt** — bottom-left on the query
+row. It is the only placement that puts the two touch targets at opposite ends
+(menu left, keyboard right), it leaves the hint line intact, and it keeps the
+`⌨` hint that tells a first-time user where typing happens. The label is
+`SPC`, not a glyph: ASCII cannot render as a box on an unverified font, and it
+teaches its own key, since the sheet's breadcrumb reads `SPC` too.
+
+Touch layouts only. A keyboard has a space bar, and drawing a button for a key
+you are already holding is the `⏎ Open` mistake this whole line of work exists
+to stop repeating.
