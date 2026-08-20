@@ -106,9 +106,10 @@ hint; and **tap-to-open is taught nowhere**.
 Both pages above were first written against a thumb with no keys. That thumb
 does not exist — Termux pins an **extra-keys row above the terminal**, and the
 phone this is built for carries `CTRL·ESC`, `ALT·TAB`, `◀▲▼▶` and
-`KEYBOARD·ENTER` on it. **`CTRL` and `ALT` are held modifiers** that compose
-with soft-keyboard letters and with each other (device-verified), so
-`ctrl+x`, `ctrl+t` and `ctrl+alt+letter` are ordinary two-finger presses.
+`KEYBOARD·ENTER` on it. **`CTRL` and `ALT` are sticky modifiers** — tap one and
+it latches until the next key — and they compose with soft-keyboard letters and
+with each other (device-verified), so `ctrl+x`, `ctrl+t` and `ctrl+alt+letter`
+are two taps with one thumb.
 
 A modifier still needs a letter, and the only letter source is the soft
 keyboard — so the reachability question splits by keyboard state. Termux
@@ -141,8 +142,17 @@ What that settles:
 tagged by evidence tier — device-verified, measured here, or documentation that
 still wants a look at the phone. Two Termux claims are in that last tier and
 must be checked before publishing: the **contents of the stock default row**
-(the previous revision asserted it and was not entitled to), and the
+(asserted twice, never verified; nothing now depends on it), and the
 **keyboard-up terminal size** — if a taller keyboard drops the pane under
-twelve rows, the app refuses to draw mid-query. Worth testing at the same time:
-whether held `CTRL` composes with the row's *arrows*, since that would give a
-keyboard-down modifier tier with no letters at all.
+twelve rows, the app refuses to draw mid-query.
+
+Confirmed on the device: the row is an Android view drawn in both keyboard
+states, swipe-up sends the `popup:` key, and raising the keyboard resizes the
+terminal. **Wrong:** long press does *not* auto-repeat — what it does instead is
+now an open question, and crossing a long list by thumb was resting on it.
+
+The sharpest open test is whether the `CTRL` latch reaches the row's **own
+arrows**. A latch holds until the next key, and the row is full of keys; if
+`CTRL` then `▶` is `ctrl+→`, then a modifier tier exists with the keyboard down
+and no letters at all — eight combinations — and the one orphan verb becomes
+bindable rather than needing chrome.

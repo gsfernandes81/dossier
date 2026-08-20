@@ -97,8 +97,9 @@
       keys. That thumb does not exist: Termux pins an <b>extra-keys row above the
       terminal</b>, and the phone this is built for carries <code>CTRL·ESC</code>,
       <code>ALT·TAB</code>, <code>◀▲▼▶</code> and <code>KEYBOARD·ENTER</code> on
-      it — with <code>CTRL</code> and <code>ALT</code> as <b>held modifiers</b>
-      that compose with soft-keyboard letters, and with each other.</p>
+      it — with <code>CTRL</code> and <code>ALT</code> as <b>sticky modifiers</b>:
+      tap one and it latches until the next key, so <code>ctrl+x</code> is two
+      taps rather than a two-finger hold. They compose with each other, too.</p>
     <p>Two findings are <b>retracted</b>, one is <b>half retracted</b>, and one new
       duplication takes their place. The reachability columns below are split by
       keyboard state, because that split is the whole design question: a modifier
@@ -135,8 +136,8 @@
           <tr><td class="v">Rub out</td><td><code>Backspace</code></td><td><span class="none">nothing</span></td><td>the IME</td><td><span class="none">nowhere</span></td></tr>
           <tr><td class="v">Clear / pop / arm</td><td><code>Esc</code></td><td>swipe <code>CTRL</code></td><td>same</td><td>hint <code>esc back</code></td></tr>
           <tr><td class="v">Move the cursor</td><td>arrows · PgUp/Dn · Home/End</td><td><code>▲▼</code> and their popups</td><td>same</td><td><span class="none">nowhere</span></td></tr>
-          <tr><td class="v">Expiring filter</td><td><code>ctrl+x</code></td><td class="gap"><b>nothing — the one real gap</b></td><td>hold <code>CTRL</code>, tap <code>x</code></td><td>button; state in a separate chip</td></tr>
-          <tr><td class="v">Search scans</td><td><code>ctrl+t</code></td><td><em>not meaningful</em> — it only widens a non-empty query</td><td>hold <code>CTRL</code>, tap <code>t</code></td><td>button; <span class="none">no desktop hint at all</span></td></tr>
+          <tr><td class="v">Expiring filter</td><td><code>ctrl+x</code></td><td class="gap"><b>nothing — the one real gap</b></td><td>tap <code>CTRL</code>, tap <code>x</code></td><td>button; state in a separate chip</td></tr>
+          <tr><td class="v">Search scans</td><td><code>ctrl+t</code></td><td><em>not meaningful</em> — it only widens a non-empty query</td><td>tap <code>CTRL</code>, tap <code>t</code></td><td>button; <span class="none">no desktop hint at all</span></td></tr>
           <tr><td class="v">Raise the keyboard</td><td>— (correctly)</td><td><code>KEYBOARD</code>; tap the field</td><td>—</td><td>the <code>⌨</code> chip</td></tr>
           <tr><td class="v">Quit</td><td><code>ctrl+q</code> · <code>ctrl+c</code> · <code>Esc·Esc</code></td><td>swipe <code>CTRL</code> twice</td><td><code>ctrl+q</code></td><td>hint <code>^q quit</code></td></tr>
         </tbody>
@@ -163,10 +164,12 @@
           time — the audit reasoned about the phone instead of looking at it,
           which is the exact failure R0.2 was run to avoid. It stays on the page
           rather than being deleted, because a retraction is more useful than a
-          tidy list. <b>It was also retracted once for the wrong reason:</b> the
-          first revision described <code>CTRL</code> as a fragile one-shot latch.
-          It is a held modifier, it composes with <code>ALT</code>, and nothing
-          about it is fragile.</p>
+          tidy list. <b>The mechanic underneath it has now been described wrong
+          twice</b> — first as a fragile one-shot latch, then as a held modifier.
+          It is a sticky modifier: tap <code>CTRL</code>, it latches until the
+          next key, and it composes with <code>ALT</code>. Nothing about it is
+          fragile, and a latch is the one kind of modifier a thumb can work
+          alone.</p>
       </div>
 
       <div class="finding">
@@ -195,8 +198,8 @@
         <p>The bar gives scan search a cell because <code>ctrl+t</code> is a
           control combination, and control combinations were assumed to be the
           hardest thing for a phone to produce.</p>
-        <p class="why"><b>Wrong twice over.</b> <code>ctrl+t</code> is a held
-          modifier and an IME letter, which is an ordinary two-finger press. And
+        <p class="why"><b>Wrong twice over.</b> <code>ctrl+t</code> is a latched
+          modifier and then a letter — two taps, one thumb. And
           it is a <b>querying verb by construction</b> — <code>app.rs:298</code>
           only widens the search into scan text when the query is non-empty, so
           the toggle does nothing at all until you are typing, and while you are
@@ -209,7 +212,7 @@
         <p>The one that survives all of it. "Cold start, show me what is expiring"
           is a <em>browsing</em> act, done with the keyboard down — and with the
           keyboard down there is no letter for the modifier to take. Reaching the
-          filter means raising the keyboard, holding <code>CTRL</code>, tapping
+          filter means raising the keyboard, tapping <code>CTRL</code>, tapping
           <code>x</code>, and dismissing the keyboard again: four or five touches
           and two re-layouts, for the app's most-used filter.</p>
         <p><b>One verb, in one state.</b> That is the entire case for a touch

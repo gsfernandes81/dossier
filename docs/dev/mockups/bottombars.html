@@ -514,14 +514,15 @@ pre.props .c { color: var(--term-dim); }
     <p class="eyebrow">R-UI · bottom chrome · second revision</p>
     <h1>Tap the Number</h1>
     <p class="standfirst">
-      The last page said Termux's <code>CTRL</code> was a fragile one-shot latch,
-      and built a pair of pressable chips on the back of it. It is a <b>held
-      modifier</b>, it composes with <code>ALT</code>, and <code>ctrl+x</code> /
-      <code>ctrl+t</code> are ordinary two-finger presses. That does not weaken
-      the case for deleting the action bar — it strengthens it, and it takes the
-      chips with it. One verb is left needing a thumb, and the plan already
-      contains the right affordance for it: <b>the header count that told you
-      there were three</b>.
+      Termux's <code>CTRL</code> and <code>ALT</code> are <b>sticky modifiers</b>:
+      you tap <code>CTRL</code>, it latches, and the next key arrives modified.
+      Not a fragile one-shot — and not a two-finger hold either, which is the
+      better news, because a latch is the one kind of modifier a thumb can work
+      alone. <code>ctrl+x</code> and <code>ctrl+t</code> are two taps. That does
+      not weaken the case for deleting the action bar — it strengthens it, and it
+      takes the pressable chips with it. One verb is left needing a thumb, and
+      the plan already contains the right affordance for it: <b>the header count
+      that told you there were three</b>.
     </p>
   </header>
 
@@ -553,7 +554,44 @@ pre.props .c { color: var(--term-dim); }
         <tr>
           <td class="k"><span class="tier docs">check it</span></td>
           <td>Termux behaviour taken from documentation. <b>Not verified on this
-            device.</b> Two claims in this tier have already turned out wrong.</td>
+            device</b> — and this tier's track record is bad, which is why it is
+            marked rather than written as fact.</td>
+        </tr>
+      </table>
+    </div>
+
+    <h3 style="margin-top:2rem">The running score</h3>
+    <p>Every Termux claim this page has made, and how it survived contact with
+      the phone.</p>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Claim</th><th>Verdict</th></tr>
+        <tr>
+          <td>The extra-keys row is an Android view, drawn in both keyboard states</td>
+          <td class="yes"><b>Confirmed</b></td>
+        </tr>
+        <tr>
+          <td>Swipe up on a key sends its <code>popup:</code></td>
+          <td class="yes"><b>Confirmed</b></td>
+        </tr>
+        <tr>
+          <td>Raising the keyboard resizes the terminal rather than covering it</td>
+          <td class="yes"><b>Confirmed</b></td>
+        </tr>
+        <tr>
+          <td>Long press auto-repeats the base key</td>
+          <td class="no"><b>Wrong.</b> It does not. What long press <em>does</em>
+            is now an open question, and this page no longer claims one.</td>
+        </tr>
+        <tr>
+          <td><code>CTRL</code> is a one-shot latch</td>
+          <td class="yes"><b>Right</b>, and this page called it a held modifier
+            in the last revision. It is sticky: tap, then tap.</td>
+        </tr>
+        <tr>
+          <td>The contents of Termux's stock default extra-keys row</td>
+          <td class="no"><b>Never verified.</b> Asserted twice; still unchecked.
+            Nothing on this page depends on it any more.</td>
         </tr>
       </table>
     </div>
@@ -577,9 +615,10 @@ pre.props .c { color: var(--term-dim); }
       <div class="key"><span class="base">⌨</span><span class="pop">ENTER</span></div>
     </div>
     <div class="keylegend">
-      <span><span class="tier told">device</span> <b>CTRL and ALT are held modifiers</b> — ctrl+letter, alt+letter and ctrl+alt+letter all reach the app</span>
-      <span><span class="tier docs">check it</span> swipe up sends the popup key; long press auto-repeats</span>
-      <span><span class="tier docs">check it</span> the row is an Android view, drawn in both keyboard states</span>
+      <span><span class="tier told">device</span> <b>CTRL and ALT are sticky</b> — tap one, it latches until the next key; ctrl+letter, alt+letter and ctrl+alt+letter all reach the app</span>
+      <span><span class="tier told">device</span> swipe up sends the popup key</span>
+      <span><span class="tier told">device</span> the row is an Android view, drawn in both keyboard states</span>
+      <span><span class="tier docs">check it</span> what long press does — it is <b>not</b> auto-repeat</span>
     </div>
 
     <p class="lede">
@@ -611,8 +650,8 @@ pre.props .c { color: var(--term-dim); }
         <tr><td class="k">peel</td><td class="yes">swipe CTRL</td><td class="yes">swipe CTRL</td></tr>
         <tr><td class="k">move / page</td><td class="yes">▲ ▼ and their popups</td><td class="yes">▲ ▼</td></tr>
         <tr><td class="k">quit</td><td class="yes">swipe CTRL twice</td><td class="yes"><code>ctrl+q</code></td></tr>
-        <tr><td class="k"><code>ctrl+t</code> scans</td><td class="no">no letter to hold CTRL against</td><td class="yes"><b>hold CTRL, tap t</b></td></tr>
-        <tr><td class="k"><code>ctrl+x</code> expiring</td><td class="no"><b>the one real gap</b></td><td class="yes"><b>hold CTRL, tap x</b></td></tr>
+        <tr><td class="k"><code>ctrl+t</code> scans</td><td class="no">no letter for the latch to land on</td><td class="yes"><b>tap CTRL, tap t</b></td></tr>
+        <tr><td class="k"><code>ctrl+x</code> expiring</td><td class="no"><b>the one real gap</b></td><td class="yes"><b>tap CTRL, tap x</b></td></tr>
       </table>
     </div>
 
@@ -628,12 +667,33 @@ pre.props .c { color: var(--term-dim); }
     <p class="lede">
       <b><code>ctrl+x</code> is the residue.</b> "Cold start, show me what is
       expiring" is a browsing act, done with the keyboard down, and with the
-      keyboard down there is no letter. The workaround is to raise the IME, hold
+      keyboard down there is no letter. The workaround is to raise the IME, tap
       CTRL, tap <code>x</code>, then dismiss the IME again — four or five touches
       and two re-layouts, to reach the app's most-used filter. <b>One verb, in one
       state.</b> That is the entire remaining case for a touch control, and it is
       not a case for three of them.
     </p>
+
+    <div class="caveat">
+      <p><b>One test could close even that gap.</b> A sticky modifier latches
+        "until the next key" — and the extra-keys row is full of keys. If tapping
+        <code>CTRL</code> and then <code>▶</code> sends <code>ctrl+→</code>, then
+        a <b>modifier tier exists with the keyboard down</b>, built entirely out
+        of the row: <code>ctrl</code> and <code>alt</code> against the four
+        arrows, eight combinations, none of which need a letter.
+        <span class="tier docs">check it</span></p>
+      <p>That would make the residue verb bindable — <code>ctrl+↑</code> or
+        similar for the expiring filter — reachable by thumb while browsing, with
+        no chrome at all. I would still build the header count first: an arrow
+        combination is <em>reachable</em> but not <em>discoverable</em>, and the
+        count is both. But it is the difference between "one verb has no
+        keyboard-down path" and "one verb has no keyboard-down path that anyone
+        would find", which is a much smaller problem.</p>
+      <p>Worth knowing either way: <code>input.rs</code> matches
+        <code>KeyCode::Right</code> with no modifier guard, so
+        <code>ctrl+→</code> currently acts as plain <code>→</code>.
+        <span class="tier measured">measured</span></p>
+    </div>
   </section>
 
   <section>
@@ -826,9 +886,9 @@ pre.props .c { color: var(--term-dim); }
  3/24  <span class="dim">[expiring]  [scans]</span>                   </pre></div>
       <figcaption>
         <span class="size">45×28 · the bar as it ships today, for comparison</span>
-        <span class="how">Every cell duplicates a key the thumb already holds:
-          <code>→ Detail</code> is ▶, and both toggles are two-finger presses
-          whenever the keyboard is up. The truth row below shows today's
+        <span class="how">Every cell duplicates a key the thumb already has:
+          <code>→ Detail</code> is ▶, and both toggles are two taps whenever the
+          keyboard is up. The truth row below shows today's
           all-or-nothing hint drop — two filters, no hints.</span>
       </figcaption>
     </figure>
@@ -926,7 +986,7 @@ pre.props .c { color: var(--term-dim); }
           <span class="size">~45×14 · querying, keyboard up</span>
           <span class="how">The state the correction is really about: five
             documents, and both <code>ctrl+x</code> and <code>ctrl+t</code>
-            reachable as two-finger presses.</span>
+            reachable as two taps — CTRL, then the letter.</span>
         </figcaption>
       </figure>
       <figure>
@@ -1004,8 +1064,8 @@ pre.props .c { color: var(--term-dim); }
       <table class="kv">
         <tr><th>What would change the recommendation</th><th>To</th></tr>
         <tr>
-          <td>Hold-CTRL + IME letter proving flaky under a different keyboard app
-            — the whole derivation rests on that one mechanic</td>
+          <td>The CTRL latch proving flaky under a different keyboard app — the
+            whole derivation rests on that one mechanic</td>
           <td>C1, immediately</td>
         </tr>
         <tr>
@@ -1038,7 +1098,7 @@ alt+Enter    -> Enter</pre>
         <code>KeyCode::Char(c) if !ctrl</code>, and <code>ctrl</code> is
         <code>contains(CONTROL)</code>. There is no <code>ALT</code> guard
         anywhere. <b>Exclude ALT from the printable fall-through</b> whether or
-        not we ever bind an alt verb: on this phone, holding ALT and typing
+        not we ever bind an alt verb: on this phone, latching ALT and typing
         currently pollutes the search.</p>
       <p>It also means <code>ctrl+alt+letter</code> is <b>not</b> a distinct
         namespace — it is aliased onto <code>ctrl+letter</code>. Which is just as
@@ -1093,9 +1153,9 @@ alt+Enter    -> Enter</pre>
         <tr><th>Key</th><th>What it serves</th></tr>
         <tr><td class="k">ESC</td><td>Peels one layer; twice quits. Without it the
           app cannot be backed out of while browsing.</td></tr>
-        <tr><td class="k">CTRL</td><td>The held modifier for <code>ctrl+x</code>,
-          <code>ctrl+t</code> and <code>ctrl+q</code>. Useless on its own, and
-          mandatory.</td></tr>
+        <tr><td class="k">CTRL</td><td>The sticky modifier for <code>ctrl+x</code>,
+          <code>ctrl+t</code> and <code>ctrl+q</code>: tap it, then tap the
+          letter. Useless on its own, and mandatory.</td></tr>
         <tr><td class="k">◀ ▲ ▼ ▶</td><td>Close detail, move, open detail — the
           whole browse loop, and the reason no <code>→ Detail</code> button is
           needed.</td></tr>
@@ -1119,11 +1179,11 @@ alt+Enter    -> Enter</pre>
     <div class="scroller">
       <table class="kv">
         <tr><th>Key</th><th>What it serves</th></tr>
-        <tr><td class="k">CTRL · ESC</td><td>Hold for the filter toggles and quit;
-          the swipe puts Esc one gesture away with the keyboard down, which is
-          what makes <code>Esc·Esc</code> an honest quit path.</td></tr>
-        <tr><td class="k">ALT · TAB</td><td>Nothing in dossier today. Hold is the
-          R4 in-edit tier; the swipe delivers Tab for R4 field navigation without
+        <tr><td class="k">CTRL · ESC</td><td>Tap to latch for the filter toggles
+          and quit; the swipe puts Esc one gesture away with the keyboard down,
+          which is what makes <code>Esc·Esc</code> an honest quit path.</td></tr>
+        <tr><td class="k">ALT · TAB</td><td>Nothing in dossier today. The latch is
+          the R4 in-edit tier; the swipe delivers Tab for R4 field navigation without
           raising the keyboard — which is why Tab is a safer future binding than
           any new control combination.</td></tr>
         <tr><td class="k">SPACE</td><td>Multi-word queries without reaching into
@@ -1160,12 +1220,14 @@ alt+Enter    -> Enter</pre>
         gains its missing underline and its missing <code>^t scans</code> hint;
         and <code>input.rs</code> stops letting <code>alt</code>+letter type into
         the query.</p>
-      <p>Two things to settle on the device before any of it is written into the
-        install notes: the <b>keyboard-up terminal size</b> (expect ~45×14 — if a
-        taller keyboard drops it under 12 rows the app refuses to draw
-        mid-query), and whether <b>held CTRL composes with the row's arrows</b>.
-        If it does, a keyboard-down modifier tier exists with no letters at all,
-        and the residue verb stops being a residue.</p>
+      <p>Three things to settle on the device before any of it is written into
+        the install notes. <b>Does the CTRL latch reach the row's own arrows?</b>
+        If <code>CTRL</code> then <code>▶</code> is <code>ctrl+→</code>, the
+        residue verb becomes bindable with the keyboard down. <b>What is the
+        terminal size with the keyboard up?</b> Expect ~45×14 — if a taller
+        keyboard drops it under twelve rows the app refuses to draw mid-query.
+        And <b>what does long press actually do</b>, now that it is known not to
+        auto-repeat — crossing a long list by thumb was resting on that.</p>
     </div>
   </section>
 
