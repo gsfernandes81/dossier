@@ -267,6 +267,14 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
    applied by row kind everywhere (doc / orphan / succession pair / other object per
    DESIGN §8); `Enter` never mutates and never dies (falls through to the record when
    there's no file).
+
+   > **Amendment approved 2026-08-20, not yet implemented — see REWRITE-UI.md
+   > §5b.** The pair becomes **`Enter` drills one layer, `Esc` peels one layer**
+   > (exact inverses), freeing `←`/`→` to move the cursor inside the query.
+   > Invariant 6 follows it (tap-on-selected drills), and invariant 1's
+   > five-keystroke budget is met exactly rather than with margin. Deferred until
+   > the port is more full-featured: the drill chain's far end needs a selection
+   > on the detail surface, which R4 builds.
 3. **Esc peels exactly one layer per press**; at base state it arms, second
    consecutive Esc quits; any other key disarms. Termux's IME-dismiss Esc must never
    quit spuriously.
@@ -275,7 +283,8 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
 5. **Narrow-first**: usable at ~40–60 cols portrait Termux; ASCII status fallbacks
    (`!`/`~`) alongside optional glyphs; sort keys with explicit tiebreakers so order
    never jitters.
-6. **Touch/Termux**: SGR mouse on; first tap selects, tap-on-selected opens;
+6. **Touch/Termux**: SGR mouse on; first tap selects, tap-on-selected opens
+   (**drills**, once the invariant-2 amendment above lands);
    the ⌨/search affordance momentarily drops mouse mode so the next tap raises the
    IME, restored on submit/blur. Mouse mode owns scrolling (Termux #4302).
 7. **Never block the render thread**: tree walks, syncthing polls, journal compaction

@@ -306,3 +306,66 @@ The reasoning, the alternatives and the arithmetic are in
 [`docs/dev/mockups/`](docs/dev/mockups/) — *The Verb Audit*, *Tap the Number*,
 *The Leader Key*, *Space Without a Spacebar*, *The Empty Field*, and
 *Find at 47×45* for the finished screens.
+
+## 5b · The verb pair, revised — approved, deferred
+
+**Approved by the user (2026-08-20). Not implemented, and deliberately not
+scheduled yet: it lands once the port is more full-featured, because two of its
+four parts want surfaces R4 has not built.**
+
+Today drilling is on one axis (`→`/`←`) and peeling on another (`Esc`), and
+`Enter` does a third thing. The revision collapses that to one axis:
+
+| | now | after |
+|---|---|---|
+| drill one layer | `→` | **`Enter`** |
+| peel one layer | `Esc` | `Esc` (unchanged) |
+| open the file | `Enter` | `Enter` again, from inside the record |
+| move the text cursor | — | **`←` `→`** |
+
+**`Enter` and `Esc` become exact inverses.** That is the whole argument: one
+axis instead of two, and it frees the arrow pair for the thing a phone actually
+needs — positioning a cursor in the query, which is miserable by tapping and
+which the app does not hit-test inside the field at all.
+
+It also retires a special case. Invariant 2's *"`Enter` never dies, falls
+through to the record when there's no file"* exists only because `Enter` skips
+the record; once it always goes there first, the fallthrough has nothing to do.
+
+### What it changes in REWRITE.md §4.5
+
+- **Invariant 2** is rewritten: the verb pair becomes `Enter` drills / `Esc`
+  peels. This is the binding invariant the change exists to amend.
+- **Invariant 6** follows it: tap-on-selected *drills* rather than opens, or
+  touch and keyboard diverge.
+- **Invariant 1's budget survives, with nothing to spare.** "Cold start → type →
+  `Enter` → file open, ≤ 5 keystrokes" becomes `c-o-c-⏎-⏎` — exactly five. A
+  four-character query would break it, so the budget's wording should say
+  *five keystrokes for a three-character query* rather than pretend to a margin
+  it no longer has.
+
+### `Home` / `End`
+
+They are list jumps today, and on the phone they are the swipe-ups on `◀`/`▶` —
+the very keys becoming cursor keys. Once `←`/`→` move through text, `Home`/`End`
+must mean the ends of the query.
+
+**Resolution: let the query decide**, the same rule that makes `Space` the
+leader. Empty query → they jump the list; non-empty → they jump within the text.
+One rule to learn rather than two. `PgUp`/`PgDn` keep the list jumps
+unconditionally and long-pressing `▲`/`▼` still repeats, so nothing becomes
+unreachable.
+
+### Why it waits
+
+The work is one change, not two — rebinding without a query cursor leaves
+`←`/`→` doing nothing at all, which is a regression with no upside. And the
+query cursor is the bulk of it: a position beside `Model::query`, insert and
+delete at that position, and the block cursor drawn where it *is* rather than
+always at the end.
+
+The part that genuinely needs R4 is the far end of the drill chain. `Enter`
+inside a record opens the primary file, which works now; but the record has no
+cursor, so "drill into the file you are looking at" cannot exist until the
+detail surface has a selection. Building the rebinding first would ship a chain
+whose last link is hardcoded.
