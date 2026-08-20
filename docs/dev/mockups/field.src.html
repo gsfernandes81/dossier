@@ -1,0 +1,229 @@
+<title>Marking the Field</title>
+<style>
+/*CSS*/
+
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+
+/* The mockup's underline: pushed 3px clear of the baseline, which is a thing a
+   browser can do and a terminal cannot. */
+.uline, .ulinedim {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+.ulinedim { color: var(--term-dim); }
+
+/* The same row where the font's own metric puts the line — under the baseline
+   but above the descenders, which is what the phone draws. */
+.asphone .uline, .asphone .ulinedim {
+  text-underline-offset: -1px;
+  text-decoration-color: var(--term-fg);
+}
+
+.bright { color: var(--term-fg); }
+.brightdim { color: var(--term-dim); }
+.tint, .tintdim { background: color-mix(in srgb, var(--term-fg) 13%, transparent); }
+.tintdim { color: var(--term-dim); }
+
+.term.mono .acc, .term.mono .exp, .term.mono .soon,
+.term.mono .ok, .term.mono .warn { color: var(--term-fg); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2.2rem 2rem; margin: 1.5rem 0 0; }
+.opt { display: flex; flex-direction: column; gap: .55rem; min-width: 0; }
+.opt h3 { display: flex; align-items: baseline; gap: .55rem; flex-wrap: wrap; margin: 0; font-size: .93rem; }
+.opt h3 .letter { font-size: .68rem; letter-spacing: .12em; color: var(--accent); background: var(--accent-soft); padding: .12rem .4rem; border-radius: 2px; }
+.opt h3 .flag { font-family: var(--sans); font-size: .68rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--term-sel-fg); background: var(--accent); padding: .1rem .45rem; border-radius: 2px; }
+.opt h3 .no { font-family: var(--sans); font-size: .68rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--term-exp); border: 1px solid var(--term-exp); padding: .06rem .4rem; border-radius: 2px; }
+.opt p { margin: 0; font-size: .89rem; color: var(--muted); max-width: 46ch; }
+.opt p + p { margin-top: .45rem; }
+.opt p b { color: var(--ink); font-weight: 600; }
+
+.states { display: flex; flex-wrap: wrap; gap: 1.75rem; margin: 1.4rem 0 0; align-items: flex-start; }
+.kv code { font-family: var(--mono); font-size: .84em; }
+.kv td.yes { color: var(--term-ok); }
+.kv td.no { color: var(--term-exp); }
+
+.mea { border: 1px dashed var(--term-exp); border-radius: 3px; padding: .85rem 1.05rem; margin: 1.5rem 0 0; }
+.mea p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 68ch; }
+.mea p + p { margin-top: .5rem; }
+.mea p b { color: var(--term-exp); font-weight: 600; }
+
+.verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.6rem 0 0; }
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .55rem; }
+
+.srcs { font-size: .82rem; color: var(--faint); margin-top: 2rem; }
+.srcs a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · the query field</p>
+    <h1>Marking the Field</h1>
+    <p class="standfirst">
+      The underline sits too high on the phone — through the descenders rather
+      than under them — and nothing in the app can move it: a terminal draws
+      <code>SGR 4</code> wherever the font's own metric says. So the question is
+      what else can say <em>you can type here</em>. Emacs has two answers, and a
+      third by leaving it out.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Pane</b> 47 columns</span>
+    <span><b>Constraint</b> underline position is the font's, not ours</span>
+    <span><b>Rule at stake</b> underline = typable</span>
+  </div>
+
+  <section>
+    <h2>The mockups were flattering it</h2>
+    <p class="lede">
+      Same specimen, twice. On the left as every page in this directory has drawn
+      it; on the right where the font's metric actually puts the line.
+    </p>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:now--></pre></div>
+        <figcaption>
+          <span class="size">the mockup</span>
+          <span class="how"><code>text-underline-offset: 3px</code> — a browser
+            can push the line clear of the text. That is what sold the design.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone asphone"><pre><!--S:now--></pre></div>
+        <figcaption>
+          <span class="size">the terminal</span>
+          <span class="how">No offset to give. The line lands where the font
+            says, which on this phone is high and through the descenders.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <div class="mea">
+      <p><b>That is a mockup lying about the one thing it exists to get right.</b>
+        Every page in this directory that recommended an underlined field drew it
+        with a three-pixel offset — a property no terminal has. The grid
+        machinery was built so a 45-column pane really is 45 columns; nothing was
+        checking that a texture rendered the way the device would render it.</p>
+      <p>Worth carrying: <b>the mockups are honest about geometry and were never
+        honest about attributes.</b> Colour they hedge correctly — the panes
+        follow the viewer's theme, and every page has a NO_COLOR twin. Underline,
+        reverse and dim have been drawn as they look in a browser.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What Emacs uses instead of a line</h2>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Where</th><th>How it is marked</th></tr>
+        <tr>
+          <td class="k">the minibuffer</td>
+          <td><b>Nothing marks the field.</b> A prompt in
+            <code>minibuffer-prompt</code> face, and the cursor. The prompt names
+            the question, so nothing has to outline where the answer goes.</td>
+        </tr>
+        <tr>
+          <td class="k">widget fields<br>(Custom buffers)</td>
+          <td><code>widget-field</code> is a <b>background face</b> — the field's
+            extent shown as a differently-coloured run, not a rule under it.</td>
+        </tr>
+        <tr>
+          <td class="k">and even there</td>
+          <td>The underline `widget-field` grew is contentious enough that theme
+            authors have patched it to follow a border colour instead. <b>A line
+            under a field is a known problem, not a settled idiom.</b></td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Four ways to mark it</h2>
+    <div class="grid">
+      <div class="opt">
+        <h3><span class="letter">A</span> Nothing — the prompt does it <span class="flag">recommended</span></h3>
+        <div class="term phone"><pre><!--S:bare--></pre></div>
+        <div class="term phone"><pre><!--S:bare-empty--></pre></div>
+        <p>The minibuffer's own answer. <code>Find:</code> in the accent colour,
+          your text at full brightness, everything else on the row dim. The
+          cursor is where you type and the prompt says what typing does.</p>
+        <p><b>This only works because the prompt got a name.</b> A bare
+          <code>&gt;</code> with no field marking would be a row of nothing; a
+          named prompt is a question, and a question needs no box around its
+          answer.</p>
+        <p>It costs the <em>typable</em> texture. That rule was written when the
+          prompt was a marker — the texture was carrying the meaning the words
+          now carry.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">B</span> A background over the extent</h3>
+        <div class="term phone"><pre><!--S:tint--></pre></div>
+        <div class="term phone"><pre><!--S:tint-empty--></pre></div>
+        <p>Emacs's <code>widget-field</code>, in a terminal. It shows the field's
+          full width, which is the one thing the underline did that a prompt does
+          not, and no font metric can put it in the wrong place.</p>
+        <p class="risk"><b>It is a colour.</b> Every other texture here is an
+          attribute, so <code>NO_COLOR</code> loses nothing structural; this
+          would be the first thing on the surface that vanishes. And a tint that
+          reads as subtle against one terminal theme reads as a bar against
+          another — we do not own the palette.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">C</span> Underline only what is there</h3>
+        <div class="term phone"><pre><!--S:short--></pre></div>
+        <div class="term phone asphone"><pre><!--S:short--></pre></div>
+        <p>Keep the line, stop drawing it across empty cells. Shown twice again —
+          the second is the phone's rendering.</p>
+        <p><b>It does not fix the problem, it shrinks it.</b> The line is still
+          through the descenders of the word you typed, which is the text you
+          most need to read. And the field stops having a visible extent, so it
+          gives up the underline's one advantage while keeping its fault.</p>
+      </div>
+
+      <div class="opt">
+        <h3><span class="letter">D</span> Delimiters</h3>
+        <div class="term phone"><pre><!--S:brackets--></pre></div>
+        <p>Two dim brackets. No attribute at all, so no font metric can move
+          them, no theme can hide them, and <code>NO_COLOR</code> is untouched.
+          The extent is explicit.</p>
+        <p>It costs two columns and about fifteen years — a bracketed input reads
+          as a dialog box drawn in text, which is the aesthetic this app has been
+          avoiding everywhere else. Worth keeping in the drawer if A turns out to
+          read as an unmarked row on the device.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What I would build</h2>
+    <div class="verdict">
+      <p><b>A — drop the underline, and let the named prompt carry it.</b> It is
+        what the minibuffer does, it is immune to the font metric that caused
+        this, and it costs nothing in <code>NO_COLOR</code>. The three textures
+        become two plus the input itself: <b>reverse is pressable, dim is
+        information, and full brightness is what you typed.</b></p>
+      <p>That is a smaller vocabulary doing the same work, and it is the one
+        reading that gets <em>more</em> true as the app grows — command mode and
+        the sheet's picker are the same row with a different prompt, and none of
+        them need a box either.</p>
+      <p>Two things I would not do. Not the tint: it is the only colour-dependent
+        texture on the surface, and the palette is the user's. Not the short
+        underline: it keeps the fault and drops the benefit.</p>
+    </div>
+
+    <p class="srcs">Checked against
+      <a href="https://www.gnu.org/software/emacs/manual/html_node/widget/User-Interface.html">the Emacs Widget manual</a>,
+      <a href="https://github.com/emacs-mirror/emacs/blob/master/lisp/wid-edit.el">wid-edit.el</a>
+      and <a href="https://github.com/protesilaos/modus-themes/pull/193">a Modus themes patch to the widget-field underline</a>.</p>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/field.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>

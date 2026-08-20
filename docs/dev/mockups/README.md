@@ -302,3 +302,39 @@ move, freeing row two), and let the prompt change with the question. The prize
 is that **command mode arrives for free** — when `:` lands there is nowhere new
 to put it. Costs four typable columns. **Wording is the user's call**: `Find:`,
 `Search:` or `Filter:`, with or without the colon.
+
+### Marking the field — and a flaw in these mockups
+
+`field.py` → **Marking the Field**. The underlined query field sits too high on
+the device: a terminal draws `SGR 4` wherever the font's metric says, through
+the descenders rather than under them, and nothing in the app can move it.
+
+**The mockups were flattering it.** Every page here that recommended an
+underlined field drew it with `text-underline-offset: 3px` — a property no
+terminal has. The grid machinery makes sure a 45-column pane really is 45
+columns; nothing was checking that a *texture* renders the way the device
+renders it. Carry this: **these pages are honest about geometry and were never
+honest about attributes.** Colour is hedged correctly (panes follow the viewer's
+theme, every page has a NO_COLOR twin); underline, reverse and dim have been
+drawn as a browser draws them. `field.src.html` has an `.asphone` class that
+renders the same specimen with the offset removed — use it when a new texture is
+proposed.
+
+What Emacs does instead:
+
+- **The minibuffer marks nothing.** A prompt in `minibuffer-prompt` face and a
+  cursor. The prompt names the question, so nothing has to outline where the
+  answer goes.
+- **`widget-field` is a background face** — the field's extent as a coloured
+  run, not a rule under it. And even that underline is contentious enough that
+  theme authors patch it; a line under a field is a known problem, not a settled
+  idiom.
+
+Proposed: **drop the underline and let the named prompt carry it.** The three
+textures become two plus the input — reverse is pressable, dim is information,
+and full brightness is what you typed. Immune to the font metric, costs nothing
+in NO_COLOR, and it only works because the prompt got a name. Rejected: a
+background tint (the only colour-dependent texture on the surface, and the
+palette is the user's) and a short underline (keeps the fault, drops the
+benefit). Kept in the drawer: dim delimiters, if an unmarked row reads as blank
+on the device.
