@@ -1,0 +1,357 @@
+<title>Find at 47×45</title>
+<style>
+/*CSS*/
+
+/* ── terminal textures ────────────────────────────────────────────────── */
+.chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.uline {
+  text-decoration: underline;
+  text-decoration-color: var(--term-dim);
+  text-underline-offset: 3px;
+}
+.term.mono .acc,
+.term.mono .exp,
+.term.mono .soon,
+.term.mono .ok,
+.term.mono .warn { color: var(--term-fg); }
+
+/* ── touch-map zones ──────────────────────────────────────────────────── */
+.zfilter { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.zpick   { background: color-mix(in srgb, var(--term-ok) 22%, transparent); }
+.zopen   { background: color-mix(in srgb, var(--term-ok) 42%, transparent); }
+.ztype   { background: color-mix(in srgb, var(--term-soon) 30%, transparent); }
+
+.zkey { display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; margin: .9rem 0 0; }
+.zkey span { display: flex; align-items: center; gap: .5rem; font-size: .86rem; color: var(--muted); }
+.zkey i {
+  width: 1.5rem;
+  height: .95rem;
+  border-radius: 2px;
+  border: 1px solid var(--rule);
+  flex: none;
+}
+.zkey .k1 { background: var(--term-sel-bg); }
+.zkey .k2 { background: color-mix(in srgb, var(--term-ok) 22%, transparent); }
+.zkey .k3 { background: color-mix(in srgb, var(--term-ok) 42%, transparent); }
+.zkey .k4 { background: color-mix(in srgb, var(--term-soon) 30%, transparent); }
+
+/* ── the Termux key row, as an Android view ───────────────────────────── */
+.keyrow {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: .3rem;
+  background: var(--term-bg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: .45rem;
+  margin: 1.2rem 0 .5rem;
+  box-shadow: var(--shadow);
+  max-width: 34rem;
+}
+.keyrow .key {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .18rem;
+  padding: .5rem .1rem .35rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--term-fg) 12%, transparent);
+  min-width: 0;
+}
+.keyrow .key.mod { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.keyrow .base { font-family: var(--mono); font-size: .8rem; color: var(--term-fg); line-height: 1; }
+.keyrow .pop { font-family: var(--mono); font-size: .58rem; color: var(--term-dim); line-height: 1; }
+
+/* a soft keyboard, drawn only to show what it costs */
+.ime {
+  max-width: 34rem;
+  background: var(--term-bg);
+  border: 1px solid var(--rule);
+  border-top: none;
+  border-radius: 0 0 3px 3px;
+  padding: .5rem .4rem .7rem;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  opacity: .55;
+}
+.ime div { display: flex; gap: .25rem; justify-content: center; }
+.ime b {
+  height: 1.1rem;
+  flex: 1 1 0;
+  max-width: 2.1rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--term-fg) 16%, transparent);
+}
+.ime div:last-child b:nth-child(2) { max-width: 9rem; }
+
+/* ── layout ───────────────────────────────────────────────────────────── */
+.screens { display: flex; flex-wrap: wrap; gap: 2.2rem; align-items: flex-start; margin: 1.4rem 0 0; }
+.screens figure { margin: 0; max-width: 100%; }
+figcaption .size { font-variant-numeric: tabular-nums; }
+
+.numbers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1.4rem 2rem;
+  margin: 1.5rem 0 0;
+}
+.numbers > div { border-top: 2px solid var(--accent); padding-top: .55rem; }
+.numbers b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 1.6rem;
+  line-height: 1.1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.numbers span { font-size: .84rem; color: var(--muted); }
+
+.texture { display: flex; flex-wrap: wrap; gap: 1.6rem; margin: 1.3rem 0 0; }
+.texture > div { display: flex; align-items: center; gap: .7rem; }
+.texture .sw {
+  font-family: var(--mono);
+  font-size: .82rem;
+  padding: .2rem .6rem;
+  border-radius: 2px;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  border: 1px solid var(--rule);
+}
+.texture .sw.rev { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+.texture .sw.und { text-decoration: underline; text-decoration-color: var(--term-dim); text-underline-offset: 3px; }
+.texture .sw.dim { color: var(--term-dim); }
+.texture p { margin: 0; font-size: .88rem; color: var(--muted); }
+.texture p b { color: var(--ink); font-weight: 600; }
+
+.keys { width: 100%; border-collapse: collapse; margin: 1.2rem 0 0; font-size: .9rem; }
+.keys td { padding: .42rem .8rem .42rem 0; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+.keys td.g { font-family: var(--mono); color: var(--accent); white-space: nowrap; width: 1%; }
+.keys td.v { color: var(--ink); white-space: nowrap; width: 1%; }
+.keys td.t { color: var(--muted); }
+
+pre.props {
+  font-family: var(--mono);
+  font-size: .78rem;
+  line-height: 1.5;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: .8rem .9rem;
+  overflow-x: auto;
+  margin: 1rem 0 0;
+  white-space: pre;
+}
+pre.props .c { color: var(--term-dim); }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">dossier v3 · Find · the built product</p>
+    <h1>Find at 47×45</h1>
+    <p class="standfirst">
+      Every screen at the size the phone actually reports — forty-seven columns,
+      forty-five rows with the keyboard down and twenty-four with it up. No
+      action bar: the terminal's own key row carries the verbs, and the only
+      thing the app adds for a thumb is the count that reports what is expiring.
+    </p>
+  </header>
+
+  <div class="numbers">
+    <div><b>21</b><span>documents at a glance, keyboard down</span></div>
+    <div><b>10</b><span>still visible while you type</span></div>
+    <div><b>3</b><span>rows of chrome — header, field, truth</span></div>
+    <div><b>2</b><span>pressable things on the screen</span></div>
+  </div>
+
+  <section>
+    <h2>Browsing</h2>
+    <p class="lede">
+      Cold start. Two rows a document: name and expiry, then where the paper
+      lives. The whole store, top to bottom, without typing anything.
+    </p>
+    <div class="screens">
+      <figure>
+        <div class="term phone"><pre><!--S:browse--></pre></div>
+        <figcaption>
+          <span class="size">47 × 45</span>
+          <span class="how">Twenty-one documents.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre><!--S:browse--></pre></div>
+        <figcaption>
+          <span class="size">47 × 45 · NO_COLOR</span>
+          <span class="how">Nothing here is only a hue.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Typing</h2>
+    <p class="lede">
+      Any letter is search text — there is nothing to press first. Raising the
+      keyboard resizes the terminal rather than covering it, so the list keeps
+      ten rows while you narrow it.
+    </p>
+    <div class="screens">
+      <figure>
+        <div class="term phone"><pre><!--S:query--></pre></div>
+        <div class="ime">
+          <div><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div>
+          <div><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div>
+          <div><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div>
+          <div><b></b><b></b><b></b></div>
+        </div>
+        <figcaption>
+          <span class="size">47 × 24 · keyboard up</span>
+          <span class="how">Four matches for <code>coc</code>.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:filtered--></pre></div>
+        <figcaption>
+          <span class="size">47 × 45 · filter live</span>
+          <span class="how">The expiring filter, from tapping the count in the
+            header or from <code>^x</code>. The chip below says it is on.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>A record, and leaving</h2>
+    <div class="screens">
+      <figure>
+        <div class="term phone"><pre><!--S:record--></pre></div>
+        <figcaption>
+          <span class="size">47 × 24 · pushed over the list</span>
+          <span class="how">Everything about one document on one screen.
+            <code>◀</code> closes it; the list is still underneath.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:armed--></pre></div>
+        <figcaption>
+          <span class="size">47 × 24 · armed</span>
+          <span class="how">Esc peels one layer at a time; on the last one it
+            arms, and says so where the hints were.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>What a thumb can touch</h2>
+    <p class="lede">
+      Four regions, and only two of them are controls. Everything else the phone
+      already provides.
+    </p>
+    <div class="screens">
+      <figure>
+        <div class="term phone"><pre><!--S:zones--></pre></div>
+        <figcaption><span class="size">the touch map</span></figcaption>
+      </figure>
+      <div style="flex:1 1 16rem; min-width:14rem">
+        <div class="zkey">
+          <span><i class="k1"></i> tap the count — filter to what is expiring</span>
+          <span><i class="k2"></i> tap a row — select it</span>
+          <span><i class="k3"></i> tap it again — open the file</span>
+          <span><i class="k4"></i> tap the field — raise the keyboard</span>
+        </div>
+        <p style="margin-top:1.1rem">Dragging scrolls the list. Nothing else on
+          the screen responds to a touch, and nothing that does is destructive.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Three textures</h2>
+    <div class="texture">
+      <div>
+        <span class="sw rev"> ! 3 exp </span>
+        <p><b>Reverse</b> — you can press it</p>
+      </div>
+      <div>
+        <span class="sw und">&nbsp;coc█&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+        <p><b>Underline</b> — you can type into it</p>
+      </div>
+      <div>
+        <span class="sw dim">^x expiry</span>
+        <p><b>Dim</b> — it is telling you something</p>
+      </div>
+    </div>
+    <p style="margin-top:1.1rem">All three are terminal <em>attributes</em>, not
+      colours, so the screen reads the same in a monochrome theme, under
+      <code>NO_COLOR</code>, and in whatever palette your terminal already
+      uses.</p>
+  </section>
+
+  <section>
+    <h2>The keys</h2>
+    <p class="lede">
+      No letter is a shortcut — letters are the search box. Everything else sits
+      on Termux's own key row, above the terminal, in both keyboard states.
+    </p>
+
+    <div class="keyrow">
+      <div class="key mod"><span class="base">CTRL</span><span class="pop">ESC</span></div>
+      <div class="key mod"><span class="base">ALT</span><span class="pop">TAB</span></div>
+      <div class="key"><span class="base">SPACE</span><span class="pop">&nbsp;</span></div>
+      <div class="key"><span class="base">◀</span><span class="pop">HOME</span></div>
+      <div class="key"><span class="base">▲</span><span class="pop">PGUP</span></div>
+      <div class="key"><span class="base">▼</span><span class="pop">PGDN</span></div>
+      <div class="key"><span class="base">▶</span><span class="pop">END</span></div>
+      <div class="key"><span class="base">⌨</span><span class="pop">ENTER</span></div>
+    </div>
+
+    <table class="keys">
+      <tr><td class="g">▶</td><td class="v">→</td><td class="t">Open the record beside the list</td></tr>
+      <tr><td class="g">◀</td><td class="v">←</td><td class="t">Close it again</td></tr>
+      <tr><td class="g">▲ ▼</td><td class="v">↑ ↓</td><td class="t">Move; hold to run</td></tr>
+      <tr><td class="g">swipe ▲ ▼</td><td class="v">PgUp PgDn</td><td class="t">A screen at a time</td></tr>
+      <tr><td class="g">swipe ⌨</td><td class="v">Enter</td><td class="t">Open the file itself</td></tr>
+      <tr><td class="g">swipe CTRL</td><td class="v">Esc</td><td class="t">Peel one layer — clear, close, unfilter, quit</td></tr>
+      <tr><td class="g">CTRL then x</td><td class="v">^x</td><td class="t">Expiring only</td></tr>
+      <tr><td class="g">CTRL then t</td><td class="v">^t</td><td class="t">Search inside scanned text</td></tr>
+      <tr><td class="g">⌨</td><td class="v">—</td><td class="t">Show or hide the keyboard</td></tr>
+    </table>
+
+    <p style="margin-top:1.3rem"><code>CTRL</code> and <code>ALT</code> latch:
+      tap one, then tap the key it applies to. A long press holds them instead.
+      Put this in <code>~/.termux/termux.properties</code> and reload with
+      <code>termux-reload-settings</code>:</p>
+    <pre class="props">extra-keys = [[ \
+  {key: CTRL, popup: ESC}, {key: ALT, popup: TAB}, {key: SPACE}, \
+  {key: LEFT, popup: HOME, display: "◀"}, {key: UP, popup: PGUP, display: "▲"}, \
+  {key: DOWN, popup: PGDN, display: "▼"}, {key: RIGHT, popup: END, display: "▶"}, \
+  {key: KEYBOARD, popup: ENTER} \
+]]</pre>
+    <p style="margin-top:.8rem"><code>ESC</code>, <code>CTRL</code> and the four
+      arrows are the minimum; the rest is comfort.</p>
+  </section>
+
+  <section>
+    <h2>At a desk</h2>
+    <p class="lede">
+      The same program in a wide terminal: one line a document, the columns the
+      phone stacks laid out side by side, and every verb taught on the last row.
+    </p>
+    <figure class="scroller">
+      <div class="term"><pre><!--S:desk--></pre></div>
+      <figcaption>
+        <span class="size">100 columns</span>
+        <span class="how">No touch chrome — nothing here is reversed except the
+          row you are on.</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/built.py</span>
+    <span>every line padded to its real column count</span>
+  </footer>
+</div>

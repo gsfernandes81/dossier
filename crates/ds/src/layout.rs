@@ -33,8 +33,13 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Below this list width, rows go two-line (name + status, then location and
 /// tags underneath). The user confirmed the two-line phone row in the R-UI
-/// mockup review: twelve documents at 45×28, and the trade against density is
-/// accepted.
+/// mockup review and the trade against density with it.
+///
+/// The phone reports **47×45** with the keyboard down and **47×24** with it up
+/// (measured on the device; Termux resizes the terminal rather than covering
+/// it). That is twenty-one two-line documents while browsing and ten while
+/// typing — the review's "twelve at 45×28" was a mockup size, not a
+/// measurement, and is superseded.
 pub const NARROW_COLS: u16 = 70;
 
 /// At or above this terminal width, an open detail splits beside the list
@@ -298,8 +303,14 @@ mod tests {
     /// Both halves of the loop count rows the same way, chrome included.
     #[test]
     fn visible_rows_accounts_for_chrome() {
-        // 45×28 phone: 28 rows − 4 chrome = 24, at two lines a row = 12 docs.
-        assert_eq!(visible_rows(45, 28), 12, "the twelve rows the mockup shows");
+        // The measured phone, keyboard down: 47×45 − 4 chrome = 41, two lines a
+        // row = 20 docs. Deleting the action bar would make it 42 and 21.
+        assert_eq!(visible_rows(47, 45), 20, "browsing, as the device reports it");
+        // The same phone with the keyboard up — Termux resizes rather than
+        // covering, so this is a shorter layout and not a hidden one.
+        assert_eq!(visible_rows(47, 24), 10, "typing, as the device reports it");
+        // 45×28, the mockup size the R-UI pages are drawn at.
+        assert_eq!(visible_rows(45, 28), 12, "the twelve rows the mockups show");
         // 100×26 desktop: 26 − 3 chrome = 23 single-line rows.
         assert_eq!(visible_rows(100, 26), 23);
     }

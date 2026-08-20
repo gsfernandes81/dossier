@@ -254,8 +254,9 @@ fn single_line_row(
 
 /// Narrow layout: name and status, then location and tags underneath.
 ///
-/// The user confirmed this in the mockup review — twelve documents visible at
-/// 45×28, the trade against density accepted.
+/// The user confirmed this in the mockup review, density trade accepted. On the
+/// measured phone (47×45 keyboard down, 47×24 up) it is twenty-one documents
+/// while browsing and ten while typing.
 fn two_line_row(
     doc: &Doc,
     status: Status,

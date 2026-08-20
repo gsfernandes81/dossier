@@ -157,8 +157,12 @@ fn render_with(model: &mut Model, cols: u16, rows: u16, theme: Theme) -> (Vec<St
     (lines, colored)
 }
 
-/// **The phone screen the user approved**: header, twelve two-line documents,
-/// the touch action bar, the docked search bar, one hint line — at 45×28.
+/// **The phone screen the user approved**: header, two-line documents, the touch
+/// action bar, the docked search bar, one hint line.
+///
+/// Drawn here at 45×28, which is the mockup size rather than the device's — the
+/// phone reports 47×45 browsing and 47×24 typing. The assertions are about what
+/// the rows contain, so the pane size only has to be a plausible narrow one.
 #[test]
 fn the_phone_screen_matches_the_approved_mockup() {
     let mut m = model(45, 28);

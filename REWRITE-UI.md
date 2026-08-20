@@ -173,8 +173,12 @@ be compared against them and refined where it does not match.
 User calls from that review, binding on R3–R5:
 
 - **Two-line phone rows confirmed** — 35 columns of name, location and tags
-  underneath, twelve documents visible at 45×28. The trade against density is
-  accepted.
+  underneath. The trade against density is accepted.
+
+  > **Measured since.** The phone reports **47×45** with the keyboard down and
+  > **47×24** with it up — Termux resizes the terminal rather than covering it.
+  > That is **twenty-one documents while browsing and ten while typing**, not
+  > the twelve this review assumed at a mockup size of 45×28.
 - **Detail density confirmed for now** — notes, files, bundles and succession on
   one phone screen.
 - **Filing card approved, with one item deferred:** it should also be able to
@@ -198,7 +202,8 @@ User calls from that review, binding on R3–R5:
 1. Every REWRITE.md §4.5 invariant, verified per surface.
 2. Cold start → type → `Enter` → file open ≤ 5 keystrokes; zero letter bindings on
    the Find surface.
-3. All surfaces reachable and fully operable at 45×28 (portrait Termux) and 80×24;
+3. All surfaces reachable and fully operable at 47×24 (portrait Termux with the
+   keyboard up — the smallest state the device actually produces) and 80×24;
    split appears only ≥ ~100 cols; too-small notice below the floor.
 4. `Esc` peels exactly one layer per press through: edit → command mode → search →
    detail/surface pop → arm → quit.

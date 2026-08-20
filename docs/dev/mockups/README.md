@@ -16,8 +16,9 @@ refined if it does not match.
 ## Review outcome
 
 - **Two-line phone rows: confirmed.** 35 columns for the name, location and tags
-  underneath. Twelve documents visible at 45×28 rather than twenty-four, and
-  that trade is accepted.
+  underneath. Half the documents of a one-line row, and that trade is accepted.
+  (The pages say "twelve at 45×28"; the device reports 47×45 browsing and 47×24
+  typing, so it is really twenty-one and ten. See the 2026-08-20 note below.)
 - **Detail density: confirmed for now** — notes, files, bundles and succession on
   one phone screen.
 - **Filing card: approved, with one deferred request.** The card should also be
@@ -115,7 +116,7 @@ A modifier still needs a letter, and the only letter source is the soft
 keyboard — so the reachability question splits by keyboard state. Termux
 *resizes* the terminal when the keyboard raises rather than covering it, which
 makes these two layouts rather than one layout half-hidden: **browsing** at
-45×28 with the keyboard down, **querying** at roughly 45×14 with it up.
+47×45 with the keyboard down, **querying** at 47×24 with it up.
 
 What that settles:
 
@@ -157,18 +158,19 @@ Two consequences:
   keeping in reserve for R4, which needs keyboard-down verbs far more than Find
   does. Binding anything there needs modifier guards on the arrow arms in
   `input.rs` — `ctrl+→` currently means plain `→`.
-- **The pane is 47×24, not 45×28** — measured in a normal terminal, keyboard
-  down, so this is the *browsing* layout. Two columns wider, four rows shorter,
-  and four rows is two documents: **ten fit, not twelve**, which makes ten the
-  headline number rather than a pessimistic floor. No code depends on it —
-  `layout.rs` is width-driven and 45×28 appears only in tests and these mockups
-  — so this is a promise to correct, not an implementation to change. Every
-  page that says "twelve documents at a glance" needs to say ten.
+- **The pane is 47×45 browsing and 47×24 typing**, not 45×28 — both measured,
+  keyboard down and up. That is **twenty-one documents at a glance and ten
+  while you type**, not twelve. No code depends on it — `layout.rs` is
+  width-driven and 45×28 appears only in tests and these mockups — so this was
+  a promise to correct, and it has been swept through `REWRITE-UI.md`,
+  `layout.rs`, `find.rs`, `screens.rs` and this file. Deleting the action bar
+  is worth a real document at the browsing height: 41 list rows hold twenty
+  two-line documents and waste one, 42 hold twenty-one.
 
-One measurement is still missing, and it is not blocking: the pane height with
-the keyboard **up**. It matters only against the 38×12 floor — browsing is 24
-rows, so a keyboard taking more than twelve of them would put the app under its
-own minimum mid-query and it would refuse to draw.
+## The built product (2026-08-20)
 
-Still unverified, and now depended on by nothing: the contents of Termux's
-stock default extra-keys row.
+`built.py` → **Find at 47×45** — the finished screens with no history and no
+argument: browsing, typing, a filter live, a record, the armed quit, the touch
+map, the three textures, the key row and the desk layout, every one drawn at
+the size the device reports. This is the page to compare the shipped binary
+against.

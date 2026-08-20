@@ -2,7 +2,8 @@
 
 Two specimens only: the places where the audit's findings are visible on screen
 rather than merely arguable. Both are reproductions of what the shipped binary
-actually renders — checked against it in a PTY at 45×28, not imagined.
+actually renders — checked against it in a PTY, not imagined. The pane is drawn
+at the 45×28 mockup size; the device reports 47×45 browsing and 47×24 typing.
 """
 
 from __future__ import annotations
