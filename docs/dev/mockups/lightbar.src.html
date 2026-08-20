@@ -1,0 +1,250 @@
+<title>A Lighter Bar</title>
+<style>
+/*CSS*/
+
+/* ── Termux's built-in default scheme, pinned ──────────────────────────────
+   Every other page here lets the panes follow the viewer's theme, which is the
+   right default: it demonstrates that the user's own colours carry the design.
+   This page does the opposite deliberately — the question is what one specific
+   phone shows, so the browser's theme is ignored entirely. */
+.term.termux {
+  --term-bg: #000000;
+  --term-fg: #ffffff;
+  --term-dim: #7f7f7f;
+  --term-sel-bg: #ffffff;
+  --term-sel-fg: #000000;
+  --term-exp: #ff0000;
+  --term-soon: #ffff00;
+  --term-ok: #00cd00;
+  --term-acc: #00cdcd;
+  background: #000000;
+  color: #ffffff;
+  border-color: #333;
+}
+.term.termux .hd { color: #ffffff; font-weight: 700; }
+.term.termux .dim { color: #7f7f7f; }
+.term.termux .exp { color: #ff0000; font-weight: 600; }
+.term.termux .soon { color: #ffff00; font-weight: 600; }
+.term.termux .ok { color: #ffffff; }
+.term.termux .acc { color: #00cdcd; }
+.term.termux .sel { background: #ffffff; color: #000000; }
+.term.termux .seldim { background: #ffffff; color: #3a3a3a; }
+.term.termux .chip { background: #ffffff; color: #000000; }
+
+/* the three bars */
+.grey, .greydim, .greywarn { background: #7f7f7f; }
+.grey { color: #ffffff; }
+.greydim { color: #d0d0d0; }
+.greywarn { color: #ffff00; font-weight: 700; }
+
+.light, .lightdim, .lightwarn { background: #e5e5e5; }
+.light { color: #000000; }
+.lightdim { color: #4a4a4a; }
+.lightwarn { color: #cd0000; font-weight: 700; }
+
+.white, .whitedim, .whitewarn { background: #ffffff; }
+.white { color: #000000; }
+.whitedim { color: #4a4a4a; }
+.whitewarn { color: #cd0000; font-weight: 700; }
+
+.trio { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.8rem 2rem; margin: 1.4rem 0 0; }
+.trio h3 { font-family: var(--mono); font-size: .84rem; margin: 0 0 .5rem; }
+.trio .slot { font-family: var(--mono); font-size: .72rem; color: var(--faint); display: block; margin-bottom: .5rem; }
+.trio .stack { display: flex; flex-direction: column; gap: .7rem; }
+.trio p { margin: .7rem 0 0; font-size: .88rem; color: var(--muted); max-width: 44ch; }
+.trio p b { color: var(--ink); font-weight: 600; }
+
+.swatches { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.2rem 0 0; }
+.swatches span {
+  font-family: var(--mono);
+  font-size: .72rem;
+  padding: .35rem .6rem;
+  border-radius: 2px;
+  border: 1px solid #333;
+}
+
+.kv code { font-family: var(--mono); font-size: .84em; }
+.caveat { border: 1px dashed var(--term-exp); border-radius: 3px; padding: .85rem 1.05rem; margin: 1.5rem 0 0; }
+.caveat p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 68ch; }
+.caveat p + p { margin-top: .5rem; }
+.caveat p b { color: var(--term-exp); font-weight: 600; }
+.verdict { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.6rem 0 0; }
+.verdict p { margin: 0; max-width: 62ch; }
+.verdict p + p { margin-top: .55rem; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">R-UI · the status line · palette</p>
+    <h1>A Lighter Bar</h1>
+    <p class="standfirst">
+      The bar as it ships is ANSI 8 with bright-white text — a mid grey. Two
+      lighter pairs, both with black text, drawn in <b>Termux's own default
+      colours rather than yours</b>: black background, and the classic xterm
+      palette Termux ships with.
+    </p>
+  </header>
+
+  <div class="meta">
+    <span><b>Panes</b> pinned to Termux defaults, not the viewer's theme</span>
+    <span><b>Unchanged</b> the entry line stays plain, on the terminal background</span>
+    <span><b>Pane</b> 47 columns</span>
+  </div>
+
+  <div class="swatches">
+    <span style="background:#000;color:#fff">bg #000000</span>
+    <span style="background:#000;color:#fff">fg #ffffff</span>
+    <span style="background:#7f7f7f;color:#fff">ANSI 8 #7f7f7f</span>
+    <span style="background:#e5e5e5;color:#000">ANSI 7 #e5e5e5</span>
+    <span style="background:#fff;color:#000">ANSI 15 #ffffff</span>
+    <span style="background:#000;color:#00cdcd">ANSI 6 #00cdcd</span>
+  </div>
+
+  <section>
+    <h2>The three bars</h2>
+    <div class="trio">
+      <div>
+        <h3>As it ships</h3>
+        <span class="slot">bg ANSI 8 · fg ANSI 15</span>
+        <div class="stack">
+          <div class="term phone termux"><pre><!--S:grey-rows--></pre></div>
+          <div class="term phone termux"><pre><!--S:grey-filter--></pre></div>
+          <div class="term phone termux"><pre><!--S:grey-armed--></pre></div>
+        </div>
+        <p>A mid grey. The hints are dim white on it, which is the combination
+          you flagged: <b>two greys close together</b>.</p>
+      </div>
+
+      <div>
+        <h3>Light</h3>
+        <span class="slot">bg ANSI 7 · fg ANSI 0</span>
+        <div class="stack">
+          <div class="term phone termux"><pre><!--S:light-rows--></pre></div>
+          <div class="term phone termux"><pre><!--S:light-filter--></pre></div>
+          <div class="term phone termux"><pre><!--S:light-armed--></pre></div>
+        </div>
+        <p>Near-white, black text. The dim hints become <b>grey on light</b>
+          instead of grey on grey, which is a real contrast rather than a
+          near-miss — and the armed warning can use a dark red that a light
+          background actually supports.</p>
+      </div>
+
+      <div>
+        <h3>Brightest</h3>
+        <span class="slot">bg ANSI 15 · fg ANSI 0</span>
+        <div class="stack">
+          <div class="term phone termux"><pre><!--S:white-rows--></pre></div>
+          <div class="term phone termux"><pre><!--S:white-filter--></pre></div>
+          <div class="term phone termux"><pre><!--S:white-armed--></pre></div>
+        </div>
+        <p>Pure white against a pure black screen — the highest contrast
+          available, and <b>the same pair the selected row already uses</b>.
+          Which is the objection: the bar would look exactly like a selection.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>In place</h2>
+    <p class="lede">
+      Whole screens, so the bar is judged against the list above it rather than
+      on its own.
+    </p>
+    <div class="trio">
+      <div>
+        <h3>ANSI 8</h3>
+        <div class="term phone termux"><pre><!--S:grey-full--></pre></div>
+      </div>
+      <div>
+        <h3>ANSI 7</h3>
+        <div class="term phone termux"><pre><!--S:light-full--></pre></div>
+      </div>
+      <div>
+        <h3>ANSI 15</h3>
+        <div class="term phone termux"><pre><!--S:white-full--></pre></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What each one costs</h2>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th></th><th>ANSI 8 · shipped</th><th>ANSI 7</th><th>ANSI 15</th></tr>
+        <tr>
+          <td class="k">dim hints on it</td>
+          <td>grey on grey — the near-miss</td>
+          <td class="yes">dark grey on near-white</td>
+          <td class="yes">dark grey on white</td>
+        </tr>
+        <tr>
+          <td class="k">weight on screen</td>
+          <td>quiet</td>
+          <td>strong</td>
+          <td class="no">loudest thing on the screen, by some distance</td>
+        </tr>
+        <tr>
+          <td class="k">collision</td>
+          <td class="yes">nothing else uses it</td>
+          <td class="yes">nothing else uses it</td>
+          <td class="no"><b>identical to the selected row</b>, which is reverse
+            video — white on black inverted is exactly ANSI 15 on ANSI 0</td>
+        </tr>
+        <tr>
+          <td class="k">the armed warning</td>
+          <td>yellow on grey</td>
+          <td class="yes">dark red on light — legible, and red means expired
+            everywhere else in this app</td>
+          <td class="yes">same</td>
+        </tr>
+        <tr>
+          <td class="k">a light terminal theme</td>
+          <td>readable</td>
+          <td class="no">near-white bar on a near-white background — the band
+            would nearly vanish, the mirror of what ANSI 0 does on yours</td>
+          <td class="no">worse</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="caveat">
+      <p><b>Two things this mockup is guessing at.</b> The palette above is
+        Termux's built-in default — the classic xterm scheme — from memory, not
+        from your device. If you have ever set <code>colors.properties</code>,
+        or if the built-in default has moved, the greys here are wrong.</p>
+      <p>And <b>dim is `SGR 2`, which not every terminal honours.</b> If Termux
+        ignores it, every "dim" element in this app — the locators under each
+        document, the hints, the placeholder — is rendering at full brightness
+        and has been all along, which would change what a light bar needs to do.
+        Both are one command to settle:</p>
+      <pre style="font-family:var(--mono);font-size:.78rem;background:var(--term-bg);color:var(--term-fg);border:1px solid var(--rule);border-radius:3px;padding:.7rem .8rem;overflow-x:auto"><span style="color:var(--term-dim)"># is dim actually dimmer?</span>
+printf '\e[2mdim\e[0m  normal  \e[1mbold\e[0m\n'
+<span style="color:var(--term-dim)"># and the three bar candidates, side by side</span>
+printf '\e[48;5;8m\e[38;5;15m  ANSI 8 on 15  \e[0m\n'
+printf '\e[48;5;7m\e[38;5;0m  ANSI 7 on 0   \e[0m\n'
+printf '\e[48;5;15m\e[38;5;0m  ANSI 15 on 0  \e[0m\n'</pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>What I would take</h2>
+    <div class="verdict">
+      <p><b>ANSI 7 with black text</b>, if either. It gets the contrast you are
+        after without taking the one pair the selection already owns — and a
+        status line that looks like a selected row is a worse problem than a
+        status line that is slightly too quiet.</p>
+      <p>The cost is that it inverts the polarity risk rather than removing it.
+        ANSI 0 was unusable on your theme because it matched your background;
+        ANSI 7 would be unusable on a <em>light</em> theme for the same reason.
+        Neither is wrong — it just means whichever we pick, the band is tuned to
+        one polarity and merely survives the other.</p>
+      <p>Not built, only drawn. Say which and I will ship it.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>dossier v3 · R-UI</span>
+    <span>generated by docs/dev/mockups/lightbar.py</span>
+    <span>panes pinned to Termux's default palette, not the viewer's theme</span>
+  </footer>
+</div>

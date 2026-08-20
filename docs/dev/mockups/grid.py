@@ -16,7 +16,10 @@ import re
 
 from wcwidth import wcswidth
 
-MARK = re.compile(r"«([a-z]+)\|([^»]*)»")
+#: A class name may carry digits after the first letter — `«b8|…»` used to
+#: fall through this silently, leaving the markup in the line and blowing the
+#: width check up somewhere unrelated.
+MARK = re.compile(r"«([a-z][a-z0-9]*)\|([^»]*)»")
 
 PHONE = 45
 FLOOR = 38
@@ -87,7 +90,7 @@ def cells(cols: int, n: int) -> list[tuple[int, int]]:
 def bar(labels: list[str], cols: int = PHONE, style: str = "chip") -> str:
     """A row of filled cells on the tiling, each label centred in its cell."""
     out, column = "", 0
-    for (start, cell), label in zip(cells(cols, len(labels)), labels):
+    for (start, cell), label in zip(cells(cols, len(labels)), labels, strict=True):
         out += " " * (start - column)
         out += f"«{style}|{centre(label, cell)}»"
         column = start + cell
@@ -97,7 +100,9 @@ def bar(labels: list[str], cols: int = PHONE, style: str = "chip") -> str:
 def render(page: str, specimens: dict[str, str], out_name: str) -> None:
     """Splice specimens and the stylesheet into a source page and write it."""
     text = pathlib.Path(page).read_text(encoding="utf-8")
-    text = text.replace("/*CSS*/", pathlib.Path("style.css").read_text(encoding="utf-8"))
+    text = text.replace(
+        "/*CSS*/", pathlib.Path("style.css").read_text(encoding="utf-8")
+    )
     missing: list[str] = []
 
     def sub(m: re.Match[str]) -> str:

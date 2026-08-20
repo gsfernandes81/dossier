@@ -385,3 +385,36 @@ ingredients, and these pages have been wrong about how a texture renders before.
 
 Unchanged: no row gained or lost (21 browsing, 10 typing), both bottom rows
 still raise the keyboard, the leader sheet still opens above the chrome.
+
+### A lighter bar
+
+`lightbar.py` → **A Lighter Bar** — the status line at three brightnesses, and
+the first page here whose panes are **pinned to Termux's default palette
+instead of following the viewer's theme.** That inversion is deliberate: every
+other page demonstrates that the user's own colours carry the design, and this
+one answers what a specific phone shows.
+
+- **ANSI 8 on 15** (shipped) — a mid grey, with dim white hints on it. Grey on
+  grey is the near-miss.
+- **ANSI 7 on 0** — near-white with black text. The dim hints become dark grey
+  on light, a real contrast rather than a near-miss, and the armed warning can
+  use a dark red that a light background supports.
+- **ANSI 15 on 0** — highest contrast available, and **the same pair the
+  selected row already uses**, since reverse video on a black terminal *is* ANSI
+  15 on ANSI 0. A status line that looks like a selection is a worse problem
+  than one that is slightly too quiet.
+
+Recommended if either: **ANSI 7**. It inverts the polarity risk rather than
+removing it — ANSI 0 was unusable here because it matched the background, and
+ANSI 7 would be unusable on a light theme for the same reason. Whichever is
+picked, the band is tuned to one polarity and merely survives the other.
+
+Two guesses on that page, both one command to settle and both written into it:
+the palette is Termux's built-in default from memory rather than from the
+device, and **dim is `SGR 2`, which not every terminal honours** — if Termux
+ignores it, every dim element in this app has been rendering at full brightness
+all along.
+
+Also fixed while here: `grid.MARK` only matched class names of `[a-z]+`, so
+`«b8|…»` fell through silently and left raw markup in the line, blowing up the
+width check somewhere unrelated. Class names may now carry digits.
