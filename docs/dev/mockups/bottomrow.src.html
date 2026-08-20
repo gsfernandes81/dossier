@@ -10,6 +10,8 @@
 .banddim { color: color-mix(in srgb, var(--term-bg) 55%, var(--term-dim)); }
 .bandacc { color: var(--term-bg); font-weight: 700; }
 .bandchip { background: var(--term-bg); color: var(--term-dim); }
+.bandwarn { background: var(--term-dim); color: var(--term-exp); font-weight: 700; }
+.term.mono .bandwarn { background: transparent; color: var(--term-fg); font-weight: 700; }
 .term.mono .band, .term.mono .banddim, .term.mono .bandacc { background: transparent; color: var(--term-fg); }
 .term.mono .banddim { color: var(--term-dim); }
 .term.mono .bandchip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
@@ -47,51 +49,66 @@
     <p class="eyebrow">R-UI · the bottom two rows</p>
     <h1>The Last Line</h1>
     <p class="standfirst">
-      The query row sits second from the bottom, with the count and hints under
-      it. Swapping them puts the entry line against the screen edge — which is
-      where <b>every keyboard-driven finder this design has borrowed from
-      already puts it</b>. There is no reason to avoid it, one thing to check on
-      the device, and two small consequences worth naming.
+      Two changes, and they only make sense as a pair. The count-and-hints row
+      goes <b>above</b> the entry line and takes the band with it; the entry line
+      goes last, on the terminal's own background. The band stops being a marking
+      on the field and becomes <b>a lit rule between the list and the thing you
+      type into</b> — which is what Vim's status line is, sitting exactly where
+      it sits, above a plain command line.
     </p>
   </header>
 
   <div class="meta">
     <span><b>Pane</b> 47×45 browsing · 47×24 typing</span>
-    <span><b>Changes</b> row order only — no row is gained or lost</span>
+    <span><b>Changes</b> row order, and which row is lit</span>
     <span><b>Tap zones</b> unchanged: both rows still raise the keyboard</span>
   </div>
 
   <section>
-    <h2>The two orders</h2>
+    <h2>Three arrangements</h2>
     <div class="pair">
       <figure>
         <div class="term phone"><pre><!--S:now--></pre></div>
         <figcaption>
           <span class="size">as built</span>
-          <span class="how">The band is a lit strip with a row underneath it.</span>
+          <span class="how">The band is on the row you type into, second from
+            the bottom. It marks the field — and puts a lit strip under your own
+            text.</span>
         </figcaption>
       </figure>
       <figure>
-        <div class="term phone"><pre><!--S:swapped--></pre></div>
+        <div class="term phone"><pre><!--S:swap-only--></pre></div>
         <figcaption>
-          <span class="size">swapped</span>
-          <span class="how">The band is docked against the edge, and the chip
-            lands in the bottom-right corner.</span>
+          <span class="size">swap only</span>
+          <span class="how">The banded row moves to the bottom. Docked, but it
+            still separates nothing: the list runs straight into an unlit count
+            row.</span>
         </figcaption>
       </figure>
       <figure>
-        <div class="term phone"><pre><!--S:now-typed--></pre></div>
-        <figcaption><span class="size">as built · typed</span></figcaption>
+        <div class="term phone"><pre><!--S:sep--></pre></div>
+        <figcaption>
+          <span class="size">swap, and the band moves up</span>
+          <span class="how">The band lands <em>between</em> the list and the
+            input. It stops marking the field and starts dividing the
+            screen.</span>
+        </figcaption>
       </figure>
       <figure>
-        <div class="term phone"><pre><!--S:swapped-typed--></pre></div>
+        <div class="term phone"><pre><!--S:sep-typed--></pre></div>
         <figcaption>
-          <span class="size">swapped · typed</span>
-          <span class="how">The count is now above the cursor rather than below
-            it — which is exactly where fzf puts it.</span>
+          <span class="size">typed</span>
+          <span class="how">Your text sits on the terminal's own background,
+            with nothing behind it.</span>
         </figcaption>
       </figure>
     </div>
+
+    <p style="margin-top:1.6rem"><b>The two changes only work together.</b> A
+      divider has to be <em>between</em> the things it divides, so the band has
+      to move up, and the entry line has to move down to be under it. Either one
+      alone is worse than what ships today — which is what the middle specimen is
+      there to show.</p>
   </section>
 
   <section>
@@ -103,10 +120,11 @@
           drawn beneath it, because there is nothing beneath it.</p>
       </div>
       <div>
-        <h3>Vim</h3>
-        <p><code>:</code> and <code>/</code> take over the final line, below the
-          status line. The status line is what sits <em>above</em> the entry —
-          which is our count-and-hints row exactly.</p>
+        <h3>Vim <span style="color:var(--accent)">— exactly this</span></h3>
+        <p><code>StatusLine</code> is a <b>highlighted</b> row carrying position
+          and state; <code>:</code> and <code>/</code> take the plain final line
+          beneath it. That is this arrangement, down to which of the two is
+          lit.</p>
       </div>
       <div>
         <h3>fzf</h3>
@@ -121,62 +139,64 @@
           closest to the bottom edge, and the chip takes the corner every phone
           app puts its primary action in.</p>
       </div>
+      <div>
+        <h3>Emacs, again</h3>
+        <p>With the band gone from the entry row, <b>nothing marks the field at
+          all</b> — a prompt and a cursor, which is the minibuffer's own answer
+          and the option the field page recommended before the band was asked
+          for. It arrives here by a different route.</p>
+      </div>
     </div>
   </section>
 
   <section>
-    <h2>What actually changes</h2>
+    <h2>What it fixes</h2>
+    <p class="lede">
+      Three problems with the band as built, and all of them are consequences of
+      putting it on the row with your text on it.
+    </p>
     <div class="scroller">
       <table class="kv">
-        <tr><th></th><th>Effect</th></tr>
+        <tr><th>As built</th><th>With the band moved up</th></tr>
         <tr>
-          <td class="k">the band</td>
-          <td class="yes">Stops being a lit strip with a row under it and becomes
-            a bar docked to the edge. This is the whole point.</td>
+          <td class="k">dim text on a lit row</td>
+          <td class="yes"><code>Type to search</code> and <code>For more, hit</code>
+            were dim over a pinned foreground on a grey band — the least legible
+            combination on the screen. They go back onto the plain background.</td>
         </tr>
         <tr>
-          <td class="k">the count</td>
-          <td>Moves from directly under the cursor to directly above it. Reading
-            order changes; the distance does not. <b>fzf has always put it
-            there.</b></td>
+          <td class="k">a pinned foreground</td>
+          <td class="yes">The band had to name both ends to survive theme
+            polarity, so your typed text was ANSI 15 rather than your terminal's
+            own foreground. Now it is simply your text, in your colour.</td>
         </tr>
         <tr>
-          <td class="k">messages</td>
-          <td>A flash and <code>esc again to quit</code> now appear above the
-            entry line rather than below. Emacs puts messages <em>on</em> the
-            entry line, which we cannot — either side is a compromise, and above
-            keeps the band clear of text that is not yours.</td>
+          <td class="k">nothing divided the surface</td>
+          <td class="yes">The list ran into the chrome with no boundary. The band
+            is now that boundary, which is the job it is actually good at.</td>
         </tr>
         <tr>
-          <td class="k">tap zones</td>
-          <td class="yes">Unchanged. Both bottom rows still raise the keyboard,
-            and an overshoot downwards still hits the screen edge.</td>
+          <td class="k">the bottom-right cell</td>
+          <td class="yes"><b>The caveat evaporates.</b> The last row is plain, so
+            no background is painted into the final cell and there is nothing to
+            make an auto-margin terminal scroll.</td>
         </tr>
         <tr>
-          <td class="k">rows</td>
-          <td class="yes">None gained, none lost. Twenty-one documents browsing,
-            ten while typing, exactly as now.</td>
-        </tr>
-        <tr>
-          <td class="k">the leader sheet</td>
-          <td class="yes">Still opens above the chrome. It now sits above the
-            count row instead of the query row, which puts one more line between
-            the sheet and the thing it filters — no worse.</td>
+          <td class="k">NO_COLOR</td>
+          <td>Still loses the band — but it now loses a <em>divider</em> rather
+            than the only thing marking the field, which is a much smaller loss.
+            The prompt and the words were always doing that work.</td>
         </tr>
       </table>
     </div>
 
-    <div class="caveat">
-      <p><b>The one thing to check on the device.</b>
-        <span class="tier docs">check it</span> With the swap, the very last cell
-        of the very last row carries a <em>background colour</em> rather than a
-        plain space. On terminals with automatic margins, writing to the
-        bottom-right cell is the classic way to make the screen scroll by a row.
-        Ratatui draws full-width bottom bars all the time and this is normally
-        handled, but "normally" is not a measurement.</p>
-      <p>It is unmissable if it happens: the whole screen judders up one line
-        every repaint. If it does, the fix is one column — leave the final cell
-        unpainted, which nobody would ever see.</p>
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Unchanged</th><th></th></tr>
+        <tr><td class="k">rows</td><td>None gained, none lost — twenty-one documents browsing, ten while typing.</td></tr>
+        <tr><td class="k">tap zones</td><td>Both bottom rows still raise the keyboard; an overshoot downwards still hits the screen edge.</td></tr>
+        <tr><td class="k">the leader sheet</td><td>Still opens above the chrome, now above the status line.</td></tr>
+      </table>
     </div>
   </section>
 
@@ -184,7 +204,7 @@
     <h2>The states it has to survive</h2>
     <div class="states">
       <figure>
-        <div class="term phone"><pre><!--S:swapped-filter--></pre></div>
+        <div class="term phone"><pre><!--S:sep-filter--></pre></div>
         <figcaption>
           <span class="size">a filter live</span>
           <span class="how">The chip and the shed hints sit above the band, which
@@ -192,7 +212,7 @@
         </figcaption>
       </figure>
       <figure>
-        <div class="term phone"><pre><!--S:swapped-armed--></pre></div>
+        <div class="term phone"><pre><!--S:sep-armed--></pre></div>
         <figcaption>
           <span class="size">armed</span>
           <span class="how">The warning is on the row above. The band stays what
@@ -200,7 +220,7 @@
         </figcaption>
       </figure>
       <figure>
-        <div class="term phone"><pre><!--S:swapped-flash--></pre></div>
+        <div class="term phone"><pre><!--S:sep-flash--></pre></div>
         <figcaption>
           <span class="size">a flash</span>
           <span class="how">Same place, and the query you typed is still on
@@ -208,7 +228,7 @@
         </figcaption>
       </figure>
       <figure>
-        <div class="term phone"><pre><!--S:swapped-sheet--></pre></div>
+        <div class="term phone"><pre><!--S:sep-sheet--></pre></div>
         <figcaption>
           <span class="size">the leader sheet</span>
           <span class="how">Sheet, then hints, then the band. Three tiers of
@@ -216,7 +236,7 @@
         </figcaption>
       </figure>
       <figure>
-        <div class="term phone mono"><pre><!--S:swapped--></pre></div>
+        <div class="term phone mono"><pre><!--S:sep--></pre></div>
         <figcaption>
           <span class="size">NO_COLOR</span>
           <span class="how">No band either way, so the swap changes nothing a
@@ -224,7 +244,7 @@
         </figcaption>
       </figure>
       <figure>
-        <div class="term phone"><pre><!--S:swapped-full--></pre></div>
+        <div class="term phone"><pre><!--S:sep-full--></pre></div>
         <figcaption>
           <span class="size">47×45 · browsing</span>
           <span class="how">Twenty-one documents, unchanged.</span>
@@ -246,7 +266,7 @@
         <figcaption><span class="size">as built</span></figcaption>
       </figure>
       <figure>
-        <div class="term phone"><pre><!--S:desk-swapped--></pre></div>
+        <div class="term phone"><pre><!--S:desk-sep--></pre></div>
         <figcaption>
           <span class="size">swapped</span>
           <span class="how">Hints above, entry last — <code>:</code> lands here

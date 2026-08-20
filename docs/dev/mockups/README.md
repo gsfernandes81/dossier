@@ -347,31 +347,41 @@ palette is the user's) and a short underline (keeps the fault, drops the
 benefit). Kept in the drawer: dim delimiters, if an unmarked row reads as blank
 on the device.
 
-### Which row goes last
+### Which row goes last, and which one is lit
 
-`bottomrow.py` → **The Last Line** — the query row currently sits second from
-the bottom with count-and-hints under it. Swapping them puts the entry line
-against the screen edge, which is where every keyboard-driven finder this design
-borrows from already puts it: Emacs's minibuffer *is* the frame's last line,
-Vim's `:` takes the final line below the status line, and **fzf's default layout
-is results, info line, prompt** — the exact arrangement the swap produces.
+`bottomrow.py` → **The Last Line** — two changes that only make sense as a pair.
+The count-and-hints row moves **above** the entry line and keeps the band; the
+entry line goes **last**, on the terminal's own background.
 
-No row is gained or lost, no tap zone moves, and every state still works
-(filter live, armed, flash, sheet up, both heights, NO_COLOR, desktop). The band
-stops being a lit strip with a row under it and becomes a bar docked to the
-edge; the `SPC` chip lands in the bottom-right corner.
+The band stops being a marking on the field and becomes **a lit rule between the
+list and the thing you type into**. That is Vim's arrangement exactly:
+`StatusLine` is a highlighted row carrying position and state, and `:` takes the
+plain final line beneath it. It is also Emacs's, by a different route — with the
+band off the entry row, nothing marks the field but a prompt and a cursor, which
+is the minibuffer's own answer and what `field.py` recommended before the band
+was asked for.
 
-Two real costs, both small: the count reads *above* the cursor rather than below
-(fzf's arrangement, so well-trodden), and messages land above the entry line
-rather than below — Emacs would put them *on* it, which we cannot, and above at
-least keeps the band carrying nothing but the user's own text.
+**Neither change works alone.** A divider has to be *between* the things it
+divides, so the band has to move up and the entry line has to move down to be
+under it. Swapping without moving the band is worse than what ships.
 
-One mechanical thing to check on the device: with the swap, the last cell of the
-last row carries a **background colour** rather than a plain space, and writing
-to the bottom-right cell is the classic way to make a terminal with automatic
-margins scroll by a row. Unmissable if it happens — the screen judders up one
-line every repaint — and the fix is one unpainted column.
+What it fixes, all of them consequences of putting the band on the row with your
+text on it:
 
-Also settled by measurement: **ANSI 0 is off the table for the band.** On this
-phone it is indistinguishable from the terminal background, so the band would
-vanish. It stays ANSI 8 behind, ANSI 15 in front.
+- Dim placeholder text over a lit row was the least legible combination on the
+  screen; it goes back onto the plain background.
+- The band had to pin both ends to survive theme polarity, so typed text was
+  ANSI 15 rather than the terminal's own foreground. Now it is just your text.
+- Nothing divided the list from the chrome. The band is now that boundary.
+- **The bottom-right-cell caveat evaporates** — the last row is plain, so no
+  background is painted into the final cell and there is no auto-margin scroll
+  to check for.
+
+What it makes worse, and the thing to look at on the device: the hints and count
+are now *on* the band, so the dim-on-lit problem moves rather than disappearing.
+It should read better, because the whole row is dim and the eye takes it as one
+quiet strip rather than as text competing with a cursor — but they are the same
+ingredients, and these pages have been wrong about how a texture renders before.
+
+Unchanged: no row gained or lost (21 browsing, 10 typing), both bottom rows
+still raise the keyboard, the leader sheet still opens above the chrome.

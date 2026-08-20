@@ -50,18 +50,26 @@ def rows(docs, sel: int = 0) -> list[str]:
     return out
 
 
-def query(text: str = "", hint: str = "For more, hit") -> str:
-    """The banded entry row — every column carries the band."""
+def query(text: str = "", hint: str = "For more, hit", band: bool = False) -> str:
+    """The entry row. Plain by default — the terminal's own background."""
     prompt = " >"
     span = W - width(prompt) - width(CHIP) - GUTTER
     body = f" {text}█"
+    b = "band" if band else ""
     if text:
-        inner = f"«band|{rpad(body, span)}»"
+        inner = f"«{b or 'plain'}|{rpad(body, span)}»"
     else:
         gap = span - width(body) - len(hint) - 1
-        inner = f"«band|{body}{' ' * gap}»«banddim|{hint}»«band| »"
+        inner = (
+            f"«{b or 'plain'}|{body}{' ' * gap}»"
+            + f"«{b + 'dim' if b else 'dim'}|{hint}»"
+            + f"«{b or 'plain'}| »"
+        )
     return (
-        f"«bandacc|{prompt}»" + inner + f"«bandchip|{CHIP}»" + f"«band|{' ' * GUTTER}»"
+        f"«{b + 'acc' if b else 'acc'}|{prompt}»"
+        + inner
+        + f"«{b + 'chip' if b else 'chip'}|{CHIP}»"
+        + f"«{b or 'plain'}|{' ' * GUTTER}»"
     )
 
 
@@ -70,11 +78,28 @@ def info(
     chips: str = "",
     hints: str = "⏎ open  ^x expiry  ^t scans",
     tone: str = "dim",
+    band: bool = False,
 ) -> str:
-    left = f" {count}" + (f"  «dim|{chips}»" if chips else "")
+    """Count, live filters and hints.
+
+    Banded, this is a status line in the vim sense — a lit rule between the list
+    and the thing you type into, which is what separates them.
+    """
+    b = "band" if band else ""
+    left = f" {count}" + (f"  «{b + 'dim' if b else 'dim'}|{chips}»" if chips else "")
     if not hints:
-        return rpad(left, W)
+        return f"«{b}|{rpad(left, W)}»" if b else rpad(left, W)
     gap = W - width(left) - len(hints) - GUTTER
+    if b:
+        head = f"«band| {count} »" if not chips else ""
+        del head
+        return (
+            f"«band| {count}»"
+            + (f"«banddim|  {chips}»" if chips else "")
+            + f"«band|{' ' * gap}»"
+            + f"«band{'warn' if tone == 'warn' else 'dim'}|{hints}»"
+            + f"«band|{' ' * GUTTER}»"
+        )
     return left + " " * gap + f"«{tone}|{hints}»" + " " * GUTTER
 
 
@@ -84,25 +109,27 @@ def pane(chrome: list[str], docs=None, rows_total: int = SHORT) -> str:
     return block([header()] + body + ["" for _ in range(fill)] + chrome, cols=W)
 
 
-# ── the two orders, side by side ────────────────────────────────────────────
-SPECIMENS["now"] = pane([query(), info()])
-SPECIMENS["swapped"] = pane([info(), query()])
+# ── as built, and the two things being asked for ───────────────────────────
+SPECIMENS["now"] = pane([query(band=True), info()])
+SPECIMENS["swap-only"] = pane([info(), query(band=True)])
+SPECIMENS["sep"] = pane([info(band=True), query()])
 
-SPECIMENS["now-typed"] = pane([query("coc"), info("4/24")], docs=DOCS[:4])
-SPECIMENS["swapped-typed"] = pane([info("4/24"), query("coc")], docs=DOCS[:4])
+SPECIMENS["now-typed"] = pane([query("coc", band=True), info("4/24")], docs=DOCS[:4])
+SPECIMENS["sep-typed"] = pane([info("4/24", band=True), query("coc")], docs=DOCS[:4])
 
-# ── the states the swap has to survive ──────────────────────────────────────
-SPECIMENS["swapped-filter"] = pane(
-    [info("3/24", "[expiring]", "^x expiry  ^t scans"), query()], docs=DOCS[:3]
+# ── the states it has to survive ────────────────────────────────────────────
+SPECIMENS["sep-filter"] = pane(
+    [info("3/24", "[expiring]", "^x expiry  ^t scans", band=True), query()],
+    docs=DOCS[:3],
 )
-SPECIMENS["swapped-armed"] = pane(
-    [info("24/24", hints="esc again to quit", tone="warn"), query()]
+SPECIMENS["sep-armed"] = pane(
+    [info("24/24", hints="esc again to quit", tone="warn", band=True), query()]
 )
-SPECIMENS["swapped-flash"] = pane(
-    [info("", hints="opened coc-master.pdf", tone="acc"), query("coc")], docs=DOCS[:4]
+SPECIMENS["sep-flash"] = pane(
+    [info("4/24", hints="opened coc-master.pdf", band=True), query("coc")],
+    docs=DOCS[:4],
 )
 
-# ── with the sheet up ───────────────────────────────────────────────────────
 RULE = "«dim|" + "─" * (W - 2) + "»"
 COLS = (16, 16, 13)
 
@@ -121,11 +148,10 @@ SHEET = [
     _crumb + " " * (W - width(_crumb) - len(_note) - GUTTER) + f"«dim|{_note}»" + " ",
     keyline(("f", "filter"), ("q", "quit")),
 ]
-SPECIMENS["swapped-sheet"] = pane(
-    [*SHEET, info(hints="esc closes"), query()], docs=DOCS[:3]
+SPECIMENS["sep-sheet"] = pane(
+    [*SHEET, info(hints="esc closes", band=True), query()], docs=DOCS[:3]
 )
 
-# ── whole screen, browsing height ───────────────────────────────────────────
 TALL = 45
 TALL_DOCS = DOCS + [
     ("Yellow Fever Certificate", "«dim|  ·  »", "cert-file 4 · medical"),
@@ -144,29 +170,33 @@ TALL_DOCS = DOCS + [
     ("Tanker Familiarisation", "«ok|09-28»", "cert-file 14 · marine"),
     ("Panama Seafarer ID", "«ok|03-29»", "cert-file 15 · marine"),
 ]
-SPECIMENS["swapped-full"] = block(
-    [header()] + rows(TALL_DOCS) + [info(), query()], cols=W
+SPECIMENS["sep-full"] = block(
+    [header()] + rows(TALL_DOCS) + [info(band=True), query()], cols=W
 )
 
 
-# ── the desktop, where the same question applies ────────────────────────────
+# ── the desktop, where the same arrangement applies ────────────────────────
 def desk_query(text: str = "coc") -> str:
     prompt = " > "
     tail = "«dim|4/24 »"
     span = W - width(prompt) - width(tail)
-    return f"«bandacc|{prompt}»«band|{rpad(f'{text}█', span)}»«banddim|4/24 »"
+    return f"«acc|{prompt}»" + rpad(f"{text}█", span) + tail
 
 
+DESK_HINTS = "space menu  ⏎ open  → detail  ^x expiring"
 SPECIMENS["desk-now"] = block(
-    [header()]
-    + rows(DOCS[:4])
-    + ["", "", desk_query(), " «dim|space menu  ⏎ open  → detail  ^x expiring»"],
+    [header()] + rows(DOCS[:4]) + ["", "", desk_query(), f" «dim|{DESK_HINTS}»"],
     cols=W,
 )
-SPECIMENS["desk-swapped"] = block(
+SPECIMENS["desk-sep"] = block(
     [header()]
     + rows(DOCS[:4])
-    + ["", "", " «dim|space menu  ⏎ open  → detail  ^x expiring»", desk_query()],
+    + [
+        "",
+        "",
+        "«band| " + DESK_HINTS + " " * (W - len(DESK_HINTS) - 2) + "»",
+        desk_query(),
+    ],
     cols=W,
 )
 
