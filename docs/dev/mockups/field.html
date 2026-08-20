@@ -373,12 +373,12 @@ footer {
 /* As shipped: ANSI 8 behind, ANSI 15 in front, both ends pinned so the row is
    readable whichever way the user's theme runs. */
 .band, .banddim, .bandacc, .bandchip {
-  background: var(--term-dim);
+  background: var(--term-fg);
   color: var(--term-bg);
 }
-.banddim { color: color-mix(in srgb, var(--term-bg) 55%, var(--term-dim)); }
+.banddim { color: color-mix(in srgb, var(--term-bg) 62%, var(--term-fg)); }
 .bandacc { color: var(--term-bg); font-weight: 700; }
-.bandchip { background: var(--term-bg); color: var(--term-dim); }
+.bandchip { background: var(--term-bg); color: var(--term-fg); }
 .term.mono .band, .term.mono .banddim,
 .term.mono .bandacc { background: transparent; color: var(--term-fg); }
 .term.mono .banddim { color: var(--term-dim); }

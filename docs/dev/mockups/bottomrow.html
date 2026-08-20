@@ -349,13 +349,13 @@ footer {
 
 .chip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
 .band, .banddim, .bandacc, .bandchip {
-  background: var(--term-dim);
+  background: var(--term-fg);
   color: var(--term-bg);
 }
-.banddim { color: color-mix(in srgb, var(--term-bg) 55%, var(--term-dim)); }
+.banddim { color: color-mix(in srgb, var(--term-bg) 62%, var(--term-fg)); }
 .bandacc { color: var(--term-bg); font-weight: 700; }
-.bandchip { background: var(--term-bg); color: var(--term-dim); }
-.bandwarn { background: var(--term-dim); color: var(--term-exp); font-weight: 700; }
+.bandchip { background: var(--term-bg); color: var(--term-fg); }
+.bandwarn { background: var(--term-fg); color: var(--term-exp); font-weight: 700; }
 .term.mono .bandwarn { background: transparent; color: var(--term-fg); font-weight: 700; }
 .term.mono .band, .term.mono .banddim, .term.mono .bandacc { background: transparent; color: var(--term-fg); }
 .term.mono .banddim { color: var(--term-dim); }

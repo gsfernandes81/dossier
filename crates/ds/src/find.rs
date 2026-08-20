@@ -523,18 +523,24 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     // Row two: what the search found, and what is filtering it — or, when there
     // is something to say, the message instead. The count is worth losing for a
     // moment; a message nobody reads is worth nothing.
+    // Tones on the band are not the tones on the terminal's own background —
+    // see [`Theme::on_band`]. A light row needs a named grey where the rest of
+    // the screen uses `DIM`, and red where it uses yellow.
     let (message, tone) = status_text(model, true);
     let info_row = if model.flash.is_some() || model.esc_armed {
-        Line::styled(format!(" {}", fit(&message, cols.saturating_sub(gutter))), theme.style(tone))
+        Line::styled(
+            format!(" {}", fit(&message, cols.saturating_sub(gutter))),
+            theme.on_band(tone),
+        )
     } else {
         let left = format!(" {count}{}", chips(model));
         let room = cols.saturating_sub(width(&left) + gutter);
         let hint = shed(&touch_hints(model), room);
         let gap = cols.saturating_sub(width(&left) + width(&hint) + gutter);
         Line::from(vec![
-            Span::styled(left, theme.style(Tone::Muted)),
+            Span::raw(left),
             Span::raw(" ".repeat(gap)),
-            Span::styled(hint, theme.style(Tone::Muted)),
+            Span::styled(hint, theme.on_band(Tone::Muted)),
             Span::raw(" ".repeat(gutter)),
         ])
     };
@@ -607,7 +613,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     // the same order, and the same rule dividing the list from the entry line.
     let line = Line::styled(
         format!(" {}", truncate(&message, area.width as usize - 1)),
-        theme.style(tone),
+        theme.on_band(tone),
     );
     frame.render_widget(Paragraph::new(line).style(theme.band()), area);
 }

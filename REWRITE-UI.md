@@ -256,12 +256,26 @@ Touch chrome is now three rows, the same as a keyboard layout:
   from the input**; it does not mark the field. The field is marked by a prompt
   and a cursor, which is what the minibuffer does.
 
-  The band runs **edge to edge** on the status row only, both ends pinned (ANSI
-  8 behind, ANSI 15 in front) because a background alone is a coin flip on theme
-  polarity; ANSI 0 was measured on the device and is indistinguishable from the
-  terminal background there. §6's promise survives: the slots are ANSI, so the
-  user's theme still picks the hues. **`NO_COLOR` has no band**, which now costs
-  a divider rather than the only thing marking the field.
+  The band runs **edge to edge** on the status row only, both ends pinned —
+  **ANSI 7 behind, ANSI 0 in front**, a light bar with black text. A background
+  alone is a coin flip on theme polarity, so the pair is named; §6's promise
+  survives because the slots are ANSI and the user's theme still picks the hues.
+  **`NO_COLOR` has no band**, which costs a divider rather than the only thing
+  marking the field.
+
+  Three pairs were tried on the device. ANSI 8 on 15 was two greys too close
+  together. ANSI 0 is indistinguishable from the terminal background there.
+  ANSI 15 has the most contrast and is unusable for a subtler reason: reverse
+  video on a black terminal *is* ANSI 15 on ANSI 0, so the bar would look like
+  the selected row. **This tunes the band to a dark terminal** — a light theme
+  puts a near-white bar on a near-white background, the mirror of what ANSI 0
+  does on a dark one. No pair works equally well both ways.
+
+- **Tones on the band are not the tones off it** (`Theme::on_band`). The band is
+  a light surface inside a dark one, so `Muted` is a named grey rather than a
+  dimmed black — `DIM` is `SGR 2`, which a terminal may ignore outright — and a
+  message that matters is red rather than yellow, red being one of the few hues
+  with real contrast on light and already this app's colour for *expired*.
 
   It began as a marking *on* the query row, and that was worse three ways: dim
   placeholder text over a lit row is the least legible thing on the screen, the

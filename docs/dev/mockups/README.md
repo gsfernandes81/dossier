@@ -404,7 +404,7 @@ one answers what a specific phone shows.
   15 on ANSI 0. A status line that looks like a selection is a worse problem
   than one that is slightly too quiet.
 
-Recommended if either: **ANSI 7**. It inverts the polarity risk rather than
+**Built: ANSI 7.** It inverts the polarity risk rather than
 removing it — ANSI 0 was unusable here because it matched the background, and
 ANSI 7 would be unusable on a light theme for the same reason. Whichever is
 picked, the band is tuned to one polarity and merely survives the other.
