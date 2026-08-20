@@ -49,7 +49,7 @@ def rows(docs, sel: int = 0) -> list[str]:
     return out
 
 
-def field(*segments: tuple[str, str]) -> str:
+def field(*segments: tuple[str, str], chip: bool = True) -> str:
     """The query row. Segments are (class, text) pairs filling the underline.
 
     Markup does not nest, so a dim placeholder inside an underlined field needs
@@ -57,7 +57,8 @@ def field(*segments: tuple[str, str]) -> str:
     independent attributes on the same cell and needs no special handling at all.
     """
     inner = "".join(f"«{cls}|{text}»" for cls, text in segments if text)
-    return "«acc| >»" + inner + "«chip| SPC »" + " " * GUTTER
+    tail = "«chip| SPC »" if chip else ""
+    return "«acc| >»" + inner + tail + " " * GUTTER
 
 
 def empty(hint: str = "", right: bool = False) -> str:
@@ -69,6 +70,26 @@ def empty(hint: str = "", right: bool = False) -> str:
         return field(("uline", " █" + " " * gap), ("uldim", hint), ("uline", " "))
     tail = SPAN - 3 - len(hint)
     return field(("uline", " █ "), ("uldim", hint), ("uline", " " * tail))
+
+
+def paired(left: str, right: str = "For more, hit", cols: int = W) -> str:
+    """Two dim phrases in one empty field, the right one running into the chip.
+
+    The sentence finishes on the button: `For more, hit` then the reversed
+    `SPC`. Both halves live *inside* the underline, so the field's geometry does
+    not change when they go — and they go together, on the first character.
+    """
+    span = cols - 2 - 5 - GUTTER
+    gap = span - 3 - len(left) - len(right)
+    if gap < 2:  # too narrow to pair: the invitation outranks the signpost
+        tail = span - 3 - len(left)
+        return field(("uline", " █ "), ("uldim", left), ("uline", " " * tail))
+    return field(
+        ("uline", " █ "),
+        ("uldim", left),
+        ("uline", " " * gap),
+        ("uldim", right),
+    )
 
 
 def typed(query: str = "coc") -> str:
@@ -108,6 +129,36 @@ SPECIMENS["row"] = pane([empty(), truth(hints="type to search  ⏎ open")])
 # ── the moment you type, it is gone ─────────────────────────────────────────
 SPECIMENS["typed"] = pane([typed(), truth()], docs=DOCS[:4])
 
+# ── the pairing: an invitation, and a signpost that ends on the button ──────
+SPECIMENS["pair"] = pane([paired("Type to search"), truth()])
+SPECIMENS["pair-lower"] = pane([paired("type to search", "for more, hit"), truth()])
+
+# The long left phrase and the signpost cannot both fit: 3 + 23 + 13 = 39 with
+# no gap at all. Pairing is what makes the short invitation the right one.
+SPECIMENS["pair-long"] = pane([paired("type any part of a name"), truth()])
+
+# At the 38-column floor the pair does not fit — 3 + 14 + 13 leaves no gap — so
+# the signpost sheds and the invitation stays. Sheds one at a time, as ever.
+FLOOR = 38
+
+
+def floor_row(text: str) -> str:
+    gap = FLOOR - width(text) - GUTTER
+    return text + " " * gap + " "
+
+
+SPECIMENS["pair-floor"] = block(
+    [
+        floor_row(" «hd|dossier»          «dim|21 docs»  «chip| ! 3 exp »"),
+        floor_row("▸ COC Certificate (Maste…  «exp|! 09-26»"),
+        floor_row("«dim|    cert-file 8 · marine»"),
+        "",
+        paired("Type to search", cols=FLOOR),
+        floor_row(" 21/21" + " " * 25 + "«dim|⏎ open»"),
+    ],
+    cols=FLOOR,
+)
+
 # ── the recommendation at browsing height ───────────────────────────────────
 TALL = 45
 TALL_DOCS = DOCS + [
@@ -129,7 +180,24 @@ TALL_DOCS = DOCS + [
     ("Panama Seafarer ID", "«ok|03-29»", "cert-file 15 · marine"),
 ]
 SPECIMENS["full"] = block(
-    [header()] + rows(TALL_DOCS) + [empty("type any part of a name"), truth()], cols=W
+    [header()] + rows(TALL_DOCS) + [paired("Type to search"), truth()], cols=W
+)
+
+# ── a keyboard layout has a space bar, so it needs no signpost ──────────────
+SPECIMENS["desk"] = block(
+    [header()]
+    + rows(DOCS[:4])
+    + [
+        "",
+        field(
+            ("uline", " █ "),
+            ("uldim", "Type to search"),
+            ("uline", " " * 27),
+            chip=False,
+        ),
+        " «dim|space  ⏎ open  → detail  ^x expiring»",
+    ],
+    cols=W,
 )
 
 render("emptyfield.src.html", SPECIMENS, "emptyfield.html")

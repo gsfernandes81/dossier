@@ -244,10 +244,23 @@ the instant a character is typed. No stored state and no decay rule — the
 condition is just "the query is empty", which is the same condition that makes
 `Space` the leader.
 
-The pick is `type any part of a name`, permanently. It is the only copy that
-teaches something the interface cannot otherwise show: the underline already
-says *typable*; what it cannot say is that `coc` will find "Certificate of
-Competency". **Wording is still the user's call.**
+Settled by the user, and better than any single phrase: **a pair**. `Type to
+search` dim on the left, `For more, hit` dim on the right, and the reversed
+`SPC` chip is the last word of the second sentence — `For more, hit` ends
+exactly where the chip begins, so the prose and the button are one object. That
+also fixes something the chip alone could not do: a bare reversed `SPC`
+announces that it is pressable and nothing about what happens next.
+
+Capitalised, narrowly: these are sentences, not labels, and every other dim
+string on the surface is a label.
+
+Costs, all accepted: the pairing forces the short invitation (`type any part of
+a name` is 23 columns, and with the cursor and signpost that is 39 exactly, so
+they would touch), which gives up teaching that the search matches anywhere in
+a name — that lesson moves to the help sheet behind `?`. At the 38-column floor
+the signpost sheds and the invitation stays, one at a time, the same rule as
+the hint line. On a keyboard layout there is no chip, so no signpost either —
+a keyboard has a space bar and the hint line already names `space`.
 
 Two things worth keeping in mind when building it:
 
