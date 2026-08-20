@@ -437,30 +437,27 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 
     if !touch {
         model.leader_zone = Zone::default();
-        // The desktop query row was missing its underline: the one texture that
-        // says *you can type here*, and the surface it belongs to most.
         let tail = format!("{count} ");
         let prompt = " > ";
         let span = cols.saturating_sub(width(prompt) + width(&tail));
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(prompt, theme.style(Tone::Accent)),
-                Span::styled(
-                    fit(&format!("{}{}█", model.query, chips(model)), span),
-                    Style::default().add_modifier(Modifier::UNDERLINED),
-                ),
+                Span::raw(fit(&format!("{}{}█", model.query, chips(model)), span)),
                 Span::styled(tail, theme.style(Tone::Muted)),
-            ])),
+            ]))
+            .style(theme.field()),
             area,
         );
         return;
     }
 
-    // Row one: the query as a field. **Underline means you can type here** — the
-    // one texture that says it without filling anything, and one that survives
-    // NO_COLOR because it is an attribute rather than a colour. The underline
-    // runs the width of the field in every state, so the field's geometry is
-    // identical empty, half-typed and full.
+    // Row one: the query as a field. **The whole row is a lit band** — Emacs
+    // marks an editable field with a background face rather than a rule under
+    // it, and a rule is exactly what a terminal cannot place: `SGR 4` lands
+    // where the font's metric says, which on the phone is through the
+    // descenders. The band runs edge to edge, so the field's shape is identical
+    // empty, half-typed and full, and no glyph can sit on top of the marking.
     //
     // The `SPC` chip closes the right-hand end. It opens the leader sheet, which
     // `Space` opens from a keyboard — and with the phone keyboard down there is
@@ -470,8 +467,9 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let key = " SPC ";
     let prompt = " >";
     let span = cols.saturating_sub(width(prompt) + width(key) + gutter);
-    let under = Style::default().add_modifier(Modifier::UNDERLINED);
-    let quiet = theme.style(Tone::Muted).add_modifier(Modifier::UNDERLINED);
+    let band = theme.field();
+    let under = Style::default();
+    let quiet = theme.style(Tone::Muted);
 
     model.leader_zone = Zone {
         row: area.y,
@@ -539,7 +537,15 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         ])
     };
 
-    frame.render_widget(Paragraph::new(vec![query_row, info_row]), area);
+    // Two widgets, not one: only the query row carries the band, and a
+    // `Paragraph`'s style paints its whole area rather than only the cells its
+    // text reaches — which is what makes the band edge to edge.
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(area);
+    frame.render_widget(Paragraph::new(query_row).style(band), rows[0]);
+    frame.render_widget(Paragraph::new(info_row), rows[1]);
 }
 
 /// The hints a touch layout shows, most sheddable first.

@@ -126,4 +126,28 @@ def bracketed(query: str = "coc") -> str:
 
 SPECIMENS["brackets"] = pane([bracketed(), truth()])
 
+# ── as built · the band is the whole row, edge to edge ─────────────────────
+def band(query: str = "coc", hint: str = "", prompt: str = " >") -> str:
+    """The shipped row: every column carries the band, including the gutters.
+
+    Markup does not nest, so each run names the band plus its own emphasis —
+    which is exactly what the renderer does with a `Paragraph` style and spans
+    patched on top of it.
+    """
+    span = W - width(prompt) - width(CHIP) - GUTTER
+    body = f" {query}█"
+    out = f"«bandacc|{prompt}»"
+    if hint:
+        gap = span - width(body) - len(hint) - 1
+        out += f"«band|{body}{' ' * gap}»«banddim|{hint}»«band| »"
+    else:
+        out += f"«band|{rpad(body, span)}»"
+    return out + f"«bandchip|{CHIP}»" + f"«band|{' ' * GUTTER}»"
+
+
+SPECIMENS["line"] = pane([band(), truth()])
+SPECIMENS["line-empty"] = pane(
+    [band(query="", hint="For more, hit"), truth("24/24")], docs=DOCS
+)
+
 render("field.src.html", SPECIMENS, "field.html")

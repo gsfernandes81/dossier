@@ -124,6 +124,33 @@ impl Theme {
         }
     }
 
+    /// The band behind the query row: **the field is a lit strip, not a line
+    /// under one.**
+    ///
+    /// A terminal draws `SGR 4` wherever the font's underline metric says, and
+    /// on the phone that is through the descenders rather than below them —
+    /// nothing here can move it. Emacs marks an editable field the same way this
+    /// does: `widget-field` is a *background* face, not a rule.
+    ///
+    /// **Both ends are pinned.** Setting only a background would be a coin flip
+    /// on polarity — ANSI 8 is a light grey on a dark theme and a near-black on
+    /// a light one, so a background-only band is unreadable on half of them.
+    /// Naming the pair keeps §6's promise intact: the slots are ANSI, so the
+    /// user's own theme still chooses the two hues.
+    ///
+    /// Under `NO_COLOR` there is no band. That is the honest cost of this
+    /// texture and the reason the prompt has to name the question on its own —
+    /// a marking is decoration over a prompt that already works, never the only
+    /// thing saying what the row is for.
+    #[must_use]
+    pub fn field(self) -> Style {
+        if self.color {
+            Style::default().bg(Color::DarkGray).fg(Color::White)
+        } else {
+            Style::default()
+        }
+    }
+
     /// The selection style: reverse video, never an indent shift.
     ///
     /// v2's rule, kept: shifting the row by a column as the cursor moves makes

@@ -127,6 +127,18 @@ fn modifier_columns(
     (0..cols).filter(|x| buffer[(*x, row)].style().add_modifier.contains(modifier)).collect()
 }
 
+/// The columns of one row whose background is not the terminal's own.
+fn banded_columns(model: &mut Model, cols: u16, rows: u16, row: u16, theme: Theme) -> Vec<u16> {
+    let mut terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
+    terminal.draw(|frame| find::draw(frame, model, theme)).expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    (0..cols)
+        .filter(|x| {
+            !matches!(buffer[(*x, row)].style().bg, None | Some(ratatui::style::Color::Reset))
+        })
+        .collect()
+}
+
 /// Render one frame and read the screen back as lines of text.
 fn screen(model: &mut Model, cols: u16, rows: u16) -> Vec<String> {
     render_with(model, cols, rows, Theme { color: true }).0
@@ -340,28 +352,52 @@ fn the_leader_sheet_opens_over_the_list() {
     assert!(on.iter().any(|l| l.contains("[✓]")), "and on, in the same place: {on:?}");
 }
 
-/// **The field is underlined across its whole width, not just under the text.**
-/// That is what makes an empty query read as waiting rather than as a blank row
-/// — and underline is an attribute, so it survives NO_COLOR untouched.
+/// **The query row is a lit band, edge to edge** — not a rule under the text.
+///
+/// A terminal puts `SGR 4` wherever the font's underline metric says, which on
+/// the phone is through the descenders; nothing in the app can move it. Emacs
+/// marks an editable field the same way this now does, with a background rather
+/// than a line. Edge to edge because the band is the row's identity, not a
+/// box drawn around the characters currently in it.
 #[test]
-fn the_query_row_is_an_underlined_field() {
+fn the_query_row_is_a_band() {
     let mut m = model(45, 28);
-    let underlined = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::UNDERLINED);
-    assert_eq!(underlined.first(), Some(&2), "starts right after the prompt");
-    assert_eq!(underlined.last(), Some(&38), "and runs to the leader chip");
-    assert_eq!(underlined.len(), 37, "one unbroken span, empty query and all: {underlined:?}");
+    let band = banded_columns(&mut m, 45, 28, 26, Theme { color: true });
+    assert_eq!(band.len(), 45, "every column, gutters included: {band:?}");
 
-    // Typing does not change the field's extent, only what is in it.
+    // Typing changes what is on the band, never the band.
     for c in "coc".chars() {
         update(&mut m, Msg::Char(c));
     }
-    let after = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::UNDERLINED);
-    assert_eq!(after, underlined, "the field is the same size once it has text");
+    assert_eq!(banded_columns(&mut m, 45, 28, 26, Theme { color: true }), band);
 
-    // The leader chip closes the right-hand end. Reverse, because it is a
-    // button — and it is the only one on the row.
+    // The row below is the echo area and carries no band of its own — two rows
+    // of tint would read as a block rather than as a field.
+    assert!(banded_columns(&mut m, 45, 28, 27, Theme { color: true }).is_empty());
+
+    // Nothing is underlined any more.
+    let underlined = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::UNDERLINED);
+    assert!(underlined.is_empty(), "the rule is gone: {underlined:?}");
+
+    // The leader chip still closes the right-hand end, reversed *against* the
+    // band — so it inverts rather than disappearing into it.
     let reversed = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::REVERSED);
     assert_eq!(reversed, [39, 40, 41, 42, 43], "SPC is reverse, with a gutter after it");
+}
+
+/// **`NO_COLOR` has no band**, and that is the honest cost of this texture:
+/// it is the first thing on the surface that a monochrome run loses.
+///
+/// What survives is the prompt and the words in the field, which is why the
+/// marking may never be the only thing saying what the row is for.
+#[test]
+fn a_monochrome_run_loses_the_band_but_not_the_row() {
+    let mut m = model(45, 28);
+    assert!(banded_columns(&mut m, 45, 28, 26, Theme { color: false }).is_empty());
+
+    let (lines, _) = render_with(&mut m, 45, 28, Theme { color: false });
+    assert!(lines[26].contains("Type to search"), "the words still say it: {:?}", lines[26]);
+    assert!(lines[26].contains("SPC"), "and the button is still there");
 }
 
 /// **The touch layout has one button, and it says what it is for.**

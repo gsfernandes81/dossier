@@ -330,7 +330,15 @@ What Emacs does instead:
   theme authors patch it; a line under a field is a known problem, not a settled
   idiom.
 
-Proposed: **drop the underline and let the named prompt carry it.** The three
+**Built: the background, widened to the whole row** — the field *is* the row,
+and a marking that stops where the characters stop is a box drawn around today's
+text. Both ends pinned (ANSI 8 behind, ANSI 7 in front): a background alone is a
+coin flip on theme polarity, since ANSI 8 is light grey on a dark theme and
+near-black on a light one. `NO_COLOR` gets no band, which is this texture's
+honest cost.
+
+Also proposed, and still open: **drop the underline and let the named prompt
+carry it.** The three
 textures become two plus the input — reverse is pressable, dim is information,
 and full brightness is what you typed. Immune to the font metric, costs nothing
 in NO_COLOR, and it only works because the prompt got a name. Rejected: a

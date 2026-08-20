@@ -250,6 +250,15 @@ Touch chrome is now three rows, the same as a keyboard layout:
   own keyboard key and tapping the field already raises the IME. The empty
   field's second phrase runs into the chip and finishes the sentence, because a
   bare reversed `SPC` says only that it is pressable.
+- **The query row is a band, not an underlined field.** A terminal puts `SGR 4`
+  where the font's metric says, which on the phone is through the descenders,
+  and nothing in the app can move it. Emacs marks an editable field the same way
+  this now does — `widget-field` is a background face, not a rule. The band runs
+  **edge to edge**, both ends pinned (ANSI 8 behind, ANSI 7 in front) because a
+  background alone is a coin flip on theme polarity. §6's promise survives: the
+  slots are ANSI, so the user's theme still picks the hues. **`NO_COLOR` has no
+  band** — the first texture on this surface a monochrome run loses, acceptable
+  only because it sits over words that already say what the row is for.
 - **Hints shed one at a time**, not the whole line. Two live filters used to
   erase every hint at once, precisely when the user had most state.
 - **The chrome is inert under a pushed record**, so a tap cannot filter a list

@@ -25,6 +25,20 @@
 .tint, .tintdim { background: color-mix(in srgb, var(--term-fg) 13%, transparent); }
 .tintdim { color: var(--term-dim); }
 
+/* As shipped: ANSI 8 behind, ANSI 7 in front, both ends pinned so the row is
+   readable whichever way the user's theme runs. */
+.band, .banddim, .bandacc, .bandchip {
+  background: var(--term-dim);
+  color: var(--term-bg);
+}
+.banddim { color: color-mix(in srgb, var(--term-bg) 55%, var(--term-dim)); }
+.bandacc { color: var(--term-bg); font-weight: 700; }
+.bandchip { background: var(--term-bg); color: var(--term-dim); }
+.term.mono .band, .term.mono .banddim,
+.term.mono .bandacc { background: transparent; color: var(--term-fg); }
+.term.mono .banddim { color: var(--term-dim); }
+.term.mono .bandchip { background: var(--term-sel-bg); color: var(--term-sel-fg); }
+
 .term.mono .acc, .term.mono .exp, .term.mono .soon,
 .term.mono .ok, .term.mono .warn { color: var(--term-fg); }
 
@@ -140,7 +154,75 @@
   </section>
 
   <section>
-    <h2>Four ways to mark it</h2>
+    <h2>What shipped</h2>
+    <p class="lede">
+      A band across the whole row rather than the field's extent — the row is
+      the field, and a marking that stops where the characters stop is a box
+      drawn around today's text.
+    </p>
+    <div class="states">
+      <figure>
+        <div class="term phone"><pre><!--S:line-empty--></pre></div>
+        <figcaption>
+          <span class="size">47×24 · empty</span>
+          <span class="how">Edge to edge, gutters included. The chip reverses
+            <em>against</em> the band, so it inverts rather than dissolving into
+            it.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone"><pre><!--S:line--></pre></div>
+        <figcaption>
+          <span class="size">typed</span>
+          <span class="how">Typing changes what is on the band, never the band —
+            the row's shape is identical empty, half-typed and full.</span>
+        </figcaption>
+      </figure>
+      <figure>
+        <div class="term phone mono"><pre><!--S:line-empty--></pre></div>
+        <figcaption>
+          <span class="size">NO_COLOR</span>
+          <span class="how">No band at all. That is this texture's honest cost,
+            and the reason the words in the field have to say what the row is
+            for on their own.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <div class="scroller">
+      <table class="kv">
+        <tr><th>Decision</th><th>Why</th></tr>
+        <tr>
+          <td class="k">the whole row</td>
+          <td>The field <em>is</em> the row. Tinting only the span between the
+            prompt and the chip leaves two untinted stubs at the ends, which
+            reads as a bar that failed to reach its own edges.</td>
+        </tr>
+        <tr>
+          <td class="k">both ends pinned</td>
+          <td class="yes">Background alone is a coin flip on polarity — ANSI 8
+            is a light grey on a dark theme and near-black on a light one, so a
+            background-only band is unreadable on half of them. Naming the pair
+            keeps §6 intact: the slots are ANSI, so the user's theme still
+            picks the two hues.</td>
+        </tr>
+        <tr>
+          <td class="k">one row, not two</td>
+          <td>The row below is the echo area. Two bands would read as a block of
+            chrome rather than as a field with something written under it.</td>
+        </tr>
+        <tr>
+          <td class="k">no band under NO_COLOR</td>
+          <td class="no">The first texture on this surface that a monochrome run
+            loses. Acceptable only because the marking sits over words that
+            already say what the row is for — never as the sole signal.</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>The four that were on the table</h2>
     <div class="grid">
       <div class="opt">
         <h3><span class="letter">A</span> Nothing — the prompt does it <span class="flag">recommended</span></h3>
@@ -199,7 +281,7 @@
   </section>
 
   <section>
-    <h2>What I would build</h2>
+    <h2>What was recommended, and what was chosen</h2>
     <div class="verdict">
       <p><b>A — drop the underline, and let the named prompt carry it.</b> It is
         what the minibuffer does, it is immune to the font metric that caused
@@ -210,9 +292,11 @@
         reading that gets <em>more</em> true as the app grows — command mode and
         the sheet's picker are the same row with a different prompt, and none of
         them need a box either.</p>
-      <p>Two things I would not do. Not the tint: it is the only colour-dependent
-        texture on the surface, and the palette is the user's. Not the short
-        underline: it keeps the fault and drops the benefit.</p>
+      <p><b>Built instead: B, widened to the whole row.</b> The colour cost is
+        real and is the reason it took an explicit call — but a band cannot be
+        put in the wrong place by a font metric, and that is the fault this page
+        exists to fix. The short underline was rejected outright: it keeps the
+        fault and drops the extent.</p>
     </div>
 
     <p class="srcs">Checked against
