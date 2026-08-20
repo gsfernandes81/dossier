@@ -49,6 +49,16 @@ pub fn to_msg(event: &Event) -> Option<Msg> {
 
 fn key_msg(key: KeyEvent) -> Option<Msg> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    // **ALT is not a typing modifier.** Termux's extra-keys `ALT` is a sticky
+    // modifier that composes with soft-keyboard letters, and crossterm delivers
+    // `alt+f` as `Char('f')` with `ALT` set — so without this guard, latching
+    // ALT and typing quietly pollutes the search. Measured on the built binary
+    // before it was fixed, not inferred.
+    //
+    // Nothing is bound to the alt tier yet. It is where R4's in-edit verbs go:
+    // on a surface that is not search-as-you-type, bare letters are the primary
+    // namespace, and `alt+s` mirrors `s` while a field is being typed into.
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
         // `ctrl+c` always quits cleanly and is never bound over (REWRITE-UI.md §3).
         KeyCode::Char('c' | 'q') if ctrl => Some(Msg::Quit),
@@ -68,7 +78,7 @@ fn key_msg(key: KeyEvent) -> Option<Msg> {
         // Find-fast: every bare printable is search text. The modifier check is
         // what keeps `ctrl+t` from typing a `t` — and nothing else on this
         // surface may claim a letter.
-        KeyCode::Char(c) if !ctrl => Some(Msg::Char(c)),
+        KeyCode::Char(c) if !ctrl && !alt => Some(Msg::Char(c)),
         _ => None,
     }
 }
@@ -106,6 +116,37 @@ mod tests {
                 "{c} must reach the query"
             );
         }
+    }
+
+    /// **A modified letter is never search text.** `ctrl` was always guarded;
+    /// `alt` was not, so latching Termux's `ALT` key and typing put the letters
+    /// straight into the query. The alt tier is silent until something is bound
+    /// to it, which is the honest default: a key that does nothing is better
+    /// than a key that does the wrong thing.
+    #[test]
+    fn a_modified_letter_never_reaches_the_query() {
+        for modifiers in [KeyModifiers::ALT, KeyModifiers::CONTROL | KeyModifiers::ALT] {
+            for c in ['f', 's', 'b', 'z'] {
+                assert_eq!(
+                    to_msg(&press(KeyCode::Char(c), modifiers)),
+                    None,
+                    "{c} with {modifiers:?} is not search text"
+                );
+            }
+        }
+    }
+
+    /// `ctrl+alt+x` is deliberately the same verb as `ctrl+x`.
+    ///
+    /// The guard asks whether CONTROL is present, not whether it is the *only*
+    /// modifier — and it stays that way on purpose. Exact-modifier matching is
+    /// how a binding breaks on a terminal that decorates keys with a modifier
+    /// nobody asked for, and the two combinations have no reason to differ.
+    #[test]
+    fn a_bound_control_letter_ignores_extra_modifiers() {
+        let both = KeyModifiers::CONTROL | KeyModifiers::ALT;
+        assert_eq!(to_msg(&press(KeyCode::Char('x'), both)), Some(Msg::ToggleExpiring));
+        assert_eq!(to_msg(&press(KeyCode::Char('q'), both)), Some(Msg::Quit));
     }
 
     /// Control combinations are verbs, and `ctrl+c` is always the exit.

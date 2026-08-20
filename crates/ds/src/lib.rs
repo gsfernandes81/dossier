@@ -73,6 +73,7 @@ pub mod load;
 pub mod open;
 pub mod scans;
 pub mod search;
+pub mod sheet;
 pub mod status;
 pub mod syncthing;
 pub mod theme;

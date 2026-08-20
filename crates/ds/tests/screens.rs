@@ -179,16 +179,20 @@ fn the_phone_screen_matches_the_approved_mockup() {
     assert!(lines[3].starts_with("  RC Book"), "second row is not selected: {:?}", lines[3]);
     assert_eq!(ds::layout::visible_rows(45, 28), 12);
 
-    let bar = &lines[25];
-    assert!(bar.contains("→ Detail") && bar.contains("^x Expiry") && bar.contains("^t Scans"));
-    assert!(!bar.contains("Open"), "Enter opens; a button for it duplicates a tap: {bar:?}");
+    // No action bar: row 25 is the twelfth document's second line, not chrome.
+    // Every verb the bar carried is a key the thumb already has on Termux's own
+    // extra-keys row, and the two it did not are in the leader sheet.
+    assert!(!lines[25].contains("Detail") && !lines[25].contains("Expiry"));
     // The search bar is docked at the bottom and is **two rows** on touch: the
     // query, then the count and hints. Both rows are the keyboard target.
     assert!(lines[26].starts_with(" > █"), "the query row: {:?}", lines[26]);
-    assert!(lines[26].contains('⌨'), "and carries the keyboard glyph: {:?}", lines[26]);
+    assert!(lines[26].contains("SPC"), "and carries the leader chip: {:?}", lines[26]);
+    assert!(!lines[26].contains('⌨'), "which replaced the keyboard chip: {:?}", lines[26]);
+    assert!(lines[26].contains("Type to search"), "the empty field says so: {:?}", lines[26]);
+    assert!(lines[26].contains("For more, hit"), "and what the chip is for");
     assert!(lines[27].trim_start().starts_with("14/14"), "matched/total: {:?}", lines[27]);
-    assert!(lines[27].contains("⏎ open"), "the hint line teaches what the bar dropped");
-    assert!(lines[27].contains("^q quit"), "and the verbs no button carries");
+    assert!(lines[27].contains("⏎ open"), "the hint line teaches the verbs");
+    assert!(lines[27].contains("^x expiry") && lines[27].contains("^t scans"));
 }
 
 /// **Every line is exactly the terminal's width, and the status column lands on
@@ -259,8 +263,7 @@ fn detail_splits_wide_and_pushes_narrow() {
     // On touch it is the *buttons* that change with the surface — the hint line
     // carries only what they do not (`esc`, `^q`), which is why it can be short
     // enough to share a row with the count.
-    assert!(lines[25].contains("← Back"), "the action bar changed: {:?}", lines[25]);
-    assert!(lines[27].contains("esc back"), "{:?}", lines[27]);
+    assert!(lines[27].contains("◀ back"), "the hints changed with the surface: {:?}", lines[27]);
 }
 
 /// Below the floor the app says so instead of drawing something broken.
@@ -288,31 +291,53 @@ fn no_color_loses_nothing_but_colour() {
     assert!(without_color.iter().any(|l| l.contains('!')), "the expired marker is text");
 }
 
-/// **The buttons are filled cells on one tiling** — reverse video, because in
-/// this design reverse means "you can press this". The cells are exactly the
-/// ones the hit test reads, and the gutters between them carry nothing, which is
-/// what gives the row a rhythm instead of four differently-spaced labels.
+/// **The header count is the touch layout's one filter button** — reverse
+/// video, because in this design reverse means "you can press this". It is
+/// checked against the columns the renderer actually filled, which is the same
+/// place the hit test reads.
 #[test]
-fn the_action_bar_is_four_filled_cells_on_the_tiling() {
+fn the_header_count_is_a_filled_cell_on_a_touch_layout() {
     let mut m = model(45, 28);
-    let reversed = modifier_columns(&mut m, 45, 28, 25, ratatui::style::Modifier::REVERSED);
+    let reversed = modifier_columns(&mut m, 45, 28, 0, ratatui::style::Modifier::REVERSED);
+    assert!(!reversed.is_empty(), "the count is pressable");
 
-    let mut expected: Vec<u16> = Vec::new();
-    for (start, w) in ds::layout::cells(45, ds::layout::ACTIONS) {
-        expected.extend(start..start + w);
-    }
-    assert_eq!(reversed, expected, "filled cells, exactly where the hit test looks");
-
-    // And the labels are centred in them: the padding on the two sides differs
-    // by at most the one column that cannot be split.
     let lines = screen(&mut m, 45, 28);
-    for (start, w) in ds::layout::cells(45, ds::layout::ACTIONS) {
-        let cell: String = lines[25].chars().skip(start as usize).take(w as usize).collect();
-        let left = cell.len() - cell.trim_start().len();
-        let right = cell.len() - cell.trim_end().len();
-        assert!(left.abs_diff(right) <= 1, "centred within a column: {cell:?}");
-        assert!(cell.trim().chars().count() > 1, "and it says something: {cell:?}");
-    }
+    let cell: String = lines[0].chars().skip(reversed[0] as usize).take(reversed.len()).collect();
+    assert!(cell.contains("exp"), "and it is the expiring count: {cell:?}");
+    assert!(cell.starts_with(' ') && cell.ends_with(' '), "padded, not butted: {cell:?}");
+
+    // A wide terminal has a keyboard and needs no button at all.
+    let mut wide = model(120, 40);
+    let none = modifier_columns(&mut wide, 120, 40, 0, ratatui::style::Modifier::REVERSED);
+    assert!(none.is_empty(), "no touch affordance where there is a keyboard");
+}
+
+/// **The leader sheet covers the list rather than shrinking it**, and its
+/// toggles draw their off state — which is the whole reason the filters live
+/// there instead of as pressable status chips.
+#[test]
+fn the_leader_sheet_opens_over_the_list() {
+    let mut m = model(45, 28);
+    let before = screen(&mut m, 45, 28);
+
+    update(&mut m, Msg::Char(' '));
+    let open = screen(&mut m, 45, 28);
+    assert_eq!(open.len(), before.len(), "the pane did not change size");
+    assert!(open.iter().any(|l| l.contains("SPC")), "the breadcrumb is up");
+    assert!(open.iter().any(|l| l.contains("filter")), "and the groups: {open:?}");
+    assert_eq!(open[26], before[26], "the query row is untouched underneath");
+
+    update(&mut m, Msg::Char('f'));
+    let group = screen(&mut m, 45, 28);
+    let boxes: Vec<&String> = group.iter().filter(|l| l.contains('[')).collect();
+    assert_eq!(boxes.len(), 2, "two toggles, both drawn: {group:?}");
+    assert!(boxes.iter().all(|l| l.contains("[ ]")), "and both showing off: {boxes:?}");
+
+    update(&mut m, Msg::Char('x'));
+    update(&mut m, Msg::Char(' '));
+    update(&mut m, Msg::Char('f'));
+    let on = screen(&mut m, 45, 28);
+    assert!(on.iter().any(|l| l.contains("[✓]")), "and on, in the same place: {on:?}");
 }
 
 /// **The field is underlined across its whole width, not just under the text.**
@@ -323,8 +348,8 @@ fn the_query_row_is_an_underlined_field() {
     let mut m = model(45, 28);
     let underlined = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::UNDERLINED);
     assert_eq!(underlined.first(), Some(&2), "starts right after the prompt");
-    assert_eq!(underlined.last(), Some(&40), "and runs to the keyboard chip");
-    assert_eq!(underlined.len(), 39, "one unbroken span, empty query and all: {underlined:?}");
+    assert_eq!(underlined.last(), Some(&38), "and runs to the leader chip");
+    assert_eq!(underlined.len(), 37, "one unbroken span, empty query and all: {underlined:?}");
 
     // Typing does not change the field's extent, only what is in it.
     for c in "coc".chars() {
@@ -333,25 +358,46 @@ fn the_query_row_is_an_underlined_field() {
     let after = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::UNDERLINED);
     assert_eq!(after, underlined, "the field is the same size once it has text");
 
-    // The keyboard target at the end is a chip, because it is a button.
+    // The leader chip closes the right-hand end. Reverse, because it is a
+    // button — and it is the only one on the row.
     let reversed = modifier_columns(&mut m, 45, 28, 26, ratatui::style::Modifier::REVERSED);
-    assert_eq!(reversed, [41, 42, 43], "⌨ is reverse, with a gutter after it");
+    assert_eq!(reversed, [39, 40, 41, 42, 43], "SPC is reverse, with a gutter after it");
 }
 
-/// **The keyboard affordance lives on the search bar, not in the action bar.**
-/// Termux's own extra-keys row can carry a keyboard toggle, so a second button
-/// for it wastes a quarter of the only touch chrome there is — and tapping the
-/// field you want to type into is what a thumb does anyway.
+/// **The touch layout has one button, and it says what it is for.**
+///
+/// The `⌨` chip is gone: Termux has its own keyboard key, and tapping the field
+/// already raises the IME, so a second button for it was a button for a key the
+/// thumb already holds. `SPC` took the corner — and because a bare reversed
+/// `SPC` announces only that it is pressable, the empty field's second phrase
+/// runs into it and finishes the sentence.
 #[test]
-fn the_keyboard_target_is_the_search_bar() {
+fn the_touch_layout_has_one_button_and_it_explains_itself() {
     let mut m = model(45, 28);
     let lines = screen(&mut m, 45, 28);
-    assert!(!lines[25].contains('⌨'), "not in the action bar: {:?}", lines[25]);
-    assert!(lines[26].contains('⌨'), "on the search bar: {:?}", lines[26]);
+    assert!(!lines[26].contains('⌨'), "no keyboard chip: {:?}", lines[26]);
+    // Columns, not bytes: the row carries `█`, so a byte offset is not a column.
+    let row: Vec<char> = lines[26].chars().collect();
+    let at = |needle: &str| {
+        let needle: Vec<char> = needle.chars().collect();
+        (0..row.len()).find(|i| row[*i..].starts_with(&needle))
+    };
+    let hit = at("For more, hit").expect("the signpost");
+    let chip = at("SPC").expect("the chip");
+    assert!(hit < chip, "the sentence runs into the button: {:?}", lines[26]);
+    let between: String = row[hit + 13..chip].iter().collect();
+    assert_eq!(between, "  ", "one plain column, then the chip's own padding");
+
+    // Typing takes both phrases away together, and puts them back on the way out.
+    update(&mut m, Msg::Char('c'));
+    let typed = screen(&mut m, 45, 28);
+    assert!(!typed[26].contains("Type to search"), "{:?}", typed[26]);
+    assert!(!typed[26].contains("For more"), "both halves go together");
+    update(&mut m, Msg::Backspace);
+    assert!(screen(&mut m, 45, 28)[26].contains("Type to search"));
 
     // **Both** rows raise the keyboard, and they sit against the bottom edge —
-    // one row is too small a thing to ask a thumb to hit when the row above it
-    // opens files.
+    // one row is too small a thing to ask a thumb to hit.
     for row in [26u16, 27] {
         m.mouse_on = true;
         m.keyboard_hint = false;
@@ -359,13 +405,14 @@ fn the_keyboard_target_is_the_search_bar() {
         assert!(!m.mouse_on, "row {row} is part of the target");
     }
 
-    // The desktop has a keyboard and no touch chrome, so it gets one row and no
-    // glyph.
+    // The desktop has a keyboard and a space bar, so it gets one row, no chip,
+    // and no signpost — but it does get the underline its query row was missing.
     let mut wide = model(100, 26);
     let lines = screen(&mut wide, 100, 26);
-    assert!(!lines[24].contains('⌨'), "{:?}", lines[24]);
-    assert!(lines[24].starts_with(" > _"), "one-row search bar: {:?}", lines[24]);
-    assert!(lines[25].contains("⏎ open"), "and a hint line of its own: {:?}", lines[25]);
+    assert!(!lines[24].contains("SPC"), "{:?}", lines[24]);
+    assert!(!lines[24].contains("For more"), "nothing to point at: {:?}", lines[24]);
+    assert!(lines[25].contains("space menu"), "the hint names the key: {:?}", lines[25]);
+    assert!(lines[25].contains("^t scans"), "and teaches every verb it has");
 }
 
 /// Typing narrows the list and the count says so — the fzf-style feedback the

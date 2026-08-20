@@ -76,22 +76,31 @@ pub fn row_height(cols: u16) -> u16 {
     }
 }
 
-/// Whether the touch action bar is shown.
+/// Whether this width gets the touch layout.
 ///
-/// It is the only extra chrome touch gets (REWRITE-UI.md §5), and it appears on
-/// the single-pane layout — which is the phone, and also a narrow tmux split
-/// where a stray row costs little. A wide desktop terminal has a keyboard and
-/// does not need it.
+/// The single-pane layout — the phone, and also a narrow tmux split. A wide
+/// desktop terminal has a keyboard and needs none of the touch affordances.
+///
+/// It used to decide whether an action bar was drawn. There is no action bar any
+/// more: every verb it held is a key the thumb already has on Termux's own
+/// extra-keys row, and the two it did not are reachable as `CTRL` then a letter.
+/// What the touch layout still decides is the *shape* of the search bar — two
+/// rows, so a thumb can hit it — and whether the touch affordances are drawn:
+/// the pressable header count, and the `SPC` chip that opens the leader sheet.
 #[must_use]
-pub fn touch_bar(cols: u16) -> bool {
+pub fn touch_layout(cols: u16) -> bool {
     !splits(cols)
 }
 
-/// Rows of chrome above and below the list: header, optional action bar, the
-/// search bar, the hint line.
+/// Rows of chrome above and below the list: the header, and the search bar —
+/// two rows of it on a touch layout, or one plus a hint line on a keyboard one.
+///
+/// **Three, either way.** They are spent differently but they cost the same,
+/// which is why deleting the action bar bought a document row rather than a
+/// different arrangement of the same ones.
 #[must_use]
-pub fn chrome_rows(cols: u16) -> u16 {
-    3 + u16::from(touch_bar(cols))
+pub const fn chrome_rows(_cols: u16) -> u16 {
+    3
 }
 
 /// How many document rows fit, given the whole terminal.
@@ -110,20 +119,12 @@ pub fn visible_rows(cols: u16, rows: u16) -> usize {
 
 /// The blank column at each end of the chrome, and between two cells.
 ///
-/// One column, everywhere: the action bar, the search field and the count row
+/// One column, everywhere: the search field, the count row and the leader sheet
 /// all start and end on it, which is what gives the block a left and a right
-/// edge instead of three of each.
+/// edge instead of one of each per row.
 pub const GUTTER: u16 = 1;
 
-/// Verbs on the touch action bar, and therefore cells in its row.
-///
-/// **`Enter` is not one of them.** It opens the highlighted document, a thumb
-/// opens by tapping the selected row a second time, and a button that duplicates
-/// a gesture you already have is a button that costs a third of the bar for
-/// nothing.
-pub const ACTIONS: u16 = 3;
-
-/// Where the action bar's cells begin and how wide they are: `(start, width)`.
+/// Where a tiled row's cells begin and how wide they are: `(start, width)`.
 ///
 /// The row is tiled as `n` equal cells with a one-column separator between them,
 /// and the whole block is **centred**, so any remainder becomes margin split
@@ -303,14 +304,14 @@ mod tests {
     /// Both halves of the loop count rows the same way, chrome included.
     #[test]
     fn visible_rows_accounts_for_chrome() {
-        // The measured phone, keyboard down: 47×45 − 4 chrome = 41, two lines a
-        // row = 20 docs. Deleting the action bar would make it 42 and 21.
-        assert_eq!(visible_rows(47, 45), 20, "browsing, as the device reports it");
+        // The measured phone, keyboard down: 47×45 − 3 chrome = 42, two lines a
+        // row = 21 docs. With the retired action bar it was 41 rows and 20.
+        assert_eq!(visible_rows(47, 45), 21, "browsing, as the device reports it");
         // The same phone with the keyboard up — Termux resizes rather than
         // covering, so this is a shorter layout and not a hidden one.
         assert_eq!(visible_rows(47, 24), 10, "typing, as the device reports it");
-        // 45×28, the mockup size the R-UI pages are drawn at.
-        assert_eq!(visible_rows(45, 28), 12, "the twelve rows the mockups show");
+        // 45×28, the mockup size the older R-UI pages are drawn at.
+        assert_eq!(visible_rows(45, 28), 12);
         // 100×26 desktop: 26 − 3 chrome = 23 single-line rows.
         assert_eq!(visible_rows(100, 26), 23);
     }
@@ -336,7 +337,7 @@ mod tests {
     #[test]
     fn the_action_bar_tiles_evenly_and_centres_the_remainder() {
         // Three cells on the phone: 13 wide, two columns of margin each side.
-        let cells = cells(45, ACTIONS);
+        let cells = cells(45, 3);
         assert_eq!(cells, [(2, 13), (16, 13), (30, 13)]);
         let (last_start, last_width) = *cells.last().unwrap();
         assert_eq!(45 - (last_start + last_width), 2, "margins match at both ends");
@@ -344,12 +345,12 @@ mod tests {
         // Every cell start reads back as its own cell, and so does its last
         // column — the two places a rounding mistake shows up first.
         for (i, (start, w)) in cells.iter().enumerate() {
-            assert_eq!(cell_at(45, ACTIONS, *start), Some(i), "start of cell {i}");
-            assert_eq!(cell_at(45, ACTIONS, start + w - 1), Some(i), "end of cell {i}");
+            assert_eq!(cell_at(45, 3, *start), Some(i), "start of cell {i}");
+            assert_eq!(cell_at(45, 3, start + w - 1), Some(i), "end of cell {i}");
         }
-        assert_eq!(cell_at(45, ACTIONS, 15), Some(0), "a separator goes to the cell it left");
-        assert_eq!(cell_at(45, ACTIONS, 1), None, "the margin is not a button");
-        assert_eq!(cell_at(45, ACTIONS, 44), None, "and neither is the far edge");
+        assert_eq!(cell_at(45, 3, 15), Some(0), "a separator goes to the cell it left");
+        assert_eq!(cell_at(45, 3, 1), None, "the margin is not a button");
+        assert_eq!(cell_at(45, 3, 44), None, "and neither is the far edge");
     }
 
     /// The same arithmetic at the floor and at the widest touch layout: cells
@@ -357,8 +358,8 @@ mod tests {
     #[test]
     fn the_tiling_holds_at_every_touch_width() {
         for cols in FLOOR.0..SPLIT_COLS {
-            let cells = cells(cols, ACTIONS);
-            assert_eq!(cells.len(), ACTIONS as usize);
+            let cells = cells(cols, 3);
+            assert_eq!(cells.len(), 3);
             let widths: Vec<u16> = cells.iter().map(|(_, w)| *w).collect();
             assert!(widths.windows(2).all(|p| p[0] == p[1]), "equal cells at {cols}");
             let (first, _) = *cells.first().unwrap();

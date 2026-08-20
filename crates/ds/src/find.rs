@@ -39,7 +39,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{Filter, ListGeometry, Model, ScanSearch};
+use crate::app::{Filter, ListGeometry, Model, ScanSearch, Zone};
 use crate::layout::{fit, pad_left, short_date, truncate, width};
 use crate::theme::{Theme, Tone};
 use crate::{Doc, Status};
@@ -67,38 +67,54 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
         return;
     }
 
-    // Touch and keyboard get the same four rows of chrome, spent differently.
-    // With the action bar showing this surface's verbs as buttons, a separate
-    // hint line would only repeat them — so that row goes to the search bar
-    // instead, which doubles the size of the one target a thumb must hit.
-    let touch = crate::layout::touch_bar(area.width);
+    // **Three rows of chrome, either way.** Touch spends them on the header and
+    // a two-row search bar; a keyboard on the header, a one-row bar and a hint
+    // line. There is no action bar: every verb it carried is a key the thumb
+    // already has on Termux's extra-keys row, and the two it did not are in the
+    // leader sheet, where a toggle can show its off state as well as its on one.
+    let touch = crate::layout::touch_layout(area.width);
     let constraints = if touch {
-        vec![
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-            Constraint::Length(2),
-        ]
+        vec![Constraint::Min(1), Constraint::Length(2)]
     } else {
-        vec![
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ]
+        vec![Constraint::Min(1), Constraint::Length(1), Constraint::Length(1)]
     };
+    let split = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(area);
     let chunks =
-        Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
+        Layout::default().direction(Direction::Vertical).constraints(constraints).split(split[1]);
 
-    draw_header(frame, chunks[0], model, theme);
-    draw_body(frame, chunks[1], model, theme);
+    draw_header(frame, split[0], model, theme);
+    draw_body(frame, chunks[0], model, theme);
     if touch {
-        draw_action_bar(frame, chunks[2], model, theme);
-        draw_search(frame, chunks[3], model, theme);
+        draw_search(frame, chunks[1], model, theme);
     } else {
-        draw_search(frame, chunks[2], model, theme);
-        draw_footer(frame, chunks[3], model, theme);
+        draw_search(frame, chunks[1], model, theme);
+        draw_footer(frame, chunks[2], model, theme);
     }
+    // The sheet is drawn last and **covers** the list rather than shrinking it:
+    // cheaper, and it matches every editor that does this. Nothing under it can
+    // be tapped while it is up.
+    draw_sheet(frame, chunks[0], model, theme);
+}
+
+/// Render one frame into a scratch backend so a unit test can read back the
+/// geometry the view published.
+///
+/// The hit test must be checked against numbers the renderer really produced,
+/// never against re-derived ones — dividing a width twice and getting two
+/// answers is the exact bug the write-back exists to prevent.
+///
+/// # Panics
+///
+/// If the scratch terminal cannot be built or drawn — which in a test means the
+/// renderer is broken, and failing loudly is the point.
+#[cfg(test)]
+pub fn draw_for_test(model: &mut Model, cols: u16, rows: u16) {
+    let backend = ratatui::backend::TestBackend::new(cols, rows);
+    let mut terminal = ratatui::Terminal::new(backend).expect("test backend");
+    terminal.draw(|frame| draw(frame, model, Theme { color: true })).expect("draw");
 }
 
 /// Below the floor, say so. A layout that renders half a row and clips the rest
@@ -122,25 +138,48 @@ fn draw_too_small(frame: &mut Frame, area: Rect, theme: Theme) {
 /// 45-column run during R0.2, where a full-width header ran straight through the
 /// count and the terminal clipped it mid-word. At phone width the counts are the
 /// only thing worth keeping, so the title goes first.
-fn draw_header(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let wide = area.width >= 72;
     let attention = model.attention_count();
     let total = model.store.docs.len();
+    let touch = crate::layout::touch_layout(area.width);
     let left = " dossier";
-    let right = if wide {
-        format!("! {attention} expiring · {total} docs ")
+    let docs = format!("{total} docs  ");
+    // On a touch layout the expiring count is the one verb a thumb cannot
+    // otherwise produce while browsing — with the keyboard down there is no
+    // letter for `CTRL` to land on. **You tap the number that told you there
+    // were three**, which is the affordance REWRITE-UI §1 already specified and
+    // the most discoverable one available. Reverse video, because in this design
+    // reverse means *you can press this* and nothing else does.
+    let count =
+        if wide { format!(" ! {attention} expiring ") } else { format!(" ! {attention} exp ") };
+    let tail = crate::layout::GUTTER as usize;
+    let room = (area.width as usize).saturating_sub(width(left) + tail);
+    let (docs, count) = if width(&docs) + width(&count) <= room {
+        (docs, count)
     } else {
-        format!("! {attention} exp · {total} docs ")
+        (String::new(), truncate(&count, room))
     };
-    let right = truncate(&right, (area.width as usize).saturating_sub(width(left) + 1));
-    let gap = (area.width as usize).saturating_sub(width(left) + width(&right));
+    let gap = room.saturating_sub(width(&docs) + width(&count));
+
+    let start = width(left) + gap + width(&docs);
+    model.count_zone = if touch {
+        Zone {
+            row: area.y,
+            col: area.x + u16::try_from(start).unwrap_or(u16::MAX),
+            width: u16::try_from(width(&count)).unwrap_or(0),
+        }
+    } else {
+        Zone::default()
+    };
+
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(left, theme.style(Tone::Title)),
             Span::raw(" ".repeat(gap)),
-            // The count names a command (`:expiring`), so it is an accent, not
-            // decoration — REWRITE-UI.md §1.
-            Span::styled(right, theme.style(Tone::Accent)),
+            Span::styled(docs, theme.style(Tone::Muted)),
+            Span::styled(count, if touch { theme.selected() } else { theme.style(Tone::Accent) }),
+            Span::raw(" ".repeat(tail)),
         ])),
         area,
     );
@@ -292,58 +331,80 @@ fn two_line_row(
     (first, second)
 }
 
-/// This surface's verbs, as buttons.
+/// The leader sheet, drawn over the bottom of the list.
 ///
-/// The keys are what a keyboard presses and the labels what a thumb reads, so
-/// both are on the button. **`Enter` is not here**: it opens the highlighted
-/// document, and a thumb opens by tapping the selected row a second time, so a
-/// button for it would duplicate a gesture you already have — and cost a third
-/// of the bar to do it. The three that remain are the verbs a thumb has no other
-/// way to reach, two of them behind modifier combinations that a phone keyboard
-/// is least reliable at delivering.
-fn button_labels(model: &Model) -> [String; crate::layout::ACTIONS as usize] {
-    [
-        if model.detail { "← Back".into() } else { "→ Detail".to_string() },
-        "^x Expiry".to_string(),
-        if model.scan_search == ScanSearch::Off {
-            "^t Scans".to_string()
-        } else {
-            // A dot, not a different colour: the state has to survive NO_COLOR.
-            "^t Scans•".to_string()
-        },
-    ]
-}
+/// A which-key panel: a rule, a breadcrumb, then what the next key can be. It
+/// **covers** rows rather than displacing them, so opening it never reflows the
+/// list underneath — the thing you were looking at is still where you left it
+/// when the sheet closes.
+///
+/// Toggles are drawn as checkboxes, not keys. That is the point of putting them
+/// here: a filter is state, and a checkbox is the only shape that shows **off**
+/// as well as on. The status chips below could never do it, because a chip is
+/// not rendered until its filter is already on — so it could turn one off and
+/// never on.
+fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+    let Some(sheet) = &model.sheet else { return };
+    let items = crate::sheet::items(sheet.group, model);
+    let hits = crate::sheet::matching(&items, &sheet.filter);
+    let cols = area.width as usize;
+    let gutter = crate::layout::GUTTER as usize;
 
-/// The one row of chrome touch gets (REWRITE-UI.md §5).
-///
-/// **Each button is a filled cell**, on the tiling [`crate::layout::cells`]
-/// defines — reverse video, because in this design reverse means *you can press
-/// this* and nothing else does. The cells are the rhythm: equal widths, equal
-/// gutters, and the label centred inside, so a label's length can never move the
-/// button it sits in.
-///
-/// A cell too narrow for the whole label keeps the key and drops the word. A
-/// truncated word is a button nobody trusts; a bare key still says what it does
-/// to anyone who has seen it once.
-fn draw_action_bar(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
-    let cells = crate::layout::cells(area.width, crate::layout::ACTIONS);
-    let labels = button_labels(model);
-    let mut spans: Vec<Span> = Vec::with_capacity(crate::layout::ACTIONS as usize * 2);
-    let mut column = 0usize;
+    let height = u16::try_from(hits.len() + 2).unwrap_or(u16::MAX).min(area.height);
+    let panel = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(height),
+        width: area.width,
+        height,
+    };
 
-    for ((start, cell), label) in cells.into_iter().zip(labels.iter()) {
-        let cell = cell as usize;
-        let gutter = (start as usize).saturating_sub(column);
-        spans.push(Span::raw(" ".repeat(gutter)));
-        let text = if width(label) <= cell {
-            label.clone()
-        } else {
-            label.split_whitespace().next().unwrap_or_default().to_string()
+    let crumb = crate::sheet::crumb(sheet.group, &sheet.filter);
+    let note = if sheet.filter.is_empty() {
+        "type to search".to_string()
+    } else {
+        format!("{} match{}", hits.len(), if hits.len() == 1 { "" } else { "es" })
+    };
+    let head_gap = cols.saturating_sub(width(&crumb) + width(&note) + gutter * 2);
+    let mut lines = vec![
+        Line::styled(
+            format!(" {}", "─".repeat(cols.saturating_sub(gutter * 2))),
+            theme.style(Tone::Muted),
+        ),
+        Line::from(vec![
+            Span::styled(format!(" {crumb}"), theme.style(Tone::Accent)),
+            Span::raw(" ".repeat(head_gap)),
+            Span::styled(note, theme.style(Tone::Muted)),
+            Span::raw(" ".repeat(gutter)),
+        ]),
+    ];
+
+    for (index, item) in hits.iter().enumerate() {
+        let lead = match item.on {
+            // The box is reserved whether or not it is ticked, so an item never
+            // changes width when it is toggled — a row that reflows on a press
+            // is a row whose next press lands somewhere else.
+            Some(on) => format!(" [{}] ", if on { "✓" } else { " " }),
+            None => format!(" {} ", item.key),
         };
-        spans.push(Span::styled(crate::layout::centre(&text, cell), theme.selected()));
-        column = start as usize + cell;
+        let body = format!("{lead}{}", item.label);
+        let gap = cols.saturating_sub(width(&body) + width(item.accel) + gutter);
+        let mut line = Line::from(vec![
+            Span::styled(lead, theme.style(Tone::Accent)),
+            Span::raw(item.label.to_string()),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(item.accel.to_string(), theme.style(Tone::Muted)),
+            Span::raw(" ".repeat(gutter)),
+        ]);
+        // Only the picker has a cursor: with nothing typed, the keys are the
+        // selection and a highlight would be a second, competing one.
+        if !sheet.filter.is_empty() && index == sheet.cursor {
+            line = line.style(theme.selected());
+        }
+        lines.push(line);
     }
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+
+    frame.render_widget(ratatui::widgets::Clear, panel);
+    frame.render_widget(Paragraph::new(lines), panel);
 }
 
 /// The filter chips: what is narrowing the list beyond the query itself.
@@ -367,26 +428,28 @@ fn chips(model: &Model) -> String {
 ///
 /// **One row on a keyboard layout, two on a touch one.** The second row is not
 /// decoration: the whole block is the keyboard target, and one terminal row is
-/// too small a thing to ask a thumb to hit between the action bar above it and
-/// the screen edge below. Doubling it costs nothing, because the row it takes is
-/// the hint line the action bar had already made redundant.
-fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+/// too small a thing to ask a thumb to hit against the screen edge.
+fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let count = format!("{}/{}", model.rows.len(), model.store.docs.len());
     let cols = area.width as usize;
+    let gutter = crate::layout::GUTTER as usize;
     let touch = area.height > 1;
 
     if !touch {
-        let body = truncate(
-            &format!("{}_{}", model.query, chips(model)),
-            cols.saturating_sub(width(&count) + 4),
-        );
-        let gap = cols.saturating_sub(3 + width(&body) + width(&count) + 1);
+        model.leader_zone = Zone::default();
+        // The desktop query row was missing its underline: the one texture that
+        // says *you can type here*, and the surface it belongs to most.
+        let tail = format!("{count} ");
+        let prompt = " > ";
+        let span = cols.saturating_sub(width(prompt) + width(&tail));
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" > ", theme.style(Tone::Accent)),
-                Span::raw(body),
-                Span::raw(" ".repeat(gap)),
-                Span::styled(format!("{count} "), theme.style(Tone::Muted)),
+                Span::styled(prompt, theme.style(Tone::Accent)),
+                Span::styled(
+                    fit(&format!("{}{}█", model.query, chips(model)), span),
+                    Style::default().add_modifier(Modifier::UNDERLINED),
+                ),
+                Span::styled(tail, theme.style(Tone::Muted)),
             ])),
             area,
         );
@@ -396,32 +459,66 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     // Row one: the query as a field. **Underline means you can type here** — the
     // one texture that says it without filling anything, and one that survives
     // NO_COLOR because it is an attribute rather than a colour. The underline
-    // runs the width of the field, not the width of the text, which is what
-    // makes an empty query read as waiting rather than as a blank row.
+    // runs the width of the field in every state, so the field's geometry is
+    // identical empty, half-typed and full.
     //
-    // The keyboard target closes the right-hand end as a chip: it is a button,
-    // and reverse video is what buttons look like here. It reverses harder while
-    // reporting is dropped, so the state is visible rather than mysterious.
-    let gutter = crate::layout::GUTTER as usize;
-    let key = " ⌨ ";
+    // The `SPC` chip closes the right-hand end. It opens the leader sheet, which
+    // `Space` opens from a keyboard — and with the phone keyboard down there is
+    // no Space to press. It replaced the `⌨` affordance rather than joining it:
+    // Termux has its own keyboard key, and tapping the field already raises the
+    // IME, so a second button for it was a button for a key you already hold.
+    let key = " SPC ";
     let prompt = " >";
     let span = cols.saturating_sub(width(prompt) + width(key) + gutter);
-    let query_row = Line::from(vec![
-        Span::styled(prompt, theme.style(Tone::Accent)),
-        Span::styled(
-            fit(&format!(" {}█", model.query), span),
-            Style::default().add_modifier(Modifier::UNDERLINED),
-        ),
-        Span::styled(
-            key,
-            if model.keyboard_hint {
-                theme.style(Tone::Armed).add_modifier(Modifier::REVERSED)
-            } else {
-                theme.selected()
-            },
-        ),
-        Span::raw(" ".repeat(gutter)),
-    ]);
+    let under = Style::default().add_modifier(Modifier::UNDERLINED);
+    let quiet = theme.style(Tone::Muted).add_modifier(Modifier::UNDERLINED);
+
+    model.leader_zone = Zone {
+        row: area.y,
+        col: area.x + u16::try_from(cols.saturating_sub(width(key) + gutter)).unwrap_or(0),
+        width: u16::try_from(width(key)).unwrap_or(0),
+    };
+
+    let mut field: Vec<Span> = vec![Span::styled(prompt, theme.style(Tone::Accent))];
+    if model.query.is_empty() {
+        // What the empty field says. An invitation on the left, and on the right
+        // a sentence that **finishes on the button**: the prose runs out at
+        // "hit" and the reversed `SPC` is its object. One plain column separates
+        // them, because a reverse block butted against text reads as a rendering
+        // fault rather than as something you can press.
+        //
+        // Both halves are dim and both live inside the underline — dim and
+        // underline are independent attributes on the same cell — so they change
+        // what is drawn on the line, never how long it is. They go together on
+        // the first keystroke.
+        let invite = "Type to search";
+        let signpost = "For more, hit";
+        let gap = span.saturating_sub(3 + width(invite) + width(signpost) + 1);
+        field.push(Span::styled(" █ ", under));
+        field.push(Span::styled(invite, quiet));
+        if gap >= 2 {
+            field.push(Span::styled(" ".repeat(gap), under));
+            field.push(Span::styled(signpost, quiet));
+            field.push(Span::styled(" ", under));
+        } else {
+            // Too narrow to pair: the invitation outranks the signpost, and the
+            // chip is still there saying `SPC` for itself.
+            field.push(Span::styled(" ".repeat(span.saturating_sub(3 + width(invite))), under));
+        }
+    } else {
+        field.push(Span::styled(fit(&format!(" {}█", model.query), span), under));
+    }
+    field.push(Span::styled(
+        key,
+        if model.sheet.is_some() {
+            // Lit while the sheet is up, so it reads as the thing that opened it.
+            theme.style(Tone::Armed).add_modifier(Modifier::REVERSED)
+        } else {
+            theme.selected()
+        },
+    ));
+    field.push(Span::raw(" ".repeat(gutter)));
+    let query_row = Line::from(field);
 
     // Row two: what the search found, and what is filtering it — or, when there
     // is something to say, the message instead. The count is worth losing for a
@@ -430,11 +527,9 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     let info_row = if model.flash.is_some() || model.esc_armed {
         Line::styled(format!(" {}", fit(&message, cols.saturating_sub(gutter))), theme.style(tone))
     } else {
-        // Count and chips left, hints right, both on the same gutter as the
-        // buttons above — one left edge and one right edge for the whole block.
         let left = format!(" {count}{}", chips(model));
         let room = cols.saturating_sub(width(&left) + gutter);
-        let hint = if width(&message) <= room { message } else { String::new() };
+        let hint = shed(&touch_hints(model), room);
         let gap = cols.saturating_sub(width(&left) + width(&hint) + gutter);
         Line::from(vec![
             Span::styled(left, theme.style(Tone::Muted)),
@@ -447,12 +542,34 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     frame.render_widget(Paragraph::new(vec![query_row, info_row]), area);
 }
 
+/// The hints a touch layout shows, most sheddable first.
+fn touch_hints(model: &Model) -> Vec<&'static str> {
+    if model.detail {
+        vec!["◀ back", "⏎ open file"]
+    } else {
+        vec!["⏎ open", "^x expiry", "^t scans"]
+    }
+}
+
+/// Fit as many hints as the room allows, **dropping them one at a time from the
+/// left** rather than dropping the line whole.
+///
+/// The old all-or-nothing rule erased every hint the moment two filters were
+/// live — which is exactly when the user has the most state and the most reason
+/// to want a way back out of it.
+fn shed(hints: &[&str], room: usize) -> String {
+    for start in 0..hints.len() {
+        let line = hints[start..].join("  ");
+        if width(&line) <= room {
+            return line;
+        }
+    }
+    String::new()
+}
+
 /// What the bottom line says: a message if there is one, else this surface's
 /// hints. Per-surface only — never another surface's verbs (v2's `check_action`
 /// lesson), and a verb appears here when it works, not before.
-///
-/// On a touch layout the action bar is already showing the verbs as buttons, so
-/// the hints shrink to the two things it does not carry.
 fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     if let Some(flash) = &model.flash {
         return (flash.clone(), Tone::Flash);
@@ -460,13 +577,16 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     if model.esc_armed {
         return ("esc again to quit".into(), Tone::Armed);
     }
-    let hints = match (touch, model.detail) {
-        // With `⏎ Open` off the bar, the hint line is where `Enter` is taught —
-        // the buttons carry the verbs a thumb cannot otherwise reach, and the
-        // text carries the ones the keyboard already has.
-        (true, _) => "⏎ open  esc back  ^q quit",
-        (false, true) => "⏎ open  ← close  esc back  ^q quit",
-        (false, false) => "⏎ open  → detail  ^x expiring  ^q quit",
+    if touch {
+        return (touch_hints(model).join("  "), Tone::Muted);
+    }
+    // The keyboard layout teaches every verb it has. `^t scans` used to appear
+    // in no desktop hint at all, which made content search reachable only by
+    // prior knowledge.
+    let hints = if model.detail {
+        "⏎ open  ← close  esc back  ^q quit"
+    } else {
+        "space menu  ⏎ open  → detail  ^x expiring  ^t scans  ^q quit"
     };
     (hints.into(), Tone::Muted)
 }

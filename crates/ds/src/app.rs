@@ -78,6 +78,8 @@ pub enum Msg {
     ToggleExpiring,
     /// The `⌨` affordance: drop mouse reporting so the next tap raises the IME.
     RaiseKeyboard,
+    /// `Space` on an empty query, or the `SPC` chip: open the leader sheet.
+    Leader,
     /// A tap or click at a terminal cell.
     Tap {
         /// Column, zero-based from the terminal's left edge.
@@ -155,13 +157,52 @@ pub enum ScanSearch {
     On,
 }
 
+/// A run of columns on one row that a tap can land in.
+///
+/// Published by the view for the same reason [`ListGeometry`] is: the hit test
+/// must read the geometry that was really drawn, never re-derive it. The touch
+/// affordances are small and few — the header's expiring count and the `SPC`
+/// chip — and both move with the terminal's width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Zone {
+    /// The terminal row it occupies.
+    pub row: u16,
+    /// First column, zero-based.
+    pub col: u16,
+    /// How many columns wide. Zero means "not drawn", which is how a keyboard
+    /// layout says it has no touch affordances without a second flag.
+    pub width: u16,
+}
+
+impl Zone {
+    /// Whether a tap landed inside. A zero-width zone contains nothing, so an
+    /// undrawn affordance can never be hit.
+    #[must_use]
+    pub const fn hit(self, col: u16, row: u16) -> bool {
+        self.width > 0 && row == self.row && col >= self.col && col < self.col + self.width
+    }
+}
+
+/// Where the leader sheet is, and what has been typed into it.
+///
+/// See [`crate::sheet`] for what it contains and why it exists at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SheetState {
+    /// The group entered so far — `None` is the top level.
+    pub group: Option<char>,
+    /// Text typed into the sheet, which turns it into a command picker.
+    pub filter: String,
+    /// Which of the matching items is selected.
+    pub cursor: usize,
+}
+
 /// The rectangle the renderer last drew document rows into.
 ///
 /// Published by the view so taps can be hit-tested against what is actually on
 /// screen. Zeroed when the list is not drawn at all (too-small notice, or detail
 /// covering it on a narrow terminal), which makes a tap in that state a no-op
 /// rather than a guess.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct ListGeometry {
     /// First terminal row of the list.
     pub top: u16,
@@ -214,6 +255,12 @@ pub struct Model {
     pub mouse_on: bool,
     /// Reporting was dropped on purpose so the next tap raises the keyboard.
     pub keyboard_hint: bool,
+    /// The leader sheet, when it is open.
+    pub sheet: Option<SheetState>,
+    /// Where the view drew the header's pressable expiring count.
+    pub count_zone: Zone,
+    /// Where the view drew the `SPC` chip.
+    pub leader_zone: Zone,
     /// A transient one-line message, cleared by the next key.
     pub flash: Option<String>,
     /// Terminal width.
@@ -243,6 +290,9 @@ impl Model {
             esc_armed: false,
             mouse_on: true,
             keyboard_hint: false,
+            sheet: None,
+            count_zone: Zone::default(),
+            leader_zone: Zone::default(),
             flash: None,
             cols,
             rows_on_screen: rows,
@@ -377,6 +427,20 @@ impl Model {
     /// soft keyboard is dismissed: every press must consume something visible
     /// before it can ever reach "quit", or the app dies on an IME dismissal.
     fn peel(&mut self, was_armed: bool) -> Effect {
+        // The sheet peels the same way everything else does — one layer per
+        // press, outermost first — so `Esc` never needs a second meaning.
+        if let Some(sheet) = &mut self.sheet {
+            if !sheet.filter.is_empty() {
+                sheet.filter.clear();
+                sheet.cursor = 0;
+            } else if sheet.group.is_some() {
+                sheet.group = None;
+                sheet.cursor = 0;
+            } else {
+                self.sheet = None;
+            }
+            return Effect::Redraw;
+        }
         if !self.query.is_empty() {
             self.query.clear();
             self.requery();
@@ -430,29 +494,35 @@ impl Model {
         (index < self.rows.len()).then_some(index)
     }
 
-    /// The touch action bar: `→ Detail · ^x Expiry · ^t Scans`.
+    /// Run one item of the leader sheet.
     ///
-    /// The cell is found with [`crate::layout::cell_at`] — **the same tiling the
-    /// renderer drew with**. Dividing the width by four here instead would put
-    /// the boundaries a column or two off wherever the width does not divide
-    /// evenly, and a tap near an edge would open a file when it meant to filter.
-    ///
-    /// The last two carry the verbs whose *keys* are modifier combinations —
-    /// exactly the ones a phone keyboard is least reliable at delivering (R0.2
-    /// probed `ctrl+t` on the device for that reason). The keyboard affordance
-    /// that used to sit here moved to the search bar, where tapping to type is
-    /// the universal phone idiom; see [`Model::raise_keyboard`].
-    fn tap_action_bar(&mut self, col: u16) -> Effect {
-        let Some(cell) = crate::layout::cell_at(self.cols, crate::layout::ACTIONS, col) else {
-            return Effect::Idle;
-        };
-        match cell {
-            0 => {
-                self.detail = !self.detail;
+    /// A chord is a shortcut for a verb, never a second implementation of it:
+    /// every arm here goes through the same [`update`] the keyboard reaches, so
+    /// `SPC f x` and `ctrl+x` cannot drift apart.
+    fn run(&mut self, act: crate::sheet::Act) -> Effect {
+        match act {
+            crate::sheet::Act::Enter(group) => {
+                self.sheet = Some(SheetState { group: Some(group), ..SheetState::default() });
                 Effect::Redraw
             }
-            1 => update(self, Msg::ToggleExpiring),
-            _ => update(self, Msg::ToggleScans),
+            crate::sheet::Act::Expiring => {
+                self.sheet = None;
+                update(self, Msg::ToggleExpiring)
+            }
+            crate::sheet::Act::Scans => {
+                self.sheet = None;
+                update(self, Msg::ToggleScans)
+            }
+            crate::sheet::Act::Clear => {
+                self.sheet = None;
+                self.filter = Filter::All;
+                self.scan_search = ScanSearch::Off;
+                self.cursor = 0;
+                self.offset = 0;
+                self.requery();
+                Effect::Redraw
+            }
+            crate::sheet::Act::Quit => Effect::Quit,
         }
     }
 
@@ -500,9 +570,22 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         model.flash = None;
     }
 
+    // While the sheet is open it owns the keyboard, because its whole purpose is
+    // to be somewhere letters mean something. `Esc` still peels (see
+    // `Model::peel`) and `ctrl+`-anything still fires, so nothing is trapped.
+    if model.sheet.is_some() {
+        if let Some(effect) = sheet_key(model, &msg) {
+            return effect;
+        }
+    }
+
     match msg {
         Msg::Quit => Effect::Quit,
         Msg::Esc => model.peel(was_armed),
+        Msg::Leader => {
+            model.sheet = Some(SheetState::default());
+            Effect::Redraw
+        }
         Msg::Enter => model.activate(),
         Msg::OpenDetail => {
             model.detail = true;
@@ -525,6 +608,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         // Find-fast (invariant 1): a bare printable starts the search and the
         // **first character is kept**. This is the whole reason the surface
         // binds no letters.
+        // A query never usefully begins with a space, so `Space` on an empty
+        // one is free — and mid-query it still types a space, which is what
+        // multi-word searches need. That is the normal-vs-insert split without
+        // modes: **the query is the mode.**
+        Msg::Char(' ') if model.query.is_empty() => update(model, Msg::Leader),
         Msg::Char(c) => {
             model.query.push(c);
             model.requery();
@@ -586,13 +674,36 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         }
         Msg::Tap { col, row } => {
             model.flash = None;
+            // A pushed record covers the list, so the chrome under it belongs to
+            // a surface you cannot see. Tapping it would mutate that surface
+            // blind — the stack metaphor has to hold for touch too.
+            let pushed = model.detail && !crate::layout::splits(model.cols);
             let (top, bottom) = search_zone(model);
-            if row >= top && row <= bottom {
-                // Tapping the search field is how every phone app says "I want
-                // to type", so it is what drops mouse reporting for one tap.
-                model.raise_keyboard()
-            } else if crate::layout::touch_bar(model.cols) && row == action_bar_row(model) {
-                model.tap_action_bar(col)
+            if model.sheet.is_some() && !model.leader_zone.hit(col, row) {
+                // Anywhere else dismisses it, the way a menu should.
+                model.sheet = None;
+                Effect::Redraw
+            } else if model.leader_zone.hit(col, row) {
+                if model.sheet.is_some() {
+                    model.sheet = None;
+                    Effect::Redraw
+                } else {
+                    update(model, Msg::Leader)
+                }
+            } else if model.count_zone.hit(col, row) && !pushed {
+                // You tap the number that told you there were three. The count
+                // names its command (REWRITE-UI §1), and it toggles rather than
+                // jumps so a second tap peels it off — the same verb `ctrl+x`
+                // has, reached the way a thumb reaches things.
+                update(model, Msg::ToggleExpiring)
+            } else if row >= top && row <= bottom {
+                if pushed {
+                    Effect::Idle
+                } else {
+                    // Tapping the field is how every phone app says "I want to
+                    // type", so it is what drops mouse reporting for one tap.
+                    model.raise_keyboard()
+                }
             } else if let Some(index) = model.row_at(row) {
                 // Tap selects; a tap on the already-selected row opens
                 // (invariant 6). Two taps, never a double-tap timer — timing
@@ -610,28 +721,72 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
     }
 }
 
+/// Keys while the leader sheet is open. `None` means "the sheet does not want
+/// this one" — it falls through to the surface underneath.
+///
+/// The rule that makes typing and chording coexist: **a printable runs an item
+/// while nothing has been typed yet; after that every printable is filter
+/// text.** So `SPC f x` is three keys, and `SPC exp` then `Enter` is a search —
+/// and neither can be mistaken for the other halfway through.
+fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    let sheet = model.sheet.clone()?;
+    let all = crate::sheet::items(sheet.group, model);
+    let hits = crate::sheet::matching(&all, &sheet.filter);
+    match msg {
+        Msg::Char(c) => {
+            if sheet.filter.is_empty() {
+                if let Some(item) = all.iter().find(|item| item.key == *c) {
+                    return Some(model.run(item.act));
+                }
+            }
+            let state = model.sheet.as_mut()?;
+            state.filter.push(*c);
+            state.cursor = 0;
+            Some(Effect::Redraw)
+        }
+        Msg::Backspace => {
+            let state = model.sheet.as_mut()?;
+            if state.filter.pop().is_none() {
+                model.sheet = None;
+            }
+            Some(Effect::Redraw)
+        }
+        Msg::Enter => hits.get(sheet.cursor).map(|item| model.run(item.act)),
+        Msg::Move(Motion::Up | Motion::Down) => {
+            let last = hits.len().saturating_sub(1);
+            let state = model.sheet.as_mut()?;
+            state.cursor = match msg {
+                Msg::Move(Motion::Up) => state.cursor.saturating_sub(1),
+                _ => (state.cursor + 1).min(last),
+            };
+            Some(Effect::Redraw)
+        }
+        // `←` closes the sheet, matching what it does to a record.
+        Msg::CloseDetail => {
+            model.sheet = None;
+            Some(Effect::Redraw)
+        }
+        _ => None,
+    }
+}
+
 /// Whether this message came from the keyboard.
 fn is_key(msg: &Msg) -> bool {
     !matches!(msg, Msg::Tap { .. } | Msg::Scroll(_) | Msg::Resize { .. } | Msg::ScansLoaded(_))
-}
-
-/// The terminal row the touch action bar sits on: directly above the search bar
-/// and the hint line.
-fn action_bar_row(model: &Model) -> u16 {
-    model.rows_on_screen.saturating_sub(3)
 }
 
 /// The rows the search bar occupies, inclusive — and therefore the rows that
 /// raise the keyboard when tapped.
 ///
 /// **Two rows on a touch layout**, sitting against the bottom edge of the
-/// screen. One terminal row is too small a target for a thumb when the row above
-/// it is a button that opens files; two rows against the screen edge means an
-/// overshoot downwards hits nothing at all, and only a deliberate reach upwards
-/// finds the action bar.
+/// screen. One terminal row is too small a target for a thumb, and against the
+/// screen edge an overshoot downwards hits nothing at all. Upwards it now finds
+/// the list's last row rather than a button that opened files — which is the
+/// quiet win from deleting the action bar: a stray tap moves the selection, and
+/// opening needs the row to be selected already.
 fn search_zone(model: &Model) -> (u16, u16) {
     let last = model.rows_on_screen.saturating_sub(1);
-    if crate::layout::touch_bar(model.cols) {
+    if crate::layout::touch_layout(model.cols) {
         (last.saturating_sub(1), last)
     } else {
         (last.saturating_sub(1), last.saturating_sub(1))
@@ -639,7 +794,7 @@ fn search_zone(model: &Model) -> (u16, u16) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{FileRef, Store};
 
@@ -667,7 +822,7 @@ mod tests {
         }
     }
 
-    fn model() -> Model {
+    pub(crate) fn model() -> Model {
         let store = Store {
             docs: vec![
                 doc("coc", "COC Certificate", Some("2026-01-01"), Some("Marine/coc.pdf")),
@@ -795,25 +950,128 @@ mod tests {
         assert_eq!(m.query, "c", "and the keystroke still counted");
     }
 
-    /// **The hit test reads the tiling the renderer drew.** Every cell is
-    /// checked at both ends, because a rounding mistake shows up at a boundary
-    /// first — and a tap that opens a file when it meant to filter is the worst
-    /// possible way to find out.
+    /// **The hit test reads the geometry the renderer drew.** The header count
+    /// is the one verb a thumb cannot otherwise produce while browsing, so it
+    /// is checked at both ends: a rounding mistake shows up at a boundary
+    /// first, and this boundary is next to nothing else pressable.
     #[test]
-    fn every_button_cell_hits_its_own_verb() {
-        let bar = model().rows_on_screen - 3;
-        let cells = crate::layout::cells(45, crate::layout::ACTIONS);
-        for (index, (start, w)) in cells.into_iter().enumerate() {
-            for col in [start, start + w - 1] {
-                let mut m = model();
-                let effect = update(&mut m, Msg::Tap { col, row: bar });
-                match index {
-                    0 => assert!(m.detail, "col {col} opens the record"),
-                    1 => assert_eq!(m.filter, Filter::Expiring, "col {col} filters"),
-                    _ => assert_eq!(effect, Effect::LoadScans, "col {col} searches scans"),
-                }
-            }
+    fn tapping_the_header_count_filters_to_what_is_expiring() {
+        let mut m = model();
+        crate::find::draw_for_test(&mut m, 45, 28);
+        let zone = m.count_zone;
+        assert!(zone.width > 0, "the count is pressable on a touch layout");
+
+        for col in [zone.col, zone.col + zone.width - 1] {
+            let mut m = model();
+            crate::find::draw_for_test(&mut m, 45, 28);
+            update(&mut m, Msg::Tap { col, row: 0 });
+            assert_eq!(m.filter, Filter::Expiring, "col {col} filters");
+            // A toggle, not a jump: the second tap peels it off, exactly as
+            // `ctrl+x` does.
+            update(&mut m, Msg::Tap { col, row: 0 });
+            assert_eq!(m.filter, Filter::All, "col {col} toggles back");
         }
+
+        // A column outside it is not a button.
+        let mut m = model();
+        crate::find::draw_for_test(&mut m, 45, 28);
+        update(&mut m, Msg::Tap { col: zone.col - 1, row: 0 });
+        assert_eq!(m.filter, Filter::All);
+    }
+
+    /// A keyboard layout has no touch affordances, so its zones are empty and
+    /// no tap can find them.
+    #[test]
+    fn a_wide_terminal_draws_no_touch_affordances() {
+        let mut m = model();
+        crate::find::draw_for_test(&mut m, 120, 40);
+        assert_eq!(m.count_zone.width, 0);
+        assert_eq!(m.leader_zone.width, 0);
+    }
+
+    /// **`Space` on an empty query is the leader; mid-query it is a space.**
+    /// The query is the mode, which is how a modeless surface gets a prefix key.
+    #[test]
+    fn space_leads_when_the_query_is_empty_and_types_when_it_is_not() {
+        let mut m = model();
+        update(&mut m, Msg::Char(' '));
+        assert!(m.sheet.is_some(), "the sheet opened");
+        assert!(m.query.is_empty(), "and nothing was typed");
+
+        update(&mut m, Msg::Esc);
+        assert!(m.sheet.is_none(), "esc peels the sheet first");
+
+        update(&mut m, Msg::Char('c'));
+        update(&mut m, Msg::Char(' '));
+        assert_eq!(m.query, "c ", "mid-query it is just a space");
+        assert!(m.sheet.is_none());
+    }
+
+    /// A live filter does not make an empty query "typing" — the query decides,
+    /// and nothing else.
+    #[test]
+    fn space_still_leads_with_a_filter_up() {
+        let mut m = model();
+        update(&mut m, Msg::ToggleExpiring);
+        update(&mut m, Msg::Char(' '));
+        assert!(m.sheet.is_some());
+    }
+
+    /// **A chord is a shortcut for a verb, never a second implementation.**
+    /// `SPC f x` goes through the same `update` that `ctrl+x` reaches.
+    #[test]
+    fn the_sheet_reaches_the_same_verbs_the_keyboard_does() {
+        let mut m = model();
+        for c in [' ', 'f', 'x'] {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(m.filter, Filter::Expiring);
+        assert!(m.sheet.is_none(), "running an item closes the sheet");
+    }
+
+    /// Typing turns the sheet into a picker, and `Enter` runs what is left.
+    #[test]
+    fn typing_in_the_sheet_finds_a_verb_by_name() {
+        let mut m = model();
+        for c in [' ', 'f', 'e', 'x', 'p'] {
+            update(&mut m, Msg::Char(c));
+        }
+        let sheet = m.sheet.clone().expect("still open while filtering");
+        assert_eq!(sheet.filter, "exp", "the letters became a search, not keys");
+        update(&mut m, Msg::Enter);
+        assert_eq!(m.filter, Filter::Expiring);
+    }
+
+    /// The sheet peels one layer per `Esc`, like everything else on the surface.
+    #[test]
+    fn esc_peels_the_sheet_one_layer_at_a_time() {
+        let mut m = model();
+        for c in [' ', 'f', 'e'] {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Esc);
+        assert_eq!(m.sheet.as_ref().map(|s| s.filter.clone()), Some(String::new()));
+        update(&mut m, Msg::Esc);
+        assert_eq!(m.sheet.as_ref().map(|s| s.group), Some(None), "up a level");
+        update(&mut m, Msg::Esc);
+        assert!(m.sheet.is_none());
+        assert!(!m.esc_armed, "and closing the sheet did not arm the quit");
+    }
+
+    /// **The chrome goes inert under a pushed record.** Tapping where a filter
+    /// used to be would mutate a surface you cannot see.
+    #[test]
+    fn a_pushed_record_makes_the_chrome_untappable() {
+        let mut m = model();
+        crate::find::draw_for_test(&mut m, 45, 28);
+        let zone = m.count_zone;
+        update(&mut m, Msg::OpenDetail);
+        crate::find::draw_for_test(&mut m, 45, 28);
+
+        update(&mut m, Msg::Tap { col: zone.col, row: 0 });
+        assert_eq!(m.filter, Filter::All, "the count is not a button here");
+        assert_eq!(update(&mut m, Msg::Tap { col: 3, row: 26 }), Effect::Idle);
+        assert!(m.mouse_on, "and the field did not drop reporting either");
     }
 
     /// **`Enter` has no button**, and does not need one: a thumb opens the

@@ -211,3 +211,65 @@ User calls from that review, binding on R3–R5:
 6. Monochrome + `NO_COLOR` legible; ASCII fallback complete.
 7. List virtualized; no I/O on the render thread (walks, syncthing polls, folds on
    workers).
+
+## 5a · The bottom chrome, as built (2026-08-20)
+
+§5 specified a touch action bar. **There is no action bar.** The phone's own
+Termux extra-keys row carries `◀▲▼▶`, `ESC` (swipe on `CTRL`), `ENTER` (swipe on
+`KEYBOARD`) and sticky `CTRL`/`ALT` modifiers, so every verb the bar held is
+already under the thumb — `→ Detail` was `⏎ Open` a second time, a button for a
+key you are holding. What was left was two toggles, and a toggle needs somewhere
+its **off** state can be seen, which a status chip can never be: the chip is not
+rendered until the filter is already on.
+
+Touch chrome is now three rows, the same as a keyboard layout:
+
+```
+ dossier                    14 docs   ! 3 exp     ← the count is pressable
+ …twenty-one documents…
+ > █ Type to search        For more, hit  SPC     ← underlined field, one button
+ 14/14             ⏎ open  ^x expiry  ^t scans    ← count, chips, hints
+```
+
+- **The header's expiring count is the touch filter.** You tap the number that
+  told you there were three — the affordance §1 already specified, now a toggle
+  so a second tap peels it off. Reverse video, and the view writes back its
+  column span so the hit test reads drawn geometry (`Zone`, beside
+  `ListGeometry`).
+- **`Space` on an empty query opens the leader sheet.** A query never usefully
+  begins with a space, so the leader needs no mode: *the query is the mode.*
+  Mid-query, `Space` still types a space.
+- **The sheet is which-key, transient and picker in one object** — see
+  `crates/ds/src/sheet.rs`. Groups named after nouns; filters drawn as
+  checkboxes, because that is the only shape that shows off as well as on; and
+  typing turns it into a command picker, each result showing the chord that
+  would have run it. It **covers** the list rather than shrinking it.
+- **A chord is a shortcut for a verb, never a second implementation.** Every
+  sheet item goes through the same `update` the keyboard reaches.
+- **`SPC` is the sheet's touch trigger**, replacing the `⌨` chip: Termux has its
+  own keyboard key and tapping the field already raises the IME. The empty
+  field's second phrase runs into the chip and finishes the sentence, because a
+  bare reversed `SPC` says only that it is pressable.
+- **Hints shed one at a time**, not the whole line. Two live filters used to
+  erase every hint at once, precisely when the user had most state.
+- **The chrome is inert under a pushed record**, so a tap cannot filter a list
+  it is covering.
+- **`alt`+letter no longer types into the query.** Termux's sticky `ALT` made it
+  reachable, and nothing was guarding it. The alt tier is reserved for R4's
+  in-edit verbs.
+
+Three tiers for a verb, and the rule for sorting one into a tier: **a key** for
+every session; **a leader chord** for weekly, or for anything whose state must
+be visible; **a command** for the rest, and for anything destructive, which is
+safer spelled than sat one slip from a chord.
+
+Measured, not assumed: the phone reports **47×45** with the keyboard down and
+**47×24** with it up — Termux resizes the terminal rather than covering it. That
+is twenty-one documents while browsing and ten while typing. Deleting the action
+bar bought a real document at the browsing height: 41 list rows hold twenty
+two-line documents and waste one; 42 hold twenty-one.
+
+The reasoning, the alternatives and the arithmetic are in
+[`docs/dev/mockups/`](docs/dev/mockups/) — *The Verb Audit*, *Tap the Number*,
+*The Leader Key*, *Space Without a Spacebar*, *The Empty Field*, and
+*Find at 47×45* for the finished screens.
