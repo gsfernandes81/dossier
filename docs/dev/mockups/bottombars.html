@@ -645,20 +645,21 @@ pre.props .c { color: var(--term-dim); }
 
     <div class="caveat">
       <p><b>The keyboard does not cover the screen — the terminal resizes.</b>
-        <span class="tier docs">check it</span> Termux uses Android's
+        <span class="tier told">device</span> Termux uses Android's
         <code>adjustResize</code>, so raising the IME delivers a SIGWINCH and the
-        app re-lays out at roughly 45×14 rather than hiding half of itself. Our
-        <code>Msg::Resize</code> already handles it. That makes "IME up" a
-        <em>different layout</em>, not an occlusion — and at 45×14 the floor
-        (38×12) is only two rows away, so it is worth checking with
-        <code>stty size</code> on the device that a taller keyboard cannot push
-        the app below its own minimum mid-query.</p>
+        app re-lays out shorter rather than hiding half of itself. Our
+        <code>Msg::Resize</code> already handles it. That makes "keyboard up" a
+        <em>different layout</em>, not an occlusion.</p>
+      <p>How much shorter is the one number still unmeasured, and it matters
+        because the floor is 38×12: browsing is 24 rows, so a keyboard taking
+        more than twelve of them would put the app under its own minimum
+        mid-query and it would refuse to draw.</p>
     </div>
 
     <h3 style="margin-top:2rem">Every verb, in both states</h3>
     <div class="scroller">
       <table class="kv">
-        <tr><th>Verb</th><th>Keyboard down · browsing · 45×28</th><th>Keyboard up · querying · ~45×14</th></tr>
+        <tr><th>Verb</th><th>Keyboard down · browsing · 47×24</th><th>Keyboard up · querying · shorter</th></tr>
         <tr><td class="k">type / backspace</td><td class="no">no letter source</td><td class="yes">the IME</td></tr>
         <tr><td class="k">open</td><td class="yes">swipe ⌨ · or tap the row again</td><td class="yes">Enter</td></tr>
         <tr><td class="k">detail / close</td><td class="yes">▶ ◀</td><td class="yes">▶ ◀</td></tr>
@@ -795,17 +796,13 @@ pre.props .c { color: var(--term-dim); }
     </figure>
 
     <div class="caveat">
-      <p><b>Which keyboard state was that measured in?</b> It was given in answer
-        to "what is the size with the keyboard up", so it is probably the
-        querying layout — in which case browsing is <em>taller</em> than 24 and
-        ten documents is the pessimistic floor, not the headline. But if 24 is
-        the browsing height, ten is the headline and the querying layout is
-        smaller still.</p>
-      <p>The difference matters enough to measure both, because one of them is
-        the number that goes in the README. Nothing in the code cares —
-        <code>layout.rs</code> is width-driven throughout and 45×28 appears only
-        in tests and in these mockups — so this is a promise to correct, not an
-        implementation to change.</p>
+      <p><b>Measured in a normal terminal</b> <span class="tier told">device</span>
+        — keyboard down, browsing. So <b>ten is the headline number</b>, not a
+        pessimistic floor, and the querying layout is shorter still.</p>
+      <p>Nothing in the code cares — <code>layout.rs</code> is width-driven
+        throughout, and 45×28 appears only in tests and in these mockups. This is
+        a promise to correct, not an implementation to change: every page that
+        says "twelve documents at a glance" needs to say ten.</p>
     </div>
   </section>
 
@@ -1099,10 +1096,9 @@ pre.props .c { color: var(--term-dim); }
  2/24            <span class="dim">⏎ open  ^x expiry  ^t scans</span> </pre></div>
         <figcaption>
           <span class="size">a short pane · querying, keyboard up</span>
-          <span class="how">Drawn at five documents as a pessimistic guess — if
-            47×24 <em>is</em> the keyboard-up size, the real querying layout is
-            twice this. Either way both <code>ctrl+x</code> and
-            <code>ctrl+t</code> are two taps here.</span>
+          <span class="how">Drawn at five documents as a guess — browsing is 24
+            rows and the keyboard takes some unmeasured number of them. Both
+            <code>ctrl+x</code> and <code>ctrl+t</code> are two taps here.</span>
         </figcaption>
       </figure>
       <figure>
@@ -1336,18 +1332,17 @@ alt+Enter    -> Enter</pre>
         gains its missing underline and its missing <code>^t scans</code> hint;
         and <code>input.rs</code> stops letting <code>alt</code>+letter type into
         the query.</p>
-      <p>One question left, and it is a promise rather than a design:
-        <b>47×24 was measured in which keyboard state?</b> Both numbers want
-        recording — the browsing height sets the document count the README
-        advertises, and the querying height is what the layout has to survive
-        without hitting the 38×12 floor. No code depends on either;
-        <code>layout.rs</code> is width-driven and 45×28 lives only in tests and
-        mockups.</p>
-      <p>Everything else is answered. The latch reaches the arrows, so there is
-        a keyboard-down modifier tier and no verb on this surface is out of
-        reach; long press repeats on the arrows, so crossing a long list by thumb
-        works after all; and the terminal resizes rather than hides, so querying
-        is a smaller layout and not a covered one.</p>
+      <p>The phone has now answered everything the design was waiting on. The
+        latch reaches the arrows, so a keyboard-down modifier tier exists and no
+        verb on this surface is out of reach. Long press repeats on the arrows,
+        so crossing a long list by thumb works. The terminal resizes rather than
+        hides, so querying is a smaller layout and not a covered one. And
+        browsing is 47×24, so the number to advertise is <b>ten documents</b>.</p>
+      <p>One measurement is still missing and it is not blocking: the pane height
+        with the keyboard up. It matters only against the 38×12 floor — a
+        keyboard taking more than twelve of the twenty-four rows would make the
+        app refuse to draw mid-query, which would be worth knowing before someone
+        meets it.</p>
     </div>
   </section>
 

@@ -131,20 +131,16 @@ What that settles:
   `[expiring]` only when the filter is already on, so a chip can turn a filter
   off and never on. The affordance is the **tappable header count** —
   REWRITE-UI §1 already specifies it, `app.rs` does not implement it (row 0
-  falls through to `Idle`), and it costs no rows. Deleting the bar keeps twelve
-  documents at 45×28 (3 chrome, 25 list) and adds one visible result while
-  querying.
+  falls through to `Idle`), and it costs no rows. Deleting the bar does not add
+  a document at either size — it buys the spare row that carries flashes and
+  the armed-quit message.
 - **A bug fell out of it.** `input.rs:71` guards only `CONTROL`, so on this
   phone `alt`+letter types into the query and `ctrl+alt+x` is
   indistinguishable from `ctrl+x`. Measured against the built binary.
 
 `bottombars.html` carries the `termux.properties` rows for the install notes,
 tagged by evidence tier — device-verified, measured here, or documentation that
-still wants a look at the phone. Two Termux claims are in that last tier and
-must be checked before publishing: the **contents of the stock default row**
-(asserted twice, never verified; nothing now depends on it), and the
-**keyboard-up terminal size** — if a taller keyboard drops the pane under
-twelve rows, the app refuses to draw mid-query.
+still wants a look at the phone.
 
 Confirmed on the device: the row is an Android view drawn in both keyboard
 states; swipe-up sends the `popup:` key; raising the keyboard resizes the
@@ -161,13 +157,18 @@ Two consequences:
   keeping in reserve for R4, which needs keyboard-down verbs far more than Find
   does. Binding anything there needs modifier guards on the arrow arms in
   `input.rs` — `ctrl+→` currently means plain `→`.
-- **The pane is 47×24, not 45×28.** Two columns wider, four rows shorter, and
-  four rows is two documents: **ten fit, not twelve**. No code depends on it —
+- **The pane is 47×24, not 45×28** — measured in a normal terminal, keyboard
+  down, so this is the *browsing* layout. Two columns wider, four rows shorter,
+  and four rows is two documents: **ten fit, not twelve**, which makes ten the
+  headline number rather than a pessimistic floor. No code depends on it —
   `layout.rs` is width-driven and 45×28 appears only in tests and these mockups
-  — so this is a promise to correct, not an implementation to change. Which
-  keyboard state that was measured in is still open, and both numbers want
-  recording: the browsing height sets the count the README advertises, the
-  querying height is what the layout must survive above the 38×12 floor.
+  — so this is a promise to correct, not an implementation to change. Every
+  page that says "twelve documents at a glance" needs to say ten.
+
+One measurement is still missing, and it is not blocking: the pane height with
+the keyboard **up**. It matters only against the 38×12 floor — browsing is 24
+rows, so a keyboard taking more than twelve of them would put the app under its
+own minimum mid-query and it would refuse to draw.
 
 Still unverified, and now depended on by nothing: the contents of Termux's
 stock default extra-keys row.
