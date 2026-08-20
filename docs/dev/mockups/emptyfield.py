@@ -80,7 +80,10 @@ def paired(left: str, right: str = "For more, hit", cols: int = W) -> str:
     not change when they go — and they go together, on the first character.
     """
     span = cols - 2 - 5 - GUTTER
-    gap = span - 3 - len(left) - len(right)
+    # One plain column between the signpost and the chip: the reverse block
+    # butted straight against the text reads as a rendering fault rather than a
+    # button. The column is still inside the field, so it is still underlined.
+    gap = span - 3 - len(left) - len(right) - 1
     if gap < 2:  # too narrow to pair: the invitation outranks the signpost
         tail = span - 3 - len(left)
         return field(("uline", " █ "), ("uldim", left), ("uline", " " * tail))
@@ -89,6 +92,7 @@ def paired(left: str, right: str = "For more, hit", cols: int = W) -> str:
         ("uldim", left),
         ("uline", " " * gap),
         ("uldim", right),
+        ("uline", " "),
     )
 
 
