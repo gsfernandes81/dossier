@@ -132,11 +132,13 @@ impl Theme {
     /// nothing here can move it. Emacs marks an editable field the same way this
     /// does: `widget-field` is a *background* face, not a rule.
     ///
-    /// **Both ends are pinned.** Setting only a background would be a coin flip
-    /// on polarity — ANSI 8 is a light grey on a dark theme and a near-black on
-    /// a light one, so a background-only band is unreadable on half of them.
-    /// Naming the pair keeps §6's promise intact: the slots are ANSI, so the
-    /// user's own theme still chooses the two hues.
+    /// **Both ends are pinned** — ANSI 8 behind, ANSI 15 in front (ratatui's
+    /// `DarkGray` and `White` are SGR 100 and 97, the *bright* pair, which is
+    /// worth stating because the names do not say so). Setting only a
+    /// background would be a coin flip on polarity: ANSI 8 is a light grey on a
+    /// dark theme and a near-black on a light one, so a background-only band is
+    /// unreadable on half of them. Naming the pair keeps §6's promise intact —
+    /// the slots are ANSI, so the user's own theme still chooses the two hues.
     ///
     /// Under `NO_COLOR` there is no band. That is the honest cost of this
     /// texture and the reason the prompt has to name the question on its own —

@@ -332,7 +332,7 @@ What Emacs does instead:
 
 **Built: the background, widened to the whole row** — the field *is* the row,
 and a marking that stops where the characters stop is a box drawn around today's
-text. Both ends pinned (ANSI 8 behind, ANSI 7 in front): a background alone is a
+text. Both ends pinned (ANSI 8 behind, ANSI 15 in front): a background alone is a
 coin flip on theme polarity, since ANSI 8 is light grey on a dark theme and
 near-black on a light one. `NO_COLOR` gets no band, which is this texture's
 honest cost.
