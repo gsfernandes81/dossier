@@ -172,7 +172,7 @@ fn run(args: &Args, start: Instant) -> io::Result<u8> {
         Some(Command::Open { query }) => Ok(open_one(&loaded, &root, &query.join(" "))),
         // Handled above, before any store was read.
         Some(Command::Init { .. }) => Ok(0),
-        None => browse(loaded, &journal, &root, start).map(|()| 0),
+        None => browse(loaded, &config, &journal, &root, start).map(|()| 0),
     }
 }
 
@@ -286,11 +286,32 @@ fn open_one(loaded: &load::Loaded, root: &Path, query: &str) -> u8 {
 }
 
 /// The TUI: everything, in order, with the terminal restored whatever happens.
-fn browse(loaded: load::Loaded, journal: &Journal, root: &Path, start: Instant) -> io::Result<()> {
+fn browse(
+    loaded: load::Loaded,
+    config: &ds::config::Config,
+    journal: &Journal,
+    root: &Path,
+    start: Instant,
+) -> io::Result<()> {
     let ops = loaded.load.lines.len();
     let build_at = start.elapsed();
     let mut model = Model::new(loaded.store, loaded.today, loaded.warn_until, 80, 24);
     let theme = Theme::from_env();
+
+    // One queue, made here rather than in the loop, because the writer thread
+    // needs its sending half before the loop that owns the receiving half has
+    // started. Terminal input, scan loads and save results all arrive on it.
+    let (tx, rx) = mpsc::channel::<Msg>();
+
+    // Whether this session can write at all is decided before the first paint,
+    // because the record's hints must not offer an edit that cannot happen. The
+    // *journal* is not touched here — see `writer_session`.
+    let session =
+        writer_session(config, journal, loaded.load.lines, loaded.stats.max_ts(), tx.clone());
+    model.write = match &session {
+        Ok(_) => ds::app::WriteState::Ready,
+        Err(reason) => ds::app::WriteState::Off(reason.clone()),
+    };
 
     let mut stderr = io::stderr();
     let mut terminal = enter_terminal(&mut stderr)?;
@@ -317,9 +338,148 @@ fn browse(loaded: load::Loaded, journal: &Journal, root: &Path, start: Instant) 
         writeln!(io::stderr(), "{line}")?;
     }
 
-    let result = event_loop(&mut terminal, &mut model, theme, root, journal);
+    let result = event_loop(
+        &mut terminal,
+        &mut model,
+        theme,
+        root,
+        journal,
+        &tx,
+        &rx,
+        session.as_ref().ok(),
+    );
     leave_terminal(&mut terminal, &mut stderr, model.mouse_on)?;
+    // The terminal is restored *first*, then the writer is waited for: a save
+    // still in its fsync when `ctrl+q` arrived has to finish, and the user
+    // should be looking at their shell while it does, not at a frozen TUI.
+    if let Ok(session) = session {
+        session.finish();
+    }
     result
+}
+
+/// The writer, on a thread of its own, or the reason there is none.
+///
+/// rust: the `Writer` is *owned by the thread* and reachable only through a
+/// channel. That is the cheapest way to say "one process, one writer" in a type
+/// system: there is no handle for a second part of the program to pick up, so
+/// there is no second appender to coordinate with.
+struct Session {
+    /// Ops to append. Dropping this closes the thread's loop.
+    commands: mpsc::Sender<Vec<journal::Draft>>,
+    worker: std::thread::JoinHandle<()>,
+}
+
+impl Session {
+    /// Close the channel and wait for the thread to finish what it holds.
+    fn finish(self) {
+        drop(self.commands);
+        let _ = self.worker.join();
+    }
+}
+
+/// Decide whether this session can write, and start the thread that does it.
+///
+/// **Nothing is opened here.** `Writer::open` creates the journal directory and
+/// the writer's file if they are absent, and REWRITE.md §7 is explicit that
+/// `.dossier/journal/` first exists inside the synced tree *at cutover, never
+/// before* — so a `ds` that opened a writer on every launch would create a
+/// journal in a Syncthing folder merely by being run, and would litter a
+/// read-only fixture like `docs/dev/demo` with an empty file for the same
+/// reason. The thread opens the writer on the **first append**, when there is
+/// finally something to put in it.
+///
+/// The cost of that is honest and worth naming: a journal locked by another `ds`
+/// is discovered at the first save rather than at launch (§3.1's "read-only with
+/// a visible notice" then arrives as a notice on the band, with the typing
+/// intact). The alternative was creating files nobody asked for, which is worse.
+fn writer_session(
+    config: &ds::config::Config,
+    journal: &Journal,
+    lines: Vec<journal::Line>,
+    max_ts: i64,
+    results: mpsc::Sender<Msg>,
+) -> Result<Session, String> {
+    let Some(device) = config.device.clone() else {
+        return Err("no device name — run `ds init` to enable editing".into());
+    };
+    let writer_id = ds::init::writer_id(&device);
+    let Some(lock_dir) = ds::config::state_dir() else {
+        return Err(format!(
+            "nowhere to keep this device's writer lock — set {}",
+            ds::config::STATE_DIR_ENV
+        ));
+    };
+
+    let (commands, orders) = mpsc::channel::<Vec<journal::Draft>>();
+    let journal = journal.clone();
+    let worker = std::thread::spawn(move || {
+        write_loop(&journal, &writer_id, &lock_dir, max_ts, lines, &orders, &results);
+    });
+    Ok(Session { commands, worker })
+}
+
+/// The writer thread: open on demand, append, fsync, re-fold, report.
+///
+/// **The whole write half of the program runs here**, which is what invariant 7
+/// asks for — the render loop never touches a lock, a disk or a fold. The
+/// thread keeps the journal's parsed lines so a save can re-fold *in memory*:
+/// appending the new ops to what was already read is cheaper than re-reading the
+/// directory, and it is the same answer, because this process is the only thing
+/// appending to this writer's file.
+///
+/// Re-folding rather than patching the `Store` in place is deliberate. A patch
+/// would have to re-implement last-writer-wins, the shelf sort, expiry-watch
+/// membership and — the one that cannot be done per-document at all —
+/// `Doc.superseded`, which is true of a document because some *other* document
+/// points at it. A shortcut may never become a second implementation.
+fn write_loop(
+    journal: &Journal,
+    writer_id: &str,
+    lock_dir: &Path,
+    max_ts: i64,
+    mut lines: Vec<journal::Line>,
+    orders: &mpsc::Receiver<Vec<journal::Draft>>,
+    results: &mpsc::Sender<Msg>,
+) {
+    let mut writer: Option<journal::Writer> = None;
+    while let Ok(drafts) = orders.recv() {
+        if writer.is_none() {
+            match journal::Writer::open(
+                journal,
+                journal::Namespace::Meta,
+                writer_id,
+                lock_dir,
+                max_ts,
+            ) {
+                Ok(opened) => writer = Some(opened),
+                Err(error) => {
+                    // A held lock will be held on the next save too, so editing
+                    // goes off for the session rather than failing again the
+                    // same way. Everything else might be transient.
+                    let permanent = matches!(error, journal::writer::Error::Locked { .. });
+                    let _ = results.send(Msg::SaveFailed { reason: error.to_string(), permanent });
+                    continue;
+                }
+            }
+        }
+        let Some(open) = writer.as_mut() else { continue };
+        // `commit` is the fsync §3.3 requires on a user-initiated save: a screen
+        // that says "saved" when a power cut would disagree is worse than a
+        // slow save. This is the thread that can afford to wait for it.
+        let saved = open.append_all(drafts).and_then(|ops| open.commit().map(|()| ops));
+        let message = match saved {
+            Ok(ops) => {
+                lines.extend(ops.into_iter().map(|op| journal::Line::Op(Box::new(op))));
+                let folded = journal::fold(&lines);
+                Msg::Saved(Box::new(ds::Store::build(&folded)))
+            }
+            Err(error) => Msg::SaveFailed { reason: error.to_string(), permanent: false },
+        };
+        if results.send(message).is_err() {
+            return;
+        }
+    }
 }
 
 fn ms(duration: std::time::Duration) -> f64 {
@@ -357,16 +517,19 @@ fn leave_terminal(terminal: &mut Tui, stderr: &mut Stderr, mouse_on: bool) -> io
 /// timeout, no busy wait. An idle `ds` costs no CPU at all, and on a phone idle
 /// CPU is battery. It is also what invariant 7 asks for: a worker can wake the
 /// UI without the UI ever asking whether it is done.
+#[allow(clippy::too_many_arguments)] // The shell's whole state, and it is flat.
 fn event_loop(
     terminal: &mut Tui,
     model: &mut Model,
     theme: Theme,
     root: &Path,
     journal: &Journal,
+    tx: &mpsc::Sender<Msg>,
+    rx: &mpsc::Receiver<Msg>,
+    session: Option<&Session>,
 ) -> io::Result<()> {
     let mut stderr = io::stderr();
     let mut mouse_applied = model.mouse_on;
-    let (tx, rx) = mpsc::channel::<Msg>();
 
     // The input thread. `event::read()` blocks it, never the loop below.
     let input_tx = tx.clone();
@@ -405,6 +568,21 @@ fn event_loop(
                 // it lands in the footer and the app carries on.
                 if let Err(error) = open::open_file(&path) {
                     model.flash = Some(error.to_string());
+                }
+            }
+            Effect::Append(drafts) => {
+                // Handed to the writer thread and forgotten about: the result
+                // comes back as `Msg::Saved` or `Msg::SaveFailed` through the
+                // same queue as everything else. The loop never waits.
+                //
+                // `session` is `None` only when the model already knows it
+                // cannot write, so an append cannot be produced — but a channel
+                // whose thread has died is a real possibility, and silently
+                // dropping the user's edit is not an option.
+                let sent = session.is_some_and(|s| s.commands.send(drafts).is_ok());
+                if !sent {
+                    model.flash = Some("the writer is gone — this edit was not saved".into());
+                    model.write = ds::app::WriteState::Off("the writer is gone".into());
                 }
             }
             Effect::LoadScans => {

@@ -20,11 +20,16 @@
 //! primary marked, what it renews, and notes. The user's review call was
 //! *"detail looks good for now"*, so this renders that layout and nothing more.
 //!
-//! It is **read-only in R3**. Detail becomes the one editing surface in R4
-//! (v2's Phase 4 conclusion stands: editing lives in one place, not scattered
-//! across pickers), and the letter verbs `s`/`b`/`u` arrive with it. Showing
-//! them now would break the rule that a hint is only ever shown for something
-//! that works.
+//! **R4 made it the editing surface** (v2's Phase 4 conclusion stands: editing
+//! lives in one place, not scattered across pickers). One field is editable so
+//! far — the expiry, on `ctrl+e` — and the record's job during an edit is to
+//! show *which* field is being typed into, since the typing itself happens on
+//! the entry line at the bottom of the screen. Without that mark the two rows
+//! would be talking about each other with nothing to connect them.
+//!
+//! The remaining verbs (`s` supersede, `b` bundle, `u` undo) arrive with the
+//! slices that implement them, not before: a hint is only ever shown for
+//! something that works.
 
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -60,8 +65,16 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     // Expiry carries its standing in words next to the date: `2026-09-28` alone
     // makes the reader do the arithmetic, and the whole point of this app is
     // that nobody should have to.
+    //
+    // While it is being edited the label is lit, because the value on this row
+    // is the *stored* one and the one being typed is three rows down on the
+    // entry line. The mark is what says those two rows are about each other.
+    let editing_expiry = model
+        .edit
+        .as_ref()
+        .is_some_and(|edit| edit.doc == doc.id && edit.field == crate::edit::Field::Expiry);
     lines.push(Line::from(vec![
-        label("expiry", theme),
+        if editing_expiry { marked_label("expiry", theme) } else { label("expiry", theme) },
         Span::raw(doc.expiry_date.clone().unwrap_or_else(|| "—".into())),
         Span::raw("  "),
         Span::styled(
@@ -128,11 +141,6 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
         lines.extend(wrapped_field("notes", &doc.notes, inner, theme));
     }
 
-    lines.push(Line::raw(""));
-    for line in wrap("read-only until R4 makes this the editing surface", inner) {
-        lines.push(Line::styled(format!(" {line}"), theme.style(Tone::Muted)));
-    }
-
     // No widget-level wrap: everything above is already laid out to this pane's
     // width, and letting the widget wrap as well would put a continuation line
     // at the left margin, where it reads as a new field.
@@ -151,6 +159,19 @@ fn nonempty(value: String) -> String {
 
 fn label(text: &str, theme: Theme) -> Span<'static> {
     Span::styled(format!(" {text:<LABEL_COLS$}"), theme.style(Tone::Muted))
+}
+
+/// The label of the field currently being edited.
+///
+/// Reverse video, which is the same texture the selected row uses and the only
+/// one this app has that needs no colour and no new attribute — `SGR 4` lands
+/// through the descenders on the phone's font, and `SGR 2` may be ignored
+/// outright. Reverse is the one that is always exactly one cell tall.
+fn marked_label(text: &str, theme: Theme) -> Span<'static> {
+    Span::styled(
+        format!(" {text:<LABEL_COLS$}"),
+        theme.style(Tone::Accent).add_modifier(ratatui::style::Modifier::REVERSED),
+    )
 }
 
 /// A one-line field: label, then the value cut to whatever the pane leaves.

@@ -62,6 +62,18 @@ fn key_msg(key: KeyEvent) -> Option<Msg> {
     match key.code {
         // `ctrl+c` always quits cleanly and is never bound over (REWRITE-UI.md §3).
         KeyCode::Char('c' | 'q') if ctrl => Some(Msg::Quit),
+        // `ctrl+e` edits the highlighted document's expiry (R4).
+        //
+        // A *control* letter and not a bare one, deliberately. Detail may bind
+        // letters (REWRITE-UI.md §2), but detail is not always what has focus:
+        // on a wide terminal the record is a split beside the list and the list
+        // still owns the keyboard, where invariant 1 forbids letter bindings
+        // outright — and even under a pushed record a printable still reaches
+        // the query, so a bare `e` would open the editor halfway through typing
+        // "expired". `ctrl+e` means the same thing at every width, and the
+        // phone delivers it: Termux's `CTRL` latches and composes with IME
+        // letters (measured in R0.2, not assumed).
+        KeyCode::Char('e') if ctrl => Some(Msg::EditField(crate::edit::Field::Expiry)),
         KeyCode::Char('t') if ctrl => Some(Msg::ToggleScans),
         KeyCode::Char('x') if ctrl => Some(Msg::ToggleExpiring),
         KeyCode::Esc => Some(Msg::Esc),
@@ -147,6 +159,23 @@ mod tests {
         let both = KeyModifiers::CONTROL | KeyModifiers::ALT;
         assert_eq!(to_msg(&press(KeyCode::Char('x'), both)), Some(Msg::ToggleExpiring));
         assert_eq!(to_msg(&press(KeyCode::Char('q'), both)), Some(Msg::Quit));
+    }
+
+    /// **`ctrl+e` is the edit verb**, and it is a control letter rather than a
+    /// bare one because a bare letter is search text everywhere the list has
+    /// focus — which, on a wide terminal, includes the moment the record is
+    /// open beside it.
+    #[test]
+    fn the_edit_verb_is_a_control_letter() {
+        assert_eq!(
+            to_msg(&press(KeyCode::Char('e'), KeyModifiers::CONTROL)),
+            Some(Msg::EditField(crate::edit::Field::Expiry))
+        );
+        assert_eq!(
+            to_msg(&press(KeyCode::Char('e'), KeyModifiers::NONE)),
+            Some(Msg::Char('e')),
+            "and a bare `e` is still search text"
+        );
     }
 
     /// Control combinations are verbs, and `ctrl+c` is always the exit.

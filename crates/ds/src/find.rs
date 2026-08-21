@@ -441,6 +441,10 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 
     if !touch {
         model.leader_zone = Zone::default();
+        if let Some(edit) = &model.edit {
+            frame.render_widget(Paragraph::new(edit_row(edit, cols)), area);
+            return;
+        }
         let tail = format!("{count} ");
         let prompt = " > ";
         let span = cols.saturating_sub(width(prompt) + width(&tail));
@@ -467,6 +471,27 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     // no Space to press. It replaced the `⌨` affordance rather than joining it:
     // Termux has its own keyboard key, and tapping the field already raises the
     // IME, so a second button for it was a button for a key you already hold.
+    // An edit takes the entry line over rather than adding a row: three rows of
+    // chrome is the budget on both layouts (REWRITE-UI.md §5a), and a field you
+    // are typing into is exactly what the last row is for. The `SPC` chip goes
+    // with it — the leader sheet is not reachable from inside an edit, so a
+    // button for it would be a button that does nothing.
+    if let Some(edit) = &model.edit {
+        model.leader_zone = Zone::default();
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .split(area);
+        let (message, tone) = status_text(model, true);
+        let band = Line::styled(
+            format!(" {}", fit(&message, cols.saturating_sub(gutter))),
+            theme.on_band(tone),
+        );
+        frame.render_widget(Paragraph::new(band).style(theme.band()), rows[0]);
+        frame.render_widget(Paragraph::new(edit_row(edit, cols)), rows[1]);
+        return;
+    }
+
     let key = " SPC ";
     let prompt = " >";
     let span = cols.saturating_sub(width(prompt) + width(key) + gutter);
@@ -557,10 +582,46 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     frame.render_widget(Paragraph::new(query_row), rows[1]);
 }
 
+/// The entry line while a field is being edited: the field's own prompt, what
+/// has been typed, and the block cursor.
+///
+/// The prompt is the field's name rather than `>`, which is the minibuffer's
+/// whole trick — one row that says which question it is asking. The cursor is
+/// the same `█` the query uses, drawn at the end because that is where typing
+/// goes; a cursor that can be moved through the text arrives with REWRITE-UI.md
+/// §5b's query cursor, and both get it from the same mechanism when it does.
+fn edit_row(edit: &crate::edit::Edit, cols: usize) -> Line<'static> {
+    let prompt = format!(" {}: ", edit.field.prompt());
+    let room = cols.saturating_sub(width(&prompt) + 1);
+    // The *tail* of an over-long value is what matters while typing: the end is
+    // where the next character lands.
+    let shown: String = {
+        let mut chars: Vec<char> = edit.buffer.chars().collect();
+        while width(&chars.iter().collect::<String>()) > room && !chars.is_empty() {
+            chars.remove(0);
+        }
+        chars.into_iter().collect()
+    };
+    Line::from(vec![
+        Span::styled(prompt, Style::default().add_modifier(Modifier::REVERSED)),
+        Span::raw(shown),
+        Span::raw("█"),
+    ])
+}
+
 /// The hints a touch layout shows, most sheddable first.
 fn touch_hints(model: &Model) -> Vec<&'static str> {
-    if model.detail {
-        vec!["◀ back", "⏎ open file"]
+    if model.edit.is_some() {
+        vec!["⏎ save", "esc discard"]
+    } else if model.detail {
+        // `^e` appears only when this session can actually write — a hint is
+        // shown for something that works, never for something that will only
+        // explain why it did not.
+        let mut hints = vec!["◀ back", "⏎ open file"];
+        if model.write.ready() {
+            hints.push("^e expiry");
+        }
+        hints
     } else {
         vec!["⏎ open", "^x expiry", "^t scans"]
     }
@@ -592,13 +653,25 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     if model.esc_armed {
         return ("esc again to quit".into(), Tone::Armed);
     }
+    if let Some(edit) = &model.edit {
+        if edit.armed_discard {
+            return ("esc again to discard".into(), Tone::Armed);
+        }
+        if edit.saving {
+            return ("saving…".into(), Tone::Muted);
+        }
+    }
     if touch {
         return (touch_hints(model).join("  "), Tone::Muted);
     }
     // The keyboard layout teaches every verb it has. `^t scans` used to appear
     // in no desktop hint at all, which made content search reachable only by
     // prior knowledge.
-    let hints = if model.detail {
+    let hints = if model.edit.is_some() {
+        "⏎ save  esc discard"
+    } else if model.detail && model.write.ready() {
+        "⏎ open  ^e edit expiry  ← close  esc back  ^q quit"
+    } else if model.detail {
         "⏎ open  ← close  esc back  ^q quit"
     } else {
         "space menu  ⏎ open  → detail  ^x expiring  ^t scans  ^q quit"

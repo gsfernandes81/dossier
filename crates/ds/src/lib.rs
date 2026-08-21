@@ -37,6 +37,8 @@
 //!   in here and a test beside it.
 //! - [`find`] / [`detail`] — the view half: the Find surface and the record,
 //!   laid out to match the approved mockups.
+//! - [`edit`] — R4's write path on the model's side: which field is being
+//!   edited, what a buffer may become, and when it is safe to throw away.
 //! - [`input`] — terminal events to messages; the only module that knows
 //!   crossterm exists.
 //! - [`layout`] / [`theme`] — the responsive thresholds and cell-width
@@ -68,6 +70,7 @@ pub mod app;
 pub mod config;
 pub mod detail;
 pub mod doc;
+pub mod edit;
 pub mod find;
 pub mod init;
 pub mod input;

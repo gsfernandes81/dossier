@@ -112,6 +112,14 @@ fn model(cols: u16, rows: u16) -> Model {
     Model::new(sample_store(), "2026-10-20".into(), "2027-01-18".into(), cols, rows)
 }
 
+/// A model allowed to write, which is not the default: a `Model` nobody has told
+/// about a device has no writer id and must not offer an edit.
+fn writable(cols: u16, rows: u16) -> Model {
+    let mut model = model(cols, rows);
+    model.write = ds::app::WriteState::Ready;
+    model
+}
+
 /// Which cells of one screen row carry a modifier — the way to check that a
 /// *texture* landed where it was meant to, since text alone cannot show it.
 fn modifier_columns(
@@ -533,4 +541,89 @@ fn a_long_note_hangs_under_its_column() {
         Some(value_column),
         "and it hangs under the value, not at the margin: {continuation:?}"
     );
+}
+
+/// **An edit takes the entry line over rather than adding a row.** Three rows of
+/// chrome is the budget on both layouts (REWRITE-UI.md §5a), and the last row is
+/// exactly what a field you are typing into is for — so the field's own prompt
+/// replaces `>` and the count and the `SPC` chip stand down.
+#[test]
+fn an_edit_takes_over_the_entry_line() {
+    let mut m = writable(47, 24);
+    update(&mut m, Msg::EditField(ds::edit::Field::Expiry));
+    let before = screen(&mut m, 47, 24).len();
+
+    let rows = screen(&mut m, 47, 24);
+    assert_eq!(rows.len(), before, "no row was added for the editor");
+    let entry = rows.last().expect("an entry line");
+    assert!(entry.contains("expiry:"), "the prompt names the field: {entry:?}");
+    assert!(entry.contains("2026-07-31"), "seeded with the stored value: {entry:?}");
+    assert!(entry.contains('█'), "and the cursor is where typing goes: {entry:?}");
+    assert!(!entry.contains("SPC"), "the leader is not reachable from inside an edit");
+
+    let band = &rows[rows.len() - 2];
+    assert!(band.contains("save"), "the band teaches the verb: {band:?}");
+    assert!(band.contains("discard"), "{band:?}");
+}
+
+/// **The record marks the field being edited.** The value on the record is the
+/// stored one and the value being typed is on the entry line; without the mark
+/// the two rows are talking about each other with nothing to connect them.
+#[test]
+fn the_record_marks_the_field_being_edited() {
+    let mut m = writable(47, 24);
+    update(&mut m, Msg::EditField(ds::edit::Field::Expiry));
+    let rows = screen(&mut m, 47, 24);
+    let expiry_row = rows
+        .iter()
+        .position(|row| row.trim_start().starts_with("expiry"))
+        .expect("the record shows an expiry row");
+    let lit = modifier_columns(
+        &mut m,
+        47,
+        24,
+        u16::try_from(expiry_row).expect("row fits"),
+        ratatui::style::Modifier::REVERSED,
+    );
+    assert!(!lit.is_empty(), "the label is marked while it is being edited");
+    assert!(lit.iter().all(|&x| x <= 11), "and only the label, not the value: {lit:?}");
+}
+
+/// **A session that cannot write is not told how to.** The `^e` hint appears
+/// when the verb works and not before — the rule that killed the action bar.
+#[test]
+fn the_edit_hint_appears_only_when_this_session_can_write() {
+    let mut readonly = model(100, 26);
+    update(&mut readonly, Msg::OpenDetail);
+    let hints = screen(&mut readonly, 100, 26).join("\n");
+    assert!(!hints.contains("^e"), "a read-only session is not offered an edit");
+
+    let mut writing = writable(100, 26);
+    update(&mut writing, Msg::OpenDetail);
+    let hints = screen(&mut writing, 100, 26).join("\n");
+    assert!(hints.contains("^e"), "and a writing one is: {hints}");
+}
+
+/// A dirty edit says what the second `Esc` will do, in the armed tone the quit
+/// already uses — one texture for "the next press acts".
+#[test]
+fn a_dirty_edit_warns_before_it_discards() {
+    let mut m = writable(47, 24);
+    update(&mut m, Msg::EditField(ds::edit::Field::Expiry));
+    update(&mut m, Msg::Char('9'));
+    update(&mut m, Msg::Esc);
+    let rows = screen(&mut m, 47, 24);
+    assert!(rows[rows.len() - 2].contains("esc again to discard"), "{rows:?}");
+}
+
+/// **`NO_COLOR` loses the band and nothing else**, the editor included: the
+/// prompt, the value and the cursor are all text.
+#[test]
+fn the_editor_survives_no_color() {
+    let mut m = writable(47, 24);
+    update(&mut m, Msg::EditField(ds::edit::Field::Expiry));
+    let (rows, coloured) = render_with(&mut m, 47, 24, Theme { color: false });
+    assert!(!coloured, "no colour was emitted");
+    let entry = rows.last().expect("an entry line");
+    assert!(entry.contains("expiry:") && entry.contains("2026-07-31"), "{entry:?}");
 }

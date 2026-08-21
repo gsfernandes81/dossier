@@ -129,6 +129,29 @@ pub fn path() -> Option<PathBuf> {
     Some(base.join("dossier").join("config.toml"))
 }
 
+/// Environment override for this device's local state directory.
+///
+/// Same two jobs as [`DIR_ENV`], and the same Windows reason for existing.
+pub const STATE_DIR_ENV: &str = "DS_STATE_DIR";
+
+/// Where this device keeps state that must **never** sync.
+///
+/// One thing lives here today and it is load-bearing: the writer's advisory
+/// lock file (REWRITE.md §3.1). A lock inside the Syncthing folder would
+/// replicate to the other device and lock *it* out of its own journal, and a
+/// lock on Android's FUSE mount is not reliable in the first place. The
+/// truncation high-water marks (§3.3) belong here too when they are wired up.
+///
+/// `~/.local/share/dossier` on Linux and Termux, `%LOCALAPPDATA%\dossier` on
+/// Windows. [`STATE_DIR_ENV`] overrides it.
+#[must_use]
+pub fn state_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os(STATE_DIR_ENV) {
+        return Some(PathBuf::from(dir));
+    }
+    Some(dirs::data_local_dir().or_else(dirs::data_dir)?.join("dossier"))
+}
+
 impl Config {
     /// Read this device's config, or return the empty default if there is none.
     ///

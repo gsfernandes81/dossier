@@ -55,6 +55,28 @@ pub enum Msg {
     /// boundary. This variant is also why `Msg` is not `Copy` — messages from
     /// workers carry data, and that is the whole point of having them.
     ScansLoaded(std::sync::Arc<crate::scans::Scans>),
+    /// `ctrl+e` — edit a field of the highlighted document (R4).
+    EditField(crate::edit::Field),
+    /// An append landed, and here is the store re-folded around it.
+    ///
+    /// rust: `Box`ed because a `Store` is much larger than every other variant,
+    /// and an enum is as big as its widest arm — every `Msg` in the queue would
+    /// otherwise carry a store's worth of space around with it.
+    Saved(Box<Store>),
+    /// The append did not land. The editor stays open with the typing intact:
+    /// the screen must never claim a value the journal refused.
+    SaveFailed {
+        /// What went wrong, ready for the status band.
+        reason: String,
+        /// Whether it will fail the same way every time.
+        ///
+        /// A held writer lock will (another `ds` has the journal, §3.1), so
+        /// editing goes off for the session; a full disk might not, so it does
+        /// not. The shell decides this, because the shell is what knows which
+        /// error it caught — a caller matching on the *text* of a message would
+        /// break the first time the wording improved.
+        permanent: bool,
+    },
     /// A bare printable character. On the Find surface every one of these is
     /// search text (invariant 1) — the surface binds no letter keys at all.
     Char(char),
@@ -131,8 +153,62 @@ pub enum Effect {
     /// Read the `enrich` namespace on a worker thread and post the result back
     /// as [`Msg::ScansLoaded`]. **Never on the render loop** (invariant 7).
     LoadScans,
+    /// Append these ops to this device's journal, then re-fold and post the new
+    /// store back as [`Msg::Saved`].
+    ///
+    /// A `Vec` rather than one draft because the contract already needs runs
+    /// that are only correct together — an id rename is create-new, copy,
+    /// fixups, delete-old (§3.2) — and one call is what keeps them adjacent in
+    /// one writer's file. This slice only ever sends one.
+    ///
+    /// Like every other effect, it names what should happen and not how: the
+    /// writer, its lock and its fsync all live on the far side of the shell,
+    /// off the render loop (invariant 7).
+    Append(Vec<journal::Draft>),
     /// Leave, restoring the terminal.
     Quit,
+}
+
+/// Whether this session can write, and what to say when it cannot.
+///
+/// Not a `bool`: every way of *not* being able to write comes with a reason the
+/// user needs, and a reason that is not carried next to the state is a reason
+/// that gets lost. REWRITE.md §3.1 is explicit that a second process must
+/// "continue read-only with a visible notice" rather than fail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteState {
+    /// Editing is available.
+    Ready,
+    /// Editing is off for this session, with the reason ready to show.
+    Off(String),
+}
+
+impl WriteState {
+    /// Whether an edit may be opened.
+    #[must_use]
+    pub fn ready(&self) -> bool {
+        matches!(self, WriteState::Ready)
+    }
+
+    /// Why not, for the status band.
+    #[must_use]
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            WriteState::Ready => None,
+            WriteState::Off(reason) => Some(reason),
+        }
+    }
+}
+
+impl Default for WriteState {
+    /// A model that nobody told about a device cannot write.
+    ///
+    /// The default is the *safe* state rather than the convenient one: a `Model`
+    /// built in a test, or before `main` has read the config, must not offer an
+    /// edit it has no writer id to perform.
+    fn default() -> Self {
+        WriteState::Off("no device name — run `ds init` to enable editing".into())
+    }
 }
 
 /// Which documents the list is showing.
@@ -257,6 +333,10 @@ pub struct Model {
     pub keyboard_hint: bool,
     /// The leader sheet, when it is open.
     pub sheet: Option<SheetState>,
+    /// The field being edited, when one is (R4).
+    pub edit: Option<crate::edit::Edit>,
+    /// Whether this session can write, and why not when it cannot.
+    pub write: WriteState,
     /// Where the view drew the header's pressable expiring count.
     pub count_zone: Zone,
     /// Where the view drew the `SPC` chip.
@@ -291,6 +371,8 @@ impl Model {
             mouse_on: true,
             keyboard_hint: false,
             sheet: None,
+            edit: None,
+            write: WriteState::default(),
             count_zone: Zone::default(),
             leader_zone: Zone::default(),
             flash: None,
@@ -548,6 +630,50 @@ impl Model {
         self.keyboard_hint = true;
         Effect::Redraw
     }
+
+    /// Open an edit on the highlighted document's field.
+    ///
+    /// **The record comes with it.** REWRITE-UI.md §2 makes detail the only
+    /// editing surface, so the verb shows the record as part of doing its job
+    /// rather than refusing until you have opened it yourself — the same shape
+    /// invariant 2 already gives `Enter`, which falls through to the record
+    /// when there is no file.
+    fn open_edit(&mut self, field: crate::edit::Field) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some(doc) = self.current() else {
+            self.flash = Some("nothing to edit".into());
+            return Effect::Redraw;
+        };
+        let current = match field {
+            crate::edit::Field::Expiry => doc.expiry_date.clone(),
+        };
+        self.edit = Some(crate::edit::Edit::new(doc.id.clone(), field, current.as_deref()));
+        self.sheet = None;
+        self.detail = true;
+        Effect::Redraw
+    }
+
+    /// Take a re-folded store, keeping the user's place in it.
+    ///
+    /// A save can reorder the list — an expiry edit moves a row under the
+    /// `expiring` filter — or push the document out of it entirely, so the row
+    /// index the cursor held before the fold means nothing after it. The anchor
+    /// is therefore the **document id**, and the return value says whether it
+    /// survived: a detail pane still showing the document that just left the
+    /// list would be showing something the list no longer contains.
+    fn adopt(&mut self, store: Store, anchor: &str) -> bool {
+        self.store = store;
+        self.requery();
+        let found = self.rows.iter().position(|&i| self.store.docs[i].id == anchor);
+        if let Some(position) = found {
+            self.cursor = position;
+            self.scroll_into_view(self.visible_rows());
+        }
+        found.is_some()
+    }
 }
 
 /// Apply one message. The only entry point to state change.
@@ -563,11 +689,20 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
 
     // Esc arms only on a *consecutive* Esc; any other key disarms it.
     let was_armed = model.esc_armed;
-    if !matches!(msg, Msg::Esc | Msg::ScansLoaded(_)) {
+    if !matches!(msg, Msg::Esc | Msg::ScansLoaded(_) | Msg::Saved(_) | Msg::SaveFailed { .. }) {
         model.esc_armed = false;
     }
     if is_key(&msg) {
         model.flash = None;
+    }
+
+    // An open edit owns the keyboard before anything else does — it is the
+    // innermost layer, and §8's Esc chain starts there. `ctrl+q`/`ctrl+c` and
+    // worker messages still fall through, so nothing is trapped.
+    if model.edit.is_some() {
+        if let Some(effect) = edit_key(model, &msg) {
+            return effect;
+        }
     }
 
     // While the sheet is open it owns the keyboard, because its whole purpose is
@@ -582,6 +717,38 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
     match msg {
         Msg::Quit => Effect::Quit,
         Msg::Esc => model.peel(was_armed),
+        Msg::EditField(field) => model.open_edit(field),
+        Msg::Saved(store) => {
+            // The edit is closed *here* and not when `Enter` was pressed: until
+            // the journal has answered, the value on screen is a hope.
+            let edited = model.edit.take().map(|edit| edit.doc);
+            let anchor = edited.or_else(|| model.current().map(|doc| doc.id.clone()));
+            let kept = model.adopt(*store, anchor.as_deref().unwrap_or_default());
+            if kept {
+                model.flash = Some("saved".into());
+            } else {
+                // The document is no longer in the list the query and filter
+                // describe, so the record above it would be showing something
+                // the list does not contain.
+                model.detail = false;
+                model.flash = Some("saved — it no longer matches the filter".into());
+            }
+            Effect::Redraw
+        }
+        Msg::SaveFailed { reason, permanent } => {
+            if let Some(edit) = &mut model.edit {
+                edit.saving = false;
+                edit.armed_discard = false;
+            }
+            model.flash = Some(reason.clone());
+            // A refusal that will refuse again takes editing off the table for
+            // the session, rather than inviting the same disappointment on
+            // every save. The typing survives either way.
+            if permanent {
+                model.write = WriteState::Off(reason);
+            }
+            Effect::Redraw
+        }
         Msg::Leader => {
             model.sheet = Some(SheetState::default());
             Effect::Redraw
@@ -721,6 +888,109 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
     }
 }
 
+/// Keys while a field is being edited. `None` falls through, which is how
+/// `ctrl+q`/`ctrl+c` and worker messages still work from inside an edit.
+///
+/// The rules, and each one is somebody's requirement:
+///
+/// * **Every printable is the value**, not search text. An edit is the one place
+///   on this app's surfaces where that is true, and it is why detail can bind
+///   letters at all (REWRITE-UI.md §2) while Find never may.
+/// * **`Enter` saves and `Esc` discards** — explicit save, and a *dirty* edit
+///   takes two `Esc`s (§2). The arming is a real layer, so invariant 3's "one
+///   layer per press" holds: an edit with typing in it is one press further from
+///   the base state than an untouched one.
+/// * **Arrows are swallowed.** They would otherwise move the list cursor under
+///   the record, and the record you are editing would stop being the record you
+///   are looking at.
+/// * **Taps and scrolls are inert**, the same rule a pushed record already
+///   follows: you cannot act on a surface the current one is covering.
+fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    // rust: the edit is cloned out, worked on, and put back, exactly as
+    // `sheet_key` does with the sheet. Holding `model.edit.as_mut()` across a
+    // write to `model.flash` would be two mutable borrows of one struct, and the
+    // borrow checker is right to refuse: a message can change both. The clone is
+    // two short strings.
+    let mut edit = model.edit.clone()?;
+
+    // "Any other key disarms" — the same rule the quit arming follows, applied
+    // to the discard so the two behave identically.
+    if !matches!(msg, Msg::Esc) {
+        edit.armed_discard = false;
+    }
+
+    let effect = match msg {
+        Msg::Char(c) => {
+            edit.buffer.push(*c);
+            Effect::Redraw
+        }
+        Msg::Backspace => {
+            edit.buffer.pop();
+            Effect::Redraw
+        }
+        Msg::Enter => {
+            // A second `Enter` while the first is still in flight would append
+            // the same op twice. The journal would survive it — LWW on identical
+            // values is a no-op — but the history would carry a lie about what
+            // the user did.
+            if edit.saving {
+                Effect::Idle
+            } else {
+                match edit.field.validate(&edit.buffer) {
+                    Ok(value) => {
+                        let field = edit.field.journal_field();
+                        let draft = match value {
+                            Some(value) => journal::Draft::set("doc", &edit.doc, field, value),
+                            // An empty buffer clears the field: `unset`, never a
+                            // stored empty string (see
+                            // [`crate::edit::Field::validate`]).
+                            None => journal::Draft::unset("doc", &edit.doc, field),
+                        };
+                        edit.saving = true;
+                        Effect::Append(vec![draft])
+                    }
+                    Err(complaint) => {
+                        // The typing is never destroyed by a refusal — it is the
+                        // thing that needs correcting.
+                        model.flash = Some(complaint);
+                        Effect::Redraw
+                    }
+                }
+            }
+        }
+        Msg::Esc => {
+            if edit.saving {
+                // Cancelling an append already on its way would leave the screen
+                // and the journal disagreeing about what happened.
+                model.flash = Some("saving — one moment".into());
+                Effect::Redraw
+            } else if edit.dirty() && !edit.armed_discard {
+                edit.armed_discard = true;
+                Effect::Redraw
+            } else {
+                model.edit = None;
+                return Some(Effect::Redraw);
+            }
+        }
+        // Swallowed: they belong to the list, and the list is not what is being
+        // edited. `Home`/`End` come back as text motions with §5b's query
+        // cursor, which is when this arm gets something to do.
+        // Pressing the verb again from inside its own editor must not reseed
+        // the buffer — that would throw away typing with a key that reads like
+        // it should do nothing.
+        Msg::EditField(_)
+        | Msg::Move(_)
+        | Msg::OpenDetail
+        | Msg::CloseDetail
+        | Msg::Leader
+        | Msg::Tap { .. }
+        | Msg::Scroll(_) => Effect::Idle,
+        _ => return None,
+    };
+    model.edit = Some(edit);
+    Some(effect)
+}
+
 /// Keys while the leader sheet is open. `None` means "the sheet does not want
 /// this one" — it falls through to the surface underneath.
 ///
@@ -771,8 +1041,20 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
 }
 
 /// Whether this message came from the keyboard.
+///
+/// A result posted back by a worker is not a keystroke, however it arrives — so
+/// a save landing must not disarm a pending quit or restore mouse reporting the
+/// IME affordance dropped, any more than a finished scan load does.
 fn is_key(msg: &Msg) -> bool {
-    !matches!(msg, Msg::Tap { .. } | Msg::Scroll(_) | Msg::Resize { .. } | Msg::ScansLoaded(_))
+    !matches!(
+        msg,
+        Msg::Tap { .. }
+            | Msg::Scroll(_)
+            | Msg::Resize { .. }
+            | Msg::ScansLoaded(_)
+            | Msg::Saved(_)
+            | Msg::SaveFailed { .. }
+    )
 }
 
 /// The rows the search bar occupies, inclusive — and therefore the rows that
@@ -835,6 +1117,256 @@ pub(crate) mod tests {
             ..Store::default()
         };
         Model::new(store, "2026-08-16".into(), "2026-11-14".into(), 45, 28)
+    }
+
+    /// A model that is allowed to write, which is not the default — the default
+    /// is the safe state, because a `Model` nobody has told about a device has
+    /// no writer id to append under.
+    fn writable() -> Model {
+        let mut model = model();
+        model.write = WriteState::Ready;
+        model
+    }
+
+    /// The store as it would fold after `coc`'s expiry became `2027-04-01` —
+    /// what the writer thread posts back, built the same way it builds it.
+    fn restored(from: &Model, id: &str, expiry: Option<&str>) -> Store {
+        let mut store = from.store.clone();
+        for doc in &mut store.docs {
+            if doc.id == id {
+                doc.expiry_date = expiry.map(str::to_string);
+            }
+        }
+        store
+    }
+
+    /// **`ctrl+e` opens the editor on the record, seeded with what is stored.**
+    /// The record comes with it: detail is the only editing surface, so the verb
+    /// shows it rather than refusing until you have opened it yourself.
+    #[test]
+    fn the_edit_verb_opens_the_record_and_seeds_the_field() {
+        let mut m = writable();
+        assert!(!m.detail);
+        assert_eq!(update(&mut m, Msg::EditField(crate::edit::Field::Expiry)), Effect::Redraw);
+        assert!(m.detail, "the record came with it");
+        let edit = m.edit.as_ref().expect("an edit is open");
+        assert_eq!(edit.doc, "coc");
+        assert_eq!(edit.buffer, "2026-01-01", "seeded with the stored value");
+        assert!(!edit.dirty());
+    }
+
+    /// **A session that cannot write never opens an editor**, and says why
+    /// instead — REWRITE.md §3.1's "read-only with a visible notice".
+    #[test]
+    fn a_read_only_session_explains_itself_instead_of_editing() {
+        let mut m = model();
+        assert_eq!(m.write, WriteState::default(), "no device, no writing");
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        assert!(m.edit.is_none());
+        assert!(m.flash.unwrap().contains("ds init"), "and it names the fix");
+    }
+
+    /// **Typing goes into the field, not into the query.** An edit is the one
+    /// place on these surfaces where a printable is not search text.
+    #[test]
+    fn typing_in_an_edit_never_reaches_the_query() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        for _ in 0..10 {
+            update(&mut m, Msg::Backspace);
+        }
+        for c in "2027-04-01".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(m.edit.as_ref().unwrap().buffer, "2027-04-01");
+        assert!(m.query.is_empty(), "the query was never touched");
+    }
+
+    /// **A valid date becomes a `set` op** — and nothing changes on screen until
+    /// the journal has answered, because until then the new value is a hope.
+    #[test]
+    fn saving_a_date_appends_a_set_op_and_waits_for_it() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        for _ in 0..10 {
+            update(&mut m, Msg::Backspace);
+        }
+        for c in "2027-04-01".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        let effect = update(&mut m, Msg::Enter);
+        assert_eq!(
+            effect,
+            Effect::Append(vec![journal::Draft::set("doc", "coc", "expiry_date", "2027-04-01")])
+        );
+        assert!(m.edit.as_ref().unwrap().saving, "still open, still unsaved");
+        assert_eq!(m.store.docs[0].expiry_date.as_deref(), Some("2026-01-01"), "unchanged so far");
+
+        let store = restored(&m, "coc", Some("2027-04-01"));
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert!(m.edit.is_none(), "the journal answered, so the editor closed");
+        assert_eq!(m.current().unwrap().expiry_date.as_deref(), Some("2027-04-01"));
+        assert_eq!(m.flash.as_deref(), Some("saved"));
+    }
+
+    /// **An empty buffer clears the field with an `unset`**, never a stored
+    /// empty string — so one field exercises both halves of §3.2's contract.
+    #[test]
+    fn clearing_the_field_appends_an_unset_op() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        for _ in 0..10 {
+            update(&mut m, Msg::Backspace);
+        }
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![journal::Draft::unset("doc", "coc", "expiry_date")])
+        );
+    }
+
+    /// **A refusal never destroys the typing.** The buffer is the thing that
+    /// needs correcting, so it stays exactly as it was.
+    #[test]
+    fn an_unparseable_date_is_refused_and_the_typing_survives() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        for c in "-ish".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "no append");
+        assert_eq!(m.edit.as_ref().unwrap().buffer, "2026-01-01-ish");
+        assert!(m.flash.as_deref().unwrap().contains("YYYY-MM-DD"));
+    }
+
+    /// **`Esc` closes a clean edit in one press and arms before discarding a
+    /// dirty one** (REWRITE-UI.md §2), and any other key disarms — the same
+    /// rule the quit arming follows, so the two cannot behave differently.
+    #[test]
+    fn esc_discards_an_edit_in_one_press_when_clean_and_two_when_dirty() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        update(&mut m, Msg::Esc);
+        assert!(m.edit.is_none(), "nothing was typed, so nothing needed confirming");
+
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        update(&mut m, Msg::Char('9'));
+        update(&mut m, Msg::Esc);
+        assert!(m.edit.as_ref().unwrap().armed_discard, "armed, not discarded");
+        update(&mut m, Msg::Esc);
+        assert!(m.edit.is_none(), "the second press threw it away");
+
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        update(&mut m, Msg::Char('9'));
+        update(&mut m, Msg::Esc);
+        update(&mut m, Msg::Char('9'));
+        assert!(!m.edit.as_ref().unwrap().armed_discard, "any other key disarms");
+    }
+
+    /// **Arrows inside an edit never move the list underneath.** The record you
+    /// are editing has to stay the record you are looking at.
+    #[test]
+    fn the_list_does_not_move_under_an_open_edit() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        let before = m.cursor;
+        for motion in [Motion::Down, Motion::PageDown, Motion::End, Motion::Up] {
+            assert_eq!(update(&mut m, Msg::Move(motion)), Effect::Idle);
+        }
+        assert_eq!(update(&mut m, Msg::Tap { col: 2, row: 5 }), Effect::Idle);
+        assert_eq!(m.cursor, before);
+        assert_eq!(m.edit.as_ref().unwrap().doc, "coc", "and it is still the same document");
+    }
+
+    /// **`ctrl+q` still quits from inside an edit.** Nothing may trap the user
+    /// on a surface, however modal it is.
+    #[test]
+    fn quitting_works_from_inside_an_edit() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        assert_eq!(update(&mut m, Msg::Quit), Effect::Quit);
+    }
+
+    /// **The cursor is re-anchored by document id, not by row.** A save re-folds
+    /// the store, and under the expiring filter a changed date moves the row —
+    /// so a remembered index would be pointing at somebody else.
+    #[test]
+    fn a_save_keeps_the_cursor_on_the_document_it_edited() {
+        let mut m = writable();
+        update(&mut m, Msg::ToggleExpiring);
+        update(&mut m, Msg::Move(Motion::Down));
+        let edited = m.current().unwrap().id.clone();
+        assert_eq!(edited, "eng1", "second-soonest under the filter");
+
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        update(&mut m, Msg::Enter);
+        // Now the soonest of all — earlier than `coc`'s 2026-01-01 — so the row
+        // moves to the top of the filter, which is the whole point of the test.
+        let store = restored(&m, &edited, Some("2025-12-01"));
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert_eq!(m.current().unwrap().id, edited, "the cursor followed the document");
+        assert_eq!(m.cursor, 0, "which is now the first row");
+    }
+
+    /// **A save that pushes the document out of the list says so, and closes the
+    /// record.** A record above a list that no longer contains it is a lie about
+    /// what is on screen.
+    #[test]
+    fn a_save_that_leaves_the_filter_closes_the_record_and_says_so() {
+        let mut m = writable();
+        update(&mut m, Msg::ToggleExpiring);
+        let edited = m.current().unwrap().id.clone();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        assert!(m.detail);
+
+        // Cleared: no expiry means it is not in the watch at all.
+        let store = restored(&m, &edited, None);
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert!(!m.detail, "the record closed");
+        assert!(m.flash.as_deref().unwrap().contains("no longer matches"));
+        assert!(m.rows.iter().all(|&i| m.store.docs[i].id != edited));
+    }
+
+    /// **A failed save keeps the editor and the typing**, and a failure that
+    /// will recur takes editing off the table rather than inviting it again.
+    #[test]
+    fn a_failed_save_keeps_the_typing_and_a_permanent_one_stops_offering() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        update(&mut m, Msg::Char('9'));
+        update(&mut m, Msg::Enter);
+
+        update(&mut m, Msg::SaveFailed { reason: "disk full".into(), permanent: false });
+        assert_eq!(m.edit.as_ref().unwrap().buffer, "2026-01-019", "the typing survived");
+        assert!(!m.edit.as_ref().unwrap().saving, "and it can be tried again");
+        assert!(m.write.ready(), "a transient failure is not a verdict");
+
+        let locked = "another process is already writing as `desk-core`";
+        update(&mut m, Msg::SaveFailed { reason: locked.into(), permanent: true });
+        assert!(!m.write.ready());
+        assert_eq!(m.write.reason(), Some(locked));
+        update(&mut m, Msg::Esc);
+        update(&mut m, Msg::Esc);
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        assert!(m.edit.is_none(), "it does not offer again");
+    }
+
+    /// **A save landing is not a keystroke.** Like a finished scan load, it must
+    /// not disarm a pending quit or undo the IME affordance's dropped mouse
+    /// reporting — the user did not touch the keyboard.
+    #[test]
+    fn a_save_result_is_not_a_keypress() {
+        let mut m = writable();
+        // Arm first: `Esc` is a real keystroke, so it would restore the mouse
+        // reporting the affordance drops — the drop has to come after it.
+        update(&mut m, Msg::Esc);
+        assert!(m.esc_armed);
+        m.raise_keyboard();
+        assert!(!m.mouse_on);
+
+        let store = restored(&m, "coc", Some("2027-04-01"));
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert!(m.esc_armed, "a worker message did not disarm the quit");
+        assert!(!m.mouse_on, "nor did it restore mouse reporting");
     }
 
     /// **Find-fast, invariant 1.** A bare printable is search text — the first
