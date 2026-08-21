@@ -236,10 +236,34 @@ bundle, device B has not folded that op yet and re-creates it. This flaps until
 both have the same journal state, then settles. Self-healing, but noisy, and the
 noise is in the user's real files tree.
 
+**Decided (user): determinism is the approach**, conditional on the check below.
+It is also the only candidate left — see the two-folder entry, which covers
+journals only and so lends the files tree nothing.
+
 **To verify before committing to this:** that Syncthing's scanner really does see
 no change for identical content *and* identical mtime, in both directions, on
 Android and Windows. The mechanism is right in principle; the claim about the
 scanner is untested and must not be assumed.
+
+**The likely failure point is Android, not Syncthing.** Termux's access to shared
+storage goes through a FUSE layer that has historically not preserved mtimes
+faithfully, and mtime granularity differs again on NTFS. If the phone cannot be
+made to reproduce an mtime exactly, determinism fails there specifically and this
+question reopens with no candidates — so test mtime preservation on the real phone
+path first, before testing anything about Syncthing.
+
+Cheapest honest test plan:
+
+1. **Does the phone preserve a set mtime at all?** Write a file to the real
+   Syncthing path in Termux, set its mtime, stat it back. One line. If this fails,
+   stop — nothing downstream matters.
+2. **Does Syncthing consider an identical rewrite a change?** Two instances on one
+   Linux box (`syncthing -home=…` twice, different ports) — no VM needed. Or even
+   one instance: write, scan, read the file's sequence number from
+   `/rest/db/file`, rewrite identical bytes with the same mtime, rescan, and see
+   whether the sequence bumped.
+3. Repeat 2 on Windows, where the CI leg has already caught one file-handle
+   difference that a green Linux run missed.
 
 **The two-folder arrangement is not the answer here** — see §3's own entry below.
 It covers **journals only**, so bundles live in the ordinary bidirectional files
@@ -333,9 +357,14 @@ exactly why the user wants `ds` to configure it rather than doing it by hand
 **Consequences to work through before building it:**
 
 - **§3.1 says the journal directory is `<syncthing_root>/.dossier/journal/`.**
-  Two Syncthing folders means two paths, so this becomes something like
-  `journal/out/` and `journal/in/` — a §3.1 change, needing an amendment note in
-  the same style as the id one, since §3 is otherwise frozen.
+  Two Syncthing folders means two paths. **Decided (user): `out/` and `in/`, under
+  a dot-prefixed `.journal`.** A §3.1 change, needing an amendment note in the same
+  style as the id one, since §3 is otherwise frozen.
+- **Hidden on Windows needs code, not a dot.** A leading dot hides a directory on
+  Unix only; Windows hides by *attribute*, so `FILE_ATTRIBUTE_HIDDEN` has to be set
+  when the directory is created. That is a few lines of `#[cfg(windows)]`, and the
+  Windows CI leg is exactly the thing that would catch it being wrong. The existing
+  `.dossier/` almost certainly has the same gap today.
 - **The fold must read both roots.** `Journal::new` takes a single directory
   today. Sibling subdirectories under one parent is the neater shape, if
   Syncthing is happy sharing a parent between two folders — worth verifying.
@@ -345,6 +374,60 @@ exactly why the user wants `ds` to configure it rather than doing it by hand
 - **The satellite** writes as `desk-lab` in the `enrich` namespace from the same
   machine as `desk-core`; it presumably shares the desk's send folder rather than
   getting a third. A detail, not a blocker.
+
+### Reviews: the target is *zero* surfaces, not five
+
+*User: "I would prefer a real simplification of them much further than how it has
+settled now."*
+
+Look at what the five actually are — orphans, missing, duplicates, succession,
+integrity — and four of them are **one shape**: the mapping between documents and
+files is not a clean bijection.
+
+| v2 tab | What it really is |
+|---|---|
+| Orphans | a file with no document |
+| Missing | a document with no file |
+| Duplicates | two things that should be one |
+| Integrity | a reference or op that does not resolve |
+| Succession | *not* a discrepancy — a **suggestion** |
+
+The first four are "things that do not line up", and **that surface already exists
+and is called `ds status`** — §5 already specifies it as a router where every line
+names the verb that fixes it. The five tabs are v2's way of doing what `ds status`
+was designed to replace; they were carried across §8's table without anyone noticing
+the overlap.
+
+So the proposal is:
+
+- **A status line is a filter.** Press "3 missing files" and the one list filters to
+  those three. No tab, no second surface, no navigation — the list you already know
+  how to drive, showing a different subset. This composes with the chain-head rule
+  and the selection idea for free: filter, multi-select, apply the verb.
+- **Succession is not a surface at all.** It is a suggestion, so it belongs *on the
+  record* — "this looks like it replaces X — `s` to accept" — where the thing it is
+  about already is.
+- **Integrity is CLI-only.** Journal anomalies are rare and diagnostic; they belong
+  in `ds status` output, not in a surface a phone has to render.
+
+Net: five surfaces become **zero**, and the merge verb (below) lands on a selection
+in the list rather than in a tab.
+
+**Not yet checked:** whether each of the five really does reduce to a filter
+expressible over the one list, one at a time, against what v2's code actually did.
+That check is the next piece of work on this question.
+
+### Small settled items
+
+- **Showing superseded documents is a filter toggle, not a command** (user: *"Show
+  superseded files?"*). It joins "expiring only" and "search scan text" in the
+  existing filter group — zero new machinery, and consistent with the two toggles
+  already there.
+- **The search prompt stays `>`** (user), with the door open. The agreed direction
+  if it is reopened: a **search glyph normally, switching to `>` when the leader is
+  pressed**, so the prompt names the question the way a minibuffer does. Check the
+  glyph renders in Termux's font before committing to one — that belongs with the
+  other device checks.
 
 ### Still unanswered
 
