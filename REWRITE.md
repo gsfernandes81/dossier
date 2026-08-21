@@ -636,6 +636,33 @@ until the cutover step the user personally green-lights.
       and `Doc.superseded` — which is a fact about the *collection*.
     - Detail gained no selection, deliberately: `ctrl+e` names its field, so the
       §5b verb-pair change still waits on the cursor it needs.
+  - **Slice 2 done (2026-08-21) — the record gets a selector, and editing stops
+    being a control key.** `ctrl+e` is retired. `detail::rows` is one list that
+    the selector walks and the renderer draws, `↑`/`↓` move it, and `e` edits the
+    row it is on.
+    - **A which-key panel for the `ctrl` tier is impossible on the phone**, which
+      is what retired it: Termux latches `CTRL` in its own UI layer, so the app
+      receives one finished `ctrl+e` event and never a moment between the
+      modifier and the letter. That tier can only ever be memorised. A selector
+      plus a bare letter can be *shown*, so that is the shape the record uses.
+    - **Search is locked out entirely while a record is focused**, which is what
+      frees bare letters to be verbs there (§4.5 invariant 1 scopes find-fast to
+      browse). `↑`/`↓` move the selector and never flick between documents: on 47
+      columns a list cursor moving behind an open record is unreadable.
+  - **Slice 3 done (2026-08-21) — every simple field, through the one verb.**
+    `name`, `expiry`, `issued`, `tags` and `notes` are `edit::Field` variants; the
+    enum is the seam, so adding one makes the compiler name every `match` that
+    has to learn about it.
+    - **An editable field is always a row, even when it is empty.** A row that
+      appeared only once it had a value could never be the row you use to give it
+      one. Rows this build cannot change stay conditional.
+    - `validate` returns a `serde_json::Value`, so **tags are typed as words and
+      stored as a list** — a stored `"a b"` would be one tag with a space in it,
+      which nothing would ever match. `name` is the one field that refuses an
+      empty buffer; every other one clears to an `unset`.
+    - Still unbuilt, and the largest hole in R4: **creating a document.** The
+      structured fields (`location`/`slot`, `bundles`, `renews`, files) need
+      pickers, not a text buffer, and are deliberately not `Field` variants.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs),
   `ds file` (manual + proposal-consuming cards, unfiled counter, exception triage per
   D11), `ds export` with manifest, `ds organize`.
@@ -663,6 +690,19 @@ strictly ordered; R6 can overlap R4/R5 once the adapter exists.
   before** — enforced by keeping all pre-cutover journals outside the Syncthing
   folder entirely (§6 R2), since anything created inside it syncs by default.
   Syncthing versioning verified on before cutover (existing status check).
+- **The two-folder send/receive arrangement is `ds`'s job to set up, not the
+  user's.** The pair of Syncthing folders and their send-only / receive-only
+  roles are configured **through `ds` against the Syncthing REST API**, never by
+  hand in the Syncthing web UI on each device. A hand-built arrangement is a
+  setup nobody can check, re-run, or restore after a device is re-paired — and
+  getting the direction backwards on one device is a data-loss shape, which is
+  exactly the class of step that should be a verb with a dry run rather than a
+  sequence of remembered clicks. **The arrangement itself is not yet specified**
+  (which folder holds what, and which device sends); write it down before
+  building it. Consequences to plan for: this is the first thing in the port that
+  *writes* Syncthing's config — today `ds` reads it, status only — so it needs an
+  API key with write access, must be idempotent, and must show what it would
+  change before it changes it.
 - The real files tree is untouched by every phase except user-approved
   `ds organize --apply` / `ds file` moves — same v2 guarantee, same rollback-safe
   rename (move file, then op; roll back the move if the append fails).

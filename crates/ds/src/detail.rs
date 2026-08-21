@@ -87,13 +87,20 @@ impl Row {
 /// The selector and the renderer both read this, which is the same rule the
 /// list's geometry follows: a hit test or a highlight that re-derives a layout
 /// disagrees with it at the first edge case.
+///
+/// **An editable field is always a row, even when it is empty.** A row that
+/// appeared only once it had a value could never be the row you use to give it
+/// one — the empty `—` is the affordance, not clutter. Rows this build cannot
+/// change stay conditional, because there is nothing to do with an absent one.
 #[must_use]
 pub fn rows(doc: &crate::Doc) -> Vec<Row> {
+    use crate::edit::Field;
     let mut rows = vec![
+        Row::Editable(Field::Name),
         Row::Fact("location"),
-        Row::Editable(crate::edit::Field::Expiry),
-        Row::Fact("issued"),
-        Row::Fact("tags"),
+        Row::Editable(Field::Expiry),
+        Row::Editable(Field::Issued),
+        Row::Editable(Field::Tags),
         Row::Fact("bundles"),
     ];
     if doc.files.is_empty() {
@@ -104,9 +111,7 @@ pub fn rows(doc: &crate::Doc) -> Vec<Row> {
     if doc.supersedes.is_some() {
         rows.push(Row::Fact("renews"));
     }
-    if !doc.notes.is_empty() {
-        rows.push(Row::Fact("notes"));
-    }
+    rows.push(Row::Editable(Field::Notes));
     rows
 }
 
@@ -123,10 +128,7 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
 
     let rows = rows(doc);
     let selected = model.record_cursor.min(rows.len().saturating_sub(1));
-    let mut lines = vec![
-        Line::styled(format!(" {}", truncate(&doc.name, inner)), theme.style(Tone::Title)),
-        Line::raw(""),
-    ];
+    let mut lines: Vec<Line> = Vec::new();
     // Where each row's lines start, so the pane can be scrolled to keep the
     // selection on screen without the renderer counting anything twice.
     let mut starts = Vec::with_capacity(rows.len());
@@ -162,46 +164,8 @@ fn render_row(
     theme: Theme,
 ) -> Vec<Line<'static>> {
     match row {
+        Row::Editable(what) => render_editable(what, doc, model, inner, theme),
         Row::Fact("location") => vec![field("location", &nonempty(doc.place()), inner, theme)],
-        // Expiry carries its standing in words next to the date: `2026-09-28`
-        // alone makes the reader do the arithmetic, and the whole point of this
-        // app is that nobody should have to.
-        //
-        // While it is being edited the label is lit, because the value on this
-        // row is the *stored* one and the one being typed is three rows down on
-        // the entry line. The mark is what says those two rows are about each
-        // other.
-        Row::Editable(crate::edit::Field::Expiry) => {
-            let status = model.status(doc);
-            let editing = model
-                .edit
-                .as_ref()
-                .is_some_and(|edit| edit.doc == doc.id && edit.field == crate::edit::Field::Expiry);
-            vec![Line::from(vec![
-                if editing { marked_label("expiry", theme) } else { label("expiry", theme) },
-                Span::raw(doc.expiry_date.clone().unwrap_or_else(|| "—".into())),
-                Span::raw("  "),
-                Span::styled(
-                    match status {
-                        Status::Expired => "! expired",
-                        Status::Soon => "~ expiring soon",
-                        Status::Ok => "  tracked",
-                        Status::Untracked if doc.superseded => "· superseded",
-                        Status::Untracked if doc.ignore_expiry => "· watch ignored",
-                        Status::Untracked => "· no expiry",
-                    }
-                    .to_string(),
-                    theme.status(status),
-                ),
-            ])]
-        }
-        Row::Fact("issued") => vec![field(
-            "issued",
-            &nonempty(doc.issue_date.clone().unwrap_or_default()),
-            inner,
-            theme,
-        )],
-        Row::Fact("tags") => vec![field("tags", &nonempty(doc.tags.join(" ")), inner, theme)],
         Row::Fact("bundles") => {
             vec![field("bundles", &nonempty(doc.bundles.join(" · ")), inner, theme)]
         }
@@ -239,8 +203,69 @@ fn render_row(
                 ),
             ])]
         }
-        Row::Fact("notes") => wrapped_field("notes", &doc.notes, inner, theme),
         Row::Fact(other) => vec![field(other, "—", inner, theme)],
+    }
+}
+
+/// The lines an editable field occupies.
+///
+/// Split out because these rows share a rule the others do not: **while one is
+/// being edited its label is lit.** The value on the row is the *stored* one and
+/// the one being typed is down on the entry line, so the mark is what says those
+/// two rows are about each other.
+fn render_editable(
+    what: crate::edit::Field,
+    doc: &crate::Doc,
+    model: &Model,
+    inner: usize,
+    theme: Theme,
+) -> Vec<Line<'static>> {
+    use crate::edit::Field;
+    let lit = model.edit.as_ref().is_some_and(|edit| edit.doc == doc.id && edit.field == what);
+    match what {
+        // The title, and the blank line under it. It carries no label, so being
+        // edited is marked on the name itself.
+        Field::Name => {
+            let mut style = theme.style(Tone::Title);
+            if lit {
+                style = style.add_modifier(ratatui::style::Modifier::REVERSED);
+            }
+            vec![Line::styled(format!(" {}", truncate(&doc.name, inner)), style), Line::raw("")]
+        }
+        // Expiry carries its standing in words next to the date: `2026-09-28`
+        // alone makes the reader do the arithmetic, and the whole point of this
+        // app is that nobody should have to.
+        Field::Expiry => {
+            let status = model.status(doc);
+            vec![Line::from(vec![
+                head("expiry", lit, theme),
+                Span::raw(doc.expiry_date.clone().unwrap_or_else(|| "—".into())),
+                Span::raw("  "),
+                Span::styled(
+                    match status {
+                        Status::Expired => "! expired",
+                        Status::Soon => "~ expiring soon",
+                        Status::Ok => "  tracked",
+                        Status::Untracked if doc.superseded => "· superseded",
+                        Status::Untracked if doc.ignore_expiry => "· watch ignored",
+                        Status::Untracked => "· no expiry",
+                    }
+                    .to_string(),
+                    theme.status(status),
+                ),
+            ])]
+        }
+        Field::Issued => vec![labelled(
+            "issued",
+            &nonempty(doc.issue_date.clone().unwrap_or_default()),
+            inner,
+            theme,
+            lit,
+        )],
+        Field::Tags => {
+            vec![labelled("tags", &nonempty(doc.tags.join(" ")), inner, theme, lit)]
+        }
+        Field::Notes => wrapped_field("notes", &nonempty(doc.notes.clone()), inner, theme, lit),
     }
 }
 
@@ -271,20 +296,73 @@ fn marked_label(text: &str, theme: Theme) -> Span<'static> {
     )
 }
 
+/// A field's label, lit when that field is the one being edited.
+fn head(name: &str, lit: bool, theme: Theme) -> Span<'static> {
+    if lit {
+        marked_label(name, theme)
+    } else {
+        label(name, theme)
+    }
+}
+
 /// A one-line field: label, then the value cut to whatever the pane leaves.
 fn field(name: &str, value: &str, inner: usize, theme: Theme) -> Line<'static> {
+    labelled(name, value, inner, theme, false)
+}
+
+/// [`field`], for a row that can be the one under edit.
+fn labelled(name: &str, value: &str, inner: usize, theme: Theme, lit: bool) -> Line<'static> {
     let value_cols = inner.saturating_sub(LABEL_COLS).max(8);
-    Line::from(vec![label(name, theme), Span::raw(truncate(value, value_cols))])
+    Line::from(vec![head(name, lit, theme), Span::raw(truncate(value, value_cols))])
 }
 
 /// A field whose value is free text: wrapped, with continuations **hanging under
 /// the value column** so the field still reads as one thing.
-fn wrapped_field(name: &str, value: &str, inner: usize, theme: Theme) -> Vec<Line<'static>> {
+fn wrapped_field(
+    name: &str,
+    value: &str,
+    inner: usize,
+    theme: Theme,
+    lit: bool,
+) -> Vec<Line<'static>> {
     let value_cols = inner.saturating_sub(LABEL_COLS).max(8);
     let mut lines = Vec::new();
     for (i, chunk) in wrap(value, value_cols).into_iter().enumerate() {
-        let head = if i == 0 { label(name, theme) } else { Span::raw(" ".repeat(LABEL_COLS + 1)) };
-        lines.push(Line::from(vec![head, Span::raw(chunk)]));
+        let first =
+            if i == 0 { head(name, lit, theme) } else { Span::raw(" ".repeat(LABEL_COLS + 1)) };
+        lines.push(Line::from(vec![first, Span::raw(chunk)]));
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::edit::Field;
+
+    /// **An empty editable field is still a row.** A row that appeared only once
+    /// it had a value could never be the row you use to give it one — this is
+    /// the whole affordance for adding notes or an issue date, so it has to hold
+    /// for a document with none of them.
+    #[test]
+    fn every_editable_field_has_a_row_even_when_it_is_empty() {
+        let model = crate::app::tests::model();
+        let doc = model.current().expect("a document");
+        assert!(doc.notes.is_empty() && doc.tags.is_empty() && doc.issue_date.is_none());
+
+        let rows = rows(doc);
+        for field in [Field::Name, Field::Expiry, Field::Issued, Field::Tags, Field::Notes] {
+            assert!(rows.contains(&Row::Editable(field)), "{field:?} has no row: {rows:?}");
+        }
+    }
+
+    /// The selector's hint follows the row: editable rows offer the verb, and
+    /// the ones this build cannot change say nothing rather than offering a key
+    /// that would refuse.
+    #[test]
+    fn only_the_editable_rows_carry_the_verb() {
+        assert_eq!(Row::Editable(Field::Notes).verb(), Some("e edit"));
+        assert_eq!(Row::Fact("location").verb(), None);
+        assert_eq!(Row::File(0).verb(), None);
+    }
 }

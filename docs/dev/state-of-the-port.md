@@ -14,12 +14,13 @@ Last true as of **2026-08-21**, branch `rust-rewrite`.
 
 ## 1 · Where the port stands
 
-**R3 is feature-complete, and R4 slice 1 has landed.** `crates/journal`
+**R3 is feature-complete, and R4's first three slices have landed.** `crates/journal`
 implements §3's format — op model, fold, compaction, torn tails, watermark
 defence — and `crates/ds` is a finder on top of it: browse, fuzzy search,
 `ctrl+t` content search, the detail surface, `ds status` with the Syncthing REST
-check, `ds open`, and now `ds init` plus one editable field. The phase list and
-each slice's notes are in REWRITE.md; don't duplicate them here.
+check, `ds open`, and now `ds init` plus **every simple field of a record made
+editable through one verb**. The phase list and each slice's notes are in
+REWRITE.md; don't duplicate them here.
 
 Three facts that shape what the rest of R4 costs:
 
@@ -108,9 +109,9 @@ Each is recorded where it belongs; the link is the point of the row.
   somewhere to land. Drawn in `docs/dev/mockups/minibuffer.py`.
 - **The verb pair revision** — `Enter` drills, `Esc` peels, arrows move the
   query cursor. **Approved and deliberately deferred**; the plan is REWRITE-UI
-  §5b and the amendment markers are on REWRITE.md §4.5 invariants 2 and 6. It
-  needs a selection on the detail surface — **which R4 slice 1 did not build**,
-  because `ctrl+e` names its own field and needed no cursor. See the row below.
+  §5b and the amendment markers are on REWRITE.md §4.5 invariants 2 and 6. Its
+  one prerequisite — a selection on the detail surface — **now exists** (slice
+  2), so what is left is the key routing and the Home/End resolution.
 - **The arrow modifier tier** (`ctrl`/`alt` + arrows) — reserved, unbound, and
   now unlikely to be used: the same argument that retired `ctrl+e` applies to it.
   Reachable by thumb, teachable by nothing.
@@ -123,15 +124,27 @@ Each is recorded where it belongs; the link is the point of the row.
   of the UI are doing.
 - **The succession reversal** on the filing card — deferred until the user
   confirms it is a real pain point. Do not build it speculatively.
+- **Creating a document.** The largest hole in R4: nothing in the Rust build
+  makes a new `doc`, only edits ones the fold already knows. It needs an id
+  scheme, a create flow (`space` → `n` is the obvious spelling) and a
+  name-first rule, since `name` is the one field `validate` will not leave
+  empty. Until it exists the Rust build cannot own the store.
 - **The rest of R4**: undo (inverse ops — the journal is the history, §3.3),
-  slots with insert-and-shift, supersession, bundle membership, settings ops,
-  `ds reset`. Each is a field or two on the same surface and another draft down
-  the same channel; none needs new machinery.
-- **A selection on the detail surface.** Slice 1 deliberately did not build one
-  — `ctrl+e` names its field, so no cursor is required — but the §5b verb-pair
-  change still needs it, and so does any surface with more than a handful of
-  editable fields. Whoever builds it also has to answer the bare-letter question
-  (`s`/`b`/`u` per §2) it collides with.
+  slots with insert-and-shift, supersession, bundle membership, file
+  attach/detach/primary, delete, settings ops, `ds reset`. The text fields are
+  done; **what is left are the structured ones**, and each of those needs a
+  picker rather than a text buffer — a slot move shifts its neighbours, and
+  `bundles`/`renews` are memberships of another entity, not values.
+- **Syncthing's two-folder send/receive arrangement, set up by `ds`.** The user
+  asked for this explicitly: the folder pair and their send-only / receive-only
+  roles get configured **from the `ds` side over the Syncthing REST API**, not by
+  hand in each device's web UI. The arrangement itself is unspecified — write it
+  down first. It is also the port's **first write to Syncthing's config** (the
+  REST client is read-only today, `syncthing.rs`), so it needs a write-capable
+  API key, idempotency, and a dry run. Recorded in REWRITE.md §7.
+- **Syncthing conflict files.** The journal is conflict-free by construction, so
+  `.sync-conflict-*` should never appear on it — but nothing notices if one does,
+  and the real files tree can still produce them. `ds status` is where that goes.
 - **Termux install notes.** The `termux.properties` minimum and recommended rows
   are written up in the mockups but not in any install doc.
 

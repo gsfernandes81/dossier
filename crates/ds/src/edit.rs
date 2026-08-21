@@ -39,14 +39,25 @@
 
 /// Which field is being edited.
 ///
-/// rust: an enum with one variant today, and deliberately so. It is the seam the
-/// rest of R4's fields arrive through — each one adds a variant and the compiler
-/// then names every `match` that has to learn about it, which is the whole
-/// reason to reach for an enum before there are two of anything.
+/// The seam R4's fields arrive through: each one adds a variant and the compiler
+/// names every `match` that has to learn about it.
+///
+/// **These are the record's simple fields — the ones whose whole value is what
+/// you type.** `location` and `slot` are not here because a slot move shifts its
+/// neighbours, and `bundles` and `renews` are not because they are memberships
+/// of another entity. Those need their own surfaces, not a text buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
+    /// What the document is called. The only field that may not be empty.
+    Name,
     /// The expiry date, ISO `YYYY-MM-DD`.
     Expiry,
+    /// The issue date, same form.
+    Issued,
+    /// Flat tags, written as a list (§8 — hierarchical tags are dropped).
+    Tags,
+    /// Free text.
+    Notes,
 }
 
 impl Field {
@@ -54,7 +65,11 @@ impl Field {
     #[must_use]
     pub fn journal_field(self) -> &'static str {
         match self {
+            Field::Name => "name",
             Field::Expiry => "expiry_date",
+            Field::Issued => "issue_date",
+            Field::Tags => "tags",
+            Field::Notes => "notes",
         }
     }
 
@@ -66,7 +81,11 @@ impl Field {
     #[must_use]
     pub fn prompt(self) -> &'static str {
         match self {
+            Field::Name => "name",
             Field::Expiry => "expiry",
+            Field::Issued => "issued",
+            Field::Tags => "tags",
+            Field::Notes => "notes",
         }
     }
 
@@ -80,19 +99,32 @@ impl Field {
     /// # Errors
     /// The message to put on the status band, phrased as the correction rather
     /// than the complaint.
-    pub fn validate(self, buffer: &str) -> Result<Option<String>, String> {
+    pub fn validate(self, buffer: &str) -> Result<Option<serde_json::Value>, String> {
         let value = buffer.trim();
         if value.is_empty() {
-            return Ok(None);
+            // A name is the one field with nothing sensible to fall back to: a
+            // document called nothing cannot be found, listed or talked about.
+            return if self == Field::Name {
+                Err("a document needs a name".into())
+            } else {
+                Ok(None)
+            };
         }
         match self {
-            Field::Expiry => {
+            Field::Expiry | Field::Issued => {
                 if is_iso_date(value) {
-                    Ok(Some(value.to_string()))
+                    Ok(Some(value.into()))
                 } else {
                     Err(format!("{value:?} is not a date — write it as YYYY-MM-DD"))
                 }
             }
+            // Whitespace-separated, and written as a **list** because that is
+            // what the fold reads. A stored `"a b"` would be one tag with a
+            // space in it, which nothing would ever match.
+            Field::Tags => {
+                Ok(Some(value.split_whitespace().map(str::to_string).collect::<Vec<_>>().into()))
+            }
+            Field::Name | Field::Notes => Ok(Some(value.into())),
         }
     }
 }

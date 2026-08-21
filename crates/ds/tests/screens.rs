@@ -639,17 +639,26 @@ fn the_record_selector_is_drawn_where_it_is() {
     let mut m = model(47, 24);
     update(&mut m, Msg::OpenDetail);
 
-    let first = modifier_columns(&mut m, 47, 24, 3, ratatui::style::Modifier::REVERSED);
+    // It opens on the name, which is the first row and now an editable one.
+    let first = modifier_columns(&mut m, 47, 24, 1, ratatui::style::Modifier::REVERSED);
     assert!(!first.is_empty(), "the top row of the record is highlighted");
 
     update(&mut m, Msg::Move(ds::app::Motion::Down));
     assert!(
-        modifier_columns(&mut m, 47, 24, 3, ratatui::style::Modifier::REVERSED).is_empty(),
+        modifier_columns(&mut m, 47, 24, 1, ratatui::style::Modifier::REVERSED).is_empty(),
         "and it left the row above"
     );
-    let second = modifier_columns(&mut m, 47, 24, 4, ratatui::style::Modifier::REVERSED);
+    let second = modifier_columns(&mut m, 47, 24, 3, ratatui::style::Modifier::REVERSED);
     assert!(!second.is_empty(), "for the next one down");
 
     let lines = screen(&mut m, 47, 24);
-    assert!(lines[4].contains("expiry"), "which is the editable row: {:?}", lines[4]);
+    assert!(lines[3].contains("location"), "which is the row below the name: {:?}", lines[3]);
+
+    // And the blank line under the name is never highlighted — a reversed empty
+    // row would read as a second selection.
+    update(&mut m, Msg::Move(ds::app::Motion::Up));
+    assert!(
+        modifier_columns(&mut m, 47, 24, 2, ratatui::style::Modifier::REVERSED).is_empty(),
+        "the blank under the name stays blank"
+    );
 }

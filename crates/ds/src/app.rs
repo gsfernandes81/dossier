@@ -697,8 +697,16 @@ impl Model {
             self.flash = Some("nothing to edit".into());
             return Effect::Redraw;
         };
+        // Seeded with what is stored, so an edit starts as a correction rather
+        // than a re-typing. Tags collapse to the space-separated spelling
+        // `Field::validate` reads back, which is the one place the list form and
+        // the typed form have to agree.
         let current = match field {
+            crate::edit::Field::Name => Some(doc.name.clone()),
             crate::edit::Field::Expiry => doc.expiry_date.clone(),
+            crate::edit::Field::Issued => doc.issue_date.clone(),
+            crate::edit::Field::Tags => Some(doc.tags.join(" ")),
+            crate::edit::Field::Notes => Some(doc.notes.clone()),
         };
         self.edit = Some(crate::edit::Edit::new(doc.id.clone(), field, current.as_deref()));
         self.sheet = None;
@@ -1273,6 +1281,68 @@ pub(crate) mod tests {
         assert_eq!(m.flash.as_deref(), Some("saved"));
     }
 
+    /// **Every simple field goes through the one verb**, seeded with what is
+    /// stored — an edit starts as a correction, not a re-typing.
+    #[test]
+    fn each_editable_field_opens_on_its_stored_value() {
+        for (field, expected) in [
+            (crate::edit::Field::Name, "COC Certificate"),
+            (crate::edit::Field::Expiry, "2026-01-01"),
+            (crate::edit::Field::Issued, ""),
+            (crate::edit::Field::Tags, ""),
+            (crate::edit::Field::Notes, ""),
+        ] {
+            let mut m = writable();
+            update(&mut m, Msg::EditField(field));
+            let edit = m.edit.as_ref().expect("the editor opened");
+            assert_eq!(edit.buffer, expected, "{field:?} seeds from the store");
+            assert!(!edit.dirty(), "and opening is not itself an edit");
+        }
+    }
+
+    /// **Tags are typed as words and stored as a list.** The space-separated
+    /// spelling is the only form a text buffer can offer; a stored `"a b"` would
+    /// be one tag with a space in it, which nothing would ever match.
+    #[test]
+    fn tags_are_typed_with_spaces_and_stored_as_a_list() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Tags));
+        for c in "marine  ticket".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![journal::Draft::set(
+                "doc",
+                "coc",
+                "tags",
+                serde_json::json!(["marine", "ticket"])
+            )])
+        );
+    }
+
+    /// **A name may not be emptied.** Every other field clears to an `unset`;
+    /// a document called nothing cannot be found, listed or talked about, so the
+    /// refusal is the only one `validate` makes on content rather than form.
+    #[test]
+    fn a_name_cannot_be_cleared_but_the_others_can() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Name));
+        for _ in 0.."COC Certificate".len() {
+            update(&mut m, Msg::Backspace);
+        }
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "nothing was appended");
+        assert!(m.flash.is_some(), "and it said why");
+        assert!(m.edit.is_some(), "with the editor still open on the empty buffer");
+
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Notes));
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![journal::Draft::unset("doc", "coc", "notes")])
+        );
+    }
+
     /// **An empty buffer clears the field with an `unset`**, never a stored
     /// empty string — so one field exercises both halves of §3.2's contract.
     #[test]
@@ -1730,7 +1800,7 @@ pub(crate) mod tests {
         let rows = crate::detail::rows(m.current().unwrap());
         let expiry = rows
             .iter()
-            .position(|row| matches!(row, crate::detail::Row::Editable(_)))
+            .position(|row| matches!(row, crate::detail::Row::Editable(crate::edit::Field::Expiry)))
             .expect("the record has an editable row");
 
         // A row that is not editable yet.
@@ -1760,7 +1830,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::OpenDetail);
         m.record_cursor = crate::detail::rows(m.current().unwrap())
             .iter()
-            .position(|row| matches!(row, crate::detail::Row::Editable(_)))
+            .position(|row| matches!(row, crate::detail::Row::Editable(crate::edit::Field::Expiry)))
             .unwrap();
 
         update(&mut m, Msg::Char(' '));
