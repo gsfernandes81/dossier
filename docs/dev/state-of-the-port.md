@@ -8,28 +8,39 @@ restate them — it exists to say *where the port is*, *what the phone actually
 is*, *what is still open*, and *which mistakes have already been paid for*.
 If something here contradicts a spec, the spec wins and this file is stale.
 
-Last true as of **2026-08-20**, branch `rust-rewrite`.
+Last true as of **2026-08-21**, branch `rust-rewrite`.
 
 ---
 
 ## 1 · Where the port stands
 
-**R3 is feature-complete.** `crates/journal` implements §3's format — op model,
-fold, compaction, torn tails, watermark defence — and `crates/ds` is a read-only
-finder on top of it: browse, fuzzy search, `ctrl+t` content search, the detail
-surface, `ds status` with the Syncthing REST check, and `ds open`. The phase
-list and each slice's notes are in REWRITE.md; don't duplicate them here.
+**R3 is feature-complete, and R4 slice 1 has landed.** `crates/journal`
+implements §3's format — op model, fold, compaction, torn tails, watermark
+defence — and `crates/ds` is a finder on top of it: browse, fuzzy search,
+`ctrl+t` content search, the detail surface, `ds status` with the Syncthing REST
+check, `ds open`, and now `ds init` plus one editable field. The phase list and
+each slice's notes are in REWRITE.md; don't duplicate them here.
 
-Two facts that shape what R4 costs:
+Three facts that shape what the rest of R4 costs:
 
-- **The write path is built and unused.** `journal::writer` (append, HLC,
-  one-process-per-writer lock, torn-tail repair) and `journal::compact` are
-  tested and green. Nothing in `crates/ds` calls either — `ds` touches only
-  `Journal`, `Load`, `Fold` and `store::Error`. **R4 is wiring an existing write
-  path to surfaces, not inventing one.**
-- **The binary has two subcommands**, `status` and `open`, plus the TUI. Every
-  other verb in REWRITE.md's module map — `init`, `reset`, `file`, `export`,
-  `organize`, the review queue — is unbuilt.
+- **The write path is wired, and it is the shape the rest of R4 plugs into.**
+  An edit becomes `Effect::Append(Vec<Draft>)`; a thread that owns the `Writer`
+  performs it — lock, append, fsync — then re-folds in memory and posts the new
+  store back as `Msg::Saved`. Undo is another `Vec<Draft>` down the same
+  channel, and compaction-on-clean-exit is that thread's shutdown work. Nothing
+  else in the program can reach the `Writer`.
+- **The writer opens on the first append, never at launch.** `Writer::open`
+  creates the journal directory and the writer's file if absent, and §7 forbids
+  `.dossier/journal/` existing in the synced tree before cutover — so an eager
+  open would create a journal merely by running `ds`, and would litter
+  `docs/dev/demo` for the same reason. **Do not "fix" this into an eager open.**
+  Its one cost is that a journal another `ds` holds is discovered at the first
+  save rather than at launch.
+- **The binary has three subcommands**, `status`, `open` and `init`, plus the
+  TUI. Every other verb in REWRITE.md's module map — `reset`, `file`, `export`,
+  `organize`, the review queue — is unbuilt. `ds init` so far asks only for the
+  device name and the root; the Syncthing key and the Termux checks §4.1 wants
+  are one more `ask` each.
 
 The Python package in `dossier/` is still the working v2 app and stays until R6
 guts it. The Rust work has not touched it.
@@ -80,6 +91,10 @@ Each is recorded where it belongs; the link is the point of the row.
 | Tones on the band differ from tones off it | `Theme::on_band` |
 | Three verb tiers: a key / a leader chord / a command | REWRITE-UI §5a |
 | Twelve-documents-at-45×28 is superseded by the measured sizes | swept through `layout.rs`, `find.rs`, `screens.rs`, REWRITE-UI |
+| The writer opens lazily, on the first append — never at launch | `main.rs::writer_session` |
+| A save re-folds; it never patches the `Store` in place | `main.rs::write_loop` |
+| The edit verb is `ctrl+e`, not a bare letter — the list has focus in the split | `input.rs` |
+| Editing is off, with a reason, rather than absent — `WriteState` | `app.rs` |
 
 ### Open — needs the user, or needs a phase
 
@@ -91,7 +106,8 @@ Each is recorded where it belongs; the link is the point of the row.
 - **The verb pair revision** — `Enter` drills, `Esc` peels, arrows move the
   query cursor. **Approved and deliberately deferred**; the plan is REWRITE-UI
   §5b and the amendment markers are on REWRITE.md §4.5 invariants 2 and 6. It
-  needs a selection on the detail surface, which R4 builds.
+  needs a selection on the detail surface — **which R4 slice 1 did not build**,
+  because `ctrl+e` names its own field and needed no cursor. See the row below.
 - **The arrow modifier tier** (`ctrl`/`alt` + arrows) — reserved, unbound. R4
   will want it more than Find does. Binding anything there needs modifier guards
   on the arrow arms in `input.rs`.
@@ -101,6 +117,15 @@ Each is recorded where it belongs; the link is the point of the row.
   of the UI are doing.
 - **The succession reversal** on the filing card — deferred until the user
   confirms it is a real pain point. Do not build it speculatively.
+- **The rest of R4**: undo (inverse ops — the journal is the history, §3.3),
+  slots with insert-and-shift, supersession, bundle membership, settings ops,
+  `ds reset`. Each is a field or two on the same surface and another draft down
+  the same channel; none needs new machinery.
+- **A selection on the detail surface.** Slice 1 deliberately did not build one
+  — `ctrl+e` names its field, so no cursor is required — but the §5b verb-pair
+  change still needs it, and so does any surface with more than a handful of
+  editable fields. Whoever builds it also has to answer the bare-letter question
+  (`s`/`b`/`u` per §2) it collides with.
 - **Termux install notes.** The `termux.properties` minimum and recommended rows
   are written up in the mockups but not in any install doc.
 
@@ -125,6 +150,15 @@ Each is recorded where it belongs; the link is the point of the row.
 - **`«class|text»` markup does not nest**, and class names may contain digits
   only after the first letter. A nested or unmatched tag leaves raw markup in
   the line and blows up the width check somewhere unrelated.
+- **Pedantic clippy fires on test helpers too.** A `Box<Store>` returned from a
+  test fixture failed `unnecessary_box_returns` after the whole suite was green
+  — `cargo test` and `cargo clippy --all-targets` are different gates and the
+  second one is CI's.
+- **`dirs` ignores the environment on Windows.** It resolves the config and data
+  directories through the Known Folder API, so `XDG_CONFIG_HOME`/`LOCALAPPDATA`
+  do not sandbox it there. Harmless while `ds` only read config; a writing test
+  would have written the CI runner's real one. `DS_CONFIG_DIR` and
+  `DS_STATE_DIR` are the seam — use them in any test that writes.
 - **Measure the phone; do not reason about it.** Three findings in a row were
   asserted from documentation and turned out wrong — the CTRL mechanic twice,
   and the pane size twice. Tag a claim as unverified rather than writing it as

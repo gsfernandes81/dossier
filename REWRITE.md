@@ -616,6 +616,26 @@ until the cutover step the user personally green-lights.
       namespace costs nothing until something asks for it.
 - **R4 — Editing**: detail editing via ops, undo (inverse ops), slots with
   insert-and-shift, supersession, bundle membership, settings ops, `ds init`/`reset`.
+  - **Slice 1 done (2026-08-21) — the write path, end to end.** `ds init` names
+    the device (the first half of its writer id), and `ctrl+e` on a record edits
+    the expiry: a `set` when the date parses, an **`unset`** when the buffer is
+    empty, so one field proves both halves of §3.2.
+    - **The `Writer` is opened on the first append, never at launch.**
+      `Writer::open` creates the journal directory and the writer's file when
+      they are absent, and §7 forbids `.dossier/journal/` existing inside the
+      synced tree before cutover — so an eager open would create a journal in a
+      Syncthing folder merely by running `ds`. `ds init` does not create it
+      either, and says so. The cost, named rather than hidden: a journal another
+      process holds is discovered at the first save, with the typing intact.
+    - **Lock, append, fsync and re-fold all run on the writer's own thread**
+      (invariant 7). That thread owns the `Writer` and is reachable only through
+      a channel, which is how "one process, one writer" is spelled in the type
+      system rather than in a comment. A save re-folds the journal's lines in
+      memory and posts a new `Store` back; it never patches the old one, because
+      a patch would have to re-implement LWW, the shelf sort, watch membership
+      and `Doc.superseded` — which is a fact about the *collection*.
+    - Detail gained no selection, deliberately: `ctrl+e` names its field, so the
+      §5b verb-pair change still waits on the cursor it needs.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs),
   `ds file` (manual + proposal-consuming cards, unfiled counter, exception triage per
   D11), `ds export` with manifest, `ds organize`.
