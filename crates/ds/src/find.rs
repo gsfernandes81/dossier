@@ -614,17 +614,24 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
     if model.edit.is_some() {
         vec!["⏎ save", "esc discard"]
     } else if model.detail {
-        // `^e` appears only when this session can actually write — a hint is
-        // shown for something that works, never for something that will only
-        // explain why it did not.
+        // The record's hints **follow the selector**: the verb is shown when the
+        // row under it has one and this session can actually write. A hint for a
+        // key that does nothing on *this* row is worse than no hint, and it is
+        // what a per-field control key forced — one key advertised everywhere,
+        // working in one place.
+        let verb = model.write.ready().then(|| selected_row(model)).flatten();
         let mut hints = vec!["◀ back", "⏎ open file"];
-        if model.write.ready() {
-            hints.push("^e expiry");
-        }
+        hints.extend(verb.and_then(crate::detail::Row::verb));
         hints
     } else {
         vec!["⏎ open", "^x expiry", "^t scans"]
     }
+}
+
+/// The record row the selector is on, if a record is open at all.
+fn selected_row(model: &Model) -> Option<crate::detail::Row> {
+    let rows = crate::detail::rows(model.current()?);
+    rows.get(model.record_cursor.min(rows.len().saturating_sub(1))).copied()
 }
 
 /// Fit as many hints as the room allows, **dropping them one at a time from the

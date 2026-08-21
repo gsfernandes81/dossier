@@ -47,6 +47,8 @@ pub enum Act {
     Scans,
     /// Drop every filter at once.
     Clear,
+    /// Edit the record row the selector is on.
+    Edit,
     /// Leave.
     Quit,
 }
@@ -77,6 +79,16 @@ const fn item(key: char, label: &'static str, act: Act) -> Item {
 #[must_use]
 pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
     match group {
+        // The top level is contextual: an open record adds the verbs that act
+        // on it. This is the whole reason the record needs no control keys —
+        // `e` is a bare letter *and* it can be read off the sheet, which a
+        // `ctrl+`combination never can (Termux latches CTRL in its own UI, so
+        // the app never sees a moment between the modifier and the letter).
+        None if model.detail => {
+            let mut top = vec![Item { accel: "e", ..item('e', "edit this row", Act::Edit) }];
+            top.push(item('q', "quit", Act::Quit));
+            top
+        }
         None => vec![item('f', "filter", Act::Enter('f')), item('q', "quit", Act::Quit)],
         Some('f') => vec![
             Item {

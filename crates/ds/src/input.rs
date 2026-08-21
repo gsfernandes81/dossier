@@ -67,13 +67,6 @@ fn key_msg(key: KeyEvent) -> Option<Msg> {
         // A *control* letter and not a bare one, deliberately. Detail may bind
         // letters (REWRITE-UI.md §2), but detail is not always what has focus:
         // on a wide terminal the record is a split beside the list and the list
-        // still owns the keyboard, where invariant 1 forbids letter bindings
-        // outright — and even under a pushed record a printable still reaches
-        // the query, so a bare `e` would open the editor halfway through typing
-        // "expired". `ctrl+e` means the same thing at every width, and the
-        // phone delivers it: Termux's `CTRL` latches and composes with IME
-        // letters (measured in R0.2, not assumed).
-        KeyCode::Char('e') if ctrl => Some(Msg::EditField(crate::edit::Field::Expiry)),
         KeyCode::Char('t') if ctrl => Some(Msg::ToggleScans),
         KeyCode::Char('x') if ctrl => Some(Msg::ToggleExpiring),
         KeyCode::Esc => Some(Msg::Esc),
@@ -165,17 +158,22 @@ mod tests {
     /// bare one because a bare letter is search text everywhere the list has
     /// focus — which, on a wide terminal, includes the moment the record is
     /// open beside it.
+    /// **Editing is a bare letter on the record, never a control key.**
+    ///
+    /// `ctrl+e` existed for one slice and was retired. Termux latches `CTRL` in
+    /// its own UI layer, so the app never sees the modifier go down — the
+    /// combination arrives as one finished key event, and there is no moment at
+    /// which the leader sheet could offer what follows it. A tier that can only
+    /// be memorised is the wrong place for a verb, so `e` on the record's
+    /// selected row does it instead and the sheet can teach it.
     #[test]
-    fn the_edit_verb_is_a_control_letter() {
+    fn editing_is_not_behind_a_control_key() {
         assert_eq!(
             to_msg(&press(KeyCode::Char('e'), KeyModifiers::CONTROL)),
-            Some(Msg::EditField(crate::edit::Field::Expiry))
+            None,
+            "ctrl+e is nothing; the app decides what `e` means by surface"
         );
-        assert_eq!(
-            to_msg(&press(KeyCode::Char('e'), KeyModifiers::NONE)),
-            Some(Msg::Char('e')),
-            "and a bare `e` is still search text"
-        );
+        assert_eq!(to_msg(&press(KeyCode::Char('e'), KeyModifiers::NONE)), Some(Msg::Char('e')));
     }
 
     /// Control combinations are verbs, and `ctrl+c` is always the exit.

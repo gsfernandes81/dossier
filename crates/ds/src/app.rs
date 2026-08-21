@@ -333,6 +333,11 @@ pub struct Model {
     pub keyboard_hint: bool,
     /// The leader sheet, when it is open.
     pub sheet: Option<SheetState>,
+    /// Which row of the open record the selector is on ([`crate::detail::rows`]).
+    ///
+    /// Zeroed whenever the record opens or changes document, so drilling in
+    /// always starts at the top rather than wherever the last record left it.
+    pub record_cursor: usize,
     /// The field being edited, when one is (R4).
     pub edit: Option<crate::edit::Edit>,
     /// Whether this session can write, and why not when it cannot.
@@ -371,6 +376,7 @@ impl Model {
             mouse_on: true,
             keyboard_hint: false,
             sheet: None,
+            record_cursor: 0,
             edit: None,
             write: WriteState::default(),
             count_zone: Zone::default(),
@@ -604,7 +610,51 @@ impl Model {
                 self.requery();
                 Effect::Redraw
             }
+            crate::sheet::Act::Edit => {
+                self.sheet = None;
+                self.record_verb('e')
+            }
             crate::sheet::Act::Quit => Effect::Quit,
+        }
+    }
+
+    /// Move the record's selector. The same motions the list understands, over
+    /// a much shorter list, so paging is clamped rather than wrapped.
+    fn move_record(&mut self, motion: Motion) {
+        let Some(doc) = self.current() else { return };
+        let last = crate::detail::rows(doc).len().saturating_sub(1);
+        self.record_cursor = match motion {
+            Motion::Up => self.record_cursor.saturating_sub(1),
+            Motion::Down => (self.record_cursor + 1).min(last),
+            Motion::PageUp | Motion::Home => 0,
+            Motion::PageDown | Motion::End => last,
+        };
+    }
+
+    /// A bare letter on the record surface.
+    ///
+    /// **`e` edits the row you are on**, which is why this surface needs no
+    /// control keys: one verb covers every field, and the selector says which.
+    /// A `ctrl+`combination could never be taught — Termux latches `CTRL` in its
+    /// own UI, so the app sees only the finished keystroke and has no moment to
+    /// offer what follows it.
+    ///
+    /// An unknown letter says so rather than doing nothing: on this surface a
+    /// letter is a verb, and silence would read as a dropped keypress.
+    fn record_verb(&mut self, key: char) -> Effect {
+        let Some(doc) = self.current() else { return Effect::Idle };
+        let rows = crate::detail::rows(doc);
+        let row = rows.get(self.record_cursor.min(rows.len().saturating_sub(1))).copied();
+        match (key, row) {
+            ('e', Some(crate::detail::Row::Editable(field))) => self.open_edit(field),
+            ('e', Some(_)) => {
+                self.flash = Some("that row cannot be edited yet".into());
+                Effect::Redraw
+            }
+            _ => {
+                self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
+                Effect::Redraw
+            }
         }
     }
 
@@ -756,14 +806,23 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         Msg::Enter => model.activate(),
         Msg::OpenDetail => {
             model.detail = true;
+            model.record_cursor = 0;
             Effect::Redraw
         }
         Msg::CloseDetail => {
             model.detail = false;
             Effect::Redraw
         }
+        // **The record owns `↑`/`↓` while it is open.** They used to move the
+        // list cursor underneath it, so the record silently became a different
+        // document while you were reading it — unfollowable at 47 columns, and
+        // the reason this selector exists.
         Msg::Move(motion) => {
-            model.move_cursor(motion);
+            if model.detail {
+                model.move_record(motion);
+            } else {
+                model.move_cursor(motion);
+            }
             Effect::Redraw
         }
         Msg::Backspace => {
@@ -779,6 +838,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         // one is free — and mid-query it still types a space, which is what
         // multi-word searches need. That is the normal-vs-insert split without
         // modes: **the query is the mode.**
+        // **Search is a browse-surface verb** (invariant 1 scopes find-fast to
+        // it), so on the record a letter is free to be a verb — which is what
+        // lets this surface have keys at all without reaching for `ctrl`.
+        Msg::Char(' ') if model.detail => update(model, Msg::Leader),
+        Msg::Char(c) if model.detail => model.record_verb(c),
         Msg::Char(' ') if model.query.is_empty() => update(model, Msg::Leader),
         Msg::Char(c) => {
             model.query.push(c);
@@ -1606,6 +1670,110 @@ pub(crate) mod tests {
         assert_eq!(m.filter, Filter::All, "the count is not a button here");
         assert_eq!(update(&mut m, Msg::Tap { col: 3, row: 26 }), Effect::Idle);
         assert!(m.mouse_on, "and the field did not drop reporting either");
+    }
+
+    /// **The record owns `↑`/`↓` while it is open.** They used to move the list
+    /// cursor underneath it, so the record silently became a different document
+    /// while you were reading it — which at 47 columns is impossible to follow.
+    #[test]
+    fn arrows_move_the_record_selector_and_not_the_list() {
+        let mut m = model();
+        let before = m.cursor;
+        update(&mut m, Msg::OpenDetail);
+        assert_eq!(m.record_cursor, 0, "drilling in starts at the top");
+
+        update(&mut m, Msg::Move(Motion::Down));
+        update(&mut m, Msg::Move(Motion::Down));
+        assert_eq!(m.record_cursor, 2);
+        assert_eq!(m.cursor, before, "the document underneath never moved");
+
+        // And back out, the list has them again.
+        update(&mut m, Msg::Esc);
+        update(&mut m, Msg::Move(Motion::Down));
+        assert_ne!(m.cursor, before);
+    }
+
+    /// The selector is clamped to the record it is on, both ends.
+    #[test]
+    fn the_record_selector_cannot_run_off_either_end() {
+        let mut m = model();
+        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Move(Motion::Up));
+        assert_eq!(m.record_cursor, 0);
+
+        let rows = crate::detail::rows(m.current().unwrap()).len();
+        for _ in 0..rows + 5 {
+            update(&mut m, Msg::Move(Motion::Down));
+        }
+        assert_eq!(m.record_cursor, rows - 1);
+    }
+
+    /// **A letter is a verb on the record, not search text.** Invariant 1 scopes
+    /// find-fast to the browse surface, which is what frees this surface to have
+    /// keys at all — and is why editing needs no control key.
+    #[test]
+    fn letters_are_verbs_on_the_record_not_query_text() {
+        let mut m = model();
+        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Char('z'));
+        assert!(m.query.is_empty(), "nothing reached the query");
+        assert!(m.flash.is_some(), "and an unknown verb says so rather than doing nothing");
+    }
+
+    /// `e` edits **the row the selector is on** — one verb over every field,
+    /// which is the whole reason a per-field control key was the wrong shape.
+    #[test]
+    fn e_edits_the_selected_row_and_says_so_when_it_cannot() {
+        let mut m = model();
+        m.write = WriteState::Ready;
+        update(&mut m, Msg::OpenDetail);
+        let rows = crate::detail::rows(m.current().unwrap());
+        let expiry = rows
+            .iter()
+            .position(|row| matches!(row, crate::detail::Row::Editable(_)))
+            .expect("the record has an editable row");
+
+        // A row that is not editable yet.
+        m.record_cursor = rows
+            .iter()
+            .position(|row| matches!(row, crate::detail::Row::Fact(_)))
+            .expect("and a row that is not");
+        update(&mut m, Msg::Char('e'));
+        assert!(m.edit.is_none(), "nothing opened");
+        assert!(m.flash.is_some(), "and it explained why");
+
+        m.record_cursor = expiry;
+        update(&mut m, Msg::Char('e'));
+        assert_eq!(
+            m.edit.as_ref().map(|edit| edit.field),
+            Some(crate::edit::Field::Expiry),
+            "on the editable row it opens the editor"
+        );
+    }
+
+    /// The same verb through the sheet, because a chord is a shortcut for a verb
+    /// and never a second implementation of it.
+    #[test]
+    fn the_sheet_offers_the_record_verb_too() {
+        let mut m = model();
+        m.write = WriteState::Ready;
+        update(&mut m, Msg::OpenDetail);
+        m.record_cursor = crate::detail::rows(m.current().unwrap())
+            .iter()
+            .position(|row| matches!(row, crate::detail::Row::Editable(_)))
+            .unwrap();
+
+        update(&mut m, Msg::Char(' '));
+        assert!(m.sheet.is_some(), "space still opens the sheet on the record");
+        let listed = crate::sheet::items(None, &m);
+        assert!(
+            listed.iter().any(|item| item.act == crate::sheet::Act::Edit),
+            "and it lists the record's verb: {listed:?}"
+        );
+
+        update(&mut m, Msg::Char('e'));
+        assert_eq!(m.edit.as_ref().map(|edit| edit.field), Some(crate::edit::Field::Expiry));
+        assert!(m.sheet.is_none(), "running an item closes the sheet");
     }
 
     /// **`Enter` has no button**, and does not need one: a thumb opens the

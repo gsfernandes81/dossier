@@ -627,3 +627,29 @@ fn the_editor_survives_no_color() {
     let entry = rows.last().expect("an entry line");
     assert!(entry.contains("expiry:") && entry.contains("2026-07-31"), "{entry:?}");
 }
+
+/// **The selector is visible, and it is the row the verbs act on.**
+///
+/// Reverse video, the same texture the list's cursor uses — the record is a
+/// wall of small text at 47 columns, and a highlight that moves predictably is
+/// what makes it followable. It is drawn from the same `detail::rows` the
+/// selector walks, so a highlight can never land on a row the reader is not on.
+#[test]
+fn the_record_selector_is_drawn_where_it_is() {
+    let mut m = model(47, 24);
+    update(&mut m, Msg::OpenDetail);
+
+    let first = modifier_columns(&mut m, 47, 24, 3, ratatui::style::Modifier::REVERSED);
+    assert!(!first.is_empty(), "the top row of the record is highlighted");
+
+    update(&mut m, Msg::Move(ds::app::Motion::Down));
+    assert!(
+        modifier_columns(&mut m, 47, 24, 3, ratatui::style::Modifier::REVERSED).is_empty(),
+        "and it left the row above"
+    );
+    let second = modifier_columns(&mut m, 47, 24, 4, ratatui::style::Modifier::REVERSED);
+    assert!(!second.is_empty(), "for the next one down");
+
+    let lines = screen(&mut m, 47, 24);
+    assert!(lines[4].contains("expiry"), "which is the editable row: {:?}", lines[4]);
+}

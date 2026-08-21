@@ -21,11 +21,21 @@
 //! *"detail looks good for now"*, so this renders that layout and nothing more.
 //!
 //! **R4 made it the editing surface** (v2's Phase 4 conclusion stands: editing
-//! lives in one place, not scattered across pickers). One field is editable so
-//! far — the expiry, on `ctrl+e` — and the record's job during an edit is to
-//! show *which* field is being typed into, since the typing itself happens on
-//! the entry line at the bottom of the screen. Without that mark the two rows
-//! would be talking about each other with nothing to connect them.
+//! lives in one place, not scattered across pickers), and it has **a selector**:
+//! one highlighted row that `↑`/`↓` move and the verbs act on.
+//!
+//! The selector is why this surface needs no control keys. `ctrl+e` briefly
+//! existed and was retired: Termux latches `CTRL` in its own UI layer, so the
+//! app never sees the modifier go down — a `ctrl+`combination arrives as one
+//! finished key event, and **there is no moment at which a which-key panel
+//! could offer what follows it**. That tier can only ever be memorised. A
+//! selector plus a bare letter can be shown, so that is what this surface uses:
+//! `e` edits *the row you are on*, and one verb covers every field instead of
+//! one key per field.
+//!
+//! [`rows`] is the list the selector walks and the renderer draws — one
+//! function, so a highlight can never land on a row the reader is not looking
+//! at.
 //!
 //! The remaining verbs (`s` supersede, `b` bundle, `u` undo) arrive with the
 //! slices that implement them, not before: a hint is only ever shown for
@@ -44,6 +54,62 @@ use crate::Status;
 /// Label column, so values line up under each other.
 const LABEL_COLS: usize = 10;
 
+/// One row of the record — the unit the selector moves over.
+///
+/// Not every row is actionable yet, and the selector still visits all of them.
+/// On a 47-column phone a record is a wall of small text, and a highlight that
+/// moves predictably through *everything* is what makes it legible; one that
+/// skipped from `expiry` to a file three rows down would read as broken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Row {
+    /// A field that can be edited, and the field it writes.
+    Editable(crate::edit::Field),
+    /// Something the record shows and this build cannot yet change.
+    Fact(&'static str),
+    /// One linked file, by index into `doc.files`.
+    File(usize),
+}
+
+impl Row {
+    /// The verb that acts on this row, for the hint line — `None` when nothing
+    /// does yet, which is a thing to say rather than a thing to hide.
+    #[must_use]
+    pub const fn verb(self) -> Option<&'static str> {
+        match self {
+            Row::Editable(_) => Some("e edit"),
+            Row::Fact(_) | Row::File(_) => None,
+        }
+    }
+}
+
+/// Every row of the record, in the order it is drawn.
+///
+/// The selector and the renderer both read this, which is the same rule the
+/// list's geometry follows: a hit test or a highlight that re-derives a layout
+/// disagrees with it at the first edge case.
+#[must_use]
+pub fn rows(doc: &crate::Doc) -> Vec<Row> {
+    let mut rows = vec![
+        Row::Fact("location"),
+        Row::Editable(crate::edit::Field::Expiry),
+        Row::Fact("issued"),
+        Row::Fact("tags"),
+        Row::Fact("bundles"),
+    ];
+    if doc.files.is_empty() {
+        rows.push(Row::Fact("files"));
+    } else {
+        rows.extend((0..doc.files.len()).map(Row::File));
+    }
+    if doc.supersedes.is_some() {
+        rows.push(Row::Fact("renews"));
+    }
+    if !doc.notes.is_empty() {
+        rows.push(Row::Fact("notes"));
+    }
+    rows
+}
+
 /// Draw the record for the highlighted row.
 pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     let inner = area.width.saturating_sub(2) as usize;
@@ -54,97 +120,128 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
         );
         return;
     };
-    let status = model.status(doc);
 
+    let rows = rows(doc);
+    let selected = model.record_cursor.min(rows.len().saturating_sub(1));
     let mut lines = vec![
         Line::styled(format!(" {}", truncate(&doc.name, inner)), theme.style(Tone::Title)),
         Line::raw(""),
-        field("location", &nonempty(doc.place()), inner, theme),
     ];
-
-    // Expiry carries its standing in words next to the date: `2026-09-28` alone
-    // makes the reader do the arithmetic, and the whole point of this app is
-    // that nobody should have to.
-    //
-    // While it is being edited the label is lit, because the value on this row
-    // is the *stored* one and the one being typed is three rows down on the
-    // entry line. The mark is what says those two rows are about each other.
-    let editing_expiry = model
-        .edit
-        .as_ref()
-        .is_some_and(|edit| edit.doc == doc.id && edit.field == crate::edit::Field::Expiry);
-    lines.push(Line::from(vec![
-        if editing_expiry { marked_label("expiry", theme) } else { label("expiry", theme) },
-        Span::raw(doc.expiry_date.clone().unwrap_or_else(|| "—".into())),
-        Span::raw("  "),
-        Span::styled(
-            match status {
-                Status::Expired => "! expired",
-                Status::Soon => "~ expiring soon",
-                Status::Ok => "  tracked",
-                Status::Untracked if doc.superseded => "· superseded",
-                Status::Untracked if doc.ignore_expiry => "· watch ignored",
-                Status::Untracked => "· no expiry",
-            }
-            .to_string(),
-            theme.status(status),
-        ),
-    ]));
-
-    lines.push(field(
-        "issued",
-        &nonempty(doc.issue_date.clone().unwrap_or_default()),
-        inner,
-        theme,
-    ));
-    lines.push(field("tags", &nonempty(doc.tags.join(" ")), inner, theme));
-    lines.push(field("bundles", &nonempty(doc.bundles.join(" · ")), inner, theme));
-
-    // Files: the count, then one line each with the primary marked — the file
-    // `Enter` opens is the one with the arrow, and seeing which that is matters
-    // more than any other field on this screen.
-    if doc.files.is_empty() {
-        lines.push(field("files", "none", inner, theme));
-    } else {
-        let primary = doc.primary_file().map(|f| f.path.clone());
-        for (i, file) in doc.files.iter().enumerate() {
-            let is_primary = Some(&file.path) == primary.as_ref();
-            let head =
-                if i == 0 { label("files", theme) } else { Span::raw(" ".repeat(LABEL_COLS + 1)) };
-            let mut spans = vec![head];
-            if i == 0 {
-                spans.push(Span::styled(format!("{} ", doc.files.len()), theme.style(Tone::Muted)));
-            }
-            spans.push(Span::styled(
-                if is_primary { "▸ " } else { "  " }.to_string(),
-                theme.style(Tone::Accent),
-            ));
-            spans.push(Span::raw(truncate(&file.path, inner.saturating_sub(LABEL_COLS + 5))));
-            lines.push(Line::from(spans));
+    // Where each row's lines start, so the pane can be scrolled to keep the
+    // selection on screen without the renderer counting anything twice.
+    let mut starts = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        starts.push(lines.len());
+        let mut drawn = render_row(*row, doc, model, inner, theme);
+        if index == selected {
+            drawn = drawn.into_iter().map(|line| line.style(theme.selected())).collect();
         }
+        lines.extend(drawn);
     }
 
-    if let Some(older) = &doc.supersedes {
-        let title = model
-            .store
-            .docs
-            .iter()
-            .find(|d| &d.id == older)
-            .map_or_else(|| older.clone(), |d| d.name.clone());
-        lines.push(Line::from(vec![
-            label("renews", theme),
-            Span::styled(truncate(&title, inner - LABEL_COLS), theme.style(Tone::Accent)),
-        ]));
-    }
-
-    if !doc.notes.is_empty() {
-        lines.extend(wrapped_field("notes", &doc.notes, inner, theme));
-    }
+    // Scroll only when the selection would fall off the bottom. A record fits
+    // on the phone in every ordinary case; this is for the document with eight
+    // files, where a selector you cannot see is worse than no selector.
+    let height = area.height as usize;
+    let end = starts.get(selected + 1).copied().unwrap_or(lines.len());
+    let skip = end.saturating_sub(height);
+    let lines: Vec<Line> = lines.into_iter().skip(skip).collect();
 
     // No widget-level wrap: everything above is already laid out to this pane's
     // width, and letting the widget wrap as well would put a continuation line
     // at the left margin, where it reads as a new field.
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// The lines one row occupies.
+fn render_row(
+    row: Row,
+    doc: &crate::Doc,
+    model: &Model,
+    inner: usize,
+    theme: Theme,
+) -> Vec<Line<'static>> {
+    match row {
+        Row::Fact("location") => vec![field("location", &nonempty(doc.place()), inner, theme)],
+        // Expiry carries its standing in words next to the date: `2026-09-28`
+        // alone makes the reader do the arithmetic, and the whole point of this
+        // app is that nobody should have to.
+        //
+        // While it is being edited the label is lit, because the value on this
+        // row is the *stored* one and the one being typed is three rows down on
+        // the entry line. The mark is what says those two rows are about each
+        // other.
+        Row::Editable(crate::edit::Field::Expiry) => {
+            let status = model.status(doc);
+            let editing = model
+                .edit
+                .as_ref()
+                .is_some_and(|edit| edit.doc == doc.id && edit.field == crate::edit::Field::Expiry);
+            vec![Line::from(vec![
+                if editing { marked_label("expiry", theme) } else { label("expiry", theme) },
+                Span::raw(doc.expiry_date.clone().unwrap_or_else(|| "—".into())),
+                Span::raw("  "),
+                Span::styled(
+                    match status {
+                        Status::Expired => "! expired",
+                        Status::Soon => "~ expiring soon",
+                        Status::Ok => "  tracked",
+                        Status::Untracked if doc.superseded => "· superseded",
+                        Status::Untracked if doc.ignore_expiry => "· watch ignored",
+                        Status::Untracked => "· no expiry",
+                    }
+                    .to_string(),
+                    theme.status(status),
+                ),
+            ])]
+        }
+        Row::Fact("issued") => vec![field(
+            "issued",
+            &nonempty(doc.issue_date.clone().unwrap_or_default()),
+            inner,
+            theme,
+        )],
+        Row::Fact("tags") => vec![field("tags", &nonempty(doc.tags.join(" ")), inner, theme)],
+        Row::Fact("bundles") => {
+            vec![field("bundles", &nonempty(doc.bundles.join(" · ")), inner, theme)]
+        }
+        Row::Fact("files") => vec![field("files", "none", inner, theme)],
+        // One line each, with the primary marked — the file `Enter` opens is the
+        // one with the arrow, and seeing which that is matters more than any
+        // other field on this screen.
+        Row::File(i) => {
+            let primary = doc.primary_file().map(|f| f.path.clone());
+            let file = &doc.files[i];
+            let mut spans = vec![if i == 0 {
+                label("files", theme)
+            } else {
+                Span::raw(" ".repeat(LABEL_COLS + 1))
+            }];
+            if i == 0 {
+                spans.push(Span::styled(format!("{} ", doc.files.len()), theme.style(Tone::Muted)));
+            }
+            spans.push(Span::styled(
+                if Some(&file.path) == primary.as_ref() { "▸ " } else { "  " }.to_string(),
+                theme.style(Tone::Accent),
+            ));
+            spans.push(Span::raw(truncate(&file.path, inner.saturating_sub(LABEL_COLS + 5))));
+            vec![Line::from(spans)]
+        }
+        Row::Fact("renews") => {
+            let older = doc.supersedes.clone().unwrap_or_default();
+            let title =
+                model.store.docs.iter().find(|d| d.id == older).map_or(older, |d| d.name.clone());
+            vec![Line::from(vec![
+                label("renews", theme),
+                Span::styled(
+                    truncate(&title, inner.saturating_sub(LABEL_COLS)),
+                    theme.style(Tone::Accent),
+                ),
+            ])]
+        }
+        Row::Fact("notes") => wrapped_field("notes", &doc.notes, inner, theme),
+        Row::Fact(other) => vec![field(other, "—", inner, theme)],
+    }
 }
 
 /// An em dash beats a blank: an empty value and a missing field look identical

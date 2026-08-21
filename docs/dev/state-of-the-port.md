@@ -90,6 +90,9 @@ Each is recorded where it belongs; the link is the point of the row.
 | The band is ANSI 7 on ANSI 0, status row only, edge to edge | `Theme::band` |
 | Tones on the band differ from tones off it | `Theme::on_band` |
 | Three verb tiers: a key / a leader chord / a command | REWRITE-UI §5a |
+| **No new `ctrl` verbs.** A which-key panel for `ctrl` is *impossible*, not unbuilt: Termux latches `CTRL` in its own UI, so the app sees one finished `ctrl+e` event and never a moment between modifier and letter. That tier can only be memorised. | `detail.rs` module docs, `input.rs` |
+| The record is a surface with its own verbs: search locked out, bare letters free, `e` edits the selected row | `detail.rs`, `Model::record_verb` |
+| The record has a selector; `↑`/`↓` drive it and never the list underneath | `Model::move_record` |
 | Twelve-documents-at-45×28 is superseded by the measured sizes | swept through `layout.rs`, `find.rs`, `screens.rs`, REWRITE-UI |
 | The writer opens lazily, on the first append — never at launch | `main.rs::writer_session` |
 | A save re-folds; it never patches the `Store` in place | `main.rs::write_loop` |
@@ -108,9 +111,12 @@ Each is recorded where it belongs; the link is the point of the row.
   §5b and the amendment markers are on REWRITE.md §4.5 invariants 2 and 6. It
   needs a selection on the detail surface — **which R4 slice 1 did not build**,
   because `ctrl+e` names its own field and needed no cursor. See the row below.
-- **The arrow modifier tier** (`ctrl`/`alt` + arrows) — reserved, unbound. R4
-  will want it more than Find does. Binding anything there needs modifier guards
-  on the arrow arms in `input.rs`.
+- **The arrow modifier tier** (`ctrl`/`alt` + arrows) — reserved, unbound, and
+  now unlikely to be used: the same argument that retired `ctrl+e` applies to it.
+  Reachable by thumb, teachable by nothing.
+- **`s` supersede, `b` bundle, `u` undo** — specced in REWRITE-UI §2, unbuilt.
+  They are bare letters on the record surface, which is legal now that search is
+  locked out there. Add them with the slices that implement them.
 - **Does Termux honour `SGR 2`?** One line settles it:
   `printf '\e[2mdim\e[0m normal\n'`. If it does not, every dim element in this
   app has been at full brightness all along, which changes what the quiet parts
