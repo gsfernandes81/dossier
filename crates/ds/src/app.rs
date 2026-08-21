@@ -357,6 +357,29 @@ pub struct Model {
     pub record_cursor: usize,
     /// The field being edited, when one is (R4).
     pub edit: Option<crate::edit::Edit>,
+    /// **Inverses of this session's own writes, newest last.**
+    ///
+    /// §3.3 makes the journal the history, and undo an *inverse op* rather than
+    /// a rewrite — nothing is ever removed from a journal. What is kept here is
+    /// only the inverse, computed at the moment of the write from the store as
+    /// it stood: the inverse of a `set` is the value that was there before it,
+    /// and that is knowable then and only awkwardly afterwards. Reconstructing
+    /// it later means re-folding the journal to a point in time, which is a
+    /// *history browser* — §8's "30-day horizon", a later phase — and not this.
+    ///
+    /// So this covers **this session's writes**, and a restart empties it. The
+    /// journal still holds everything; only the shortcut back is per-session.
+    pub undo: Vec<Vec<journal::Draft>>,
+    /// The inverse of the append currently in flight, promoted onto [`Self::undo`]
+    /// when the journal confirms it and dropped when it refuses — so a write that
+    /// never landed can never be "undone".
+    pending_undo: Option<Vec<journal::Draft>>,
+    /// The document an in-flight append is about, when no edit is open to name
+    /// it. An undo can be about a document the cursor is nowhere near.
+    pending_anchor: Option<String>,
+    /// Whether the append in flight *is* an undo, which changes what is said
+    /// afterwards and stops the undo from stacking its own inverse.
+    undoing: bool,
     /// Whether this session can write, and why not when it cannot.
     pub write: WriteState,
     /// Where the view drew the header's pressable expiring count.
@@ -396,6 +419,10 @@ impl Model {
             record_cursor: 0,
             edit: None,
             write: WriteState::default(),
+            undo: Vec::new(),
+            pending_undo: None,
+            pending_anchor: None,
+            undoing: false,
             count_zone: Zone::default(),
             leader_zone: Zone::default(),
             flash: None,
@@ -635,6 +662,10 @@ impl Model {
                 self.sheet = None;
                 self.open_new()
             }
+            crate::sheet::Act::Undo => {
+                self.sheet = None;
+                self.undo()
+            }
             crate::sheet::Act::Quit => Effect::Quit,
         }
     }
@@ -672,6 +703,10 @@ impl Model {
                 self.flash = Some("that row cannot be edited yet".into());
                 Effect::Redraw
             }
+            // Undo is about the session, not about the row — but it is bound
+            // here because this is the surface where a bare letter is a verb,
+            // and it is where a write has just been made.
+            ('u', _) => self.undo(),
             _ => {
                 self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
                 Effect::Redraw
@@ -757,6 +792,59 @@ impl Model {
         Effect::Redraw
     }
 
+    /// Put the last write this session made back the way it was.
+    ///
+    /// **An undo is an ordinary append**, never a rewrite: §3.1's whole
+    /// guarantee is that a journal is append-only and single-writer, so "taking
+    /// something back" is writing the op that says so. The other device sees an
+    /// edit, which is exactly what happened.
+    ///
+    /// **An undo does not stack its own inverse**, so `u u u` walks back three
+    /// writes rather than toggling the last one. Redo is therefore not free, and
+    /// is not built: pressing undo twice must mean what it means everywhere.
+    fn undo(&mut self) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some(drafts) = self.undo.pop() else {
+            // Named for what it is rather than "nothing to undo": the stack is
+            // this session's, and a user who edited yesterday is owed the
+            // reason it is empty rather than the impression it is broken.
+            self.flash = Some("nothing to undo — this session has not written yet".into());
+            return Effect::Redraw;
+        };
+        // The document an undo is about need not be the one under the cursor,
+        // so the anchor travels with the append rather than being guessed at
+        // when it lands.
+        self.pending_anchor = drafts.first().map(|draft| draft.id.clone());
+        self.undoing = true;
+        self.sheet = None;
+        Effect::Append(drafts)
+    }
+
+    /// The ops that would put this edit back the way it was.
+    ///
+    /// A create inverts to a tombstone; a field inverts to whatever the store
+    /// holds for it right now — a `set` when it has a value, an `unset` when it
+    /// does not, which is the same pair the forward write chooses between.
+    fn inverse_of(&self, edit: &crate::edit::Edit) -> Vec<journal::Draft> {
+        if edit.creating {
+            return vec![journal::Draft::delete("doc", &edit.doc)];
+        }
+        let field = edit.field.journal_field();
+        let was = self
+            .store
+            .docs
+            .iter()
+            .find(|doc| doc.id == edit.doc)
+            .and_then(|doc| edit.field.stored(doc));
+        vec![match was {
+            Some(value) => journal::Draft::set("doc", &edit.doc, field, value),
+            None => journal::Draft::unset("doc", &edit.doc, field),
+        }]
+    }
+
     /// The id for a document being created here and now.
     ///
     /// Every id in the store is a candidate collision, not merely the ones this
@@ -836,10 +924,26 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             // the journal has answered, the value on screen is a hope.
             let closed = model.edit.take();
             let created = closed.as_ref().is_some_and(|edit| edit.creating);
-            let edited = closed.map(|edit| edit.doc);
-            let anchor = edited.or_else(|| model.current().map(|doc| doc.id.clone()));
+            let undone = std::mem::take(&mut model.undoing);
+            // The write landed, so its inverse is now a thing that can be taken
+            // back. An undo's own inverse is dropped rather than stacked — see
+            // `Model::undo`.
+            if let Some(inverse) = model.pending_undo.take() {
+                model.undo.push(inverse);
+            }
+            let anchor = closed
+                .map(|edit| edit.doc)
+                .or_else(|| model.pending_anchor.take())
+                .or_else(|| model.current().map(|doc| doc.id.clone()));
+            model.pending_anchor = None;
             let kept = model.adopt(*store, anchor.as_deref().unwrap_or_default());
-            if kept && created {
+            if undone {
+                // An undo of a create leaves nothing to look at, and an undo of
+                // an edit may move the row out of the filter. Neither is a
+                // surprise worth a different word for.
+                model.detail &= kept;
+                model.flash = Some("undone".into());
+            } else if kept && created {
                 // **A new document opens on its record**, which is the only
                 // place its remaining fields can be filled in — creating one and
                 // being left on the list would make the next step invisible.
@@ -862,6 +966,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 edit.saving = false;
                 edit.armed_discard = false;
             }
+            // A write that never landed cannot be taken back, so its inverse is
+            // dropped rather than left on the stack to undo something nobody did.
+            model.pending_undo = None;
+            model.pending_anchor = None;
+            model.undoing = false;
             model.flash = Some(reason.clone());
             // A refusal that will refuse again takes editing off the table for
             // the session, rather than inviting the same disappointment on
@@ -1083,6 +1192,11 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
                         if edit.creating {
                             edit.doc = model.mint_id(edit.buffer.trim());
                         }
+                        // **The inverse is computed now, from the store as it
+                        // stands**, because "what was there before" is knowable
+                        // here and only by re-folding history afterwards. It is
+                        // held aside until the journal confirms the write.
+                        model.pending_undo = Some(model.inverse_of(&edit));
                         let field = edit.field.journal_field();
                         let write = match value {
                             Some(value) => journal::Draft::set("doc", &edit.doc, field, value),
@@ -1505,6 +1619,102 @@ pub(crate) mod tests {
         update(&mut m, Msg::Char(' '));
         update(&mut m, Msg::Char('n'));
         assert!(m.edit.is_none());
+        assert!(m.flash.is_some());
+    }
+
+    /// **A write that never landed cannot be undone.** The inverse is computed
+    /// when the append is asked for, but it only becomes undoable when the
+    /// journal confirms it — otherwise a refused save would leave a stack entry
+    /// that puts back something nobody ever changed.
+    #[test]
+    fn a_refused_save_leaves_nothing_to_undo() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        for c in "-x".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Backspace);
+        update(&mut m, Msg::Backspace);
+        for c in "2027-04-01".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::SaveFailed { reason: "the disk said no".into(), permanent: false });
+        assert!(m.undo.is_empty(), "nothing was written, so there is nothing to take back");
+    }
+
+    /// **The inverse of an edit is the value the store holds, not the buffer.**
+    /// Tags are typed as words and stored as a list; an inverse built from the
+    /// typing would restore a string where a list had been.
+    #[test]
+    fn the_inverse_of_a_tag_edit_restores_the_list() {
+        let mut m = writable();
+        m.store.docs[0].tags = vec!["marine".into(), "ticket".into()];
+        update(&mut m, Msg::EditField(crate::edit::Field::Tags));
+        for c in " extra".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Enter);
+        let store = m.store.clone();
+        update(&mut m, Msg::Saved(Box::new(store)));
+
+        assert_eq!(
+            m.undo.last(),
+            Some(&vec![journal::Draft::set(
+                "doc",
+                "coc",
+                "tags",
+                serde_json::json!(["marine", "ticket"])
+            )])
+        );
+    }
+
+    /// **Creating inverts to a tombstone**, which is the only op that can
+    /// un-create anything: §3.2 keeps a `create` forever, so the way back is to
+    /// write the delete rather than to pretend the create never happened.
+    #[test]
+    fn creating_a_document_inverts_to_a_delete() {
+        let mut m = writable();
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('n'));
+        for c in "Seaman Book".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Enter);
+        let store = m.store.clone();
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert_eq!(m.undo.last(), Some(&vec![journal::Draft::delete("doc", "seaman-book-desk")]));
+    }
+
+    /// An undo does not stack its own inverse — `u u u` walks back three writes
+    /// rather than toggling the last one. Redo is a different verb, and is not
+    /// built precisely because this one has to mean what it means everywhere.
+    #[test]
+    fn an_undo_does_not_become_something_to_undo() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
+        update(&mut m, Msg::Backspace);
+        update(&mut m, Msg::Char('2'));
+        update(&mut m, Msg::Enter);
+        let store = m.store.clone();
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert_eq!(m.undo.len(), 1);
+
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('u'));
+        let store = m.store.clone();
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert!(m.undo.is_empty(), "the undo consumed the entry and added none");
+        assert_eq!(m.flash.as_deref(), Some("undone"));
+    }
+
+    /// A session that cannot write says so rather than doing nothing, the same
+    /// way editing and creating do.
+    #[test]
+    fn undo_is_refused_with_a_reason_when_the_session_cannot_write() {
+        let mut m = model();
+        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Char('u'));
         assert!(m.flash.is_some());
     }
 

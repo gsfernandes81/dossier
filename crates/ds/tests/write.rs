@@ -243,3 +243,106 @@ fn a_created_document_survives_a_reload() {
     assert_eq!(doc.name, "Seaman Book");
     assert_eq!(doc.expiry_date, None, "and nothing it was not given");
 }
+
+/// **Undo puts the field back, and does it by appending rather than rewriting.**
+/// §3.3 makes the journal the history: nothing is ever removed from it, so
+/// taking an edit back is writing the op that says so — and the file has to
+/// still hold both the edit and its inverse afterwards.
+#[test]
+fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
+    let (dir, journal) = journal_with_a_document("undo");
+    let (mut model, loaded) = load_model(&journal);
+    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+
+    update(&mut model, Msg::EditField(Field::Expiry));
+    for _ in 0..10 {
+        update(&mut model, Msg::Backspace);
+    }
+    for c in "2031-05-31".chars() {
+        update(&mut model, Msg::Char(c));
+    }
+    let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
+    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    assert_eq!(model.current().and_then(|d| d.expiry_date.clone()).as_deref(), Some("2031-05-31"));
+
+    // Now take it back.
+    update(&mut model, Msg::Char(' '));
+    let Effect::Append(inverse) = update(&mut model, Msg::Char('u')) else {
+        panic!("undo must ask for an append");
+    };
+    write_and_reload(&journal, &dir, inverse, ts, &mut model);
+
+    let reloaded = ds::load::load(&journal).expect("reload");
+    let doc = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("the document");
+    assert_eq!(doc.expiry_date.as_deref(), Some("2026-09-28"), "back to what it was");
+
+    let written = std::fs::read_to_string(dir.join("meta").join("desk-core.jsonl")).expect("read");
+    assert!(written.contains("2031-05-31"), "the edit is still in the journal");
+    assert!(written.contains("2026-09-28"), "and so is the op that took it back");
+    assert_eq!(
+        written.lines().count(),
+        5,
+        "the three lines it started with plus two appends — neither of them a rewrite"
+    );
+}
+
+/// **The stack is a stack**: two edits then two undos walk back both, rather
+/// than the second undo toggling the first one forward again. Redo is a
+/// different verb and is not built.
+#[test]
+fn undo_walks_back_more_than_one_write() {
+    let (dir, journal) = journal_with_a_document("undo-twice");
+    let (mut model, loaded) = load_model(&journal);
+    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+
+    for value in ["2031-05-31", "2032-06-30"] {
+        update(&mut model, Msg::EditField(Field::Expiry));
+        for _ in 0..10 {
+            update(&mut model, Msg::Backspace);
+        }
+        for c in value.chars() {
+            update(&mut model, Msg::Char(c));
+        }
+        let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
+        ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    }
+    assert_eq!(model.current().and_then(|d| d.expiry_date.clone()).as_deref(), Some("2032-06-30"));
+
+    for expected in ["2031-05-31", "2026-09-28"] {
+        update(&mut model, Msg::Char(' '));
+        let Effect::Append(inverse) = update(&mut model, Msg::Char('u')) else {
+            panic!("undo must ask for an append");
+        };
+        ts = write_and_reload(&journal, &dir, inverse, ts, &mut model);
+        assert_eq!(
+            model.current().and_then(|d| d.expiry_date.clone()).as_deref(),
+            Some(expected),
+            "each undo walks back one more write"
+        );
+    }
+
+    // And then there is nothing left that this session did.
+    update(&mut model, Msg::Char(' '));
+    assert_eq!(update(&mut model, Msg::Char('u')), Effect::Redraw, "nothing more to undo");
+    assert!(model.flash.as_deref().is_some_and(|say| say.contains("nothing to undo")));
+}
+
+/// Append what the model asked for, fold the journal back, and hand the model
+/// the new store exactly as the writer thread does — the only way a test can
+/// take more than one step down the write path.
+fn write_and_reload(
+    journal: &Journal,
+    dir: &std::path::Path,
+    drafts: Vec<journal::Draft>,
+    max_ts: i64,
+    model: &mut Model,
+) -> i64 {
+    let mut writer = Writer::open(journal, Namespace::Meta, "desk-core", &lock_dir(dir), max_ts)
+        .expect("open the writer");
+    let ops = writer.append_all(drafts).expect("append");
+    writer.commit().expect("fsync");
+    drop(writer);
+    let reloaded = ds::load::load(journal).expect("reload");
+    update(model, Msg::Saved(Box::new(reloaded.store)));
+    ops.iter().map(|op| op.ts).max().unwrap_or(max_ts)
+}

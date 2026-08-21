@@ -73,6 +73,28 @@ impl Field {
         }
     }
 
+    /// What the store holds for this field right now, as the journal sees it.
+    ///
+    /// **This is the shape [`crate::app::Model`] inverts an edit with**, and it
+    /// is deliberately not the string [`crate::app::Model::open_edit`] seeds the
+    /// buffer from: the buffer is what a person types (`tags` as words), and
+    /// this is what the field folds from (`tags` as a list). Undo has to restore
+    /// the second one, or a restored value would not equal the one it replaced.
+    ///
+    /// `None` means the field is absent, which is what an empty list or an empty
+    /// string folds to as well — `Doc` cannot tell those apart, and neither can
+    /// anything downstream of it, so the inverse of clearing is an `unset`.
+    #[must_use]
+    pub fn stored(self, doc: &crate::Doc) -> Option<serde_json::Value> {
+        match self {
+            Field::Name => Some(doc.name.clone().into()),
+            Field::Expiry => doc.expiry_date.clone().map(Into::into),
+            Field::Issued => doc.issue_date.clone().map(Into::into),
+            Field::Tags => (!doc.tags.is_empty()).then(|| doc.tags.clone().into()),
+            Field::Notes => (!doc.notes.is_empty()).then(|| doc.notes.clone().into()),
+        }
+    }
+
     /// The prompt the entry line shows while this field is being edited.
     ///
     /// It names the field rather than the surface, which is what makes a

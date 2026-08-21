@@ -51,6 +51,8 @@ pub enum Act {
     Edit,
     /// Start a new document by asking for its name.
     New,
+    /// Put the last write this session made back the way it was.
+    Undo,
     /// Leave.
     Quit,
 }
@@ -92,11 +94,13 @@ pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
             // thing about the record you happen to be reading, and making the
             // user peel back to a surface that admits it would teach that it is.
             item('n', "new document", Act::New),
+            Item { accel: "u", ..item('u', "undo last change", Act::Undo) },
             item('q', "quit", Act::Quit),
         ],
         None => vec![
             item('f', "filter", Act::Enter('f')),
             item('n', "new document", Act::New),
+            item('u', "undo last change", Act::Undo),
             item('q', "quit", Act::Quit),
         ],
         Some('f') => vec![

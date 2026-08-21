@@ -14,12 +14,12 @@ Last true as of **2026-08-21**, branch `rust-rewrite`.
 
 ## 1 · Where the port stands
 
-**R3 is feature-complete, and R4's first four slices have landed.** `crates/journal`
+**R3 is feature-complete, and R4's first five slices have landed.** `crates/journal`
 implements §3's format — op model, fold, compaction, torn tails, watermark
 defence — and `crates/ds` is a finder on top of it: browse, fuzzy search,
 `ctrl+t` content search, the detail surface, `ds status` with the Syncthing REST
-check, `ds open`, and now `ds init`, **creating a document**, and **every simple
-field of a record made editable through one verb**. The phase list and each slice's notes are in
+check, `ds open`, and now `ds init`, **creating a document**, **every simple
+field of a record editable through one verb**, and **undo**. The phase list and each slice's notes are in
 REWRITE.md; don't duplicate them here.
 
 Three facts that shape what the rest of R4 costs:
@@ -124,12 +124,17 @@ Each is recorded where it belongs; the link is the point of the row.
   of the UI are doing.
 - **The succession reversal** on the filing card — deferred until the user
   confirms it is a real pain point. Do not build it speculatively.
-- **The rest of R4**: undo (inverse ops — the journal is the history, §3.3),
-  delete, slots with insert-and-shift, supersession, bundle membership, file
-  attach/detach/primary, settings ops, `ds reset`. Creating and the text fields
-  are done; **what is left are the structured ones**, and each of those needs a
-  picker rather than a text buffer — a slot move shifts its neighbours, and
-  `bundles`/`renews` are memberships of another entity, not values.
+- **The rest of R4**: delete, slots with insert-and-shift, supersession, bundle
+  membership, file attach/detach/primary, settings ops, `ds reset`. Creating,
+  undo and the text fields are done; **what is left are the structured ones**,
+  and each of those needs a picker rather than a text buffer — a slot move shifts
+  its neighbours, and `bundles`/`renews` are memberships of another entity, not
+  values.
+- **History beyond this session.** Undo covers what *this* session wrote, because
+  the inverse is captured at write time. §8's "30-day horizon" — walking back
+  further, or seeing what changed and when — needs re-folding the journal to a
+  point in time, which is a different feature from the undo stack and is
+  unstarted. The journal already holds everything it would need.
 - **Syncthing's two-folder send/receive arrangement, set up by `ds`.** The user
   asked for this explicitly: the folder pair and their send-only / receive-only
   roles get configured **from the `ds` side over the Syncthing REST API**, not by

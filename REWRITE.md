@@ -699,7 +699,25 @@ until the cutover step the user personally green-lights.
       `Option<String>` of it. A session may write exactly when it knows who it
       is, and the state "allowed to write, no idea as whom" is one nothing
       downstream could do anything sensible with.
-    - Still unbuilt in R4: undo, delete, and the structured fields' pickers.
+    - Still unbuilt in R4: delete, and the structured fields' pickers.
+  - **Slice 5 done (2026-08-21) — undo.** `u` on the record, `SPC u` anywhere.
+    - **An undo is an ordinary append, never a rewrite** (§3.1: a journal is
+      append-only and single-writer), so taking something back means writing the
+      op that says so. The other device sees an edit, which is what happened.
+      A test asserts both the edit and its inverse are still in the file.
+    - **The inverse is computed at the moment of the write**, from the store as
+      it then stood, and held aside until the journal confirms — a refused save
+      leaves nothing to undo. Reconstructing an inverse *afterwards* means
+      re-folding history to a point in time, which is §8's 30-day history browser
+      and a later phase; this is the shortcut, not that.
+    - It is therefore **this session's writes**: a restart empties the stack, and
+      the journal still holds everything.
+    - **An undo does not stack its own inverse**, so `u u u` walks back three
+      writes rather than toggling the last one. Redo is consequently not free and
+      is not built — pressing undo twice has to mean what it means everywhere.
+    - `Field::stored` is the shape an inverse restores, deliberately not the
+      string the buffer seeds from: tags are typed as words and folded as a list,
+      and an inverse built from the typing would restore the wrong type.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs,
   and **the document-merge verb** — §3.2's amendment note; wording and exact
   placement open, keep it simple),
