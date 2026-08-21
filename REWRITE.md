@@ -138,11 +138,14 @@ section and the golden vectors in the same slice.
   possible collisions are against ids this device can see, so the counter suffix
   is a local decision again. This changes no op, field or fold rule, and applies
   only to documents created in v3; exported v2 ids keep their names.
-  **Its consequence, open:** two devices can now hold two documents for one real
-  thing, and **nothing merges them**. The merge verb needs no new machinery — it
-  is the id-rename contract below minus the `create` — and its exact detection
-  signal is two documents listing the same file path. v2's `dedup` does not cover
-  it (that clusters duplicate *files*; this is two documents over one file).
+  **Its consequence:** two devices can now hold two documents for one real thing,
+  and nothing merges them yet. **The user approved this trade — a duplicate you
+  can see beats a merge you cannot — and placed the merge verb in the review
+  surface (R5)**; its exact home there and its wording are open, with "keep it
+  simple" the only standing instruction. The verb needs no new machinery: it is
+  the id-rename contract below minus the `create`, and its exact detection signal
+  is two documents listing the same file path. v2's `dedup` does not cover it
+  (that clusters duplicate *files*; this is two documents over one file).
 - An id rename = `create` new + copy fields + **reference fixups** + `delete` old, emitted
   as consecutive ops from one writer. Fixups are part of the contract: rewrite every
   inbound `supersedes` pointing at the old id, and re-emit the effective
@@ -697,7 +700,9 @@ until the cutover step the user personally green-lights.
       is, and the state "allowed to write, no idea as whom" is one nothing
       downstream could do anything sensible with.
     - Still unbuilt in R4: undo, delete, and the structured fields' pickers.
-- **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs),
+- **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs,
+  and **the document-merge verb** — §3.2's amendment note; wording and exact
+  placement open, keep it simple),
   `ds file` (manual + proposal-consuming cards, unfiled counter, exception triage per
   D11), `ds export` with manifest, `ds organize`.
 - **R6 — Satellite adaptation**: persistence adapter, `ds-lab` CLI, gut the Python

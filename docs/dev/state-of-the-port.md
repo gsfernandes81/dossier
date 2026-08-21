@@ -137,15 +137,18 @@ Each is recorded where it belongs; the link is the point of the row.
   down first. It is also the port's **first write to Syncthing's config** (the
   REST client is read-only today, `syncthing.rs`), so it needs a write-capable
   API key, idempotency, and a dry run. Recorded in REWRITE.md §7.
-- **Merging two documents that describe one thing.** New ids carry the device
-  (`passport-desk` / `passport-phone`, REWRITE.md §3.2 as amended), so two
-  offline devices creating the same document no longer collide — they produce a
-  visible duplicate instead of a silent destructive merge. Closing that duplicate
-  is unbuilt: it is the id-rename op sequence minus the `create` (copy fields,
-  fix inbound `supersedes`, re-emit `state`, `delete` the loser), and the exact
-  detection signal is two documents listing the same file path. **v2's `dedup` is
-  not this** — it clusters duplicate files, and this is two documents over one
-  file.
+- **Merging two documents that describe one thing** — *settled: it belongs in
+  the review surface (R5); where exactly, and how it is worded, is deliberately
+  left open.* New ids carry the device (`passport-desk` / `passport-phone`,
+  REWRITE.md §3.2 as amended), so two offline devices creating the same document
+  no longer collide — they produce a visible duplicate instead of a silent
+  destructive merge, **which is the trade the user approved rather than a gap to
+  close by dropping the suffix**. The verb itself is the id-rename op sequence
+  minus the `create` (copy fields, fix inbound `supersedes`, re-emit `state`,
+  `delete` the loser), and the exact detection signal is two documents listing
+  the same file path. **v2's `dedup` is not this** — it clusters duplicate files,
+  and this is two documents over one file. Keep the wording simple when it is
+  built; that was the user's one instruction about it.
 - **Syncthing conflict files.** The journal is conflict-free by construction, so
   `.sync-conflict-*` should never appear on it — but nothing notices if one does,
   and the real files tree can still produce them. `ds status` is where that goes.

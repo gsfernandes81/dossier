@@ -59,7 +59,11 @@
 //! cannot. The bare-slug alternative does not merge them *correctly* either —
 //! it merges them wrongly and silently.
 //!
-//! The merge verb is unbuilt and unspecified, but it is not new machinery: §3.2
+//! **This trade was put to the user and approved**, with the merge verb placed
+//! in the review surface (R5); where it sits there and how it is worded are
+//! open, and "keep it simple" is the standing instruction.
+//!
+//! The merge verb is unbuilt, but it is not new machinery: §3.2
 //! already contracts this exact op sequence for an **id rename** — copy the
 //! fields, fix up every inbound `supersedes`, re-emit the effective `state`,
 //! `delete` the old id, all as consecutive ops from one writer. A merge is that
