@@ -133,6 +133,12 @@ Each is recorded where it belongs; the link is the point of the row.
   think about what a tool like this actually needs — the standard being *"as
   simple at base yet as versatile as git"* — and named the pickers specifically
   as something to decide the shape of before building.
+- **The model rethink is under way in
+  [`model-rethink.md`](model-rethink.md)** — edges instead of four membership
+  mechanisms, succession chains instead of a document taxonomy, the list showing
+  chain heads, and what bundles actually need. Read it before touching any of
+  those; several ideas in the older specs are rejected there **with reasons**, so
+  a fresh session does not re-propose them.
 - **R5's five review surfaces are explicitly in question.** The user's words:
   *"5 review surfaces feels like bloat."* The five tabs are inherited from v2 via
   §8's disposition table; nothing about them has been re-argued for v3. Treat the
