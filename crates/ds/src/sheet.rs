@@ -53,6 +53,8 @@ pub enum Act {
     New,
     /// Put the last write this session made back the way it was.
     Undo,
+    /// Put back the last write that was taken back.
+    Redo,
     /// Leave.
     Quit,
 }
@@ -95,12 +97,14 @@ pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
             // user peel back to a surface that admits it would teach that it is.
             item('n', "new document", Act::New),
             Item { accel: "u", ..item('u', "undo last change", Act::Undo) },
+            Item { accel: "r", ..item('r', "redo", Act::Redo) },
             item('q', "quit", Act::Quit),
         ],
         None => vec![
             item('f', "filter", Act::Enter('f')),
             item('n', "new document", Act::New),
             item('u', "undo last change", Act::Undo),
+            item('r', "redo", Act::Redo),
             item('q', "quit", Act::Quit),
         ],
         Some('f') => vec![

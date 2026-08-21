@@ -622,11 +622,15 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
         let verb = model.write.ready().then(|| selected_row(model)).flatten();
         let mut hints = vec!["◀ back", "⏎ open file"];
         hints.extend(verb.and_then(crate::detail::Row::verb));
-        // Offered only once there is something to take back. An undo hint on a
-        // session that has written nothing teaches a key that answers with an
-        // apology — the same rule the row verbs follow.
+        // Offered only once there is something to take back, and likewise for
+        // the way forward. A hint on a session that has written nothing teaches
+        // a key that answers with an apology — the same rule the row verbs
+        // follow. They are separate hints because they are separate verbs.
         if model.write.ready() && !model.undo.is_empty() {
             hints.push("u undo");
+        }
+        if model.write.ready() && !model.redo.is_empty() {
+            hints.push("r redo");
         }
         hints
     } else {

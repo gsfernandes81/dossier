@@ -713,11 +713,27 @@ until the cutover step the user personally green-lights.
     - It is therefore **this session's writes**: a restart empties the stack, and
       the journal still holds everything.
     - **An undo does not stack its own inverse**, so `u u u` walks back three
-      writes rather than toggling the last one. Redo is consequently not free and
-      is not built — pressing undo twice has to mean what it means everywhere.
+      writes rather than toggling the last one — which is why putting one forward
+      again needs a verb of its own (slice 6).
     - `Field::stored` is the shape an inverse restores, deliberately not the
       string the buffer seeds from: tags are typed as words and folded as a list,
       and an inverse built from the typing would restore the wrong type.
+  - **Slice 6 done (2026-08-21) — redo.** `r` on the record, `SPC r` anywhere; a
+    separate verb on a separate key, per the user.
+    - The stacks hold a `Change` — the ops written **and** the ops that put them
+      back. Undo appends `back`, redo appends `forward`: **the very ops written
+      the first time**, so a redo cannot drift from what it is putting back. It
+      is also what makes redoing a *creation* work, since §3.2's create-after-
+      tombstone starts from empty and the name has to be re-sent with it.
+    - **An ordinary write clears the redo stack.** Once history has branched, the
+      future those changes described is one the store never took, and putting one
+      back would write an old edit over a document that has moved on.
+    - A refused step puts its change back on the stack it came from: a save the
+      disk would not take has not changed what the session last did.
+    - `back` is a **snapshot**, not a rule — it records what the store held when
+      the change was made. That is right for the undo/redo dance and deliberately
+      not a promise about a document the other device has since edited; §3.2's
+      field-level LWW settles that, and the loser stays in the journal.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs,
   and **the document-merge verb** — §3.2's amendment note; wording and exact
   placement open, keep it simple),

@@ -346,3 +346,84 @@ fn write_and_reload(
     update(model, Msg::Saved(Box::new(reloaded.store)));
     ops.iter().map(|op| op.ts).max().unwrap_or(max_ts)
 }
+
+/// **Redo puts the write back, and the journal ends up holding all three ops.**
+/// Undo and redo are both ordinary appends, so a value that was set, taken back
+/// and put again leaves three lines behind — not one line edited twice.
+#[test]
+fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
+    let (dir, journal) = journal_with_a_document("redo");
+    let (mut model, loaded) = load_model(&journal);
+    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+
+    update(&mut model, Msg::EditField(Field::Expiry));
+    for _ in 0..10 {
+        update(&mut model, Msg::Backspace);
+    }
+    for c in "2031-05-31".chars() {
+        update(&mut model, Msg::Char(c));
+    }
+    let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
+    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+
+    update(&mut model, Msg::Char(' '));
+    let Effect::Append(back) = update(&mut model, Msg::Char('u')) else { panic!("no undo") };
+    ts = write_and_reload(&journal, &dir, back, ts, &mut model);
+    assert_eq!(model.current().and_then(|d| d.expiry_date.clone()).as_deref(), Some("2026-09-28"));
+
+    update(&mut model, Msg::Char(' '));
+    let Effect::Append(again) = update(&mut model, Msg::Char('r')) else { panic!("no redo") };
+    write_and_reload(&journal, &dir, again, ts, &mut model);
+
+    let reloaded = ds::load::load(&journal).expect("reload");
+    let doc = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("the document");
+    assert_eq!(doc.expiry_date.as_deref(), Some("2031-05-31"), "the write is back");
+
+    let written = std::fs::read_to_string(dir.join("meta").join("desk-core.jsonl")).expect("read");
+    assert_eq!(
+        written.lines().count(),
+        6,
+        "three lines to begin with, then a write, an undo and a redo — each an append"
+    );
+}
+
+/// **Undo and redo of a create work on a tombstoned document.** §3.2 keeps a
+/// `create` forever and makes a later one a legitimate recreate that starts from
+/// empty, so putting a new document back has to re-send its name as well — which
+/// it does, because redo appends the ops that were written the first time.
+#[test]
+fn a_created_document_can_be_taken_back_and_put_again() {
+    let (dir, journal) = journal_with_a_document("recreate");
+    let (mut model, loaded) = load_model(&journal);
+    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+
+    update(&mut model, Msg::Char(' '));
+    update(&mut model, Msg::Char('n'));
+    for c in "Seaman Book".chars() {
+        update(&mut model, Msg::Char(c));
+    }
+    let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
+    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    assert!(model.store.docs.iter().any(|d| d.id == "seaman-book-desk"));
+
+    update(&mut model, Msg::Char(' '));
+    let Effect::Append(back) = update(&mut model, Msg::Char('u')) else { panic!("no undo") };
+    ts = write_and_reload(&journal, &dir, back, ts, &mut model);
+    assert!(
+        !model.store.docs.iter().any(|d| d.id == "seaman-book-desk"),
+        "the tombstone took it out of the fold"
+    );
+
+    update(&mut model, Msg::Char(' '));
+    let Effect::Append(again) = update(&mut model, Msg::Char('r')) else { panic!("no redo") };
+    write_and_reload(&journal, &dir, again, ts, &mut model);
+
+    let reloaded = ds::load::load(&journal).expect("reload");
+    let doc = reloaded
+        .store
+        .docs
+        .iter()
+        .find(|d| d.id == "seaman-book-desk")
+        .expect("the document is back");
+    assert_eq!(doc.name, "Seaman Book", "with its name, which a bare recreate would not have");
+}
