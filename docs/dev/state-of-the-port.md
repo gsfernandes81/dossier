@@ -115,13 +115,15 @@ Each is recorded where it belongs; the link is the point of the row.
 - **The arrow modifier tier** (`ctrl`/`alt` + arrows) — reserved, unbound, and
   now unlikely to be used: the same argument that retired `ctrl+e` applies to it.
   Reachable by thumb, teachable by nothing.
-- **`s` supersede, `b` bundle, `u` undo** — specced in REWRITE-UI §2, unbuilt.
+- **`s` supersede and `b` bundle** — specced in REWRITE-UI §2, unbuilt (`u`/`r`
+  undo and redo are built).
   They are bare letters on the record surface, which is legal now that search is
   locked out there. Add them with the slices that implement them.
-- **Does Termux honour `SGR 2`?** One line settles it:
-  `printf '\e[2mdim\e[0m normal\n'`. If it does not, every dim element in this
-  app has been at full brightness all along, which changes what the quiet parts
-  of the UI are doing.
+- ~~Does Termux honour `SGR 2`?~~ **Answered on the device, 2026-08-21: yes.**
+  The user ran `tools/probe-attrs.fish` on the phone and reports dim, bold,
+  reverse and underline all clearly distinguishable. Dim is a real texture on
+  Termux and the quiet parts of the UI are quiet. *(Not yet reported from that
+  run: the glyph row and dim-on-band — still assumptions.)*
 - **The succession reversal** on the filing card — deferred until the user
   confirms it is a real pain point. Do not build it speculatively.
 - **The structured fields** — slots with insert-and-shift, supersession, bundle

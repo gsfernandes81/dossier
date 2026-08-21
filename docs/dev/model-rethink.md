@@ -237,6 +237,9 @@ both have the same journal state, then settles. Self-healing, but noisy, and the
 noise is in the user's real files tree.
 
 **Decided (user): determinism is the approach**, conditional on the check below.
+**Status: the hardest half has passed.** The phone preserves exact mtimes (step 1
+below), which was the failure most likely to kill this outright. What remains is
+Syncthing's own scanner behaviour and the cross-device leg.
 It is also the only candidate left — see the two-folder entry, which covers
 journals only and so lends the files tree nothing.
 
@@ -259,9 +262,20 @@ path that matters fails — a false pass there would be worse than no test.
 
 Cheapest honest test plan:
 
-1. **Does the phone preserve a set mtime at all?** Write a file to the real
-   Syncthing path in Termux, set its mtime, stat it back. One line. If this fails,
-   stop — nothing downstream matters.
+1. ~~Does the phone preserve a set mtime at all?~~ **Run on the device,
+   2026-08-21: PASS, with room to spare.** In a Syncthing folder on the phone, an
+   mtime set to `2026-01-02 03:04:05.123456789` read back byte for byte —
+   **nanosecond precision intact**, not merely the second. Rewriting identical
+   bytes and re-setting the same mtime left size, mtime *and* inode unchanged.
+   The FUSE-mangling worry was the right thing to check and it did not
+   materialise.
+
+   Two caveats on that result, to close out later rather than assume away: it was
+   the raw one-liner rather than `probe-mtime.fish`, so the `$HOME` false-pass
+   guard never ran — worth confirming the directory used really is inside the
+   Syncthing tree; and it proves the *filesystem* keeps an mtime, not that
+   Syncthing's scanner ignores an identical rewrite, which is step 2 and is still
+   unrun.
 2. **Does Syncthing consider an identical rewrite a change?** Two instances on one
    Linux box (`syncthing -home=…` twice, different ports) — no VM needed. Or even
    one instance: write, scan, read the file's sequence number from
@@ -428,11 +442,36 @@ That check is the next piece of work on this question.
   the user (I5). It joins "expiring only" and "search scan text" in the
   existing filter group — zero new machinery, and consistent with the two toggles
   already there.
+- **`SGR 2` is honoured by Termux** — measured on the device 2026-08-21. Dim,
+  bold, reverse and underline are all distinguishable, so dim is a real texture
+  and not a no-op. The glyph row and dim-on-band from the same probe have not
+  been reported back yet.
 - **The search prompt stays `>`** (user), with the door open. The agreed direction
   if it is reopened: a **search glyph normally, switching to `>` when the leader is
   pressed**, so the prompt names the question the way a minibuffer does. Check the
   glyph renders in Termux's font before committing to one — that belongs with the
   other device checks.
+
+### Where this was left, 2026-08-21
+
+Paused mid-conversation, with the design questions in the state below. Numbering
+convention agreed with the user: **I<n>** for informational items, **R<n>** for
+things needing their input. Those numbers are per-message, not stable ids — the
+durable record is this note.
+
+Open and awaiting the user's reread:
+
+- **the reviews analysis** — walking each of the five surfaces against v2's code
+  to confirm it really does reduce to a filter (the "zero surfaces" claim above is
+  a proposal, not a verified one);
+- **the Windows hidden-attribute gap** on the existing `.dossier/` — fix now, or
+  fold into the journal-path work;
+- **the cross-device mtime leg** — set a known mtime on the desk, let it sync,
+  `stat` it on the phone. Needs both devices and a wait, so it is instructions
+  rather than a script.
+
+Nothing is in flight. The port is paused at R4's complete verb set with CI green
+on every job.
 
 ### Still unanswered
 
