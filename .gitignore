@@ -38,8 +38,15 @@ coverage.xml
 # separate checkouts, not content to commit into the main tree.
 .claude/worktrees/
 
-# Dev-container git-identity keys + ssh config (see docker-*.dev.sh). Never commit.
+# Dev-container git-identity keys + ssh config (see dev/entrypoint.sh, dev/login.sh).
+# Never commit.
 .dev-ssh/
+
+# The dev container's host-specific config: absolute paths and a pointer at the
+# host user's ssh directory. dev/.env.example is the committed template.
+dev/.env
+dev/.env.*
+!dev/.env.example
 
 # Environments (uv.lock IS committed — do not ignore it)
 .venv/

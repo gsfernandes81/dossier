@@ -1,0 +1,139 @@
+# ds-dev — the dossier development container. See dev/README.md; drive it with
+# `make up` in this directory (or `make dev-up` from the repo root).
+#
+# Three conventions borrowed from or3/dev, which borrowed them from ~/infra,
+# because these stacks sit next to each other on the same host:
+#   - no `..` in a path — the Makefile passes DS_SRC as an absolute path instead
+#   - `name:` is declared, so Compose never invents a project name from the
+#     directory (this one is `dev`, which would collide with the next repo that
+#     has one)
+#   - host-specific paths come from the gitignored .env or from make, never $HOME
+#
+# dossier is a local, file-backed TUI: there is no database, no Railway deploy,
+# and — deliberately — NO data store mounted here. Tests use tmp_path and real
+# documents stay off the dev box. Only the repo clone is bind-mounted.
+name: ds-dev
+
+services:
+  dev:
+    build:
+      # The repo root, not this directory: the image pre-builds the Python venv
+      # from pyproject.toml + uv.lock, which live up there. The Makefile supplies
+      # DS_SRC; the :? is for anyone driving compose by hand, so they get a
+      # sentence instead of a build against an empty context.
+      context: ${DS_SRC:?set DS_SRC (the absolute path of the dossier clone) — `make up` does this for you}
+      dockerfile: dev/Dockerfile
+      args:
+        # Build the container's `dev` user at the HOST owner's uid/gid, or every
+        # write from in here lands as the wrong owner in the bind-mounted clone.
+        # The Makefile passes the OWNER of the checkout, which is the right answer
+        # whether or not it was invoked through sudo.
+        USER_UID: ${HOST_UID:-1000}
+        USER_GID: ${HOST_GID:-1000}
+    image: ds-dev
+    container_name: ds-dev
+    hostname: ${DEV_HOSTNAME:-ds-dev}   # Claude Code shows this as the machine title;
+                                        # make up sets it to <host-hostname>-ds-dev
+    init: true                           # reap the orphans detached sessions leave behind
+
+    # No tty/stdin_open. They belong to an arrangement where a Claude session ran
+    # on PID 1's tty; sshd is the foreground process now and wants neither. Every
+    # interactive thing in here gets its pty from the ssh session or the
+    # `docker exec -it` that carried it. Nothing to attach to is the point —
+    # `docker attach` on this container would show you sshd's log and no prompt.
+
+    # A cap, not a reservation. It confines an OOM kill to this container's own
+    # cgroup, so a runaway build in here cannot reap a neighbour on the same Pi.
+    # The default is deliberately generous rather than tuned down: the hungriest
+    # thing this container does is `cargo test --workspace --release`, and the
+    # release profile is lto="thin" with codegen-units=1, which is exactly the
+    # shape that wants headroom. Lower it in .env only if the box actually needs
+    # the memory back; do not lower it to "be safe".
+    mem_limit: ${DEV_MEM_LIMIT:-3072m}
+    memswap_limit: ${DEV_MEMSWAP_LIMIT:-4096m}
+
+    # Deliberate, and matching the sibling dev containers. This can hold a live
+    # Claude session; an unattended restart at 03:00 would resurrect it with
+    # nobody watching and no idea what it was part-way through.
+    restart: "no"
+
+    # .env is read by Compose for INTERPOLATION only — a name in it does not reach
+    # the container unless it is named here too. The entrypoint reads the git
+    # identity to set the commit author; without this block it was silently absent
+    # and every commit made in here failed on "Please tell me who you are".
+    environment:
+      GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
+      GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
+
+      # Claude Remote Control — the claude.ai/code and mobile-app daemon — is OFF
+      # unless this is 1. The way in is ssh plus abduco; remote control is a thing
+      # to turn on for a spell when you are away from a terminal, and a daemon
+      # running with nobody driving it is a live Claude nobody is watching. Read
+      # by the entrypoint at start, so it lands on `make up`, not `make restart`.
+      DS_REMOTE_CONTROL: ${DS_REMOTE_CONTROL:-0}
+
+    volumes:
+      # The host clone. `git pull` in the container and on the host are the same
+      # pull — one working tree, nothing that can drift.
+      - ${DS_SRC:?set DS_SRC (the absolute path of the dossier clone) — `make up` does this for you}:/workspace
+
+      # The host user's .ssh DIRECTORY, read-only: sshd reads authorized_keys out
+      # of it, so the keys that reach the host reach this container and there is
+      # no second key list to maintain. dossier has no secrets-directory mount
+      # (or3 needs one for a vessel-LAN key and a per-repo deploy key; this
+      # container's git identity lives in the gitignored .dev-ssh/ that rides
+      # with the clone). The :? is because an unset value here is a compose error
+      # about an empty path, which is a confusing way to learn you skipped .env.
+      - ${DEV_SSH_AUTHORIZED_KEYS:?set DEV_SSH_AUTHORIZED_KEYS in dev/.env to the host user's .ssh directory}:/home/dev/.host-ssh:ro
+
+      - ds-uv-cache:/home/dev/.cache/uv         # uv cache — fast re-syncs
+      - ds-claude:/home/dev/.claude             # Claude login + config (CLAUDE_CONFIG_DIR points here)
+      - ds-gh:/home/dev/.config/gh              # `gh auth login` (GH_CONFIG_DIR points here)
+      - ds-ssh-host:/home/dev/.ssh-host         # sshd host key -> stable known_hosts across rebuilds
+      - ds-zed-server:/home/dev/.zed_server     # Zed's remote server binary (no re-download per rebuild)
+      - ds-local-share:/home/dev/.local/share   # bash + fish history, and the rc supervisor's log
+
+      # Cargo. The registry and git caches are mounted individually rather than
+      # covering all of ~/.cargo, because CARGO_HOME also holds the rustup-
+      # installed binaries: a volume over the whole directory would shadow the
+      # toolchain a rebuild just installed with whatever the old volume held.
+      - ds-cargo-registry:/home/dev/.cargo/registry
+      - ds-cargo-git:/home/dev/.cargo/git
+      # CARGO_TARGET_DIR, outside the bind mount (Dockerfile explains why). On a
+      # volume so an incremental `cargo test --release` survives a rebuild — the
+      # difference between seconds and minutes on a Pi. It is also the biggest
+      # thing here: debug + release + the musl cross-build together run to
+      # several GB, and `make down-volumes` is what reclaims it.
+      - ds-cargo-target:/home/dev/cargo-target
+
+    # Do NOT mount over /home/dev/venv or over all of /home/dev — either would
+    # erase the pre-built venv and the Rust toolchain.
+
+    ports:
+      # 2222 is dd-dev and 2224 is or3-dev on this same box, so this one is 2225.
+      # The port is this container's identity on the host; do not renumber it
+      # casually. The CONTAINER side stays 2222 whatever the host side is.
+      #
+      # DEV_SSH_BIND is the ADDRESS it is published on, and it defaults to
+      # loopback because that default is the whole of this port's protection:
+      # sshd behind it is key-only, but what a key gets you is a shell in a
+      # container holding a GitHub push key, a gh token and a Claude login. A
+      # cloudflared running on the host ITSELF reaches 127.0.0.1:2225 with
+      # nothing changed here.
+      #
+      # Widen it only for a cloudflared that cannot — one in a container of its
+      # own, which needs the docker bridge gateway address — or set it to
+      # 0.0.0.0 if you deliberately want the home LAN to reach it. Publishing is
+      # create-time: it lands on `make up`, never on `make restart`.
+      - "${DEV_SSH_BIND:-127.0.0.1}:${DEV_SSH_PORT:-2225}:2222"
+
+volumes:
+  ds-uv-cache:
+  ds-claude:
+  ds-gh:
+  ds-ssh-host:
+  ds-zed-server:
+  ds-local-share:
+  ds-cargo-registry:
+  ds-cargo-git:
+  ds-cargo-target:

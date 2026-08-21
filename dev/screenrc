@@ -1,0 +1,20 @@
+# screen inside ds-dev.
+#
+# abduco is what a full-screen program belongs in (claude, and dossier's own TUI —
+# it passes every key through, which a TUI being tested needs). screen is here for
+# ordinary shell work, where scrollback and a status line are worth having. The
+# settings below are about surviving a detach, not about looks.
+
+startup_message off
+defscrollback 10000        # claude and pytest both print more than the default 100 lines
+altscreen on               # restore the shell's screen after a full-screen program exits
+vbell off
+term xterm-256color
+
+# Detach rather than die if the terminal that was attached goes away — an ssh drop
+# from a phone must not take the session with it.
+autodetach on
+
+# A status line, because a detached-and-reattached session with no chrome is easy
+# to mistake for a plain shell, and then you start a SECOND claude in it.
+hardstatus alwayslastline '%{= kG}[ ds-dev ] %{= kw}%-w%{=b kR}[%n %t]%{-}%+w %=%{= kG}%c'

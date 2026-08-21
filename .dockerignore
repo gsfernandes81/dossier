@@ -1,11 +1,42 @@
-# Build-context excludes for `docker build` (Dockerfile.dev). The dev image only
-# COPYs pyproject.toml + uv.lock + the dev scripts; the source is bind-mounted at
-# runtime, so this mainly keeps the context small and secrets/personal data out.
+# Build-context excludes for the dev image (dev/Dockerfile).
+#
+# THE CONTEXT IS THIS DIRECTORY — the repo root — not dev/. That is deliberate:
+# the image pre-builds the Python venv from pyproject.toml + uv.lock, which live
+# here, and a build context cannot reach outside itself. So this file is the one
+# that applies (a dev/.dockerignore would be ignored), and everything the image
+# actually COPYs must stay OUT of the lists below: pyproject.toml, uv.lock, and
+# dev/*.
+#
+# Nothing else is copied in — the source is bind-mounted at runtime — so the rest
+# of this file exists to keep the context small and to keep secrets and personal
+# data out of it entirely.
 
+# Secrets: dev/.env holds host paths and points at the host user's key material.
+# Nothing COPYs it, but it should not be uploaded to the docker daemon at all.
+dev/.env
+dev/.env.*
+!dev/.env.example
+*.env
+
+# Big and pointless to upload. target/ especially: debug + release + the musl
+# cross-build run to several GB, and the container builds into its own
+# CARGO_TARGET_DIR volume anyway (see dev/Dockerfile).
+target/
+spike/target/
+.venv
 .git
+
+# Source trees. None of these are copied into the image; the clone arrives
+# through the /workspace bind mount at runtime. Listed so the context stays a
+# handful of KB rather than the whole repo — if you ever add a COPY that needs
+# one of them, take it out of this list in the same edit.
+crates/
+dossier/
+tools/
+docs/
+
 .claude/
 .dev-ssh/
-.venv
 
 **/__pycache__
 *.pyc
@@ -16,9 +47,7 @@ htmlcov
 .coverage
 .coverage.*
 
-*.env
-
-# dossier: never pull personal data, local config, or scratch into the build context.
+# dossier: never pull personal data, local config, or scratch into the context.
 .dossier/
 scratch/
 *.local.toml
@@ -28,5 +57,3 @@ notion-export*.json
 # Syncthing bookkeeping.
 .stfolder/
 .stignore
-
-docs/

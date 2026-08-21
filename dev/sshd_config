@@ -1,0 +1,44 @@
+# The in-container sshd for ds-dev. Runs as the unprivileged `dev` user on port
+# 2222, which compose publishes on 127.0.0.1:2225 of the host.
+#
+# This is the container's FOREGROUND process and its front door — not a
+# side-channel next to `docker exec`. You ssh in from a PC or from Termux and
+# hold the session in abduco; the entrypoint prints the two lines for it on every
+# start. `docker exec` still works and needs none of this.
+Port 2222
+ListenAddress 0.0.0.0
+
+# Persisted in the ds-ssh-host volume so a client's known_hosts entry survives
+# every rebuild. Regenerating it per build would train you to accept a changed
+# host key, which is the one habit that makes the check worthless.
+HostKey /home/dev/.ssh-host/ssh_host_ed25519_key
+PidFile /home/dev/.ssh-host/sshd.pid
+
+# Key-only, `dev` only — a non-root sshd can only ever serve its own account.
+# The key list is the HOST user's, read straight out of the read-only bind mount
+# of their .ssh directory (DEV_SSH_AUTHORIZED_KEYS in dev/.env), so a key that
+# reaches the host reaches this container and there is no second list to keep in
+# step. Adding a client therefore means editing authorized_keys on the host, not
+# in here; nothing needs restarting for sshd to see it.
+AuthorizedKeysFile /home/dev/.host-ssh/authorized_keys
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+UsePAM no                 # PAM needs root; a non-root sshd must disable it
+
+# Let ssh sessions (and Zed-remote) inherit the env the entrypoint writes to
+# ~/.ssh/environment — this is what puts the venv and cargo on PATH and gives
+# Zed's toolchain detection its VIRTUAL_ENV.
+PermitUserEnvironment yes
+
+# Drop a wedged session rather than leaving a half-dead one that accepts data and
+# never answers: 3 x 30s of silence and it is gone. This is safe precisely because
+# the work lives in abduco — the session dies, what is under it keeps running, and
+# `abduco -A claude claude` puts you back. A phone hitting its lock screen is the
+# ordinary case, not the exception.
+ClientAliveInterval 30
+ClientAliveCountMax 3
+
+Subsystem sftp internal-sftp
+StrictModes yes
