@@ -241,10 +241,11 @@ no change for identical content *and* identical mtime, in both directions, on
 Android and Windows. The mechanism is right in principle; the claim about the
 scanner is untested and must not be assumed.
 
-**Still to decide:** whether this is enough, or whether the two-folder send/receive
-arrangement the user asked for (REWRITE.md §7) is the natural home for derived
-state with one writer. Those two decisions may really be one decision, and are
-worth making together.
+**The two-folder arrangement is not the answer here** — see §3's own entry below.
+It covers **journals only**, so bundles live in the ordinary bidirectional files
+folder and get no single-writer guarantee from it. That removes the alternative
+this question had, leaving determinism as the surviving proposal and making the
+Syncthing scanner check load-bearing rather than merely prudent.
 
 ### When it refreshes
 
@@ -304,6 +305,46 @@ first framed. The manifest still earns its keep, and its real job is not
 documentation: **dossier only ever deletes files it recorded putting there.**
 Anything else in that folder is left strictly alone — which is also what makes
 ingest safe, because an unrecognised file is a candidate, never garbage.
+
+### The Syncthing two-folder arrangement: journals only
+
+*User: "a separate send and a separate receive folder for the journals only."*
+(Recorded here because it was decided in an earlier session that did not survive
+in full.)
+
+Each device gets a **send-only** folder holding the journals it writes, and a
+**receive-only** folder holding the journals it receives. The real files tree —
+the PDFs and scans — stays in an ordinary bidirectional folder.
+
+What it buys is **structural enforcement of §3.1's single-writer rule at the
+transport layer** rather than only in the application. A device's own journal
+cannot be overwritten from the network, because Syncthing never writes into a
+send-only folder; and another device's journal cannot be damaged locally, because
+the app never writes into the receive-only one. §3.3's "journal damage without a
+conflict file" (a versioning restore, a partial sync, a byte-length shrink) stops
+being a thing the app has to defend against and becomes a thing that mostly cannot
+happen. The local high-water marks stay worth keeping as a backstop.
+
+It scales as one folder per **writer**: send-only on its owner, receive-only
+everywhere else. Two devices, two folders. The per-device setup this implies is
+exactly why the user wants `ds` to configure it rather than doing it by hand
+(REWRITE.md §7).
+
+**Consequences to work through before building it:**
+
+- **§3.1 says the journal directory is `<syncthing_root>/.dossier/journal/`.**
+  Two Syncthing folders means two paths, so this becomes something like
+  `journal/out/` and `journal/in/` — a §3.1 change, needing an amendment note in
+  the same style as the id one, since §3 is otherwise frozen.
+- **The fold must read both roots.** `Journal::new` takes a single directory
+  today. Sibling subdirectories under one parent is the neater shape, if
+  Syncthing is happy sharing a parent between two folders — worth verifying.
+- **The compaction temp file** (`<writer>.jsonl.tmp-<pid>`) now lives in a
+  send-only folder and would propagate. The `.stignore` step already in R7's
+  cutover checklist is unchanged and still required.
+- **The satellite** writes as `desk-lab` in the `enrich` namespace from the same
+  machine as `desk-core`; it presumably shares the desk's send folder rather than
+  getting a third. A detail, not a blocker.
 
 ### Still unanswered
 
