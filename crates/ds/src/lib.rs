@@ -45,6 +45,8 @@
 //!   makes a missing opener fixable.
 //! - [`config`] / [`load`] — the small per-device TOML, and the one path from a
 //!   directory to a store that every entry point shares.
+//! - [`init`] — `ds init`: naming this device, which is what gives the write
+//!   path a writer id to append under.
 //! - [`status`] — what `ds status` reports, as data that is rendered twice: in
 //!   full for a person, problems only for cron.
 //! - [`syncthing`] — asking the local daemon how the sync is going, status only,
@@ -67,6 +69,7 @@ pub mod config;
 pub mod detail;
 pub mod doc;
 pub mod find;
+pub mod init;
 pub mod input;
 pub mod layout;
 pub mod load;

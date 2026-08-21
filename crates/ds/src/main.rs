@@ -107,6 +107,21 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         query: Vec<String>,
     },
+    /// Name this device, so it can write.
+    ///
+    /// Listed under maintenance rather than with the daily verbs (REWRITE.md
+    /// §4.1): it is run once per device, and every launch after that depends on
+    /// what it decided.
+    Init {
+        /// This device's name — the first half of its writer id (`phone` →
+        /// `phone-core`). Asked for interactively when omitted.
+        #[arg(long, value_name = "NAME")]
+        device: Option<String>,
+
+        /// Replace an existing config.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Exit codes, so a script can tell the cases apart.
@@ -135,6 +150,13 @@ fn main() -> ExitCode {
 }
 
 fn run(args: &Args, start: Instant) -> io::Result<u8> {
+    // Init comes first, before anything reads a config or a journal: it is the
+    // verb for a device that has neither, and loading a store to answer "what
+    // is this device called" would be backwards.
+    if let Some(Command::Init { device, force }) = &args.command {
+        return Ok(init(args, device.clone(), *force));
+    }
+
     // A config that exists but is broken is fatal; one that is simply absent is
     // not. A fresh device has none until `ds init`, and `--root` covers it.
     let config = ds::config::Config::load().map_err(io::Error::other)?;
@@ -148,7 +170,41 @@ fn run(args: &Args, start: Instant) -> io::Result<u8> {
             Ok(status(&loaded, &config, &root, *quiet, *no_sync))
         }
         Some(Command::Open { query }) => Ok(open_one(&loaded, &root, &query.join(" "))),
+        // Handled above, before any store was read.
+        Some(Command::Init { .. }) => Ok(0),
         None => browse(loaded, &journal, &root, start).map(|()| 0),
+    }
+}
+
+/// `ds init` — the conversation, wired to the real streams.
+///
+/// The policy lives here and the mechanism in [`ds::init`]: which streams, and
+/// whether there is a person on the end of them. Everything else — the
+/// questions, the grammar check, the refusal to overwrite — is testable without
+/// a terminal, which is the only way CI can check it at all.
+fn init(args: &Args, device: Option<String>, force: bool) -> u8 {
+    let Some(path) = ds::config::path() else {
+        eprintln!(
+            "ds: cannot work out where this platform keeps config — set {}",
+            ds::config::DIR_ENV
+        );
+        return code::FAILED;
+    };
+    let answers = ds::init::Answers {
+        device,
+        root: args.root.clone().or_else(|| std::env::var_os("DS_ROOT").map(PathBuf::from)),
+        force,
+    };
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let mut output = io::stdout();
+    match ds::init::run(&path, &answers, &mut input, &mut output, ds::init::stdin_is_interactive())
+    {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("ds: {error}");
+            code::FAILED
+        }
     }
 }
 

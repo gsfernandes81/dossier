@@ -23,7 +23,7 @@
 //! contract with `ds status --quiet` is that exit code.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 /// A journal directory holding one writer file.
 fn journal_dir(name: &str, lines: &[String]) -> PathBuf {
@@ -65,7 +65,14 @@ fn sample(name: &str) -> PathBuf {
 }
 
 /// Run the built binary with a config directory of its own, so the developer's
-/// real config can never change what a test sees.
+/// real config can never change what a test sees — and, now that `ds init`
+/// *writes* one, so a test can never change the developer's.
+///
+/// `DS_CONFIG_DIR` is what makes that true on Windows. The four variables below
+/// it sandbox the config directory on Linux only: `dirs` resolves the Windows
+/// path through the Known Folder API, which ignores the environment entirely.
+/// While `ds` only read config that was merely useless; a writing test would
+/// have written the CI runner's real `%LOCALAPPDATA%\dossier\config.toml`.
 fn ds(root: &Path, args: &[&str]) -> Output {
     let sandbox = root.join("config-home");
     std::fs::create_dir_all(&sandbox).expect("mkdir");
@@ -73,6 +80,7 @@ fn ds(root: &Path, args: &[&str]) -> Output {
         .args(args)
         .arg("--root")
         .arg(root)
+        .env("DS_CONFIG_DIR", &sandbox)
         .env("XDG_CONFIG_HOME", &sandbox)
         .env("HOME", &sandbox)
         .env("LOCALAPPDATA", &sandbox)
@@ -80,6 +88,19 @@ fn ds(root: &Path, args: &[&str]) -> Output {
         .env_remove("DS_ROOT")
         .output()
         .expect("run ds")
+}
+
+/// The config file `ds` in this sandbox would read and write.
+fn config_path(root: &Path) -> PathBuf {
+    root.join("config-home").join("config.toml")
+}
+
+/// An empty root, with no journal and no config — a device on its first day.
+fn fresh(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("ds-cli-{name}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    dir
 }
 
 /// The full report names the journal, counts the documents, and says the store
@@ -161,4 +182,87 @@ fn open_says_when_a_file_has_not_synced() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("Syncthing"), "{stderr}");
+}
+
+/// `ds init` writes the config the whole write path hangs off, and says which
+/// writer id this device will append as.
+#[test]
+fn init_names_the_device() {
+    let root = fresh("init");
+    let out = ds(&root, &["init", "--device", "phone"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{text}{}", String::from_utf8_lossy(&out.stderr));
+    assert!(text.contains("phone-core"), "{text}");
+
+    let written = std::fs::read_to_string(config_path(&root)).expect("config");
+    assert!(written.contains("device = \"phone\""), "{written}");
+    assert!(written.contains("syncthing_root"), "{written}");
+}
+
+/// **`ds init` never creates the journal directory** (REWRITE.md §7). It first
+/// exists inside the synced tree at cutover, and anything created inside a
+/// Syncthing folder syncs by default — so a journal appearing on the other
+/// device before its store was exported is the one thing the plan cannot take.
+#[test]
+fn init_does_not_create_the_journal() {
+    let root = fresh("init-nojournal");
+    let out = ds(&root, &["init", "--device", "phone"]);
+    assert!(out.status.success());
+    assert!(!root.join(".dossier").exists(), "the journal must not exist yet");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("not there yet"));
+}
+
+/// An existing config is never silently replaced: `device` is this device's
+/// identity, and changing it strands every op written under the old one.
+#[test]
+fn init_refuses_to_overwrite_without_force() {
+    let root = fresh("init-exists");
+    assert!(ds(&root, &["init", "--device", "phone"]).status.success());
+
+    let again = ds(&root, &["init", "--device", "desk"]);
+    let stderr = String::from_utf8_lossy(&again.stderr);
+    assert_eq!(again.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("--force"), "{stderr}");
+    assert!(
+        std::fs::read_to_string(config_path(&root)).unwrap().contains("phone"),
+        "the refusal changed nothing"
+    );
+
+    assert!(ds(&root, &["init", "--device", "desk", "--force"]).status.success());
+    assert!(std::fs::read_to_string(config_path(&root)).unwrap().contains("desk"));
+}
+
+/// A device name outside the frozen writer grammar is refused, and the message
+/// says what the grammar is rather than only that the name was wrong.
+#[test]
+fn init_refuses_a_device_name_the_grammar_rejects() {
+    let root = fresh("init-grammar");
+    let out = ds(&root, &["init", "--device", "My_Phone"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("My_Phone-core"), "{stderr}");
+    assert!(stderr.contains("lowercase"), "{stderr}");
+    assert!(!config_path(&root).exists(), "nothing was written");
+}
+
+/// **With no terminal and no flag, `ds init` fails fast instead of hanging.**
+/// A CI job or a pipe has no one to answer the question, and a command that
+/// waits forever for an answer that cannot come is the worse failure.
+#[test]
+fn init_without_a_terminal_or_a_flag_fails_fast() {
+    let root = fresh("init-notty");
+    let sandbox = root.join("config-home");
+    std::fs::create_dir_all(&sandbox).expect("mkdir");
+    let out = Command::new(env!("CARGO_BIN_EXE_ds"))
+        .args(["init"])
+        .arg("--root")
+        .arg(&root)
+        .env("DS_CONFIG_DIR", &sandbox)
+        .env_remove("DS_ROOT")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run ds");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("--device"), "{stderr}");
 }
