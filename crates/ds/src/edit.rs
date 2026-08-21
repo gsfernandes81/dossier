@@ -185,6 +185,15 @@ pub struct Edit {
     /// until the journal has answered, so the screen never shows a value the
     /// store does not hold.
     pub saving: bool,
+    /// **This edit is naming a document that does not exist yet**, so saving it
+    /// appends a `create` before the field.
+    ///
+    /// The id cannot be decided when the edit opens, because it is minted from
+    /// the name and the name is what is being typed — so [`Edit::doc`] is empty
+    /// until `Enter`, and filled in with the id that was actually written. That
+    /// is what lets everything downstream stay ignorant of the difference: the
+    /// save path anchors on `doc`, and by the time it looks there is one.
+    pub creating: bool,
 }
 
 impl Edit {
@@ -199,6 +208,31 @@ impl Edit {
             original,
             armed_discard: false,
             saving: false,
+            creating: false,
+        }
+    }
+
+    /// Open the edit that names a document into existence.
+    ///
+    /// It starts empty and therefore **dirty the moment anything is typed**,
+    /// which is what makes `Esc` ask twice before throwing away a name — the
+    /// same rule every other edit follows, for free.
+    #[must_use]
+    pub fn creating() -> Self {
+        Self { creating: true, ..Self::new(String::new(), Field::Name, None) }
+    }
+
+    /// What the entry line asks for.
+    ///
+    /// A create asks for *the document*, not for a field: the same buffer means
+    /// something different, and the prompt is the only thing on screen that
+    /// says which — the record behind it still shows whatever was selected.
+    #[must_use]
+    pub fn prompt(&self) -> &'static str {
+        if self.creating {
+            "new document"
+        } else {
+            self.field.prompt()
         }
     }
 

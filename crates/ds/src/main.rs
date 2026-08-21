@@ -309,7 +309,7 @@ fn browse(
     let session =
         writer_session(config, journal, loaded.load.lines, loaded.stats.max_ts(), tx.clone());
     model.write = match &session {
-        Ok(_) => ds::app::WriteState::Ready,
+        Ok(session) => ds::app::WriteState::Ready { device: session.device.clone() },
         Err(reason) => ds::app::WriteState::Off(reason.clone()),
     };
 
@@ -368,6 +368,9 @@ struct Session {
     /// Ops to append. Dropping this closes the thread's loop.
     commands: mpsc::Sender<Vec<journal::Draft>>,
     worker: std::thread::JoinHandle<()>,
+    /// The device this session writes as — the half of the writer id `ds init`
+    /// fixed, and the half of a new document's id `crate::id::mint` needs.
+    device: String,
 }
 
 impl Session {
@@ -416,7 +419,7 @@ fn writer_session(
     let worker = std::thread::spawn(move || {
         write_loop(&journal, &writer_id, &lock_dir, max_ts, lines, &orders, &results);
     });
-    Ok(Session { commands, worker })
+    Ok(Session { commands, worker, device })
 }
 
 /// The writer thread: open on demand, append, fsync, re-fold, report.

@@ -116,7 +116,7 @@ fn model(cols: u16, rows: u16) -> Model {
 /// about a device has no writer id and must not offer an edit.
 fn writable(cols: u16, rows: u16) -> Model {
     let mut model = model(cols, rows);
-    model.write = ds::app::WriteState::Ready;
+    model.write = ds::app::WriteState::Ready { device: "desk".into() };
     model
 }
 

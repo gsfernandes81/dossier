@@ -177,8 +177,16 @@ pub enum Effect {
 /// "continue read-only with a visible notice" rather than fail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteState {
-    /// Editing is available.
-    Ready,
+    /// Editing is available, under this device's name.
+    ///
+    /// **The device travels with the permission** rather than beside it: a
+    /// session may write exactly when it knows who it is, since the device is
+    /// the first half of the writer id every op is appended under — and, since
+    /// [`crate::id::mint`], part of the id of every document created here. A
+    /// separate `Option<String>` would let those two facts drift apart, and the
+    /// state that could then exist — allowed to write, no idea as whom — is one
+    /// nothing downstream could do anything sensible with.
+    Ready { device: String },
     /// Editing is off for this session, with the reason ready to show.
     Off(String),
 }
@@ -187,14 +195,23 @@ impl WriteState {
     /// Whether an edit may be opened.
     #[must_use]
     pub fn ready(&self) -> bool {
-        matches!(self, WriteState::Ready)
+        matches!(self, WriteState::Ready { .. })
+    }
+
+    /// The device to write under, when there is one.
+    #[must_use]
+    pub fn device(&self) -> Option<&str> {
+        match self {
+            WriteState::Ready { device } => Some(device),
+            WriteState::Off(_) => None,
+        }
     }
 
     /// Why not, for the status band.
     #[must_use]
     pub fn reason(&self) -> Option<&str> {
         match self {
-            WriteState::Ready => None,
+            WriteState::Ready { .. } => None,
             WriteState::Off(reason) => Some(reason),
         }
     }
@@ -614,6 +631,10 @@ impl Model {
                 self.sheet = None;
                 self.record_verb('e')
             }
+            crate::sheet::Act::New => {
+                self.sheet = None;
+                self.open_new()
+            }
             crate::sheet::Act::Quit => Effect::Quit,
         }
     }
@@ -714,6 +735,40 @@ impl Model {
         Effect::Redraw
     }
 
+    /// Start a new document by asking for its name.
+    ///
+    /// **The name is the whole creation gesture**, and deliberately so: it is
+    /// the one field `Field::validate` refuses to leave empty, so a document
+    /// cannot be brought into existence nameless and then abandoned — which is
+    /// exactly the shape a multi-field "new document form" would produce on a
+    /// phone, one interruption in. Everything else is a field on the record,
+    /// reached by the same `e` as every other edit.
+    ///
+    /// The record is *not* opened here. There is nothing to show until the
+    /// journal has answered, and a record for a document that does not exist
+    /// yet would be a screen full of `—` with no way to tell whether it saved.
+    fn open_new(&mut self) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        self.edit = Some(crate::edit::Edit::creating());
+        self.sheet = None;
+        Effect::Redraw
+    }
+
+    /// The id for a document being created here and now.
+    ///
+    /// Every id in the store is a candidate collision, not merely the ones this
+    /// device made: a name that would land on a document synced from the other
+    /// device must still count up. [`crate::id::mint`] is what makes that a
+    /// *local* question again — the device is already in the id, so the only
+    /// ids that can be in the way are ones this device can see.
+    fn mint_id(&self, name: &str) -> String {
+        let taken = self.store.docs.iter().map(|doc| doc.id.as_str()).collect();
+        crate::id::mint(name, self.write.device().unwrap_or_default(), &taken)
+    }
+
     /// Take a re-folded store, keeping the user's place in it.
     ///
     /// A save can reorder the list — an expiry edit moves a row under the
@@ -779,10 +834,19 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         Msg::Saved(store) => {
             // The edit is closed *here* and not when `Enter` was pressed: until
             // the journal has answered, the value on screen is a hope.
-            let edited = model.edit.take().map(|edit| edit.doc);
+            let closed = model.edit.take();
+            let created = closed.as_ref().is_some_and(|edit| edit.creating);
+            let edited = closed.map(|edit| edit.doc);
             let anchor = edited.or_else(|| model.current().map(|doc| doc.id.clone()));
             let kept = model.adopt(*store, anchor.as_deref().unwrap_or_default());
-            if kept {
+            if kept && created {
+                // **A new document opens on its record**, which is the only
+                // place its remaining fields can be filled in — creating one and
+                // being left on the list would make the next step invisible.
+                model.detail = true;
+                model.record_cursor = 0;
+                model.flash = Some("created".into());
+            } else if kept {
                 model.flash = Some("saved".into());
             } else {
                 // The document is no longer in the list the query and filter
@@ -1010,16 +1074,35 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             } else {
                 match edit.field.validate(&edit.buffer) {
                     Ok(value) => {
+                        // **The id is minted here, not when the edit opened**,
+                        // because it is made from the name and the name is what
+                        // was being typed. Writing it back into `edit.doc` is
+                        // what lets the save path below — and `Msg::Saved`,
+                        // which anchors on it — stay ignorant of the difference
+                        // between creating and editing.
+                        if edit.creating {
+                            edit.doc = model.mint_id(edit.buffer.trim());
+                        }
                         let field = edit.field.journal_field();
-                        let draft = match value {
+                        let write = match value {
                             Some(value) => journal::Draft::set("doc", &edit.doc, field, value),
                             // An empty buffer clears the field: `unset`, never a
                             // stored empty string (see
                             // [`crate::edit::Field::validate`]).
                             None => journal::Draft::unset("doc", &edit.doc, field),
                         };
+                        // `create` first, and in the *same* append: §3.2's fold
+                        // orphans a `set` on an entity that is not alive yet, so
+                        // a name that arrived before its create would be
+                        // silently dropped. One batch, one writer, so the two
+                        // ops cannot be separated by anything.
+                        let drafts = if edit.creating {
+                            vec![journal::Draft::create("doc", &edit.doc), write]
+                        } else {
+                            vec![write]
+                        };
                         edit.saving = true;
-                        Effect::Append(vec![draft])
+                        Effect::Append(drafts)
                     }
                     Err(complaint) => {
                         // The typing is never destroyed by a refusal — it is the
@@ -1196,7 +1279,7 @@ pub(crate) mod tests {
     /// no writer id to append under.
     fn writable() -> Model {
         let mut model = model();
-        model.write = WriteState::Ready;
+        model.write = WriteState::Ready { device: "desk".into() };
         model
     }
 
@@ -1341,6 +1424,88 @@ pub(crate) mod tests {
             update(&mut m, Msg::Enter),
             Effect::Append(vec![journal::Draft::unset("doc", "coc", "notes")])
         );
+    }
+
+    /// **Creating a document is `create` then `set name`, in one append.**
+    /// §3.2's fold orphans a `set` on an entity that is not alive yet, so a name
+    /// arriving before its create would be silently dropped — and the two ops
+    /// cannot be separated by anything if they are one batch from one writer.
+    #[test]
+    fn creating_a_document_appends_the_create_before_the_name() {
+        let mut m = writable();
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('n'));
+        assert!(m.edit.as_ref().is_some_and(|edit| edit.creating), "the name is being asked for");
+        assert!(!m.detail, "and the record is not opened on a document that does not exist");
+
+        for c in "Seaman Book".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![
+                journal::Draft::create("doc", "seaman-book-desk"),
+                journal::Draft::set("doc", "seaman-book-desk", "name", "Seaman Book"),
+            ])
+        );
+    }
+
+    /// **The id is minted from the store the user can see** — a name that would
+    /// land on a document synced from the other device still has to count up,
+    /// even though the device half means it could only be one of this device's.
+    #[test]
+    fn a_new_id_avoids_every_id_already_in_the_store() {
+        let mut m = writable();
+        m.store.docs[0].id = "passport-desk".into();
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('n'));
+        for c in "Passport".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        let Effect::Append(drafts) = update(&mut m, Msg::Enter) else { panic!("no append") };
+        assert_eq!(drafts[0], journal::Draft::create("doc", "passport-desk-2"));
+    }
+
+    /// **A new document lands on its record**, which is the only place the rest
+    /// of its fields can be filled in. Being dropped back on the list would make
+    /// the next step invisible.
+    #[test]
+    fn a_created_document_opens_on_its_record() {
+        let mut m = writable();
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('n'));
+        for c in "Seaman Book".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Enter);
+
+        // What the writer thread posts back once the ops have landed.
+        let mut store = m.store.clone();
+        let mut fresh = store.docs[0].clone();
+        fresh.id = "seaman-book-desk".into();
+        fresh.name = "Seaman Book".into();
+        fresh.expiry_date = None;
+        fresh.files.clear();
+        fresh.haystack = crate::search::fold(&fresh.name);
+        store.docs.push(fresh);
+        update(&mut m, Msg::Saved(Box::new(store)));
+
+        assert!(m.edit.is_none(), "the journal answered, so the editor closed");
+        assert!(m.detail, "and the record is open");
+        assert_eq!(m.record_cursor, 0, "on its first row");
+        assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("seaman-book-desk"));
+        assert_eq!(m.flash.as_deref(), Some("created"));
+    }
+
+    /// A session that cannot write cannot create either, and says the same thing
+    /// it says about editing rather than doing nothing.
+    #[test]
+    fn creating_is_refused_with_a_reason_when_the_session_cannot_write() {
+        let mut m = model();
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('n'));
+        assert!(m.edit.is_none());
+        assert!(m.flash.is_some());
     }
 
     /// **An empty buffer clears the field with an `unset`**, never a stored
@@ -1795,7 +1960,7 @@ pub(crate) mod tests {
     #[test]
     fn e_edits_the_selected_row_and_says_so_when_it_cannot() {
         let mut m = model();
-        m.write = WriteState::Ready;
+        m.write = WriteState::Ready { device: "desk".into() };
         update(&mut m, Msg::OpenDetail);
         let rows = crate::detail::rows(m.current().unwrap());
         let expiry = rows
@@ -1826,7 +1991,7 @@ pub(crate) mod tests {
     #[test]
     fn the_sheet_offers_the_record_verb_too() {
         let mut m = model();
-        m.write = WriteState::Ready;
+        m.write = WriteState::Ready { device: "desk".into() };
         update(&mut m, Msg::OpenDetail);
         m.record_cursor = crate::detail::rows(m.current().unwrap())
             .iter()

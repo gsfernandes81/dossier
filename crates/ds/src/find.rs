@@ -591,7 +591,7 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 /// goes; a cursor that can be moved through the text arrives with REWRITE-UI.md
 /// §5b's query cursor, and both get it from the same mechanism when it does.
 fn edit_row(edit: &crate::edit::Edit, cols: usize) -> Line<'static> {
-    let prompt = format!(" {}: ", edit.field.prompt());
+    let prompt = format!(" {}: ", edit.prompt());
     let room = cols.saturating_sub(width(&prompt) + 1);
     // The *tail* of an over-long value is what matters while typing: the end is
     // where the next character lands.

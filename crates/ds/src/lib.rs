@@ -72,6 +72,7 @@ pub mod detail;
 pub mod doc;
 pub mod edit;
 pub mod find;
+pub mod id;
 pub mod init;
 pub mod input;
 pub mod layout;

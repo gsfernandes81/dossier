@@ -246,6 +246,10 @@ Touch chrome is now three rows, the same as a keyboard layout:
   would have run it. It **covers** the list rather than shrinking it.
 - **A chord is a shortcut for a verb, never a second implementation.** Every
   sheet item goes through the same `update` the keyboard reaches.
+- **`SPC n` creates a document**, and asks only for its name. It is listed on the
+  record's sheet as well as the list's: creating a document is not a thing about
+  the record you happen to be reading, and making the user peel back to a surface
+  that admits it would teach that it is.
 - **`SPC` is the sheet's touch trigger**, replacing the `⌨` chip: Termux has its
   own keyboard key and tapping the field already raises the IME. The empty
   field's second phrase runs into the chip and finishes the sentence, because a

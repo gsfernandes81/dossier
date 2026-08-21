@@ -61,7 +61,7 @@ fn load_model(journal: &Journal) -> (Model, journal::Load) {
     let loaded = ds::load::load(journal).expect("load");
     let lines = loaded.load;
     let mut model = Model::new(loaded.store, loaded.today, loaded.warn_until, 47, 24);
-    model.write = WriteState::Ready;
+    model.write = WriteState::Ready { device: "desk".into() };
     (model, lines)
 }
 
@@ -199,4 +199,47 @@ fn two_devices_write_two_files_and_fold_to_one_store() {
     assert_eq!(doc.notes, "renewed in Mumbai", "and the desk's, from the same fold");
     assert!(dir.join("meta").join("phone-core.jsonl").is_file());
     assert!(dir.join("meta").join("desk-core.jsonl").is_file());
+}
+
+/// **A document created in the TUI exists after a reload.** The model tests
+/// prove the two ops are asked for in the right order; only a real journal
+/// proves the fold accepts them — a `set` that reached the file before its
+/// `create` would be orphaned, and the new document would simply not be there.
+#[test]
+fn a_created_document_survives_a_reload() {
+    let (dir, journal) = journal_with_a_document("create");
+    let (mut model, loaded) = load_model(&journal);
+    let before = model.store.docs.len();
+
+    update(&mut model, Msg::Char(' '));
+    update(&mut model, Msg::Char('n'));
+    for c in "Seaman Book".chars() {
+        update(&mut model, Msg::Char(c));
+    }
+    let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
+        panic!("naming a new document must ask for an append");
+    };
+
+    let mut writer = Writer::open(
+        &journal,
+        Namespace::Meta,
+        "desk-core",
+        &lock_dir(&dir),
+        loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0),
+    )
+    .expect("open the writer");
+    writer.append_all(drafts).expect("append");
+    writer.commit().expect("fsync");
+    drop(writer);
+
+    let reloaded = ds::load::load(&journal).expect("reload");
+    assert_eq!(reloaded.store.docs.len(), before + 1);
+    let doc = reloaded
+        .store
+        .docs
+        .iter()
+        .find(|d| d.id == "seaman-book-desk")
+        .expect("the new document, keyed by name and device");
+    assert_eq!(doc.name, "Seaman Book");
+    assert_eq!(doc.expiry_date, None, "and nothing it was not given");
 }

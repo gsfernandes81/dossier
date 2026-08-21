@@ -49,6 +49,8 @@ pub enum Act {
     Clear,
     /// Edit the record row the selector is on.
     Edit,
+    /// Start a new document by asking for its name.
+    New,
     /// Leave.
     Quit,
 }
@@ -84,12 +86,19 @@ pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
         // `e` is a bare letter *and* it can be read off the sheet, which a
         // `ctrl+`combination never can (Termux latches CTRL in its own UI, so
         // the app never sees a moment between the modifier and the letter).
-        None if model.detail => {
-            let mut top = vec![Item { accel: "e", ..item('e', "edit this row", Act::Edit) }];
-            top.push(item('q', "quit", Act::Quit));
-            top
-        }
-        None => vec![item('f', "filter", Act::Enter('f')), item('q', "quit", Act::Quit)],
+        None if model.detail => vec![
+            Item { accel: "e", ..item('e', "edit this row", Act::Edit) },
+            // Offered here as well as on the list. Creating a document is not a
+            // thing about the record you happen to be reading, and making the
+            // user peel back to a surface that admits it would teach that it is.
+            item('n', "new document", Act::New),
+            item('q', "quit", Act::Quit),
+        ],
+        None => vec![
+            item('f', "filter", Act::Enter('f')),
+            item('n', "new document", Act::New),
+            item('q', "quit", Act::Quit),
+        ],
         Some('f') => vec![
             Item {
                 on: Some(model.filter == Filter::Expiring),

@@ -128,8 +128,22 @@ section and the golden vectors in the same slice.
   vanishingly rare, and LWW's loser is still in the journal (recoverable), never
   silently gone. Do not build OR-sets — documented simplicity trade, revisit only on
   evidence.
-- Doc `id` stays the slug (v2 rules: reserved-name guard, collision suffixing). An id
-  rename = `create` new + copy fields + **reference fixups** + `delete` old, emitted
+- Doc `id` stays the slug (v2 rules: reserved-name guard, collision suffixing).
+  **Amended (2026-08-21) for ids minted in v3: the device name is part of the id,
+  not merely part of the tie-break** — `passport-desk`, `passport-phone`. v2's
+  rule assumed one process owning the whole store; under a journal two offline
+  devices both find the bare slug free, both mint it, and the fold treats them as
+  one entity — where a `create` *resets* the entity's fields, so the later one
+  silently wipes the other device's work. With the device in the id, the only
+  possible collisions are against ids this device can see, so the counter suffix
+  is a local decision again. This changes no op, field or fold rule, and applies
+  only to documents created in v3; exported v2 ids keep their names.
+  **Its consequence, open:** two devices can now hold two documents for one real
+  thing, and **nothing merges them**. The merge verb needs no new machinery — it
+  is the id-rename contract below minus the `create` — and its exact detection
+  signal is two documents listing the same file path. v2's `dedup` does not cover
+  it (that clusters duplicate *files*; this is two documents over one file).
+- An id rename = `create` new + copy fields + **reference fixups** + `delete` old, emitted
   as consecutive ops from one writer. Fixups are part of the contract: rewrite every
   inbound `supersedes` pointing at the old id, and re-emit the effective
   review/suggestion `state` under the new id (stale old-id state is harmless after
@@ -660,9 +674,29 @@ until the cutover step the user personally green-lights.
       stored as a list** — a stored `"a b"` would be one tag with a space in it,
       which nothing would ever match. `name` is the one field that refuses an
       empty buffer; every other one clears to an `unset`.
-    - Still unbuilt, and the largest hole in R4: **creating a document.** The
-      structured fields (`location`/`slot`, `bundles`, `renews`, files) need
+    - The structured fields (`location`/`slot`, `bundles`, `renews`, files) need
       pickers, not a text buffer, and are deliberately not `Field` variants.
+  - **Slice 4 done (2026-08-21) — creating a document.** `SPC n` asks for a
+    name and nothing else, on the record surface as well as the list; the name
+    is the one field `validate` refuses to leave empty, so a document cannot be
+    created nameless and abandoned — the shape a multi-field "new document form"
+    produces on a phone, one interruption in. Everything else is a field on the
+    record, reached by the same `e`.
+    - **`create` and `set name` go in one append**, `create` first: the fold
+      orphans a `set` on an entity that is not alive yet, and one batch from one
+      writer is what makes the two ops inseparable.
+    - **The id is minted at `Enter`, not when the edit opened**, because it is
+      made from the name and the name is what was being typed. It is written
+      back into `Edit::doc`, so the save path and `Msg::Saved` — which anchors
+      on it — stay ignorant of the difference between creating and editing.
+    - **New ids carry the device** (`crate::id`, §3.2 as amended above). The open
+      consequence is written down there: two devices can now hold two documents
+      for one real thing, and nothing merges them yet.
+    - `WriteState::Ready` now carries the device rather than sitting beside an
+      `Option<String>` of it. A session may write exactly when it knows who it
+      is, and the state "allowed to write, no idea as whom" is one nothing
+      downstream could do anything sensible with.
+    - Still unbuilt in R4: undo, delete, and the structured fields' pickers.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs),
   `ds file` (manual + proposal-consuming cards, unfiled counter, exception triage per
   D11), `ds export` with manifest, `ds organize`.

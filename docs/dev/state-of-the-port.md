@@ -14,12 +14,12 @@ Last true as of **2026-08-21**, branch `rust-rewrite`.
 
 ## 1 · Where the port stands
 
-**R3 is feature-complete, and R4's first three slices have landed.** `crates/journal`
+**R3 is feature-complete, and R4's first four slices have landed.** `crates/journal`
 implements §3's format — op model, fold, compaction, torn tails, watermark
 defence — and `crates/ds` is a finder on top of it: browse, fuzzy search,
 `ctrl+t` content search, the detail surface, `ds status` with the Syncthing REST
-check, `ds open`, and now `ds init` plus **every simple field of a record made
-editable through one verb**. The phase list and each slice's notes are in
+check, `ds open`, and now `ds init`, **creating a document**, and **every simple
+field of a record made editable through one verb**. The phase list and each slice's notes are in
 REWRITE.md; don't duplicate them here.
 
 Three facts that shape what the rest of R4 costs:
@@ -124,15 +124,10 @@ Each is recorded where it belongs; the link is the point of the row.
   of the UI are doing.
 - **The succession reversal** on the filing card — deferred until the user
   confirms it is a real pain point. Do not build it speculatively.
-- **Creating a document.** The largest hole in R4: nothing in the Rust build
-  makes a new `doc`, only edits ones the fold already knows. It needs an id
-  scheme, a create flow (`space` → `n` is the obvious spelling) and a
-  name-first rule, since `name` is the one field `validate` will not leave
-  empty. Until it exists the Rust build cannot own the store.
 - **The rest of R4**: undo (inverse ops — the journal is the history, §3.3),
-  slots with insert-and-shift, supersession, bundle membership, file
-  attach/detach/primary, delete, settings ops, `ds reset`. The text fields are
-  done; **what is left are the structured ones**, and each of those needs a
+  delete, slots with insert-and-shift, supersession, bundle membership, file
+  attach/detach/primary, settings ops, `ds reset`. Creating and the text fields
+  are done; **what is left are the structured ones**, and each of those needs a
   picker rather than a text buffer — a slot move shifts its neighbours, and
   `bundles`/`renews` are memberships of another entity, not values.
 - **Syncthing's two-folder send/receive arrangement, set up by `ds`.** The user
@@ -142,6 +137,15 @@ Each is recorded where it belongs; the link is the point of the row.
   down first. It is also the port's **first write to Syncthing's config** (the
   REST client is read-only today, `syncthing.rs`), so it needs a write-capable
   API key, idempotency, and a dry run. Recorded in REWRITE.md §7.
+- **Merging two documents that describe one thing.** New ids carry the device
+  (`passport-desk` / `passport-phone`, REWRITE.md §3.2 as amended), so two
+  offline devices creating the same document no longer collide — they produce a
+  visible duplicate instead of a silent destructive merge. Closing that duplicate
+  is unbuilt: it is the id-rename op sequence minus the `create` (copy fields,
+  fix inbound `supersedes`, re-emit `state`, `delete` the loser), and the exact
+  detection signal is two documents listing the same file path. **v2's `dedup` is
+  not this** — it clusters duplicate files, and this is two documents over one
+  file.
 - **Syncthing conflict files.** The journal is conflict-free by construction, so
   `.sync-conflict-*` should never appear on it — but nothing notices if one does,
   and the real files tree can still produce them. `ds status` is where that goes.
