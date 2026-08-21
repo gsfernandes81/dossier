@@ -252,6 +252,11 @@ made to reproduce an mtime exactly, determinism fails there specifically and thi
 question reopens with no candidates — so test mtime preservation on the real phone
 path first, before testing anything about Syncthing.
 
+**The probes are written and smoke-tested: `tools/probe-mtime.fish` and
+`tools/probe-attrs.fish`.** The mtime one refuses to run inside `$HOME`, because
+Termux's home is app-private storage and would pass even when the shared-storage
+path that matters fails — a false pass there would be worse than no test.
+
 Cheapest honest test plan:
 
 1. **Does the phone preserve a set mtime at all?** Write a file to the real
@@ -419,8 +424,8 @@ That check is the next piece of work on this question.
 
 ### Small settled items
 
-- **Showing superseded documents is a filter toggle, not a command** (user: *"Show
-  superseded files?"*). It joins "expiring only" and "search scan text" in the
+- **Showing superseded documents is a filter toggle, not a command** — agreed by
+  the user (I5). It joins "expiring only" and "search scan text" in the
   existing filter group — zero new machinery, and consistent with the two toggles
   already there.
 - **The search prompt stays `>`** (user), with the door open. The agreed direction
