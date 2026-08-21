@@ -55,6 +55,8 @@ pub enum Act {
     Undo,
     /// Put back the last write that was taken back.
     Redo,
+    /// Tombstone the record's document.
+    Delete,
     /// Leave.
     Quit,
 }
@@ -98,6 +100,9 @@ pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
             item('n', "new document", Act::New),
             Item { accel: "u", ..item('u', "undo last change", Act::Undo) },
             Item { accel: "r", ..item('r', "redo", Act::Redo) },
+            // Record-only, and it is the record's document it deletes — you
+            // should be able to see the thing you are removing.
+            Item { accel: "d d", ..item('d', "delete this document", Act::Delete) },
             item('q', "quit", Act::Quit),
         ],
         None => vec![

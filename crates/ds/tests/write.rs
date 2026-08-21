@@ -427,3 +427,52 @@ fn a_created_document_can_be_taken_back_and_put_again() {
         .expect("the document is back");
     assert_eq!(doc.name, "Seaman Book", "with its name, which a bare recreate would not have");
 }
+
+/// **A deleted document comes back whole.** This is the test the whole delete
+/// slice exists for: §3.2's tombstone is retained forever and a later `create`
+/// starts from *empty*, so an undo that only re-created the entity would give
+/// back a document with a name and nothing else — every tag, date, file and note
+/// silently gone, on the one keystroke a user presses precisely because they
+/// want their data back.
+#[test]
+fn undoing_a_delete_restores_every_field() {
+    let dir = std::env::temp_dir().join("ds-write-delete");
+    let _ = std::fs::remove_dir_all(&dir);
+    let meta = dir.join("meta");
+    std::fs::create_dir_all(&meta).expect("mkdir");
+    let lines = [
+        r#"{"v":1,"ts":1700000000001,"w":"desk-core","op":"create","ent":"doc","id":"coc"}"#,
+        r#"{"v":1,"ts":1700000000002,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"name","val":"COC Certificate"}"#,
+        r#"{"v":1,"ts":1700000000003,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"expiry_date","val":"2026-09-28"}"#,
+        r#"{"v":1,"ts":1700000000004,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"tags","val":["marine","ticket"]}"#,
+        r#"{"v":1,"ts":1700000000005,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"perm_location","val":"cert-file"}"#,
+        r#"{"v":1,"ts":1700000000006,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"perm_slot","val":8}"#,
+        r#"{"v":1,"ts":1700000000007,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"notes","val":"the one with the stamp"}"#,
+        r#"{"v":1,"ts":1700000000008,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"files","val":[{"label":"complete","path":"Marine/coc.pdf","primary":true}]}"#,
+    ];
+    std::fs::write(meta.join("desk-core.jsonl"), format!("{}\n", lines.join("\n"))).expect("write");
+    let journal = Journal::new(&dir);
+
+    let (mut model, loaded) = load_model(&journal);
+    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let before = model.store.docs.iter().find(|d| d.id == "coc").expect("the document").clone();
+
+    update(&mut model, Msg::OpenDetail);
+    update(&mut model, Msg::Char('d'));
+    let Effect::Append(drafts) = update(&mut model, Msg::Char('d')) else {
+        panic!("the second d must ask for an append");
+    };
+    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    assert!(
+        !model.store.docs.iter().any(|d| d.id == "coc"),
+        "the tombstone took it out of the fold"
+    );
+
+    update(&mut model, Msg::Char(' '));
+    let Effect::Append(back) = update(&mut model, Msg::Char('u')) else { panic!("no undo") };
+    write_and_reload(&journal, &dir, back, ts, &mut model);
+
+    let reloaded = ds::load::load(&journal).expect("reload");
+    let after = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("it is back");
+    assert_eq!(after, &before, "and it is the same document, field for field");
+}

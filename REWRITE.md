@@ -734,6 +734,25 @@ until the cutover step the user personally green-lights.
       the change was made. That is right for the undo/redo dance and deliberately
       not a promise about a document the other device has since edited; §3.2's
       field-level LWW settles that, and the loser stays in the journal.
+  - **Slice 7 done (2026-08-21) — delete. R4's verb set is complete.**
+    `d` arms and a second `d` does it, the same idiom `Esc` and quit use; any
+    other key disarms, and while armed the hint line stops teaching and asks.
+    - **Record-only**, because you should be able to see what you are deleting —
+      and because on the list `d` is search text, so a verb confirmed differently
+      depending on where it was invoked from would be a worse safeguard than
+      none.
+    - **`Doc::as_fields` is the exact inverse of `Store::build`'s mapping**, and
+      it is what makes the delete undoable: §3.2's create-after-tombstone starts
+      from *empty*, so putting a document back means re-sending every field it
+      had. An undo that only re-created the entity would return a name and
+      nothing else — on the one keystroke a user presses because they want their
+      data back. A **round-trip test guards the pair**, with the fixture written
+      as an exhaustive struct literal so a field added to `Doc` will not compile
+      until somebody decides what it round-trips as.
+    - **Inbound references are left alone.** §3.2 says a stale `supersedes` is
+      harmless after a tombstone, and rewriting other documents as a side effect
+      of deleting this one is the kind of thing an undo could not honestly
+      reverse. Dangling references are the review surface's business.
 - **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs,
   and **the document-merge verb** — §3.2's amendment note; wording and exact
   placement open, keep it simple),

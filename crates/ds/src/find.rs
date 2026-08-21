@@ -632,6 +632,11 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
         if model.write.ready() && !model.redo.is_empty() {
             hints.push("r redo");
         }
+        // While a delete is armed the hint line stops teaching and starts
+        // asking: the one moment where the next keystroke is the whole point.
+        if model.delete_armed {
+            return vec!["d again to delete", "any key cancels"];
+        }
         hints
     } else {
         vec!["⏎ open", "^x expiry", "^t scans"]

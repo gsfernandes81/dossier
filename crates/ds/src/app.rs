@@ -422,6 +422,17 @@ pub struct Model {
     /// stacking itself as something to undo, and decides which stack the
     /// confirmed change lands on.
     direction: Direction,
+    /// Whether the forward append in flight is a deletion — the one write that
+    /// leaves nothing to look at afterwards, and so needs its own word for it.
+    pending_delete: bool,
+    /// One more `d` and the record's document is tombstoned.
+    ///
+    /// The same arming idiom `Esc` and quit already use, for the same reason:
+    /// on a phone the thumb that meant `e` is one row from the key that means
+    /// this. It is armed rather than confirmed with a dialog because a dialog
+    /// would be a fourth surface, and because the write **is** reversible — `u`
+    /// puts the document back, fields and all.
+    pub delete_armed: bool,
     /// Whether this session can write, and why not when it cannot.
     pub write: WriteState,
     /// Where the view drew the header's pressable expiring count.
@@ -466,6 +477,8 @@ impl Model {
             pending: None,
             pending_anchor: None,
             direction: Direction::Forward,
+            pending_delete: false,
+            delete_armed: false,
             count_zone: Zone::default(),
             leader_zone: Zone::default(),
             flash: None,
@@ -713,6 +726,10 @@ impl Model {
                 self.sheet = None;
                 self.redo()
             }
+            crate::sheet::Act::Delete => {
+                self.sheet = None;
+                self.delete()
+            }
             crate::sheet::Act::Quit => Effect::Quit,
         }
     }
@@ -755,6 +772,7 @@ impl Model {
             // and it is where a write has just been made.
             ('u', _) => self.undo(),
             ('r', _) => self.redo(),
+            ('d', _) => self.delete(),
             _ => {
                 self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
                 Effect::Redraw
@@ -857,6 +875,62 @@ impl Model {
         self.step(Direction::Undo, "nothing to undo — this session has not written yet")
     }
 
+    /// Tombstone the record's document — on the second `d`.
+    ///
+    /// **Delete is a record-only verb**, because you should be able to see what
+    /// you are deleting. It is also why the confirmation can be the same key:
+    /// on the list, `d` is search text, and a verb that had to be confirmed
+    /// differently depending on where it was invoked from would be a worse
+    /// safeguard than none.
+    ///
+    /// §3.2's tombstone is retained forever and nothing older than it survives
+    /// the fold, so this genuinely removes the document from the store. It is
+    /// still reversible: the change records every field the document had (see
+    /// [`crate::Doc::as_fields`]), so `u` puts it back whole rather than as a
+    /// bare recreate with a name.
+    ///
+    /// References other documents hold to this one are deliberately left alone.
+    /// §3.2 says a stale `supersedes` is harmless after a tombstone, and
+    /// rewriting other documents as a side effect of deleting this one is the
+    /// kind of thing an undo could not honestly reverse.
+    fn delete(&mut self) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some(doc) = self.current() else {
+            self.flash = Some("nothing to delete".into());
+            return Effect::Redraw;
+        };
+        if !self.delete_armed {
+            // Named, because on a 47-column screen the record above may have
+            // scrolled and "delete this?" would be a question about nothing in
+            // particular.
+            let asking = format!("delete {:?}? press d again", doc.name);
+            self.delete_armed = true;
+            self.flash = Some(asking);
+            return Effect::Redraw;
+        }
+        let id = doc.id.clone();
+        // The way back is built here, while the document is still in the store:
+        // after the tombstone there is nothing left to read the fields off.
+        let restore: Vec<journal::Draft> = std::iter::once(journal::Draft::create("doc", &id))
+            .chain(
+                doc.as_fields()
+                    .into_iter()
+                    .map(|(field, value)| journal::Draft::set("doc", &id, field, value)),
+            )
+            .collect();
+        self.delete_armed = false;
+        self.pending =
+            Some(Change { forward: vec![journal::Draft::delete("doc", &id)], back: restore });
+        self.direction = Direction::Forward;
+        self.pending_anchor = Some(id.clone());
+        self.pending_delete = true;
+        self.sheet = None;
+        Effect::Append(vec![journal::Draft::delete("doc", &id)])
+    }
+
     /// Put back the last write this session took back.
     ///
     /// **A separate verb on a separate key**, which is the whole reason
@@ -957,6 +1031,16 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         model.keyboard_hint = false;
     }
 
+    // Delete arms only on a *consecutive* `d`; any other key disarms it, the
+    // same rule Esc and quit follow. Worker messages are not keystrokes and so
+    // do not disarm — a scan landing mid-decision must not silently make the
+    // next `d` mean something different from what the screen is offering.
+    if !matches!(msg, Msg::Char('d') | Msg::ScansLoaded(_) | Msg::Saved(_) | Msg::SaveFailed { .. })
+        && is_key(&msg)
+    {
+        model.delete_armed = false;
+    }
+
     // Esc arms only on a *consecutive* Esc; any other key disarms it.
     let was_armed = model.esc_armed;
     if !matches!(msg, Msg::Esc | Msg::ScansLoaded(_) | Msg::Saved(_) | Msg::SaveFailed { .. }) {
@@ -994,6 +1078,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             let closed = model.edit.take();
             let created = closed.as_ref().is_some_and(|edit| edit.creating);
             let direction = std::mem::replace(&mut model.direction, Direction::Forward);
+            model.delete_armed = false;
             // The write landed, so the change is real and belongs on the stack
             // that can reverse it: a write becomes something to undo, an undo
             // becomes something to redo, and a redo something to undo again.
@@ -1023,6 +1108,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 model.detail &= kept;
                 model.flash =
                     Some(if direction == Direction::Undo { "undone" } else { "redone" }.into());
+            } else if std::mem::take(&mut model.pending_delete) {
+                // There is nothing left to look at, and the word for it is
+                // neither "saved" nor a complaint about the filter.
+                model.detail = false;
+                model.flash = Some("deleted — u to undo".into());
             } else if kept && created {
                 // **A new document opens on its record**, which is the only
                 // place its remaining fields can be filled in — creating one and
@@ -1059,6 +1149,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             }
             model.pending_anchor = None;
             model.direction = Direction::Forward;
+            model.pending_delete = false;
+            model.delete_armed = false;
             model.flash = Some(reason.clone());
             // A refusal that will refuse again takes editing off the table for
             // the session, rather than inviting the same disappointment on
@@ -1873,6 +1965,79 @@ pub(crate) mod tests {
         let store = m.store.clone();
         update(&mut m, Msg::Saved(Box::new(store)));
         m
+    }
+
+    /// **The first `d` asks, the second does it.** The same arming idiom `Esc`
+    /// and quit already use — on a phone the thumb that meant `e` is one row
+    /// from the key that means this.
+    #[test]
+    fn delete_takes_two_presses_and_names_what_it_would_remove() {
+        let mut m = writable();
+        update(&mut m, Msg::OpenDetail);
+
+        assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw, "the first press only asks");
+        assert!(m.delete_armed);
+        let asking = m.flash.clone().expect("it asked");
+        assert!(asking.contains("COC Certificate"), "and named the document: {asking:?}");
+
+        assert_eq!(
+            update(&mut m, Msg::Char('d')),
+            Effect::Append(vec![journal::Draft::delete("doc", "coc")]),
+            "the second press writes the tombstone"
+        );
+        assert!(!m.delete_armed);
+    }
+
+    /// Any other key disarms it, so a `d` left hanging from a moment ago cannot
+    /// be completed by a keystroke meant for something else.
+    #[test]
+    fn any_other_key_disarms_a_pending_delete() {
+        let mut m = writable();
+        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Char('d'));
+        assert!(m.delete_armed);
+
+        update(&mut m, Msg::Move(Motion::Down));
+        assert!(!m.delete_armed, "moving the selector is not consent");
+        assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw, "so this asks again");
+    }
+
+    /// **Undoing a delete restores the document whole**, not as a bare recreate
+    /// with a name: §3.2's create-after-tombstone starts from empty, so the way
+    /// back has to re-send every field the document had.
+    #[test]
+    fn deleting_inverts_to_a_create_with_every_field() {
+        let mut m = writable();
+        m.store.docs[0].tags = vec!["marine".into()];
+        m.store.docs[0].notes = "the one with the stamp".into();
+        update(&mut m, Msg::OpenDetail);
+        let expected = m.current().expect("a document").as_fields().len();
+
+        update(&mut m, Msg::Char('d'));
+        update(&mut m, Msg::Char('d'));
+        let mut store = m.store.clone();
+        store.docs.retain(|doc| doc.id != "coc");
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert_eq!(m.flash.as_deref(), Some("deleted — u to undo"));
+        assert!(!m.detail, "there is nothing left to look at");
+
+        let back = m.undo.last().expect("something to undo").back.clone();
+        assert_eq!(back.first(), Some(&journal::Draft::create("doc", "coc")));
+        assert_eq!(back.len(), expected + 1, "the create, then every field it had");
+        assert!(
+            back.contains(&journal::Draft::set("doc", "coc", "notes", "the one with the stamp")),
+            "including the ones no other verb touches: {back:?}"
+        );
+    }
+
+    /// A session that cannot write cannot delete either, and never arms.
+    #[test]
+    fn delete_is_refused_with_a_reason_when_the_session_cannot_write() {
+        let mut m = model();
+        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Char('d'));
+        assert!(!m.delete_armed, "it did not even arm");
+        assert!(m.flash.is_some());
     }
 
     /// A session that cannot write says so rather than doing nothing, the same
