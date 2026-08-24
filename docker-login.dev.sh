@@ -7,7 +7,9 @@
 # you are NOT already signed in, so re-running is safe and near-instant. All three
 # credential stores live in persisted named volumes / the clone (see
 # docker-compose.dev.yml), so you normally do this exactly once per machine:
-#   - git SSH  -> .dev-ssh/    (gitignored, rides with the bind-mounted clone)
+#   - git SSH  -> .dev-ssh/    (gitignored, rides with the bind-mounted clone; the
+#                              identities file in it is ssh_config.fleet, the name the
+#                              base image prepends to ~/.ssh/config at every start)
 #   - GitHub   -> ds-gh        (~/.config/gh)
 #   - Claude   -> ds-claude    (~/.claude)
 set -u
@@ -41,20 +43,32 @@ else
     if ask "Generate a new ed25519 key there?"; then
       mkdir -p "$DEV_SSH" && chmod 700 "$DEV_SSH"
       ssh-keygen -t ed25519 -f "$DEV_SSH/id_ed25519_dev" -N "" -C "ds-dev-$(hostname)"
-      # Point ssh at this key by its absolute path (survives restarts;
-      # child-init.sh re-links .dev-ssh/config -> ~/.ssh/config on every start).
-      # Don't clobber a
-      # config you may already have from a manual multi-account setup.
-      [ -f "$DEV_SSH/config" ] || cat > "$DEV_SSH/config" <<EOF
+      # ssh_config.fleet is the BASE IMAGE's name for the host-specific half of
+      # ~/.ssh/config: it prepends this file to the baked defaults at every start, and
+      # it does so before it pulls the clone, which is why the identities live here
+      # rather than in something this container assembles later. Don't clobber a file
+      # you may already have.
+      #
+      # The key is named by the path the BASE copies it to, not by its path in the
+      # mount: the base copies every .dev-ssh/id_* into ~/.ssh at 0600, and a copy it
+      # owns cannot be refused for the mount's modes.
+      [ -f "$DEV_SSH/ssh_config.fleet" ] || cat > "$DEV_SSH/ssh_config.fleet" <<EOF
 Host github.com
   HostName github.com
   User git
-  IdentityFile /workspace/.dev-ssh/id_ed25519_dev
+  IdentityFile ~/.ssh/id_ed25519_dev
   IdentitiesOnly yes
   StrictHostKeyChecking accept-new
 EOF
+      # In force now rather than at the next start — the same two-part assembly the
+      # base does. NOT a symlink: the base's own write would follow it and truncate
+      # the host's file on the next boot.
       mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-      ln -sf "$DEV_SSH/config" "$HOME/.ssh/config"
+      cp -f "$DEV_SSH/id_ed25519_dev" "$HOME/.ssh/id_ed25519_dev" 2>/dev/null || true
+      chmod 600 "$HOME/.ssh/id_ed25519_dev" 2>/dev/null || true
+      rm -f "$HOME/.ssh/config"
+      cat "$DEV_SSH/ssh_config.fleet" /home/dev/ssh_config > "$HOME/.ssh/config"
+      chmod 600 "$HOME/.ssh/config"
       existing="$DEV_SSH/id_ed25519_dev"
     fi
   fi

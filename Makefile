@@ -18,6 +18,35 @@
 # instead of the random container ID.
 dev-up:
 	DEV_HOSTNAME=$$(hostname)-ds-dev docker compose -f docker-compose.dev.yml up -d --build
+	@$(MAKE) --no-print-directory dev-check-uid
+
+# The guard that the deleted HOST_UID build arg used to make unnecessary. The base image
+# bakes its `dev` account at whatever uid built it (1001 in the published one), and if
+# that is not this clone's owner the container comes up perfectly and then fails at two
+# things at once, neither of which names a uid: /workspace is read-only from inside, and
+# sshd refuses the bind-mounted authorized_keys under StrictModes as "bad ownership or
+# modes", which reads as a broken key. Checked after the start rather than before the
+# build, because the image's uid is a property of the image and this asks the container
+# itself. A warning and not a failure: the container is up and `docker exec` still works,
+# which is how you would fix it.
+dev-check-uid:
+	@cuid=$$(docker exec ds-dev id -u 2>/dev/null); \
+	owner=$$(stat -c '%u' .); \
+	if [ -z "$$cuid" ]; then \
+	  echo "note: ds-dev is not running yet — skipping the uid check." >&2; \
+	elif [ "$$cuid" != "$$owner" ]; then \
+	  echo "" >&2; \
+	  echo "WARNING: ds-dev's dev user is uid $$cuid; this clone is owned by uid $$owner." >&2; \
+	  echo "         /workspace is not writable from inside the container, and sshd will" >&2; \
+	  echo "         refuse every login as 'bad ownership or modes' on the host account's" >&2; \
+	  echo "         authorized_keys. Neither message says uid." >&2; \
+	  echo "         Fix: build the base at this uid, then re-run make dev-up —" >&2; \
+	  echo "             cd ~/infra/dev && make base" >&2; \
+	  echo "         It reads its own clone's owner and tags the result under the same" >&2; \
+	  echo "         ghcr name, which docker prefers over the pull. If the uid changes," >&2; \
+	  echo "         the named volumes must be recreated too: make dev-down-volumes." >&2; \
+	  echo "" >&2; \
+	fi
 
 # One command to stand the whole thing up: build + start the container, wait for it
 # to be running, then walk through any logins that aren't done yet (git SSH, GitHub,
@@ -48,4 +77,4 @@ dev-down:
 dev-down-volumes:
 	docker compose -f docker-compose.dev.yml down -v
 
-.PHONY: dev-up dev dev-login dev-down dev-down-volumes
+.PHONY: dev-up dev-check-uid dev dev-login dev-down dev-down-volumes

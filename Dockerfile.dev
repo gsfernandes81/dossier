@@ -47,6 +47,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# The dev account's login shell goes back to bash, which the base sets to fish. Not a
+# preference — it is the shell sshd takes from /etc/passwd, so it is what runs every
+# `ssh -p <port> dev@<host> '<cmd>'` and every command Zed's remote bootstrap issues, and
+# this repo's tooling has always assumed a POSIX one there: `VAR=x cmd` prefixes,
+# `$(...)`, and `export` are all fish syntax errors. The pre-base Dockerfile said the same
+# thing in its useradd, and the conversion should not quietly reverse a choice this repo
+# had made. fish is still installed and still what `docker exec -it ds-dev fish` gives.
+RUN usermod --shell /bin/bash dev
+
 # TZ, CLAUDE_CONFIG_DIR, GH_CONFIG_DIR, HISTFILE, SCREENDIR and ABDUCO_CMD are all set in
 # the base and are deliberately not repeated here — a value stated twice is a value that
 # drifts. What is left is this project's own.
@@ -95,16 +104,20 @@ RUN mkdir -p /home/dev/.cache/uv /home/dev/.zed_server
 
 # ── the seams, which is all a child is meant to need ────────────────────────
 #
-# ~/.ssh/config's baked half. The real one is /workspace/.dev-ssh/config — host-side,
-# gitignored, and symlinked over this by child-init.sh when it exists — so what this file
-# carries is only the defaults that must not be wrong when it does not. See ssh_config.dev.
+# ~/.ssh/config's baked half. The base prepends /workspace/.dev-ssh/ssh_config.fleet —
+# host-side, gitignored, this repo's actual identities — to it at every start, so what
+# this file carries is only the defaults that must not be wrong when that half is absent.
+# See ssh_config.dev, which explains why it names no key.
 COPY --chown=dev:dev ssh_config.dev /home/dev/ssh_config
 
-# AuthorizedKeysFile. The base serves ~/.ssh/authorized_keys, written from the secrets
-# mount infra-dev has; this container has always served the HOST account's, bind-mounted
-# read-only at ~/.host-ssh, so the same keys that log into the host log into the
-# container. sshd takes the first value it obtains for a keyword and the base's Include is
-# at the top of its file, so this wins.
+# Two sshd drop-ins, and both exist to keep this container behaving as it did before the
+# base. 10-authorized-keys.conf serves the HOST account's authorized_keys, bind-mounted
+# read-only at ~/.host-ssh, where the base would serve ~/.ssh/authorized_keys from its own
+# secrets mount. 20-forwarding.conf puts AllowTcpForwarding back to the OpenSSH default
+# this container's old sshd_config left in place, which the base turns off. sshd takes the
+# first value it obtains for a keyword and the base's Include is at the top of its file,
+# so both win, and entrypoint.sh runs `sshd -t` before exec'ing, so a drop-in that does
+# not parse costs the drop-ins and not the container.
 COPY --chown=dev:dev sshd_config.dev.d/ /home/dev/sshd_config.d/
 
 # The login walkthrough — git SSH, GitHub, Claude. Repo-specific by nature and unchanged.

@@ -24,7 +24,8 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 > **Tooling is mirrored from the sibling project `destiny-director`** (same ruff/ty/pytest
 > setup), minus everything Railway/Atlas/DB/Discord-specific, which does not apply here.
 > The one Docker/Makefile piece we DO mirror is the **remote dev container**
-> (`Dockerfile.dev`, `docker-compose.dev.yml`, `docker-*.dev.sh`, `sshd_config.dev`) —
+> (`Dockerfile.dev`, `docker-compose.dev.yml`, `docker-*.dev.sh`, `ssh_config.dev`,
+> `sshd_config.dev.d/`) — both repos are now thin children of the same base image —
 > see [Remote dev container](#remote-dev-container). The `Makefile` exists solely to
 > drive it; day-to-day work is still the `uv run` commands below, not make.
 
@@ -162,7 +163,18 @@ that repo checked out — the `FROM` pulls.
   match what it is asked for, so a start with fewer flags uninstalls the baked extras. A
   failed sync warns and the container still comes up.
 - **One-time host setup:** `cp .env-example .env` and set `DEV_SSH_AUTHORIZED_KEYS` to the
-  host user's `.ssh/` dir (its `authorized_keys` gates the in-container sshd). Optionally set
+  host user's `.ssh/` dir (its `authorized_keys` gates the in-container sshd). Git
+  identities go in the gitignored `.dev-ssh/`, with the ssh config named
+  **`ssh_config.fleet`** — the base prepends that file to the baked defaults at every
+  start, before it pulls the clone, which is why it is not called `config` and why
+  nothing symlinks it. A clone still holding the old `.dev-ssh/config` keeps working:
+  `docker-child-init.dev.sh` copies it into place each start and says to rename it.
+- **The uid matters and is now checked.** The `dev` account is built in the BASE (uid
+  1001 in the published image), not from this clone's owner as it was before. `make
+  dev-up` runs `dev-check-uid`, which compares the container's `id -u` against the clone
+  owner and prints the fix — `cd ~/infra/dev && make base`, which builds the base at the
+  right uid under the same name. A mismatch otherwise shows up as an unwritable
+  `/workspace` and sshd refusing every login as "bad ownership or modes". Optionally set
   `DEV_SSH_PORT` to change the **host-side** port mapped to the container's sshd (defaults to
   `2222`; the container side stays `2222`) — bump it when `2222` is taken or you run more than
   one dev container, then point Zed / SSH / the Cloudflare tunnel at the port you chose.
@@ -179,6 +191,13 @@ that repo checked out — the `FROM` pulls.
   the pre-base arrangement: the door is what the container's lifetime should equal. So
   `docker logs ds-dev` shows sshd and the start-up lines, and the supervisor is read at
   `~/.local/share/remote-control.log`.
+- **Two sshd defaults the base changed are put back** in `sshd_config.dev.d/`:
+  `AuthorizedKeysFile` (the host account's, as always here) and `AllowTcpForwarding yes`
+  (the OpenSSH default this container's old config left in place, which the base turns
+  off). The `dev` account's login shell is likewise put back to **bash** in
+  `Dockerfile.dev` — sshd runs it from `/etc/passwd`, so it is what `ssh <host> '<cmd>'`
+  and Zed's remote bootstrap execute under, and this repo's tooling assumes POSIX there.
+  `docker exec -it ds-dev fish` is unchanged.
 - Container/image/volumes are prefixed `ds-` (the CLI name). There is **no MySQL/Atlas/
   Railway** service, and no data store is mounted — tests use `tmp_path`; real documents
   stay off the dev box.

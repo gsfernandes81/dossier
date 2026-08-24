@@ -2,9 +2,9 @@
 # ds-dev's own start-up, baked into the image at /home/dev/child-init.sh and RUN by the
 # base image's entrypoint — the fifth seam of gsrpi-dev-base, added 2026-08-24 for this
 # container and dd-dev. The base runs it after its `git pull --ff-only` of /workspace and
-# before it starts the remote-control supervisor and sshd, which is the only window where
-# both halves are true: the lockfile in the mount is current, and nothing has arrived yet
-# to meet a half-installed venv.
+# before it starts the remote-control supervisor and sshd, so a lockfile that pull moved
+# is the one installed from, and nothing has arrived yet to meet a half-installed venv.
+# (That pull only authenticates once .dev-ssh/ssh_config.fleet exists — see below.)
 #
 # WHAT USED TO BE HERE AND IS NOT ANY MORE. This replaces docker-entrypoint.dev.sh, and
 # most of that file was not lost but inherited — the base does all of it, for four
@@ -24,26 +24,46 @@ set -u
 rc=0
 
 # ── git identities ──────────────────────────────────────────────────────────
-# Keys and the ssh config live in the gitignored .dev-ssh/, which rides along with the
-# bind-mounted clone. They are host-side because they are credentials, and the config
-# beside them is host-side because `make dev-login` writes it.
+# The keys and the ssh config live in the gitignored .dev-ssh/, which rides along with the
+# bind-mounted clone. DEV_SECRETS_DIR points the base at that directory, and the base does
+# both halves BEFORE it pulls: it copies every private key out of it into ~/.ssh at 0600,
+# and it PREPENDS .dev-ssh/ssh_config.fleet to ~/.ssh/config.
 #
-# The symlink OVERWRITES the file the base assembled from /home/dev/ssh_config a moment
-# ago, which is intended: that baked file carries the defaults that have to be right when
-# .dev-ssh/config is absent, and this one is the real thing when it is present.
+# THAT FILENAME IS THE BASE'S, and it is why this section is four lines rather than forty.
+# `ssh_config.fleet` is an odd name in this repo — it is infra-dev's word for "the
+# host-specific half of ~/.ssh/config" — and it is worth it: the identities are then in
+# force in time for the start-up `git pull`, which is not true of anything this script
+# could do, because this script runs after it.
+#
+# NOTHING IS SYMLINKED ANY MORE, and that is a correctness fix rather than tidying. Until
+# 2026-08-24 ~/.ssh/config was a symlink to .dev-ssh/config; under the base that destroys
+# the host's file. The base rewrites ~/.ssh/config with a redirection at every start, a
+# redirection follows a symlink, and ~/.ssh is not a volume — so the FIRST boot writes a
+# regular file and replaces it with the link, and the SECOND boot (any docker stop/start)
+# truncates /workspace/.dev-ssh/config and fills it with the baked defaults. The base now
+# `rm -f`s that path first; this script no longer gives it a link to find either way.
 if [ -d /workspace/.dev-ssh ]; then
     chmod 700 /workspace/.dev-ssh 2>/dev/null || true
     # ssh refuses a key it considers group- or world-readable, and these live in a bind
     # mount whose modes came from the host. Failures are ignored: a read-only clone is a
     # thing somebody may try, and it is not a reason to fail the start.
     chmod 600 /workspace/.dev-ssh/id_* 2>/dev/null || true
-    if [ -f /workspace/.dev-ssh/config ]; then
-        mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-        ln -sf /workspace/.dev-ssh/config "$HOME/.ssh/config"
-        echo "~/.ssh/config -> /workspace/.dev-ssh/config"
+
+    if [ -f /workspace/.dev-ssh/ssh_config.fleet ]; then
+        echo "ssh identities: .dev-ssh/ssh_config.fleet, prepended by the base at start"
+    elif [ -f /workspace/.dev-ssh/config ]; then
+        # The pre-base layout, still on disk. COPIED, never linked, so this boot works —
+        # and said loudly, because until it is renamed the identities arrive after the
+        # pull and that pull reports itself as offline every start.
+        cp -f /workspace/.dev-ssh/config "$HOME/.ssh/config"
+        chmod 600 "$HOME/.ssh/config"
+        echo "LEGACY LAYOUT: .dev-ssh/config is the pre-base name for this file."
+        echo "    Copied into ~/.ssh/config for this boot. On the host, rename it:"
+        echo "        mv .dev-ssh/config .dev-ssh/ssh_config.fleet"
+        echo "    Until then the start-up 'git pull' has no identity to offer and says"
+        echo "    'pull skipped (not fast-forward, or offline)' whatever the truth is."
     else
-        echo "no /workspace/.dev-ssh/config — ssh has the baked defaults only."
-        echo "    'make dev-login' on the host writes one, key and all."
+        echo "no ssh identities in .dev-ssh — 'make dev-login' on the host writes them."
     fi
 else
     echo "no /workspace/.dev-ssh — this container cannot push to GitHub over ssh yet."
