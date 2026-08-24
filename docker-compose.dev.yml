@@ -2,7 +2,8 @@
 #   make dev            (= make dev-up  +  make dev-login)
 # then reach the container over the host's sshd:
 #   ssh -t <host-user>@<host-ip> 'docker exec -it ds-dev fish'
-# or drive it remotely from claude.ai/code — the entrypoint auto-starts
+# or drive it remotely from claude.ai/code — the base image's entrypoint starts this
+# repo's supervisor (DEV_REMOTE_CONTROL=1 below), which brings up
 # `claude remote-control --spawn worktree` once you're signed in.
 #
 # dossier is a local, file-backed TUI: there is no database, no Railway deploy, and
@@ -13,17 +14,50 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+      # No USER_UID/USER_GID here any more: since 2026-08-24 this image is a thin child
+      # of gsrpi-dev-base and the `dev` user is built in the BASE, at the uid of whoever
+      # built it — 1001 in the published one, the clone owner's under infra's `make
+      # base`. Same guard as before, one layer down. If this host's clone owner is not
+      # the uid the published base bakes, build the base locally in infra's dev/ and this
+      # FROM picks it up: docker prefers a local image over a pull.
       args:
-        # Build the container's `dev` user with the HOST user's uid/gid so the
-        # bind-mounted /workspace (below) stays writable. Pass via `make dev-up`
-        # (HOST_UID=$(stat -c '%u' .) HOST_GID=$(stat -c '%g' .)); defaults to 1000.
-        USER_UID: ${HOST_UID:-1000}
-        USER_GID: ${HOST_GID:-1000}
+        BASE_TAG: ${BASE_TAG:-2026.08.24.2}
     image: ds-dev
     container_name: ds-dev
     hostname: ${DEV_HOSTNAME:-ds-dev}   # Claude Code shows this as the machine title;
                                         # make dev-up sets it to <host-hostname>-ds-dev
     init: true
+
+    # What this container is, told to the base image. entrypoint.sh in the base lists
+    # every DEV_* it reads; these three are the ones that are not its defaults.
+    environment:
+      # Names this container in the base's own start-up lines and in the sshd host key's
+      # comment. Without it the base uses $(hostname), which `make dev-up` sets to
+      # <host>-ds-dev — accurate, but not what anything else here calls this container.
+      DEV_NAME: ds-dev
+
+      # Where the base looks for ssh material. infra-dev's default is a mode-700
+      # directory outside its repo; this container's has always been .dev-ssh/ inside the
+      # bind-mounted clone, gitignored, and that is what this points at. The effect is
+      # that the base's start-up messages about missing keys name THIS repo's directory
+      # rather than a path from another container.
+      #
+      # authorized_keys is NOT here: it comes from the host account's .ssh mount below,
+      # via sshd_config.dev.d/10-authorized-keys.conf.
+      DEV_SECRETS_DIR: /workspace/.dev-ssh
+
+      # Start the remote-control supervisor this image bakes. The base carries the hook
+      # and never the daemon, so this switch does nothing in an image that ships no
+      # /home/dev/rc-supervisor.sh — and it is also what makes the base seed
+      # `remoteDialogSeen`, the one-time consent prompt a headless container cannot
+      # answer. Set it to 0 to bring the container up with no claude driving it.
+      DEV_REMOTE_CONTROL: "1"
+
+      # DEV_TUNNEL_HOSTNAME is deliberately unset. The base can run cloudflared itself,
+      # but this container is reached through the tunnel on the HOST pointed at the
+      # published port below. Setting it here without the credentials the base wants in
+      # DEV_SECRETS_DIR/tunnel.json only earns a warning at start.
+
     volumes:
       - .:/workspace                          # bind-mount the host clone; dev user uid built to match (USER_UID)
       - ds-uv-cache:/home/dev/.cache/uv        # persist uv cache (fast re-syncs)

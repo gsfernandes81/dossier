@@ -140,15 +140,27 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 ## Remote dev container
 
 For developing dossier remotely (e.g. on a Pi/home server, driven from claude.ai/code, the
-Claude mobile app, or Zed-remote), the repo ships a Docker dev environment mirrored from
-`destiny-director` — **stripped of everything DB/Railway/Atlas**, since dossier has no
-database and no deploy target. It bakes the toolchain (uv, git, gh, Node + Claude Code,
-fish, the `driver` group for the TUI harness) into an image and **bind-mounts the clone**
-at `/workspace`; the venv lives at `/home/dev/venv`, outside the mount.
+Claude mobile app, or Zed-remote), the repo ships a Docker dev environment. Since
+**2026-08-24** `Dockerfile.dev` no longer builds one — it is a **thin child of
+`gsrpi-dev-base`**, the shared image the four dev containers on that Pi run
+(`infra-dev`, `or3-dev`, `dd-dev`, this): python 3.13-slim, uv's siblings git and `gh`,
+Node + Claude Code, fish, screen, abduco, the ssh client and server, the `dev` user, the
+dotfiles and the entrypoint all come from there, pulled from
+`ghcr.io/gsfernandes81/gsrpi-dev-base` at the tag pinned in `ARG BASE_TAG`. This repo
+adds a compiler, `uv`, and its own venv (`--all-extras --group driver`). The clone is
+**bind-mounted** at `/workspace`; the venv lives at `/home/dev/venv`, outside the mount.
+The base's source is `dev/Dockerfile.base` in the `infra` repo, and nothing here needs
+that repo checked out — the `FROM` pulls.
 
-- **Files:** `Dockerfile.dev`, `docker-compose.dev.yml`, `docker-entrypoint.dev.sh`,
-  `docker-login.dev.sh`, `docker-rc-supervisor.dev.sh`, `sshd_config.dev`, `Makefile`,
-  `.dockerignore`, `.env-example`.
+- **Files:** `Dockerfile.dev`, `docker-compose.dev.yml`, `docker-child-init.dev.sh`,
+  `docker-login.dev.sh`, `docker-rc-supervisor.dev.sh`, `ssh_config.dev`,
+  `sshd_config.dev.d/`, `Makefile`, `.dockerignore`, `.env-example`.
+- **What this image does at start:** the base's entrypoint pulls the clone, then runs
+  `docker-child-init.dev.sh` — the `.dev-ssh` git identities, and `uv sync --frozen
+  --all-extras --group driver` to add the editable project to the pre-built venv. Keep
+  those flags identical to `Dockerfile.dev`'s build sync: `uv sync` makes the environment
+  match what it is asked for, so a start with fewer flags uninstalls the baked extras. A
+  failed sync warns and the container still comes up.
 - **One-time host setup:** `cp .env-example .env` and set `DEV_SSH_AUTHORIZED_KEYS` to the
   host user's `.ssh/` dir (its `authorized_keys` gates the in-container sshd). Optionally set
   `DEV_SSH_PORT` to change the **host-side** port mapped to the container's sshd (defaults to
@@ -158,12 +170,15 @@ at `/workspace`; the venv lives at `/home/dev/venv`, outside the mount.
   → Claude). Re-login later with `make dev-login`; tear down with `make dev-down` (add
   `-volumes` to also drop the persisted uv/claude/gh/ssh/history volumes).
 - **Attach:** `docker exec -it ds-dev fish`, or over SSH: `ssh -t <host> 'docker exec -it
-  ds-dev fish'`. Once Claude is logged in, the entrypoint's supervisor (the container's
-  foreground process; sshd runs in the background) brings up `claude remote-control
-  --spawn worktree` on its own (~10s) — no manual step. The
-  entrypoint pre-seeds Claude's workspace-trust flag for `/workspace` in `~/.claude.json`
-  so the headless remote-control daemon never blocks on an un-acceptable "Workspace not
-  trusted" dialog.
+  ds-dev fish'`. Once Claude is logged in, the supervisor the base's entrypoint started
+  (`DEV_REMOTE_CONTROL=1` in the compose file) brings up `claude remote-control --spawn
+  worktree` on its own (~10s) — no manual step. The base pre-seeds Claude's
+  workspace-trust flag for `/workspace` in `~/.claude.json`, and `remoteDialogSeen` with
+  it, so the headless daemon never blocks on a dialog nobody can answer.
+- **sshd is the foreground process and the supervisor runs behind it**, the reverse of
+  the pre-base arrangement: the door is what the container's lifetime should equal. So
+  `docker logs ds-dev` shows sshd and the start-up lines, and the supervisor is read at
+  `~/.local/share/remote-control.log`.
 - Container/image/volumes are prefixed `ds-` (the CLI name). There is **no MySQL/Atlas/
   Railway** service, and no data store is mounted — tests use `tmp_path`; real documents
   stay off the dev box.

@@ -1,113 +1,123 @@
 # syntax=docker/dockerfile:1
 
-# Remote dev environment for dossier. Adapted from the sibling project
-# destiny-director's Dockerfile.dev, minus everything DB/Railway/Atlas-specific
-# (dossier is a local, file-backed TUI — no MySQL, no migrations, no Railway deploy).
+# ds-dev — a THIN CHILD of gsrpi-dev-base since 2026-08-24. Everything this container
+# shares with its three siblings on the same Pi (infra-dev, or3-dev, dd-dev) lives in
+# infra's `dev/Dockerfile.base` and is pulled, not rebuilt: python:3.13-slim-bookworm,
+# Node + Claude Code, `gh`, abduco, screen, fish, openssh client and server, cloudflared,
+# the `dev` user, every dotfile, and the entrypoint that starts the lot. What is left here
+# is only what makes this image not one of the others — a compiler for source builds, and
+# this project's venv with its extras and the `driver` group.
 #
-# The toolchain is baked into the image; the app source is bind-mounted at
-# /workspace at runtime (see docker-compose.dev.yml), so it is NOT copied in. The
-# container runs an in-container sshd on port 2222 for Zed-remote / direct SSH, and
-# is also reachable via `docker exec` from the host.
-FROM python:3.13-slim-bookworm AS dev
-ARG USERNAME=dev
-ARG USER_UID=1000
-ARG USER_GID=1000
+# This file used to be destiny-director's Dockerfile.dev minus the DB/Railway parts,
+# copied by hand. That is what the base image ends: the shared layers are now the same
+# layers rather than two builds that happen to agree, and a fix to the entrypoint gets
+# made once instead of four times.
+#
+# PINNED TAG, never `latest`: a base rebuild must not change this container until this
+# line moves. The base is PUBLIC on ghcr, built by infra's
+# `.github/workflows/dev-base.yml` on manual dispatch, so there is no cross-repo build
+# order — the FROM pulls, and nothing here needs the infra repo on disk.
+#
+# THE OFFLINE FALLBACK is `make base` in infra's `dev/`. It builds the identical image
+# locally UNDER THE SAME NAME, and docker prefers a local image over a pull — so a GitHub
+# outage, a metered month, or a host whose clone owner is not the uid the CI image bakes
+# means building it there, and this file is none the wiser.
+ARG BASE_TAG=2026.08.24.2
+FROM ghcr.io/gsfernandes81/gsrpi-dev-base:${BASE_TAG}
 
-# fish is the interactive shell; bash stays the dev account's login shell for Claude
-# Code + entrypoint/make tooling. openssh-client is required for git push over
-# git@github.com (Debian's git does not pull an ssh client under --no-install-recommends).
-# openssh-server runs the in-container sshd (port 2222, non-root) so Zed can remote
-# directly in (see sshd_config.dev). build-essential/make cover any source builds Claude
-# Code or the TUI driver need.
+# Re-declared, because an ARG stated before FROM is out of scope after it. Recorded as a
+# label so WHICH BASE THIS CONTAINER IS ON is answerable from a running container —
+# `docker inspect ds-dev --format '{{index .Config.Labels "uk.gsrpi.base-tag"}}'` — rather
+# than inferred from behaviour, which is the kind of check that passes for a wrong reason.
+ARG BASE_TAG
+LABEL uk.gsrpi.base-tag="${BASE_TAG}"
+
+# The base ends as the dev user; everything below writes system paths until USER dev.
+USER root
+
+# build-essential is the only apt package the base does not carry: it covers the source
+# builds Claude Code or the TUI driver need on arm64, where a wheel may not exist. git,
+# make, fish, the ssh client and server, curl, gnupg, ca-certificates and tzdata all come
+# from the base — and so does abduco, which is new here: `abduco -A work fish` holds a
+# session across a dropped link with no key handling of its own, which matters more for a
+# full-screen TUI than screen's does.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential git make fish openssh-client openssh-server curl gnupg ca-certificates tzdata \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
-
-# Node 22 LTS + Claude Code.
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @anthropic-ai/claude-code
-
-# GitHub CLI (`gh`): install the release tarball directly (Debian's apt repo lags).
-# GitHub publishes linux arm64 + amd64 assets whose names match
-# `dpkg --print-architecture` verbatim, so no arch remapping is needed. Bump
-# GH_VERSION to upgrade.
-ARG GH_VERSION=2.96.0
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    case "$arch" in \
-      arm64|amd64) : ;; \
-      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" \
-      | tar -xz -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_${arch}/bin/gh"; \
-    gh --version
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Create the dev user at the host owner's uid/gid (passed as build args — see
-# Makefile `dev-up`). Guard against an already-present gid/uid so the build won't
-# hard-fail if the host owner collides with a base-image account.
-RUN if ! getent group "${USER_GID}" >/dev/null; then \
-        groupadd --gid "${USER_GID}" "${USERNAME}"; \
-    fi \
-    && if ! getent passwd "${USER_UID}" >/dev/null; then \
-        useradd --uid "${USER_UID}" --gid "${USER_GID}" --shell /bin/bash -m "${USERNAME}"; \
-    fi \
-    && mkdir -p /workspace && chown "${USER_UID}:${USER_GID}" /workspace
-
-# Venv lives OUTSIDE /workspace so the bind-mount can't shadow the pre-built venv.
-# VIRTUAL_ENV mirrors UV_PROJECT_ENVIRONMENT so ty/ruff/Zed toolchain detection find
-# the venv over SSH (they key off VIRTUAL_ENV, and this repo has no project-local .venv).
-# CLAUDE_CONFIG_DIR moves ~/.claude.json INTO the persisted .claude volume (below) so
-# Claude's onboarding/trust survives `make dev-up` rebuilds. GH_CONFIG_DIR does the same
-# for `gh auth login` (gh writes hosts.yml/config.yml there — with no keyring in this slim
-# image it falls back to storing the token in that file), persisted via the ds-gh volume.
-# HISTFILE points bash history into the persisted .local/share volume. The entrypoint
-# publishes all of these to SSH sessions via ~/.ssh/environment (it dumps `env`), so no
-# entrypoint edit is needed.
-ENV TZ=Etc/UTC \
-    UV_COMPILE_BYTECODE=1 \
+# TZ, CLAUDE_CONFIG_DIR, GH_CONFIG_DIR, HISTFILE, SCREENDIR and ABDUCO_CMD are all set in
+# the base and are deliberately not repeated here — a value stated twice is a value that
+# drifts. What is left is this project's own.
+#
+# The venv lives OUTSIDE /workspace so the bind mount cannot shadow it. VIRTUAL_ENV
+# mirrors UV_PROJECT_ENVIRONMENT so ty/ruff/Zed toolchain detection find it over SSH (they
+# key off VIRTUAL_ENV, and this repo has no project-local .venv).
+#
+# PATH IS NEW, and it replaces a line in the old entrypoint. That entrypoint published
+# `PATH=/home/dev/venv/bin:$PATH` into ~/.ssh/environment, so an ssh session had the venv
+# and a `docker exec` did not — the same container answering `python` two different ways
+# depending on how you arrived. Setting it in the image makes both agree, and the base
+# publishes whatever PATH it inherits, so ssh sessions keep it.
+ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0 \
     UV_PROJECT_ENVIRONMENT=/home/dev/venv \
     VIRTUAL_ENV=/home/dev/venv \
-    CLAUDE_CONFIG_DIR=/home/dev/.claude \
-    GH_CONFIG_DIR=/home/dev/.config/gh \
-    HISTFILE=/home/dev/.local/share/.bash_history
+    PATH=/home/dev/venv/bin:$PATH
 
-USER ${USERNAME}
-WORKDIR /workspace
+# Pre-build the full dependency set into /home/dev/venv: the dev group (default), all
+# extras (dedup + scan), and the opt-in `driver` group for the real-terminal TUI harness
+# in tools/. The editable project is added at container start by child-init.sh, once
+# /workspace is mounted. KEEP THESE FLAGS IN SYNC with docker-child-init.dev.sh — a start
+# that syncs with fewer flags than the build used would uninstall the baked extras.
+#
+# RUN AS ROOT AND CHOWNED, which is a change from the pre-base version of this file and is
+# caused by the base rather than chosen. A BuildKit cache mount is created root-owned and
+# takes a NUMERIC uid to be anything else — the old file passed ${USER_UID}, the build arg
+# that no longer exists here because the base owns the account. Rather than guess that
+# number (the CI base bakes 1001, a `make base` bakes the clone owner's), the sync runs as
+# root against a root-owned cache and the venv is handed to dev in the same layer.
+COPY --chown=dev:dev pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_CACHE_DIR=/root/.cache/uv \
+    uv sync --frozen --no-install-project --all-extras --group driver \
+    && chown -R dev:dev /home/dev/venv
 
-# Pre-create the dirs that compose mounts named volumes onto, as the dev user, so
-# the (initially empty) volumes inherit uid-1000 ownership instead of root:root —
-# otherwise uv/claude/gh can't write to them. .ssh-host holds the persisted sshd
-# host key (ds-ssh-host volume). .host-ssh needs no pre-create — it's a directory
-# bind mount that inherits the mounted .ssh dir's ownership.
-RUN mkdir -p /home/dev/.cache/uv /home/dev/.claude /home/dev/.config/gh \
-    /home/dev/.ssh-host /home/dev/.zed_server /home/dev/.local/share
+USER dev
 
-# Pre-build the full dependency set into /home/dev/venv: the dev group (default),
-# all extras (dedup + scan), and the opt-in `driver` group for the real-terminal
-# TUI harness in tools/. The editable project is added at container start once
-# /workspace is mounted. Keep these flags in sync with docker-entrypoint.dev.sh.
-COPY --chown=${USER_UID}:${USER_GID} pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/home/dev/.cache/uv,uid=${USER_UID},gid=${USER_GID} \
-    uv sync --frozen --no-install-project --all-extras --group driver
+# The volume mountpoints the base does not already create. It pre-creates .claude,
+# .config/gh, .ssh-host and .local/share as the dev user; these two are this repo's. A
+# volume that is empty on first use inherits the ownership of the directory it covers, so
+# a mountpoint created by root is one uv and Zed cannot write to.
+RUN mkdir -p /home/dev/.cache/uv /home/dev/.zed_server
 
-# In-container sshd config (Zed-remote / direct SSH on port 2222, non-root `dev`).
-COPY --chown=${USER_UID}:${USER_GID} sshd_config.dev /home/dev/sshd_config
-EXPOSE 2222
+# ── the seams, which is all a child is meant to need ────────────────────────
+#
+# ~/.ssh/config's baked half. The real one is /workspace/.dev-ssh/config — host-side,
+# gitignored, and symlinked over this by child-init.sh when it exists — so what this file
+# carries is only the defaults that must not be wrong when it does not. See ssh_config.dev.
+COPY --chown=dev:dev ssh_config.dev /home/dev/ssh_config
 
-# Interactive login walkthrough (git SSH / GitHub / Claude), driven from the host by
-# `make dev` / `make dev-login`. Idempotent — see the script header.
-COPY --chown=${USER_UID}:${USER_GID} docker-login.dev.sh /home/dev/login.sh
+# AuthorizedKeysFile. The base serves ~/.ssh/authorized_keys, written from the secrets
+# mount infra-dev has; this container has always served the HOST account's, bind-mounted
+# read-only at ~/.host-ssh, so the same keys that log into the host log into the
+# container. sshd takes the first value it obtains for a keyword and the base's Include is
+# at the top of its file, so this wins.
+COPY --chown=dev:dev sshd_config.dev.d/ /home/dev/sshd_config.d/
 
-# Foreground supervisor that runs + health-recycles `claude remote-control`. Launched
-# by the entrypoint (sshd runs in the background); only recycles a wedged daemon at
-# 0/32 — see the script header.
-COPY --chown=${USER_UID}:${USER_GID} docker-rc-supervisor.dev.sh /home/dev/rc-supervisor.sh
+# The login walkthrough — git SSH, GitHub, Claude. Repo-specific by nature and unchanged.
+COPY --chown=dev:dev docker-login.dev.sh /home/dev/login.sh
 
-COPY --chown=${USER_UID}:${USER_GID} docker-entrypoint.dev.sh /home/dev/entrypoint.sh
-CMD ["bash", "/home/dev/entrypoint.sh"]
+# Claude Remote Control. The BASE carries the hook — its entrypoint starts this exact path
+# when DEV_REMOTE_CONTROL=1 — and this repo carries the daemon, because the recycle policy
+# in it is a decision about THIS container.
+COPY --chown=dev:dev docker-rc-supervisor.dev.sh /home/dev/rc-supervisor.sh
+
+# The fifth seam: what this image does at start that the base cannot know about.
+COPY --chown=dev:dev docker-child-init.dev.sh /home/dev/child-init.sh
+
+# WORKDIR, EXPOSE and CMD are inherited. Everything else this container is — its name, its
+# port, its volumes, its secrets directory, whether remote control runs — is in
+# docker-compose.dev.yml, which is where the values that genuinely differ belong.
