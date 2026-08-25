@@ -134,5 +134,5 @@ COPY --chown=dev:dev docker-login.dev.sh /home/dev/login.sh
 COPY --chown=dev:dev docker-child-init.dev.sh /home/dev/child-init.sh
 
 # WORKDIR, EXPOSE and CMD are inherited. Everything else this container is — its name, its
-# port, its volumes, its secrets directory, whether remote control runs — is in
+# port, its volumes, its secrets directory, whether the base's idle offloader runs — is in
 # docker-compose.dev.yml, which is where the values that genuinely differ belong.
