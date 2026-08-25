@@ -2,9 +2,8 @@
 #   make dev            (= make dev-up  +  make dev-login)
 # then reach the container over the host's sshd:
 #   ssh -t <host-user>@<host-ip> 'docker exec -it ds-dev fish'
-# or drive it remotely from claude.ai/code — the base image's entrypoint starts this
-# repo's supervisor (DEV_REMOTE_CONTROL=1 below), which brings up
-# `claude remote-control --spawn worktree` once you're signed in.
+# then hold the work in an abduco session: `abduco -A claude claude`. There is no
+# remote-control daemon in this container as of 2026-08-25 — ssh is the way in.
 #
 # dossier is a local, file-backed TUI: there is no database, no Railway deploy, and
 # no data store mounted here on purpose (tests use tmp_path; real documents stay off
@@ -21,7 +20,7 @@ services:
       # the uid the published base bakes, build the base locally in infra's dev/ and this
       # FROM picks it up: docker prefers a local image over a pull.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.08.24.2}
+        BASE_TAG: ${BASE_TAG:-2026.08.25}
     image: ds-dev
     container_name: ds-dev
     hostname: ${DEV_HOSTNAME:-ds-dev}   # Claude Code shows this as the machine title;
@@ -46,12 +45,11 @@ services:
       # via sshd_config.dev.d/10-authorized-keys.conf.
       DEV_SECRETS_DIR: /workspace/.dev-ssh
 
-      # Start the remote-control supervisor this image bakes. The base carries the hook
-      # and never the daemon, so this switch does nothing in an image that ships no
-      # /home/dev/rc-supervisor.sh — and it is also what makes the base seed
-      # `remoteDialogSeen`, the one-time consent prompt a headless container cannot
-      # answer. Set it to 0 to bring the container up with no claude driving it.
-      DEV_REMOTE_CONTROL: "1"
+      # DEV_REMOTE_CONTROL IS GONE, 2026-08-25, along with the supervisor this image used
+      # to bake and the hook in the base that started it. The way in is ssh + abduco, on
+      # every dev container on this host. What the base runs instead is the idle
+      # offloader: a claude that has been detached, silent and not working for 90 minutes
+      # is stopped and left resumable. DEV_IDLE_OFFLOAD: "0" here would keep them resident.
 
       # DEV_TUNNEL_HOSTNAME is deliberately unset. The base can run cloudflared itself,
       # but this container is reached through the tunnel on the HOST pointed at the

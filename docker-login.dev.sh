@@ -94,9 +94,8 @@ else
 fi
 
 # ── 3/3  Claude Code ─────────────────────────────────────────────────────────
-# Logging in here also unblocks the background Remote Control supervisor started by
-# the base image's entrypoint — it polls auth every ~10s and comes online on its own
-# once signed in.
+# Logging in here is what makes `claude` work in the container at all: ssh in and run
+# it inside an abduco session, which is how every dev container on this host is used.
 bold "3/3  Claude Code"
 if claude auth status >/dev/null 2>&1; then
   ok "$(claude auth status --text 2>&1 | grep -m1 -E 'Email|Login method' | sed 's/^[[:space:]]*//')"
@@ -107,11 +106,12 @@ fi
 
 bold "Done."
 if claude auth status >/dev/null 2>&1; then
-  ok "Claude Remote Control goes live within ~10s — open claude.ai/code or the mobile app."
+  ok "Work in it over ssh: 'ssh -p <port> dev@<host>' then 'abduco -A claude claude'."
 fi
 cat <<'EOF'
 
   Attach a shell:   docker exec -it ds-dev fish
-  Remote control:   auto-started (spawn=worktree); log at ~/.local/share/remote-control.log
+  Work in it:       ssh -p <port> dev@<host>  then  abduco -A claude claude
+  Idle sessions:    stopped after 90m and left resumable — ~/.local/share/claude-offload.log
   Re-run logins:    make dev-login
 EOF

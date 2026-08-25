@@ -154,7 +154,7 @@ The base's source is `dev/Dockerfile.base` in the `infra` repo, and nothing here
 that repo checked out — the `FROM` pulls.
 
 - **Files:** `Dockerfile.dev`, `docker-compose.dev.yml`, `docker-child-init.dev.sh`,
-  `docker-login.dev.sh`, `docker-rc-supervisor.dev.sh`, `ssh_config.dev`,
+  `docker-login.dev.sh`, `ssh_config.dev`,
   `sshd_config.dev.d/`, `Makefile`, `.dockerignore`, `.env-example`.
 - **What this image does at start:** the base's entrypoint pulls the clone, then runs
   `docker-child-init.dev.sh` — the `.dev-ssh` git identities, and `uv sync --frozen
@@ -182,15 +182,19 @@ that repo checked out — the `FROM` pulls.
   → Claude). Re-login later with `make dev-login`; tear down with `make dev-down` (add
   `-volumes` to also drop the persisted uv/claude/gh/ssh/history volumes).
 - **Attach:** `docker exec -it ds-dev fish`, or over SSH: `ssh -t <host> 'docker exec -it
-  ds-dev fish'`. Once Claude is logged in, the supervisor the base's entrypoint started
-  (`DEV_REMOTE_CONTROL=1` in the compose file) brings up `claude remote-control --spawn
-  worktree` on its own (~10s) — no manual step. The base pre-seeds Claude's
-  workspace-trust flag for `/workspace` in `~/.claude.json`, and `remoteDialogSeen` with
-  it, so the headless daemon never blocks on a dialog nobody can answer.
-- **sshd is the foreground process and the supervisor runs behind it**, the reverse of
-  the pre-base arrangement: the door is what the container's lifetime should equal. So
-  `docker logs ds-dev` shows sshd and the start-up lines, and the supervisor is read at
-  `~/.local/share/remote-control.log`.
+  ds-dev fish'`. **There is no Remote Control here as of 2026-08-25** — the supervisor is
+  deleted, not defaulted off, and every dev container on this host is reached the same
+  way: ssh in, then `abduco -A claude claude`, which holds the session across a dropped
+  link. The base still pre-seeds Claude's workspace-trust flag for `/workspace` in
+  `~/.claude.json` so a fresh volume does not meet a dialog nobody can answer.
+- **An idle claude is offloaded after 90 minutes and left resumable.** The base runs
+  `offload-idle-claude.sh`: a session detached, silent and running nothing for longer than
+  a claude can schedule its own wake-up (the runtime clamps that to an hour) is stopped,
+  and `~/.local/share/claude-offload.log` holds the `claude --resume` that brings it back.
+  It never touches an attached session, one with work running under it, or one with no
+  transcript. One idle session's process tree measures over a gigabyte.
+- **sshd is the foreground process**, and it is the only long-lived one: the container's
+  lifetime is the door's. `docker logs ds-dev` shows sshd and the start-up lines.
 - **Two sshd defaults the base changed are put back** in `sshd_config.dev.d/`:
   `AuthorizedKeysFile` (the host account's, as always here) and `AllowTcpForwarding yes`
   (the OpenSSH default this container's old config left in place, which the base turns

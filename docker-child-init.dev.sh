@@ -2,7 +2,7 @@
 # ds-dev's own start-up, baked into the image at /home/dev/child-init.sh and RUN by the
 # base image's entrypoint — the fifth seam of gsrpi-dev-base, added 2026-08-24 for this
 # container and dd-dev. The base runs it after its `git pull --ff-only` of /workspace and
-# before it starts the remote-control supervisor and sshd, so a lockfile that pull moved
+# before it starts sshd, so a lockfile that pull moved
 # is the one installed from, and nothing has arrived yet to meet a half-installed venv.
 # (That pull only authenticates once .dev-ssh/ssh_config.fleet exists — see below.)
 #

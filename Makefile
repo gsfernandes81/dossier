@@ -51,10 +51,9 @@ dev-check-uid:
 # One command to stand the whole thing up: build + start the container, wait for it
 # to be running, then walk through any logins that aren't done yet (git SSH, GitHub,
 # Claude) interactively. Every login step is idempotent — already-signed-in services
-# are skipped — so this is safe to re-run. Once Claude is logged in the supervisor the
-# base image's entrypoint started (DEV_REMOTE_CONTROL=1) brings up `claude
-# remote-control --spawn worktree` on its own (~10s), so there's nothing to exec by
-# hand.
+# are skipped — so this is safe to re-run. Once Claude is logged in, work in the
+# container the way you work in the others: ssh in and run `abduco -A claude claude`,
+# which holds the session across a dropped link.
 dev: dev-up
 	@echo "Waiting for ds-dev to come up (up to 120s)..."
 	@for i in $$(seq 1 120); do \
