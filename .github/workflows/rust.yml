@@ -118,7 +118,7 @@ jobs:
         run: |
           $dir = Join-Path $env:LOCALAPPDATA 'dossier'
           New-Item -ItemType Directory -Force $dir | Out-Null
-          Set-Content -NoNewline (Join-Path $dir 'config.toml') "device = `"ci-twin`"`n"
+          Set-Content -Path (Join-Path $dir 'config.toml') -Value 'device = "ci-twin"'
 
       # Debug, not release: the perf gates assert only in release, and this leg
       # is about I/O semantics, so the halved build time is free.
