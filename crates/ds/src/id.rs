@@ -59,9 +59,10 @@
 //! cannot. The bare-slug alternative does not merge them *correctly* either —
 //! it merges them wrongly and silently.
 //!
-//! **This trade was put to the user and approved**, with the merge verb placed
-//! in the review surface (R5); where it sits there and how it is worded are
-//! open, and "keep it simple" is the standing instruction.
+//! **This trade was put to the user and approved.** The merge verb acts on a
+//! two-document selection, reached through the duplicates filter (R5 — there is
+//! no review surface); its wording is open, and "keep it simple" is the
+//! standing instruction.
 //!
 //! The merge verb is unbuilt, but it is not new machinery: §3.2
 //! already contracts this exact op sequence for an **id rename** — copy the

@@ -39,7 +39,7 @@ Three facts that shape what the rest of R4 costs:
   save rather than at launch.
 - **The binary has three subcommands**, `status`, `open` and `init`, plus the
   TUI. Every other verb in REWRITE.md's module map — `reset`, `file`, `export`,
-  `organize`, the review queue — is unbuilt. `ds init` so far asks only for the
+  `organize`, the review filters — is unbuilt. `ds init` so far asks only for the
   device name and the root; the Syncthing key and the Termux checks §4.1 wants
   are one more `ask` each.
 
@@ -146,8 +146,9 @@ Each is recorded where it belongs; the link is the point of the row.
   2026-09-29** ([`model-rethink.md`](model-rethink.md), "Checked against v2's
   code"): zero new surfaces. Orphans and file-side duplicates go to `ds file`;
   missing and document-side duplicates become list filters; succession becomes a
-  record suggestion; integrity is CLI-only. Three questions await the user there;
-  REWRITE.md §8/§4.5 amendments follow once they are answered.
+  record suggestion; integrity is CLI-only. **Accepted by the user**, with its
+  three questions answered (card gets link-to-existing; ack-missing dropped;
+  ignore globs kept), and REWRITE.md / REWRITE-UI amended to match.
 - **History beyond this session.** Undo and redo cover what *this* session wrote,
   because the change is captured at write time. §8's "30-day horizon" — walking back
   further, or seeing what changed and when — needs re-folding the journal to a

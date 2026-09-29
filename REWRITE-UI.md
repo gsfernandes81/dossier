@@ -74,7 +74,6 @@ style); prefix-matched with completion.
 
 | Surface | Command | Content |
 |---|---|---|
-| Review | `:review` | the five tabs (orphans · missing · duplicates · succession · integrity), `[`/`]` or `tab` cycles; row verbs per REWRITE.md invariant 2 |
 | File | `:file` | the filing queue — proposal cards, exception triage, unfiled counter |
 | Bundles | `:bundles` | bundle list (dated, chronological), Enter scopes the Find list to the bundle; export from here |
 | Expiring | `:expiring` (hotkey `ctrl+x`) | the Find list with the expiring filter + `N tracked · M red` header — a filter, not a mode |

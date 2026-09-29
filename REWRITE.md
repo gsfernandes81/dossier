@@ -141,8 +141,10 @@ section and the golden vectors in the same slice.
   **Its consequence:** two devices can now hold two documents for one real thing,
   and nothing merges them yet. **The user approved this trade — a duplicate you
   can see beats a merge you cannot — and placed the merge verb in the review
-  surface (R5)**; its exact home there and its wording are open, with "keep it
-  simple" the only standing instruction. The verb needs no new machinery: it is
+  surface (R5)**. *Amended 2026-09-29: there is no review surface any more
+  (docs/dev/model-rethink.md, "Checked against v2's code"); the verb acts on a
+  two-document selection, reached through the duplicates filter.* Its wording
+  is open, with "keep it simple" the only standing instruction. The verb needs no new machinery: it is
   the id-rename contract below minus the `create`, and its exact detection signal
   is two documents listing the same file path. v2's `dedup` does not cover it
   (that clusters duplicate *files*; this is two documents over one file).
@@ -281,8 +283,9 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
    search (first character kept); the surface binds **no letter keys**. Cold start →
    type → `Enter` → file open, ≤ 5 keystrokes.
 2. **The verb pair**: `Enter` opens the **file**, `→` opens the **record/detail** —
-   applied by row kind everywhere (doc / orphan / succession pair / other object per
-   DESIGN §8); `Enter` never mutates and never dies (falls through to the record when
+   applied by row kind everywhere (*amended 2026-09-29:* the list shows documents
+   only — files appear on the filing card and the record's file rows, never as
+   list rows); `Enter` never mutates and never dies (falls through to the record when
    there's no file).
 
    > **Amendment approved 2026-08-20, not yet implemented — see REWRITE-UI.md
@@ -307,10 +310,12 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
 7. **Never block the render thread**: tree walks, syncthing polls, journal compaction
    run on worker threads; the UI thread only folds messages. (The v2 rule "no blocking
    I/O in async paths" becomes "no blocking I/O on the render loop".)
-8. **Surfaces** (however the layout arranges them): browse+detail, review queue
-   (orphans / missing / duplicates / succession / integrity — **no conflicts tab**),
-   bundles (+ export + readiness *counts* only), filing cards, settings. Expiry watch
+8. **Surfaces** (however the layout arranges them): browse+detail, bundles (+ export + readiness *counts* only), filing cards, settings. Expiry watch
    is a **filter with a header count**, not a mode (v2 watch-mode is not ported).
+   **No review surface** (*amended 2026-09-29*, docs/dev/model-rethink.md "Checked
+   against v2's code"): orphans and file-side duplicates are `ds file`'s; missing
+   and document-side duplicates are list filters; succession is a record
+   suggestion; integrity is `ds status` output.
 
 ### 4.6 Rust-for-learning commenting standard (binding, D2)
 
@@ -752,12 +757,17 @@ until the cutover step the user personally green-lights.
     - **Inbound references are left alone.** §3.2 says a stale `supersedes` is
       harmless after a tombstone, and rewriting other documents as a side effect
       of deleting this one is the kind of thing an undo could not honestly
-      reverse. Dangling references are the review surface's business.
-- **R5 — Review + file + export**: `walkdir` tree walk, review queue (five tabs,
-  and **the document-merge verb** — §3.2's amendment note; wording and exact
-  placement open, keep it simple),
+      reverse. Dangling references are `ds status`'s business, and the record
+      shows a dangling target in the warning tone.
+- **R5 — Review + file + export**: `walkdir` tree walk; **no review surface**
+  (amended 2026-09-29 — the five v2 tabs route per docs/dev/model-rethink.md
+  "Checked against v2's code"): missing / duplicates / suggested **list filters**
+  (composable, in the sheet's filter group), the **suggestion count + record
+  accept/dismiss** that succession rides, and **the document-merge verb** on a
+  two-document selection (§3.2's amendment note; keep it simple);
   `ds file` (manual + proposal-consuming cards, unfiled counter, exception triage per
-  D11), `ds export` with manifest, `ds organize`.
+  D11; card verbs add **link to an existing document**, **restore dismissed** and
+  **ignore-glob** to v2's file/fold/skip/not-doc), `ds export` with manifest, `ds organize`.
 - **R6 — Satellite adaptation**: persistence adapter, `ds-lab` CLI, gut the Python
   package, service writes to `enrich/`, sync-idle wait kept.
 - **R7 — Cutover (big-bang, D4) + polish.** Rehearse on a copy; then, in this order:
@@ -805,7 +815,7 @@ strictly ordered; R6 can overlap R4/R5 once the adapter exists.
 |---|---|
 | Browse/search/open, detail editing, slots+shift, supersession | **Port** (Rust; layout per R-UI) |
 | Expiry watch | **Port as filter** + header count; watch *mode* dropped |
-| Review: orphans/missing/duplicates/succession/integrity | **Port** (five tabs; conflicts tab dropped) |
+| Review: orphans/missing/duplicates/succession/integrity | **Rehome, no surface** (amended 2026-09-29): orphans + file-side dups → `ds file`; missing + doc-side dups → list filters (+ merge verb); succession → record suggestion; integrity → `ds status`. *Acknowledge missing* is **dropped** — unlink, or wait for sync. Conflicts tab dropped. |
 | Suggestions accept/dismiss | **Port**; name-parse source in Rust, reading source from satellite |
 | Bundles + export + manifest | **Port**; readiness = counts only |
 | Bundle rename (atomic member rewrite) | **Port** as a TUI command-line verb emitting per-member ops (§4.1) |

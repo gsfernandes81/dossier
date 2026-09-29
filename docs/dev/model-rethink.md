@@ -465,7 +465,12 @@ reached through the duplicates status line.
 "doc / orphan / succession pair" row kinds (now **doc only**), R5's "review queue
 (five tabs)", and REWRITE-UI §3's `:review` row.
 
-**Needs the user**, each with a recommendation:
+**Answered by the user, 2026-09-29 — all three as recommended:** link-to-existing
+goes on the filing card; acknowledge-missing is dropped; ignore globs stay, set from
+the card and stored in synced settings. REWRITE.md §3.2, §4.5 (invariant 2, item 8),
+R5 and §8, and REWRITE-UI §3's `:review` row, are amended to match.
+
+The questions as put:
 
 1. **Add *link to an existing document* to the filing card?** *Recommended: yes.* It
    is the only way to attach a back page or second scan from the filing flow. It
@@ -505,7 +510,8 @@ durable record is this note.
 Open and awaiting the user's reread:
 
 - ~~**the reviews analysis**~~ — **done 2026-09-29**, under "Checked against v2's
-  code" above. It holds, with the routing corrected; three questions for the user;
+  code" above. It holds, with the routing corrected; the user's three answers are
+  recorded there and the specs amended;
 - **the Windows hidden-attribute gap** on the existing `.dossier/` — fix now, or
   fold into the journal-path work;
 - **the cross-device mtime leg** — set a known mtime on the desk, let it sync,
@@ -520,7 +526,7 @@ on every job.
 - What the full-chain-history command is called, and how a chain is drawn.
 - ~~Whether the review surfaces survive as surfaces~~ and ~~where the merge verb
   lands~~ — answered by the check above (zero new surfaces; merge on a two-document
-  selection), pending the user's read of its three questions.
+  selection); the user accepted it 2026-09-29.
 
 ---
 

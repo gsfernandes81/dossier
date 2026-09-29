@@ -298,7 +298,7 @@ impl Store {
     ///
     /// A document with no `name` field is still built — with an empty name — on
     /// purpose: hiding it would make a half-written record invisible instead of
-    /// fixable, and the review surface exists to surface exactly that.
+    /// fixable, and `ds status` exists to surface exactly that.
     #[must_use]
     pub fn build(fold: &Fold) -> Self {
         // Superseded-ness is a fact about the collection, not the document:
