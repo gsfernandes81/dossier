@@ -25,9 +25,19 @@
 //!
 //! Reveal-in-file-manager and copy-path are v2 verbs that arrive with the detail
 //! surface's actions in R4; this slice is the one verb `Enter` needs.
+//!
+//! **Under WSL** the file goes to Windows, because that is where the default
+//! application is: the path is translated ([`crate::wsl`]) and handed to
+//! `rundll32 url.dll,FileProtocolHandler` — the shell's own "open this", in one
+//! argument. Not `explorer.exe`, whose parser splits a name at its commas even
+//! inside quotes; not `cmd /C start`, which re-reads `&` and `^` in a name that
+//! WSL's interop left unquoted for having no spaces; not `wslview`, which is an
+//! optional package.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use crate::wsl::Wsl;
 
 /// Why a file could not be opened. Every variant carries what to do about it.
 #[derive(Debug, thiserror::Error)]
@@ -65,6 +75,23 @@ pub enum OpenError {
     },
 }
 
+/// What opens a file on the Windows side of WSL.
+const RUNDLL32: &str = "rundll32.exe";
+
+/// `rundll32.exe` is not on `PATH` and not where Windows keeps it.
+const WSL_PATH_HINT: &str = "Windows' programs are not on PATH here — check `appendWindowsPath` \
+                             under `[interop]` in /etc/wsl.conf";
+
+/// Linux refused to run a Windows program at all.
+const WSL_INTEROP_HINT: &str = "WSL cannot run Windows programs — set `enabled = true` under \
+                                `[interop]` in /etc/wsl.conf, then `wsl --shutdown`";
+
+/// `ENOEXEC`: what `exec` of a `.exe` returns when WSL's interop is switched
+/// off, since the kernel then sees a PE file it has no loader for. The value is
+/// the same on every Linux architecture, and a one-number dependency on `libc`
+/// would cost more than it says.
+const ENOEXEC: i32 = 8;
+
 const TERMUX_HINT: &str = "run `pkg install termux-api` and install the Termux:API app from the \
                            same source as Termux (an F-Droid/Play-Store mismatch makes \
                            termux-open a silent no-op)";
@@ -88,8 +115,61 @@ pub fn open_file(path: &Path) -> Result<(), OpenError> {
     if !path.exists() {
         return Err(OpenError::Missing(path.to_path_buf()));
     }
+    if let Some(wsl) = Wsl::current() {
+        return open_on_windows(wsl, path);
+    }
     let (opener, hint) = platform_opener();
-    run(&opener, path, &hint)
+    let mut command = Command::new(&opener);
+    if cfg!(target_os = "windows") && opener == "cmd" {
+        // The empty string is `start`'s title argument. Without it, a quoted
+        // path is taken *as* the title and nothing opens — a decades-old
+        // `cmd.exe` wart, and the reason this is not just `start <path>`.
+        command.args(["/C", "start", ""]).arg(path);
+    } else {
+        command.arg(path);
+    }
+    run(&opener, command, path, &hint)
+}
+
+/// Open a file from WSL with Windows' default application.
+fn open_on_windows(wsl: &Wsl, path: &Path) -> Result<(), OpenError> {
+    // A relative root (`--root .`) is still a path Windows must be able to
+    // name from wherever *it* starts.
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let Some(windows) = wsl.to_windows(&absolute) else {
+        return Err(OpenError::Failed {
+            opener: RUNDLL32.into(),
+            path: path.to_path_buf(),
+            detail: "Windows has no name for it: it is inside this distribution and \
+                     WSL_DISTRO_NAME is not set"
+                .into(),
+        });
+    };
+    // `PATH` first, then where Windows keeps it, for a WSL configured with
+    // `appendWindowsPath = false`.
+    let system = format!("{}c/Windows/System32/{RUNDLL32}", wsl.mount_root);
+    for opener in [RUNDLL32, system.as_str()] {
+        let mut command = Command::new(opener);
+        command.args(["url.dll,FileProtocolHandler", &windows]);
+        // A Windows program started from a directory inside the distribution
+        // gets a `\\wsl$` working directory, which some of them warn about on
+        // stderr — and stderr is where this module looks for a complaint.
+        let drive = PathBuf::from(format!("{}c", wsl.mount_root));
+        if drive.is_dir() {
+            command.current_dir(drive);
+        }
+        match run(opener, command, path, WSL_PATH_HINT) {
+            Err(OpenError::NoOpener { .. }) => {}
+            Err(OpenError::Spawn { source, .. }) if source.raw_os_error() == Some(ENOEXEC) => {
+                return Err(OpenError::NoOpener {
+                    opener: RUNDLL32.into(),
+                    hint: WSL_INTEROP_HINT.into(),
+                });
+            }
+            done => return done,
+        }
+    }
+    Err(OpenError::NoOpener { opener: RUNDLL32.into(), hint: WSL_PATH_HINT.into() })
 }
 
 /// The opener for this platform, and what to tell the user if it is missing.
@@ -108,17 +188,9 @@ fn platform_opener() -> (String, String) {
     ("xdg-open".into(), "no 'xdg-open' on PATH — install xdg-utils".into())
 }
 
-fn run(opener: &str, path: &Path, hint: &str) -> Result<(), OpenError> {
-    let mut command = Command::new(opener);
-    if cfg!(target_os = "windows") && opener == "cmd" {
-        // The empty string is `start`'s title argument. Without it, a quoted
-        // path is taken *as* the title and nothing opens — a decades-old
-        // `cmd.exe` wart, and the reason this is not just `start <path>`.
-        command.args(["/C", "start", ""]).arg(path);
-    } else {
-        command.arg(path);
-    }
-
+/// Run a prepared opener and turn what happened into an [`OpenError`] that
+/// says what to do about it.
+fn run(opener: &str, mut command: Command, path: &Path, hint: &str) -> Result<(), OpenError> {
     let output = match command.output() {
         Ok(output) => output,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
@@ -172,6 +244,64 @@ mod tests {
         let joined = resolve(Path::new("/home/u/Sync"), "Marine/coc.pdf");
         assert!(joined.ends_with("Marine/coc.pdf"));
         assert!(joined.starts_with("/home/u/Sync"));
+    }
+
+    /// The WSL hints name the setting to change and the file it lives in —
+    /// both failures otherwise look like "Windows is broken".
+    #[test]
+    fn the_wsl_hints_name_the_setting_and_its_file() {
+        for (hint, setting) in
+            [(WSL_PATH_HINT, "appendWindowsPath"), (WSL_INTEROP_HINT, "enabled = true")]
+        {
+            assert!(hint.contains(setting), "{hint}");
+            assert!(hint.contains("/etc/wsl.conf"), "{hint}");
+        }
+    }
+
+    /// **The WSL opener, end to end, with a stand-in `rundll32.exe`.** Put
+    /// where Windows keeps the real one, it is found by the `PATH`-miss
+    /// fallback — the `appendWindowsPath = false` case — and records what it was
+    /// given: the translated Windows path as **one** argument (spaces and a
+    /// comma intact), after the handler, started from the drive.
+    ///
+    /// Skipped on a real WSL, where the real `rundll32.exe` is on `PATH` and
+    /// would try to open the file on the desktop.
+    #[cfg(unix)]
+    #[test]
+    fn under_wsl_a_file_goes_to_rundll32_as_one_windows_path() {
+        use std::os::unix::fs::PermissionsExt;
+        if Wsl::current().is_some() {
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("ds-open-wsl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let system = base.join("mnt/c/Windows/System32");
+        std::fs::create_dir_all(&system).expect("mkdir");
+        let log = base.join("argv");
+        let fake = system.join(RUNDLL32);
+        std::fs::write(
+            &fake,
+            format!("#!/bin/sh\n{{ pwd; printf '%s\\n' \"$@\"; }} > '{}'\n", log.display()),
+        )
+        .expect("write");
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+        let wsl = Wsl {
+            generation: crate::wsl::Generation::Two,
+            mount_root: format!("{}/", base.join("mnt").display()),
+            distro: Some("Ubuntu".into()),
+        };
+        let file = base.join("mnt/c/Users/g/a b,c.pdf");
+        open_on_windows(&wsl, &file).expect("opened");
+
+        let seen = std::fs::read_to_string(&log).expect("the stand-in ran");
+        let lines: Vec<&str> = seen.lines().collect();
+        let drive = base.join("mnt/c");
+        assert_eq!(
+            lines,
+            [drive.to_str().unwrap(), "url.dll,FileProtocolHandler", r"C:\Users\g\a b,c.pdf"]
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The Termux hint names both halves of the install, because having only one

@@ -55,6 +55,8 @@
 //!   with the loopback-scoped TLS exception Termux forces.
 //! - [`scans`] — what the documents *say*, loaded lazily on a worker the first
 //!   time `ctrl+t` asks for it.
+//! - [`wsl`] — the Linux build on a Windows machine: path translation across
+//!   the boundary, and the one device-name collision only WSL can see.
 //!
 //! # Reading this code
 //!
@@ -84,6 +86,7 @@ pub mod sheet;
 pub mod status;
 pub mod syncthing;
 pub mod theme;
+pub mod wsl;
 
 pub use app::{update, Effect, Model, Msg};
 pub use doc::{Doc, FileRef, Location, Status, Store};

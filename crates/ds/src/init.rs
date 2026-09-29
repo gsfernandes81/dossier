@@ -84,6 +84,30 @@ pub enum Error {
     /// The config could not be read or written.
     #[error(transparent)]
     Config(#[from] crate::config::Error),
+    /// Under WSL: `ds.exe` on the Windows side of this machine already writes
+    /// to the same store under this name.
+    #[error("{}", twin_message(device, twin))]
+    WindowsTwin {
+        /// The name that was refused.
+        device: String,
+        /// The Windows-side config that claims it.
+        twin: crate::wsl::Twin,
+    },
+}
+
+/// Why a device name shared with `ds.exe` on the same PC is refused, and what
+/// to do instead. One wording for `ds init` and for the writer, which refuses
+/// the same thing at the first save.
+#[must_use]
+pub fn twin_message(device: &str, twin: &crate::wsl::Twin) -> String {
+    format!(
+        "`{device}` is already ds.exe's device name on this PC ({config}) — both \
+         would append to `{writer}`, and a lock taken on one side of WSL is \
+         invisible from the other. Give this side a name of its own, e.g. \
+         `ds init --force --device {device}-wsl`",
+        config = twin.config.display(),
+        writer = twin.writer,
+    )
 }
 
 /// The component half of this device's writer id.
@@ -164,13 +188,19 @@ impl<R: BufRead, W: Write> Conversation<'_, R, W> {
 /// # Errors
 /// [`Error`] for a config already in the way, a device name outside the frozen
 /// writer grammar, a question with no terminal to ask it at, or a write that
-/// failed.
+/// failed — or, under WSL, a device name `ds.exe` on the same PC already
+/// writes to this store as.
+///
+/// `wsl` is the WSL this runs under, if any: a root typed as Windows writes it
+/// (`C:\Users\g\Sync`) is stored as its mount, and the Windows side is checked
+/// for a twin before anything is written.
 pub fn run<R: BufRead, W: Write>(
     path: &Path,
     answers: &Answers,
     input: &mut R,
     output: &mut W,
     interactive: bool,
+    wsl: Option<&crate::wsl::Wsl>,
 ) -> Result<(), Error> {
     // Refuse before asking anything: making someone answer three questions and
     // *then* telling them it was pointless is the rudest possible ordering.
@@ -210,6 +240,10 @@ pub fn run<R: BufRead, W: Write>(
             "--root",
         )?),
     };
+    let root = crate::wsl::native_root(wsl, root);
+    if let Some(twin) = wsl.and_then(|wsl| crate::wsl::windows_twin(wsl, &device, Some(&root))) {
+        return Err(Error::WindowsTwin { device, twin });
+    }
 
     // Everything not asked about is carried through, so `--force` re-names a
     // device without silently dropping its Syncthing credentials.
@@ -293,7 +327,7 @@ mod tests {
     ) -> (Result<(), Error>, String) {
         let mut input = Cursor::new(replies.as_bytes().to_vec());
         let mut output = Vec::new();
-        let result = run(path, answers, &mut input, &mut output, interactive);
+        let result = run(path, answers, &mut input, &mut output, interactive, None);
         (result, String::from_utf8(output).expect("utf-8"))
     }
 
@@ -408,6 +442,70 @@ mod tests {
         let config = Config::read(&path).expect("read");
         assert_eq!(config.syncthing.apikey.as_deref(), Some("secret"));
         assert_eq!(config.syncthing.address.as_deref(), Some("https://127.0.0.1:8384"));
+    }
+
+    /// A WSL whose drives are mounted under `dir` — a Windows drive this test
+    /// owns, so the profile scan reads real files on every CI platform.
+    fn fake_wsl(dir: &Path) -> crate::wsl::Wsl {
+        crate::wsl::Wsl {
+            generation: crate::wsl::Generation::Two,
+            mount_root: format!("{}/", dir.join("mnt").display()),
+            distro: Some("Ubuntu".into()),
+        }
+    }
+
+    /// **Under WSL, a root typed as Explorer shows it is stored as its mount** —
+    /// the config holds a path Linux can open, not backslashes.
+    #[test]
+    fn under_wsl_a_windows_root_is_stored_as_its_mount() {
+        let dir = sandbox("wsl-root");
+        let path = dir.join("config.toml");
+        let wsl = fake_wsl(&dir);
+        let answers = Answers { device: Some("desk-wsl".into()), ..Answers::default() };
+        let mut input = Cursor::new(b"C:\\Users\\g\\Sync\n".to_vec());
+        let mut output = Vec::new();
+        run(&path, &answers, &mut input, &mut output, true, Some(&wsl)).expect("init");
+        let root = Config::read(&path).expect("read").syncthing_root.expect("root");
+        assert_eq!(root, PathBuf::from(format!("{}c/Users/g/Sync", wsl.mount_root)));
+    }
+
+    /// **Under WSL, a device name `ds.exe` already uses for this store is
+    /// refused** before anything is written, and the refusal offers a name that
+    /// would work. The same name on a different store is fine.
+    #[test]
+    fn under_wsl_a_windows_twin_is_refused() {
+        let dir = sandbox("wsl-twin");
+        let path = dir.join("config.toml");
+        let wsl = fake_wsl(&dir);
+        let windows = dir.join("mnt/c/Users/g/AppData/Local/dossier");
+        std::fs::create_dir_all(&windows).expect("mkdir");
+        std::fs::write(
+            windows.join("config.toml"),
+            "device = \"desk\"\nsyncthing_root = 'C:\\Users\\g\\Sync'\n",
+        )
+        .expect("write");
+
+        let answer = |device: &str, root: &str| {
+            let answers = Answers {
+                device: Some(device.into()),
+                root: Some(root.into()),
+                ..Answers::default()
+            };
+            let mut output = Vec::new();
+            run(&path, &answers, &mut Cursor::new(Vec::new()), &mut output, false, Some(&wsl))
+        };
+        let refused = answer("desk", r"c:\users\g\sync").expect_err("a twin");
+        assert!(matches!(refused, Error::WindowsTwin { .. }), "{refused:?}");
+        let message = refused.to_string();
+        assert!(
+            message.contains("desk-core") && message.contains("--device desk-wsl"),
+            "{message}"
+        );
+        assert!(!path.exists(), "nothing was written");
+
+        answer("desk", r"D:\Other").expect("the same name on another store");
+        std::fs::remove_file(&path).expect("reset");
+        answer("desk-wsl", r"C:\Users\g\Sync").expect("a name of its own");
     }
 
     /// **With no terminal, a missing answer is an error and not a wait.** `ds

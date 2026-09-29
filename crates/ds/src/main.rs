@@ -198,8 +198,15 @@ fn init(args: &Args, device: Option<String>, force: bool) -> u8 {
     let stdin = io::stdin();
     let mut input = stdin.lock();
     let mut output = io::stdout();
-    match ds::init::run(&path, &answers, &mut input, &mut output, ds::init::stdin_is_interactive())
-    {
+    let interactive = ds::init::stdin_is_interactive();
+    match ds::init::run(
+        &path,
+        &answers,
+        &mut input,
+        &mut output,
+        interactive,
+        ds::wsl::Wsl::current(),
+    ) {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("ds: {error}");
@@ -228,7 +235,7 @@ fn status(
     // slow — so it is last, after everything local has already been decided.
     if !no_sync {
         report.sync = ds::syncthing::Settings::from_config(&config.syncthing)
-            .map(|settings| ds::syncthing::query(&settings, root));
+            .map(|settings| ds::syncthing::query(&settings, root, ds::wsl::Wsl::current()));
     }
     if quiet {
         if report.healthy() {
@@ -307,7 +314,7 @@ fn browse(
     // because the record's hints must not offer an edit that cannot happen. The
     // *journal* is not touched here — see `writer_session`.
     let session =
-        writer_session(config, journal, loaded.load.lines, loaded.stats.max_ts(), tx.clone());
+        writer_session(config, journal, root, loaded.load.lines, loaded.stats.max_ts(), tx.clone());
     model.write = match &session {
         Ok(session) => ds::app::WriteState::Ready { device: session.device.clone() },
         Err(reason) => ds::app::WriteState::Off(reason.clone()),
@@ -399,6 +406,7 @@ impl Session {
 fn writer_session(
     config: &ds::config::Config,
     journal: &Journal,
+    root: &Path,
     lines: Vec<journal::Line>,
     max_ts: i64,
     results: mpsc::Sender<Msg>,
@@ -416,8 +424,9 @@ fn writer_session(
 
     let (commands, orders) = mpsc::channel::<Vec<journal::Draft>>();
     let journal = journal.clone();
+    let owner = Owner { device: device.clone(), writer_id, root: root.to_path_buf() };
     let worker = std::thread::spawn(move || {
-        write_loop(&journal, &writer_id, &lock_dir, max_ts, lines, &orders, &results);
+        write_loop(&journal, &owner, &lock_dir, max_ts, lines, &orders, &results);
     });
     Ok(Session { commands, worker, device })
 }
@@ -438,7 +447,7 @@ fn writer_session(
 /// points at it. A shortcut may never become a second implementation.
 fn write_loop(
     journal: &Journal,
-    writer_id: &str,
+    owner: &Owner,
     lock_dir: &Path,
     max_ts: i64,
     mut lines: Vec<journal::Line>,
@@ -448,10 +457,21 @@ fn write_loop(
     let mut writer: Option<journal::Writer> = None;
     while let Ok(drafts) = orders.recv() {
         if writer.is_none() {
+            // Under WSL, `ds.exe` on the same PC under the same name would share
+            // this writer file with a lock this process cannot see. Asked here,
+            // at the first save, for the same reason the writer opens here: a
+            // scan of the Windows drive has no business on the launch path.
+            if let Some(twin) = ds::wsl::Wsl::current()
+                .and_then(|wsl| ds::wsl::windows_twin(wsl, &owner.device, Some(&owner.root)))
+            {
+                let reason = ds::init::twin_message(&owner.device, &twin);
+                let _ = results.send(Msg::SaveFailed { reason, permanent: true });
+                continue;
+            }
             match journal::Writer::open(
                 journal,
                 journal::Namespace::Meta,
-                writer_id,
+                &owner.writer_id,
                 lock_dir,
                 max_ts,
             ) {
@@ -483,6 +503,16 @@ fn write_loop(
             return;
         }
     }
+}
+
+/// Who the writer thread writes as, and for which store.
+struct Owner {
+    /// This device's name, as `ds init` recorded it.
+    device: String,
+    /// `<device>-core`.
+    writer_id: String,
+    /// The store root, which decides whether a same-named `ds.exe` is a twin.
+    root: PathBuf,
 }
 
 fn ms(duration: std::time::Duration) -> f64 {

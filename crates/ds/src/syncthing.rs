@@ -34,11 +34,19 @@
 //! * **The interesting folder is the one containing the store.** A device may
 //!   sync a dozen folders; only one of them decides whether these documents
 //!   move.
+//!
+//! Under WSL the daemon is usually the *Windows* one, so the folder paths it
+//! reports are Windows paths and are translated before they are compared
+//! ([`crate::wsl`]), and a loopback that does not answer gets the one
+//! explanation that is almost always true there: WSL 2's NAT networking gives
+//! Linux a loopback of its own.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::Value;
+
+use crate::wsl::{Generation, Wsl};
 
 /// Per-request timeout. Loopback answers in milliseconds; anything slower is a
 /// daemon that is not going to answer at all, and `ds status` must not hang.
@@ -184,18 +192,45 @@ pub fn is_loopback(host: &str) -> bool {
     host == "localhost" || host == "::1" || host.starts_with("127.")
 }
 
+/// What an unanswered loopback means under WSL, and the two ways out.
+///
+/// WSL 2's default NAT networking gives the Linux side its own `127.0.0.1`, and
+/// Windows' Syncthing binds only Windows' — so the daemon is running and simply
+/// not reachable from here. Mirrored networking shares the loopback (WSL 1
+/// always did). Pointing `address` at the Windows host instead is not offered:
+/// it would need Syncthing listening beyond loopback and the TLS exception
+/// stretched to match, which is the trade the loopback rule exists to refuse.
+pub const WSL_LOOPBACK_HINT: &str =
+    "under WSL 2's default NAT networking 127.0.0.1 is Linux's own loopback, not \
+     Windows' — set `networkingMode=mirrored` under `[wsl2]` in \
+     %UserProfile%\\.wslconfig and run `wsl --shutdown`, or run Syncthing inside WSL";
+
 /// Query the daemon. Never fails — every failure is a [`State`].
+///
+/// `wsl` is the WSL this runs under, if any ([`Wsl::current`] in the binary,
+/// passed in so a test can be on WSL from any platform).
 #[must_use]
-pub fn query(settings: &Settings, root: &Path) -> Status {
+pub fn query(settings: &Settings, root: &Path, wsl: Option<&Wsl>) -> Status {
     let host = host_of(&settings.base_url);
+    // Under WSL 2 with NAT networking both of the unhappy states below usually
+    // have the same cause — Windows' daemon is not on this loopback — and the
+    // Refused one is the user's first attempt to route around it.
+    let nat = wsl.is_some_and(|wsl| wsl.generation == Generation::Two);
+    let explain = |detail: String| {
+        if nat {
+            format!("{detail} — {WSL_LOOPBACK_HINT}")
+        } else {
+            detail
+        }
+    };
     if !settings.verify_tls && !is_loopback(host) {
         return Status {
             state: State::Refused,
-            detail: Some(format!(
+            detail: Some(explain(format!(
                 "refusing to skip TLS verification for {host}: that exception is \
                  only safe on loopback, where the certificate is self-signed and \
                  the API key is the real authenticator"
-            )),
+            ))),
             ..Status::default()
         };
     }
@@ -209,12 +244,13 @@ pub fn query(settings: &Settings, root: &Path) -> Status {
             return Status { state: State::Unauthorized, detail: Some(detail), ..Status::default() }
         }
         Err(Failure::Unreachable(detail)) => {
-            return Status { state: State::Unreachable, detail: Some(detail), ..Status::default() }
+            let detail = if is_loopback(host) { explain(detail) } else { detail };
+            return Status { state: State::Unreachable, detail: Some(detail), ..Status::default() };
         }
     };
 
     let folders = get(&agent, settings, "/rest/config/folders").ok();
-    let folder = folders.as_ref().and_then(|doc| folder_containing(doc, root));
+    let folder = folders.as_ref().and_then(|doc| folder_containing(doc, root, wsl));
     let folder = folder.map(|mut folder| {
         if let Ok(doc) = get(&agent, settings, &format!("/rest/db/status?folder={}", folder.id)) {
             folder.folder_state = string(&doc, "state");
@@ -272,12 +308,18 @@ fn get(agent: &ureq::Agent, settings: &Settings, path: &str) -> Result<Value, Fa
 ///
 /// Compared as text after both sides are canonicalized, because Termux's view of
 /// shared storage (`~/storage/shared/…`) is a symlink to the path Syncthing
-/// reports (`/storage/emulated/0/…`).
+/// reports (`/storage/emulated/0/…`). Under WSL a Windows daemon's `C:\…` is
+/// first translated to its `/mnt/c/…`, and on a Windows drive case is folded,
+/// because Windows' own spelling and the one typed into `ds init` need not
+/// agree.
 #[must_use]
-pub fn folder_containing(doc: &Value, root: &Path) -> Option<Folder> {
-    let root = canonical(root);
+pub fn folder_containing(doc: &Value, root: &Path, wsl: Option<&Wsl>) -> Option<Folder> {
+    let root = comparable(root, wsl);
     doc.as_array()?.iter().find_map(|entry| {
-        let path = canonical(Path::new(entry.get("path")?.as_str()?));
+        let reported = entry.get("path")?.as_str()?;
+        let local =
+            wsl.and_then(|wsl| wsl.to_linux(reported)).unwrap_or_else(|| PathBuf::from(reported));
+        let path = comparable(&local, wsl);
         (root == path || root.starts_with(&format!("{path}/"))).then(|| Folder {
             id: string(entry, "id").unwrap_or_default(),
             label: string(entry, "label")
@@ -301,6 +343,16 @@ pub fn folder_containing(doc: &Value, root: &Path) -> Option<Folder> {
 fn canonical(path: &Path) -> String {
     let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     resolved.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_string()
+}
+
+/// [`canonical`], with case folded where Windows decides what a name means.
+fn comparable(path: &Path, wsl: Option<&Wsl>) -> String {
+    let text = canonical(path);
+    if wsl.is_some_and(|wsl| wsl.on_windows_drive(Path::new(&text))) {
+        text.to_ascii_lowercase()
+    } else {
+        text
+    }
 }
 
 /// Connected and configured device counts, this device excluded.
@@ -406,7 +458,7 @@ mod tests {
     #[test]
     fn an_absent_daemon_is_a_state() {
         // Port 1 is reserved and never listening.
-        let status = query(&settings("http://127.0.0.1:1".into()), Path::new("/tmp"));
+        let status = query(&settings("http://127.0.0.1:1".into()), Path::new("/tmp"), None);
         assert_eq!(status.state, State::Unreachable);
         assert!(status.detail.is_some());
     }
@@ -416,7 +468,7 @@ mod tests {
     #[test]
     fn a_rejected_key_is_told_apart_from_an_absent_daemon() {
         let (url, handle) = serve(vec![("/rest/system/version", 403, "{}")]);
-        let status = query(&settings(url), Path::new("/tmp"));
+        let status = query(&settings(url), Path::new("/tmp"), None);
         assert_eq!(status.state, State::Unauthorized);
         assert!(status.detail.unwrap().contains("API key"));
         let seen = handle.join().expect("server");
@@ -432,7 +484,7 @@ mod tests {
             api_key: Some("k".into()),
             verify_tls: false,
         };
-        let status = query(&settings, Path::new("/tmp"));
+        let status = query(&settings, Path::new("/tmp"), None);
         assert_eq!(status.state, State::Refused);
         assert!(status.detail.unwrap().contains("only safe on loopback"));
     }
@@ -465,13 +517,14 @@ mod tests {
             {"id": "docs", "label": "Documents", "path": "/home/u/Sync",
              "paused": true, "versioning": {"type": "staggered"}},
         ]);
-        let folder = folder_containing(&doc, Path::new("/home/u/Sync/Marine")).expect("found");
+        let folder =
+            folder_containing(&doc, Path::new("/home/u/Sync/Marine"), None).expect("found");
         assert_eq!(folder.id, "docs");
         assert!(folder.paused, "a paused folder is exactly what status must reveal");
         assert_eq!(folder.versioning, "staggered");
 
         assert!(
-            folder_containing(&doc, Path::new("/elsewhere")).is_none(),
+            folder_containing(&doc, Path::new("/elsewhere"), None).is_none(),
             "no folder covers it, and saying so beats guessing"
         );
     }
@@ -481,8 +534,71 @@ mod tests {
     #[test]
     fn folder_matching_is_by_path_component_not_by_prefix() {
         let doc = serde_json::json!([{"id": "docs", "path": "/home/u/Sync", "paused": false}]);
-        assert!(folder_containing(&doc, Path::new("/home/u/Sync")).is_some());
-        assert!(folder_containing(&doc, Path::new("/home/u/Sync2")).is_none());
+        assert!(folder_containing(&doc, Path::new("/home/u/Sync"), None).is_some());
+        assert!(folder_containing(&doc, Path::new("/home/u/Sync2"), None).is_none());
+    }
+
+    /// **Under WSL, a Windows daemon's folder is found.** It reports
+    /// `C:\Users\…`, the store is at `/mnt/c/users/…` in whatever case `ds init`
+    /// was given, and the two are the same place. A folder the Linux side has
+    /// no name for (a network share) is skipped rather than guessed at.
+    #[test]
+    fn under_wsl_a_windows_folder_path_matches_its_mount() {
+        let wsl = Wsl {
+            generation: Generation::Two,
+            mount_root: "/mnt/".into(),
+            distro: Some("Ubuntu".into()),
+        };
+        let doc = serde_json::json!([
+            {"id": "nas", "path": r"\\nas\share"},
+            {"id": "docs", "label": "Documents", "path": r"C:\Users\G\Sync"},
+        ]);
+        let root = Path::new("/mnt/c/users/g/Sync/Marine");
+        let folder = folder_containing(&doc, root, Some(&wsl)).expect("found");
+        assert_eq!(folder.id, "docs");
+        assert!(folder_containing(&doc, root, None).is_none(), "off WSL the text never matches");
+
+        // Inside the distribution, case still distinguishes.
+        let doc =
+            serde_json::json!([{"id": "home", "path": r"\\wsl.localhost\Ubuntu\home\g\Sync"}]);
+        assert!(folder_containing(&doc, Path::new("/home/g/Sync"), Some(&wsl)).is_some());
+        assert!(folder_containing(&doc, Path::new("/home/g/sync"), Some(&wsl)).is_none());
+    }
+
+    /// An unanswered loopback under WSL 2 names the likely cause and both
+    /// fixes. WSL 1 shares Windows' loopback, so there — as anywhere else — it
+    /// stays the plain fact.
+    #[test]
+    fn an_unreachable_loopback_under_wsl2_explains_nat() {
+        let two = Wsl { generation: Generation::Two, mount_root: "/mnt/".into(), distro: None };
+        let dead = || settings("http://127.0.0.1:1".into());
+        let status = query(&dead(), Path::new("/tmp"), Some(&two));
+        assert_eq!(status.state, State::Unreachable);
+        let detail = status.detail.expect("detail");
+        assert!(detail.contains("networkingMode=mirrored"), "{detail}");
+        assert!(detail.contains("inside WSL"), "{detail}");
+
+        let one = Wsl { generation: Generation::One, ..two };
+        for wsl in [Some(&one), None] {
+            let plain = query(&dead(), Path::new("/tmp"), wsl);
+            assert!(!plain.detail.expect("detail").contains("WSL"));
+        }
+    }
+
+    /// Pointing `address` at the Windows host with verification off is still
+    /// refused under WSL 2 — the loopback rule does not bend — but the refusal
+    /// says what to do instead, because that is the workaround people try.
+    #[test]
+    fn a_refusal_under_wsl2_points_at_mirrored_networking() {
+        let two = Wsl { generation: Generation::Two, mount_root: "/mnt/".into(), distro: None };
+        let settings = Settings {
+            base_url: "https://172.20.160.1:8384".into(),
+            api_key: Some("k".into()),
+            verify_tls: false,
+        };
+        let status = query(&settings, Path::new("/tmp"), Some(&two));
+        assert_eq!(status.state, State::Refused);
+        assert!(status.detail.expect("detail").contains("networkingMode=mirrored"));
     }
 
     /// The happy path: a version, the store's folder, its state, and the device
@@ -497,7 +613,7 @@ mod tests {
             ("/rest/config/devices", 200, r#"[{"deviceID":"SELF"},{"deviceID":"PHONE"}]"#),
             ("/rest/system/connections", 200, r#"{"connections":{"PHONE":{"connected":true}}}"#),
         ]);
-        let status = query(&settings(url), Path::new("/tmp"));
+        let status = query(&settings(url), Path::new("/tmp"), None);
         handle.join().expect("server");
 
         assert_eq!(status.state, State::Busy, "a syncing folder is not idle");

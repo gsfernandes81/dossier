@@ -271,6 +271,16 @@ sentence of justification in the PR.
   copy one binary into `$PATH` (this *replaces* the python/uv/libyaml install chain
   on the phone — document it; a self-update verb is out of scope for v3.0).
 - Linux (`x86_64-unknown-linux-gnu`) for CI and the dev container.
+- **WSL 1 and 2 — first-class, as the Linux build** (no separate target). The store
+  lives on the Windows drive (`/mnt/c/…`) and Syncthing usually runs on Windows, so
+  everything that crosses the boundary is WSL-aware (`crates/ds/src/wsl.rs`): `open`
+  hands the translated Windows path to `rundll32 url.dll,FileProtocolHandler`;
+  `status` translates the daemon's `C:\…` folder paths before matching and, on WSL 2,
+  explains NAT's separate loopback (fix: `networkingMode=mirrored`); `init` accepts
+  a root typed as `C:\…`; and because a lock taken in WSL is invisible to `ds.exe`,
+  **the same device name on both sides of one PC is refused** — by `init`, and by the
+  writer at the first save. CI's `wsl` leg runs the suite on drvfs under both
+  generations.
 
 ### 4.5 TUI — behavioral invariants only (layout deferred, D12)
 
@@ -867,7 +877,7 @@ each phase end and recorded in the PR. A phase does not ship over-budget.
   thin PTY smoke test on real terminals (port the `tools/` driver idea; `expectrl` or
   the existing Python driver pointed at the binary).
 - **CI matrix**: Rust jobs — `cargo fmt --check`, `clippy -D warnings` (pedantic
-  triaged), `cargo test` on Linux + Windows, cross-build `aarch64-unknown-linux-musl`
+  triaged), `cargo test` on Linux + Windows + WSL 1/2 (on drvfs), cross-build `aarch64-unknown-linux-musl`
   + artifact upload, synthetic perf gate. Python jobs — existing ruff/ty/pytest over
   the surviving satellite. The v2 local-gate discipline stands: mirror CI exactly,
   read per-job conclusions, never infer (docs/dev/ci-gate.md).
