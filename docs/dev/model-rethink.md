@@ -432,9 +432,52 @@ So the proposal is:
 Net: five surfaces become **zero**, and the merge verb (below) lands on a selection
 in the list rather than in a tab.
 
-**Not yet checked:** whether each of the five really does reduce to a filter
-expressible over the one list, one at a time, against what v2's code actually did.
-That check is the next piece of work on this question.
+#### Checked against v2's code (2026-09-29)
+
+Each tab walked against what v2 actually lists and offers, one at a time. **The
+zero-tabs claim holds, but the routing above was wrong for two of the five**: an
+orphan is a *file*, and the list shows documents. So orphans do not become a list
+filter. They dissolve into `ds file`, and duplicates split between `ds file` and the
+list. **The one list never has to show a file row.** The reduction works *because*
+`ds file` (REWRITE.md §4.1, already planned) is the home of every file-shaped item.
+
+| v2 tab | What v2 lists | Lands in v3 | Verdict |
+|---|---|---|---|
+| Orphans | scanned files, minus linked, minus dismissed/folded (`reconcile.py:137-143`) | **`ds file`**, entirely. v2's intake queue is *the same predicate* restricted to a prefix (`intake.pending_files`, `intake.py:90-114`), so "unfiled = in-scope orphan" is verified in code, not asserted. Status line: `N unfiled → ds file`. | Clean, with card verbs added (below) |
+| Missing | `(doc, path)` pairs whose file does not exist, minus acked (`reconcile.py:145-151`) | A **list filter**: documents with any dead file path. Needs a background stat pass over linked files, a subset of R5's planned walk. `u` unlink is the record's files-row edit. | Clean |
+| Duplicates | page-hash clusters of *files*, linked and orphan alike (`dedup.py:130-186`) | **Split.** File-side (orphan ⊆ filed file) is `ds file`'s fold, which v2's card already does (`intake._detect_duplicate`). Document-side (two documents over one file, or in one satellite cluster) is a **list filter + the merge verb on a two-document selection**. Hashing stays in the satellite (§8); the `s` scan verb is gone by D8. | Clean, split across two homes |
+| Succession | `newer → older` pairs from VLM readings (`succession.py:87-151`) — already satellite-sourced | A **suggestion on the record**: accept = the `s` supersede picker pre-filled. v2's filing card already renders `renews X` this way. | Clean, given the discovery hook (below) |
+| Integrity | doctor checks (`doctor.py:128-164`); **no verbs of its own** — every fix was a record edit | **CLI-only** in `ds status`. `round-trip`, `reconcile-folded-link` and `reconcile-stale` die with the per-doc files and the sidecar; `ambiguous-date` is already a suggestion. Left: dangling edge targets, succession cycles, date order. The record shows a dangling target in the warning tone. | Clean; nothing lost, since the tab had no verbs |
+
+This also settles **where the merge verb lands**: on a two-document selection,
+reached through the duplicates status line.
+
+**What the reduction needs**, marked by what exists:
+
+- **A status-line count that sets a filter:** exists for expiring (`Filter::Expiring`, `app.rs`). Missing, duplicates and suggested are new variants. The header is two counts wide at 47 columns, so the new ones go in the sheet's filter group beside the superseded toggle (I5). `Filter` then has to *compose* (superseded + missing), not stay a one-of enum.
+- **The suggestion discovery hook:** a suggestion on a record nobody opens is invisible, so it needs a count and a "suggested" filter. Not new to succession: §8's already-ported name-parse suggestions need the identical hook. Succession rides it.
+- **Filing-card verbs:** v2's card has `a file · f fold · e edit · n rename · r renews · k skip · x not-doc · o open` (`tui/intake.py:371`). The orphan tab's **link to an existing document**, **restore dismissed** and **ignore-glob** have no home there yet.
+- **Dismissal state:** the mechanism exists (per-key LWW `state` ops; `fold.rs` already tests `review` / `orphan:<path>` both ways). Only the key grammar is new: `orphan:<path>`, `dup:<keep>`, `succession:<newer>:<older>`.
+- **Already planned elsewhere:** the stat pass, multi-select, settings ops (ignore globs live there), and reading `enrich/` clusters and proposals.
+
+**Stale once this is accepted** (amend, don't re-argue): REWRITE.md §8's
+"Review… Port (five tabs)" row, §4.5 item 8's review queue, invariant 2's
+"doc / orphan / succession pair" row kinds (now **doc only**), R5's "review queue
+(five tabs)", and REWRITE-UI §3's `:review` row.
+
+**Needs the user**, each with a recommendation:
+
+1. **Add *link to an existing document* to the filing card?** *Recommended: yes.* It
+   is the only way to attach a back page or second scan from the filing flow. It
+   reuses the picker the record's files edit needs anyway; v2's token match makes a
+   free initial query.
+2. **Keep *acknowledge missing*, or only *unlink*?** *Recommended: drop ack.* A file
+   that has not synced yet wants waiting, and a file that is gone wants unlinking
+   (relinked from `ds file` if it reappears). A synced per-path ack cannot fix
+   per-device selective sync either.
+3. **Keep folder-level ignore globs, from the card (`g`), in synced settings?**
+   *Recommended: yes, as v2.* A 600-file backlog cannot be triaged without them, and
+   synced settings keep both devices agreeing on scope.
 
 ### Small settled items
 
@@ -461,9 +504,8 @@ durable record is this note.
 
 Open and awaiting the user's reread:
 
-- **the reviews analysis** — walking each of the five surfaces against v2's code
-  to confirm it really does reduce to a filter (the "zero surfaces" claim above is
-  a proposal, not a verified one);
+- ~~**the reviews analysis**~~ — **done 2026-09-29**, under "Checked against v2's
+  code" above. It holds, with the routing corrected; three questions for the user;
 - **the Windows hidden-attribute gap** on the existing `.dossier/` — fix now, or
   fold into the journal-path work;
 - **the cross-device mtime leg** — set a known mtime on the desk, let it sync,
@@ -476,11 +518,9 @@ on every job.
 ### Still unanswered
 
 - What the full-chain-history command is called, and how a chain is drawn.
-- Whether the review surfaces survive at all as surfaces, or become saved queries
-  over the one list. The user's *"5 review surfaces feels like bloat"* is
-  unresolved; the queries idea is untested against what the five actually do.
-- Where the document-merge verb lands, given all of the above (previously placed in
-  the review surface — see REWRITE.md §3.2's amendment note).
+- ~~Whether the review surfaces survive as surfaces~~ and ~~where the merge verb
+  lands~~ — answered by the check above (zero new surfaces; merge on a two-document
+  selection), pending the user's read of its three questions.
 
 ---
 

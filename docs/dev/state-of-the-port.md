@@ -142,9 +142,12 @@ Each is recorded where it belongs; the link is the point of the row.
   those; several ideas in the older specs are rejected there **with reasons**, so
   a fresh session does not re-propose them.
 - **R5's five review surfaces are explicitly in question.** The user's words:
-  *"5 review surfaces feels like bloat."* The five tabs are inherited from v2 via
-  §8's disposition table; nothing about them has been re-argued for v3. Treat the
-  count as an open design question, not a requirement.
+  *"5 review surfaces feels like bloat."* **Checked against v2's code on
+  2026-09-29** ([`model-rethink.md`](model-rethink.md), "Checked against v2's
+  code"): zero new surfaces. Orphans and file-side duplicates go to `ds file`;
+  missing and document-side duplicates become list filters; succession becomes a
+  record suggestion; integrity is CLI-only. Three questions await the user there;
+  REWRITE.md §8/§4.5 amendments follow once they are answered.
 - **History beyond this session.** Undo and redo cover what *this* session wrote,
   because the change is captured at write time. §8's "30-day horizon" — walking back
   further, or seeing what changed and when — needs re-folding the journal to a
