@@ -332,8 +332,11 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
 
 The user will learn Rust from this codebase. Requirements:
 
-- Every public item has a doc comment (`///`) saying what it is **and why it exists**;
-  every module a `//!` header explaining its role and its key design decision.
+- Every public item has a doc comment (`///`): a one-line summary of what it is, plus
+  a contract the signature can't show (errors, panics, invariants) when there is one.
+  Every module has a short `//!` header saying what it is for. The *why* behind a
+  design lives in this document and `docs/dev/`, not in the code — see CLAUDE.md's
+  "Comments" rules, which govern everything not listed here.
 - Where a Rust idiom would surprise a Python developer, add a short `// rust:` note at
   first use *in that module* — ownership/borrow choices at API boundaries, `?` error
   flow, lifetimes (avoid them in public APIs where an owned type is cheap), enums +
