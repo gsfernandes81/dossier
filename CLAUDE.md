@@ -136,7 +136,8 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
     --jq '{overall: .conclusion, jobs: [.jobs[] | {name, conclusion}]}'
   ```
 - The root `Makefile` holds only cargo wrappers for the Rust workspace (`build`,
-  `phone`, `fmt`, `fmt-check`, `clippy`, `rust-test`, `rust-gate`, `run`, `clean`) —
+  `phone`, `fmt`, `fmt-check`, `clippy`, `rust-test`, `rust-gate`, `run`, `clean`,
+  `install` — `cargo install` into rustup's `~/.cargo/bin`, or `$PREFIX/bin` on Termux) —
   `make rust-gate` runs the Rust local gate above, minus the spike. It has no Python
   targets; the Python gate is the `uv run` commands above. The remote-dev-container
   targets (`dev`, `dev-up`, `dev-login`, `dev-down`, `dev-down-volumes`) live in

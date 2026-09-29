@@ -51,4 +51,13 @@ run:
 clean:
 	$(CARGO) clean
 
-.PHONY: build phone fmt fmt-check clippy rust-test rust-gate run clean
+# Install ds for this user. cargo's bin dir (~/.cargo/bin, %USERPROFILE%\.cargo\bin) is
+# put on PATH once by rustup, so nothing here edits PATH. Termux's rust package does no
+# such thing, so there it goes to $PREFIX/bin, which is on PATH already.
+ifdef TERMUX_VERSION
+INSTALL_ROOT := --root $(PREFIX)
+endif
+install:
+	$(CARGO) install --locked --path crates/ds $(INSTALL_ROOT)
+
+.PHONY: build phone fmt fmt-check clippy rust-test rust-gate run clean install
