@@ -153,18 +153,17 @@ Comment only where it adds something the code cannot say. Applies to Rust and Py
   fails there").
 - **Never:** narrate what the next line does; restate a name, type or signature; mark
   block ends; narrate the change ("fixed", "now", "as requested", "the user asked");
-  cite spec sections, decision IDs (`§4.1`, `D11`, `U2`) or mockups. Design rationale
-  and history live in `REWRITE.md`, `REWRITE-UI.md` and `docs/dev/` — link a doc at
-  most once, in a module header, never per item.
+  cite spec sections, decision IDs (`§4.1`, `D11`, `U2`) or mockups. The design behind
+  the code lives in `REWRITE.md`, `REWRITE-UI.md` and `docs/dev/` — link a doc at most
+  once, in a module header, never per item.
+- **History lives in git, nowhere else.** What changed, when, who decided it, what it
+  used to be — that goes in the commit message. Not in code, not in docs: both
+  describe what *is*. No dates, "amended", "approved", "was", "used to", "previously".
 - **Rust doc comments** follow the Rust API Guidelines: `///` opens with a one-line
   summary, third person ("Returns …"), ~15 words max. Add more only for a contract the
   signature doesn't show — `# Errors`, `# Panics`, an invariant, a unit. A private
   item gets `///` only when its name and signature don't already say it. `//!` is for
   a module's purpose in 1–5 lines, not its design history.
-- **`// rust:` notes are the exception that stays**, because the codebase doubles as
-  the user's Rust learning material (REWRITE.md §4.6): one short note at the *first*
-  use of a surprising idiom in each module, explaining the chosen pattern to a Python
-  developer.
 - **Editing code with over-long comments:** trim or delete the ones you touch, as part
   of the same change. Deleting a comment that restates the code is always in scope.
 
