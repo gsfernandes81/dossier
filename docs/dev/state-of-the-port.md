@@ -195,15 +195,14 @@ Each is recorded where it belongs; the link is the point of the row.
 - **The Windows leg is not decoration.** It has already caught a bug a green
   Linux run missed (append-mode handles lack `FILE_WRITE_DATA`, so `set_len`
   fails there and not on Linux).
-- **WSL is two filesystems and two networks, not one.** WSL 1's drvfs is
-  syscall translation in the NT kernel, WSL 2's is a 9P share out of a VM, and
-  only WSL 2 (in NAT mode) has a loopback of its own — so the `wsl` CI leg runs
-  both generations, and `ds status` explains NAT only on 2. Two things CI
-  cannot tell you: whether *your* WSL 2 is NAT or mirrored, and how 9P behaves
+- **WSL means WSL 2; WSL 1 is not supported.** Its drvfs is a 9P share out of
+  a VM, and in its default NAT mode it has a loopback of its own — which is why
+  `ds status` explains NAT there. Two things CI cannot tell you: whether *your*
+  WSL 2 is NAT or mirrored, and how 9P behaves
   on a real desktop's drive under Syncthing and antivirus. **Never verified on
   the user's machine yet** — record it here, phone-style, once it is.
 - **A kernel that says "microsoft" is not WSL.** Docker Desktop containers run
-  on the same WSL 2 kernel with nothing Windows on the other end, which is why
+  on the same WSL kernel with nothing Windows on the other end, which is why
   `Wsl::current` also wants WSL's environment or its interop registration.
 - **ratatui's colour names lie about brightness.** `Color::White` is SGR 97 —
   ANSI **15**. `Color::Gray` is ANSI 7, `Color::DarkGray` is ANSI 8.
@@ -234,7 +233,7 @@ before pushing. In short: Rust is `cargo fmt --all --check`, pedantic clippy wit
 `aarch64-unknown-linux-musl` cross-build (which needs `clang` on PATH). Python
 still has its own gate and its own CI matrix; run whichever you touched.
 
-Three workflows: `rust.yml` (check, test on Linux + Windows, WSL 1 + 2, phone), `ci.yml`
+Three workflows: `rust.yml` (check, test on Linux + Windows + WSL 2, phone), `ci.yml`
 (the Python matrix), `spike.yml` (the throwaway `spike/` tree).
 
 The phone build ships as the `ds-phone` CI artifact — binary plus

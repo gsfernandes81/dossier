@@ -35,12 +35,11 @@ in tests), so the linux/no-extras run is authoritative.
 
 ### The Rust `wsl` leg cannot be mirrored off Windows
 
-`rust.yml`'s `wsl (WSL 1)` / `wsl (WSL 2)` jobs run the workspace tests inside a
-WSL distribution with the checkout — and `TMPDIR` — on the Windows drive, then
+`rust.yml`'s `wsl` job runs the workspace tests inside a WSL 2 distribution with the checkout — and `TMPDIR` — on the Windows drive, then
 smoke the binary (`init` with a `C:\…` root, the Windows-side twin refusal, the
-WSL 2 NAT hint). No Linux box or dev container can reproduce drvfs, so the local
-gate covers only the pure translation tests; **read these two jobs' conclusions
-separately**, exactly like the Windows leg. On a real WSL, `DS_EXPECT_WSL=2 cargo
+NAT hint). No Linux box or dev container can reproduce drvfs, so the local
+gate covers only the pure translation tests; **read this job's conclusion
+separately**, exactly like the Windows leg. On a real WSL, `DS_EXPECT_WSL=1 cargo
 test -p ds wsl` (from a checkout under `/mnt/…`) runs the check against `wslpath`.
 
 ## 2. The driver test is outside `testpaths` — plain pytest never runs it

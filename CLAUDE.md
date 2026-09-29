@@ -29,9 +29,9 @@
 > `FILE_WRITE_DATA`, so `set_len` on it fails with "Access is denied" while working
 > fine on Linux. Anything touching file handles, locks or renames is exactly what
 > that leg is for; read its conclusion, never infer it from the Linux one.
-> **WSL is a first-class platform too** (the Linux build, store on `/mnt/c`):
-> CI's `wsl (WSL 1)` / `wsl (WSL 2)` legs run the suite on drvfs and cannot be
-> mirrored off Windows — read their conclusions the same way. Anything that
+> **WSL 2 is a first-class platform too** (the Linux build, store on `/mnt/c`;
+> WSL 1 is not supported): CI's `wsl` leg runs the suite on drvfs and cannot be
+> mirrored off Windows — read its conclusion the same way. Anything that
 > crosses the Windows boundary (opening files, Syncthing paths, config/lock
 > locations) goes through `crates/ds/src/wsl.rs`.
 

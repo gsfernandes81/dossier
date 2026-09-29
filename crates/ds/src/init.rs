@@ -448,7 +448,6 @@ mod tests {
     /// owns, so the profile scan reads real files on every CI platform.
     fn fake_wsl(dir: &Path) -> crate::wsl::Wsl {
         crate::wsl::Wsl {
-            generation: crate::wsl::Generation::Two,
             mount_root: format!("{}/", dir.join("mnt").display()),
             distro: Some("Ubuntu".into()),
         }

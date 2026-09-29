@@ -38,7 +38,7 @@
 //! Under WSL the daemon is usually the *Windows* one, so the folder paths it
 //! reports are Windows paths and are translated before they are compared
 //! ([`crate::wsl`]), and a loopback that does not answer gets the one
-//! explanation that is almost always true there: WSL 2's NAT networking gives
+//! explanation that is almost always true there: WSL's NAT networking gives
 //! Linux a loopback of its own.
 
 use std::path::{Path, PathBuf};
@@ -46,7 +46,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::wsl::{Generation, Wsl};
+use crate::wsl::Wsl;
 
 /// Per-request timeout. Loopback answers in milliseconds; anything slower is a
 /// daemon that is not going to answer at all, and `ds status` must not hang.
@@ -194,14 +194,13 @@ pub fn is_loopback(host: &str) -> bool {
 
 /// What an unanswered loopback means under WSL, and the two ways out.
 ///
-/// WSL 2's default NAT networking gives the Linux side its own `127.0.0.1`, and
+/// WSL's default NAT networking gives the Linux side its own `127.0.0.1`, and
 /// Windows' Syncthing binds only Windows' — so the daemon is running and simply
-/// not reachable from here. Mirrored networking shares the loopback (WSL 1
-/// always did). Pointing `address` at the Windows host instead is not offered:
+/// not reachable from here. Mirrored networking shares the loopback. Pointing `address` at the Windows host instead is not offered:
 /// it would need Syncthing listening beyond loopback and the TLS exception
 /// stretched to match, which is the trade the loopback rule exists to refuse.
 pub const WSL_LOOPBACK_HINT: &str =
-    "under WSL 2's default NAT networking 127.0.0.1 is Linux's own loopback, not \
+    "under WSL's default NAT networking 127.0.0.1 is Linux's own loopback, not \
      Windows' — set `networkingMode=mirrored` under `[wsl2]` in \
      %UserProfile%\\.wslconfig and run `wsl --shutdown`, or run Syncthing inside WSL";
 
@@ -212,10 +211,10 @@ pub const WSL_LOOPBACK_HINT: &str =
 #[must_use]
 pub fn query(settings: &Settings, root: &Path, wsl: Option<&Wsl>) -> Status {
     let host = host_of(&settings.base_url);
-    // Under WSL 2 with NAT networking both of the unhappy states below usually
+    // Under WSL with NAT networking both of the unhappy states below usually
     // have the same cause — Windows' daemon is not on this loopback — and the
     // Refused one is the user's first attempt to route around it.
-    let nat = wsl.is_some_and(|wsl| wsl.generation == Generation::Two);
+    let nat = wsl.is_some();
     let explain = |detail: String| {
         if nat {
             format!("{detail} — {WSL_LOOPBACK_HINT}")
@@ -544,11 +543,7 @@ mod tests {
     /// no name for (a network share) is skipped rather than guessed at.
     #[test]
     fn under_wsl_a_windows_folder_path_matches_its_mount() {
-        let wsl = Wsl {
-            generation: Generation::Two,
-            mount_root: "/mnt/".into(),
-            distro: Some("Ubuntu".into()),
-        };
+        let wsl = Wsl { mount_root: "/mnt/".into(), distro: Some("Ubuntu".into()) };
         let doc = serde_json::json!([
             {"id": "nas", "path": r"\\nas\share"},
             {"id": "docs", "label": "Documents", "path": r"C:\Users\G\Sync"},
@@ -565,38 +560,34 @@ mod tests {
         assert!(folder_containing(&doc, Path::new("/home/g/sync"), Some(&wsl)).is_none());
     }
 
-    /// An unanswered loopback under WSL 2 names the likely cause and both
-    /// fixes. WSL 1 shares Windows' loopback, so there — as anywhere else — it
-    /// stays the plain fact.
+    /// An unanswered loopback under WSL names the likely cause and both fixes;
+    /// anywhere else it stays the plain fact.
     #[test]
-    fn an_unreachable_loopback_under_wsl2_explains_nat() {
-        let two = Wsl { generation: Generation::Two, mount_root: "/mnt/".into(), distro: None };
+    fn an_unreachable_loopback_under_wsl_explains_nat() {
+        let wsl = Wsl { mount_root: "/mnt/".into(), distro: None };
         let dead = || settings("http://127.0.0.1:1".into());
-        let status = query(&dead(), Path::new("/tmp"), Some(&two));
+        let status = query(&dead(), Path::new("/tmp"), Some(&wsl));
         assert_eq!(status.state, State::Unreachable);
         let detail = status.detail.expect("detail");
         assert!(detail.contains("networkingMode=mirrored"), "{detail}");
         assert!(detail.contains("inside WSL"), "{detail}");
 
-        let one = Wsl { generation: Generation::One, ..two };
-        for wsl in [Some(&one), None] {
-            let plain = query(&dead(), Path::new("/tmp"), wsl);
-            assert!(!plain.detail.expect("detail").contains("WSL"));
-        }
+        let plain = query(&dead(), Path::new("/tmp"), None);
+        assert!(!plain.detail.expect("detail").contains("WSL"));
     }
 
     /// Pointing `address` at the Windows host with verification off is still
-    /// refused under WSL 2 — the loopback rule does not bend — but the refusal
+    /// refused under WSL — the loopback rule does not bend — but the refusal
     /// says what to do instead, because that is the workaround people try.
     #[test]
-    fn a_refusal_under_wsl2_points_at_mirrored_networking() {
-        let two = Wsl { generation: Generation::Two, mount_root: "/mnt/".into(), distro: None };
+    fn a_refusal_under_wsl_points_at_mirrored_networking() {
+        let wsl = Wsl { mount_root: "/mnt/".into(), distro: None };
         let settings = Settings {
             base_url: "https://172.20.160.1:8384".into(),
             api_key: Some("k".into()),
             verify_tls: false,
         };
-        let status = query(&settings, Path::new("/tmp"), Some(&two));
+        let status = query(&settings, Path::new("/tmp"), Some(&wsl));
         assert_eq!(status.state, State::Refused);
         assert!(status.detail.expect("detail").contains("networkingMode=mirrored"));
     }

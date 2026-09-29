@@ -26,7 +26,7 @@
 //!   path and go to a Windows opener ([`crate::open`]).
 //! - **The Syncthing check.** Syncthing usually runs on Windows and reports
 //!   folder paths as `C:\Users\…\Sync`, which the store root `/mnt/c/Users/…/Sync`
-//!   never matches as text ([`crate::syncthing`]). Under WSL 2's default NAT
+//!   never matches as text ([`crate::syncthing`]). Under WSL's default NAT
 //!   networking, `127.0.0.1` is not even the same machine's loopback.
 //! - **Two `ds` on one PC.** `ds.exe` on Windows and `ds` in WSL keep separate
 //!   configs and separate lock directories, and a lock taken in one is invisible
@@ -46,10 +46,12 @@ use std::sync::OnceLock;
 pub const DEFAULT_MOUNT_ROOT: &str = "/mnt/";
 
 /// What `ds` needs to know about the WSL it is running under.
+///
+/// **WSL 2 only.** WSL 1 is not supported — it is not tested, and the one
+/// thing known to differ (it shares Windows' loopback, so `ds status`'s NAT
+/// explanation is wrong there) is not special-cased.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Wsl {
-    /// Which WSL — they differ in the one way `ds status` cares about.
-    pub generation: Generation,
     /// The directory the drive letters are mounted under, with a trailing `/`
     /// — `/mnt/` by default, so `C:` is `/mnt/c`.
     pub mount_root: String,
@@ -58,43 +60,27 @@ pub struct Wsl {
     pub distro: Option<String>,
 }
 
-/// WSL 1 translates Linux system calls on the Windows kernel; WSL 2 is a real
-/// Linux kernel in a lightweight VM. For `ds` the difference is networking:
-/// WSL 1 shares Windows' loopback, WSL 2 (in its default NAT mode) has its own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Generation {
-    /// Shares `127.0.0.1` with Windows.
-    One,
-    /// A VM with a loopback of its own unless networking is mirrored.
-    Two,
-}
-
-/// Which WSL a kernel release string belongs to, if any.
+/// Whether a kernel release string is a WSL kernel.
 ///
-/// Every WSL kernel says so in its release — WSL 2's
-/// `5.15.153.1-microsoft-standard-WSL2`, WSL 1's `4.4.0-19041-Microsoft` — and
-/// nothing else does.
+/// Every WSL kernel says so in its release —
+/// `5.15.153.1-microsoft-standard-WSL2` — and nothing else does.
 #[must_use]
-pub fn kernel_generation(osrelease: &str) -> Option<Generation> {
-    let lower = osrelease.to_ascii_lowercase();
-    if !lower.contains("microsoft") {
-        return None;
-    }
-    Some(if lower.contains("wsl2") { Generation::Two } else { Generation::One })
+pub fn is_wsl_kernel(osrelease: &str) -> bool {
+    osrelease.to_ascii_lowercase().contains("microsoft")
 }
 
 /// Whether this process is on WSL, given the kernel's release and the two
 /// things only a real WSL distribution has.
 ///
 /// The kernel alone is not enough: **a Docker Desktop container runs on the
-/// same WSL 2 kernel** and has no Windows on the other end of anything. So the
+/// same WSL kernel** and has no Windows on the other end of anything. So the
 /// kernel must be backed by either WSL's own environment (`WSL_DISTRO_NAME`,
 /// `WSL_INTEROP`) or the interop registration that lets Linux run a `.exe` —
 /// the latter because a cron job or a systemd unit has no WSL environment and
 /// is still very much on WSL.
 #[must_use]
-pub fn detect(osrelease: &str, wsl_env: bool, interop: bool) -> Option<Generation> {
-    kernel_generation(osrelease).filter(|_| wsl_env || interop)
+pub fn detect(osrelease: &str, wsl_env: bool, interop: bool) -> bool {
+    is_wsl_kernel(osrelease) && (wsl_env || interop)
 }
 
 impl Wsl {
@@ -120,10 +106,11 @@ impl Wsl {
                 let interop = ["WSLInterop", "WSLInterop-late"]
                     .iter()
                     .any(|name| Path::new("/proc/sys/fs/binfmt_misc").join(name).exists());
-                let generation = detect(&release, env, interop)?;
+                if !detect(&release, env, interop) {
+                    return None;
+                }
                 let conf = std::fs::read_to_string("/etc/wsl.conf").unwrap_or_default();
                 Some(Wsl {
-                    generation,
                     mount_root: mount_root_from(&conf),
                     distro: std::env::var("WSL_DISTRO_NAME").ok().filter(|d| !d.is_empty()),
                 })
@@ -353,36 +340,28 @@ mod tests {
     use crate::config::Config;
 
     fn wsl() -> Wsl {
-        Wsl {
-            generation: Generation::Two,
-            mount_root: DEFAULT_MOUNT_ROOT.into(),
-            distro: Some("Ubuntu".into()),
-        }
+        Wsl { mount_root: DEFAULT_MOUNT_ROOT.into(), distro: Some("Ubuntu".into()) }
     }
 
-    /// Both WSL generations are told apart from the kernel, and an ordinary
-    /// Linux kernel — or Termux's Android one — is not mistaken for either.
+    /// A WSL kernel is recognised, and an ordinary Linux kernel — or Termux's
+    /// Android one — is not mistaken for one.
     #[test]
-    fn each_wsl_kernel_is_recognised_and_nothing_else_is() {
-        assert_eq!(
-            kernel_generation("5.15.153.1-microsoft-standard-WSL2\n"),
-            Some(Generation::Two)
-        );
-        assert_eq!(kernel_generation("4.4.0-19041-Microsoft"), Some(Generation::One));
-        assert_eq!(kernel_generation("6.8.0-45-generic"), None);
-        assert_eq!(kernel_generation("5.10.198-android12-9-g5a1b"), None);
+    fn a_wsl_kernel_is_recognised_and_nothing_else_is() {
+        assert!(is_wsl_kernel("5.15.153.1-microsoft-standard-WSL2\n"));
+        assert!(!is_wsl_kernel("6.8.0-45-generic"));
+        assert!(!is_wsl_kernel("5.10.198-android12-9-g5a1b"));
     }
 
-    /// **A Docker Desktop container is not WSL**, though it runs on WSL 2's
+    /// **A Docker Desktop container is not WSL**, though it runs on WSL's
     /// kernel: without WSL's environment or its interop there is no Windows to
     /// hand anything to. Either one is enough, because cron has only the second.
     #[test]
     fn the_kernel_alone_is_not_wsl() {
         let release = "5.15.153.1-microsoft-standard-WSL2";
-        assert_eq!(detect(release, false, false), None, "a container on the WSL kernel");
-        assert_eq!(detect(release, true, false), Some(Generation::Two), "interop off, env set");
-        assert_eq!(detect(release, false, true), Some(Generation::Two), "cron: interop, no env");
-        assert_eq!(detect("6.8.0-45-generic", true, true), None, "stray variables on real Linux");
+        assert!(!detect(release, false, false), "a container on the WSL kernel");
+        assert!(detect(release, true, false), "interop off, env set");
+        assert!(detect(release, false, true), "cron: interop, no env");
+        assert!(!detect("6.8.0-45-generic", true, true), "stray variables on real Linux");
     }
 
     /// A drive path in either slash style lands on its drvfs mount, with the
@@ -461,7 +440,7 @@ mod tests {
     #[test]
     fn a_custom_mount_root_is_honoured() {
         let conf = "[boot]\nsystemd=true\n\n[automount]\nenabled = true\nroot = /win   # moved\n";
-        let wsl = Wsl { mount_root: mount_root_from(conf), distro: None, ..wsl() };
+        let wsl = Wsl { mount_root: mount_root_from(conf), distro: None };
         assert_eq!(wsl.mount_root, "/win/");
         assert_eq!(wsl.to_linux(r"C:\x"), Some(PathBuf::from("/win/c/x")));
         assert_eq!(wsl.to_windows(Path::new("/win/c/x")).as_deref(), Some(r"C:\x"));
@@ -502,17 +481,17 @@ mod tests {
 
     /// **On a real WSL, this module agrees with WSL's own `wslpath`.**
     ///
-    /// Only the CI `wsl` leg sets `DS_EXPECT_WSL` (to `1` or `2`), with the
-    /// checkout on a Windows drive: there, detection must find WSL of that
-    /// generation, and translating the working directory each way must give
+    /// Only the CI `wsl` leg sets `DS_EXPECT_WSL`, with the checkout on a
+    /// Windows drive: there, detection must find WSL, and translating the
+    /// working directory each way must give
     /// what `wslpath` gives. Everywhere else this is a no-op, which is honest —
     /// the pure tests above are what run there.
     #[test]
     fn a_real_wsl_agrees_with_wslpath() {
-        let Ok(expected) = std::env::var("DS_EXPECT_WSL") else { return };
+        if std::env::var_os("DS_EXPECT_WSL").is_none() {
+            return;
+        }
         let wsl = Wsl::current().expect("DS_EXPECT_WSL is set, so this is WSL");
-        let generation = if expected == "1" { Generation::One } else { Generation::Two };
-        assert_eq!(wsl.generation, generation);
 
         let here = std::env::current_dir().expect("cwd");
         assert!(wsl.on_windows_drive(&here), "the CI leg runs on drvfs: {}", here.display());
@@ -570,7 +549,7 @@ mod tests {
         };
         profile("Public", "device = \"laptop\"\n");
         profile("g", "device = \"desk\"\nsyncthing_root = 'C:\\Users\\g\\Sync'\n");
-        let wsl = Wsl { mount_root: format!("{}/", base.display()), distro: None, ..wsl() };
+        let wsl = Wsl { mount_root: format!("{}/", base.display()), distro: None };
         let ours = PathBuf::from(format!("{}c/Users/g/Sync", wsl.mount_root));
 
         let twin = windows_twin(&wsl, "desk", Some(&ours)).expect("the collision is found");

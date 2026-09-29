@@ -76,21 +76,15 @@ jobs:
   # this leg can say is whether the journal's file handling — the advisory
   # lock, the append handle, `set_len` on a torn tail, `sync_data`, and the
   # temp-plus-rename of a compaction while the append handle is still open —
-  # behaves on drvfs, the filesystem the store actually lives on. Both
-  # generations, because they are different filesystems underneath: WSL 1's
-  # drvfs translates syscalls in the NT kernel, WSL 2's is a 9P share out of a
-  # VM. `TMPDIR` is pointed at the Windows drive so every test's temp directory
-  # lands there, and `DS_EXPECT_WSL` arms the one test that checks detection and
+  # behaves on drvfs — WSL 2's 9P share out of its VM, the filesystem the
+  # store actually lives on. WSL 2 only: WSL 1 is not supported. `TMPDIR` is
+  # pointed at the Windows drive so every test's temp directory lands there,
+  # and `DS_EXPECT_WSL` arms the one test that checks detection and
   # translation against `wslpath` on a real WSL.
   #
   # Not mirrorable off Windows: the local gate cannot run this leg, so read its
   # conclusion rather than infer it from the Linux one.
   wsl:
-    name: wsl (WSL ${{ matrix.wsl }})
-    strategy:
-      fail-fast: false
-      matrix:
-        wsl: [1, 2]
     # Pinned, not `windows-latest`: WSL 2 needs the runner's nested
     # virtualization, and the image that has it is not something to inherit.
     runs-on: windows-2022
@@ -100,7 +94,7 @@ jobs:
       - uses: Vampire/setup-wsl@v7
         with:
           distribution: Ubuntu-24.04
-          wsl-version: ${{ matrix.wsl }}
+          wsl-version: 2
           # A C compiler for `ring` (rustls, via the Syncthing check).
           additional-packages: build-essential curl ca-certificates
 
@@ -130,12 +124,12 @@ jobs:
           export CARGO_TARGET_DIR="$HOME/target"
           export TMPDIR="$PWD/../wsl-tmp"
           mkdir -p "$TMPDIR"
-          export DS_EXPECT_WSL=${{ matrix.wsl }}
+          export DS_EXPECT_WSL=1
           cargo test --workspace -- --nocapture
 
       # The binary as a person runs it: a root typed as Explorer shows it is
       # stored as its mount, the planted twin is refused, and an unanswered
-      # Syncthing loopback explains NAT on WSL 2 and only there.
+      # Syncthing loopback explains WSL's NAT networking.
       - name: Smoke the binary
         shell: wsl-bash {0}
         run: |
@@ -150,11 +144,7 @@ jobs:
           printf '\n[syncthing]\napikey = "k"\naddress = "https://127.0.0.1:1"\n' >> "$DS_CONFIG_DIR/config.toml"
           report="$("$ds" status)"
           echo "$report"
-          if [ "${{ matrix.wsl }}" = 2 ]; then
-            grep -F "networkingMode=mirrored" <<<"$report"
-          elif grep -F "networkingMode" <<<"$report"; then
-            echo "WSL 1 shares Windows' loopback; the NAT hint is wrong here"; exit 1
-          fi
+          grep -F "networkingMode=mirrored" <<<"$report"
 
   # The journal crate is pure logic, so this is quick — but it is also the crate
   # the phone's startup path depends on, and a cross-build that only ever runs

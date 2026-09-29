@@ -287,7 +287,6 @@ mod tests {
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).expect("chmod");
 
         let wsl = Wsl {
-            generation: crate::wsl::Generation::Two,
             mount_root: format!("{}/", base.join("mnt").display()),
             distro: Some("Ubuntu".into()),
         };
