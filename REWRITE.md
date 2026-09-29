@@ -29,7 +29,7 @@ structurally impossible and makes a polyglot split free.
 | # | Decision |
 |---|---|
 | D1 | **Track B**: Rust core + Python enrichment satellite, communicating only through the journal store. From-scratch core; not weighted by the existing codebase. |
-| D2 | **Rust + Ratatui** for the core. The codebase doubles as the user's **Rust learning material** — see §5.6 commenting requirements. |
+| D2 | **Rust + Ratatui** for the core. |
 | D3 | **PyPy is off the table** (wrong axis: JIT helps hot loops, not startup; no Android story). |
 | D4 | ~~**Big-bang cutover** (no prolonged side-by-side); the exporter + parity check are still mandatory.~~ **Superseded by D13.** |
 | D5 | **Perf budget: < 100 ms to usable on the phone (target), 150 ms acceptable.** Enforced, not aspirational (§9). |
@@ -237,7 +237,7 @@ the TUI or via `ds file` — a bare CLI creator earned no keep).
 ### 4.2 Crate layout
 
 Cargo **workspace** at the repo root — two crates, so the pure logic is a library the
-TUI can't reach into and tests hammer directly (also the cleanest Rust-learning shape):
+TUI can't reach into and tests hammer directly:
 
 ```
 Cargo.toml            # workspace
@@ -260,7 +260,7 @@ on Termux the API is HTTPS-only with a *self-signed* cert (Phase 15 finding; pla
 http 307-redirects), so rustls needs a custom `ServerCertVerifier` pinned/permissive
 for `127.0.0.1` only — budget for that shim in R3, never disable verification
 globally). **No async runtime** — std threads + channels are sufficient at this
-scale and far better learning material than tokio. Every added dependency needs a
+scale and far simpler than tokio. Every added dependency needs a
 sentence of justification in the PR.
 
 ### 4.4 Platform targets
@@ -328,24 +328,17 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
    and document-side duplicates are list filters; succession is a record
    suggestion; integrity is `ds status` output.
 
-### 4.6 Rust-for-learning commenting standard (binding, D2)
+### 4.6 Code standard
 
-The user will learn Rust from this codebase. Requirements:
-
-- Every public item has a doc comment (`///`): a one-line summary of what it is, plus
-  a contract the signature can't show (errors, panics, invariants) when there is one.
-  Every module has a short `//!` header saying what it is for. The *why* behind a
-  design lives in this document and `docs/dev/`, not in the code — see CLAUDE.md's
-  "Comments" rules, which govern everything not listed here.
-- Where a Rust idiom would surprise a Python developer, add a short `// rust:` note at
-  first use *in that module* — ownership/borrow choices at API boundaries, `?` error
-  flow, lifetimes (avoid them in public APIs where an owned type is cheap), enums +
-  exhaustive `match` as the state-machine tool, why a `&str` vs `String`, interior
-  mutability if ever used. Explain the *chosen* pattern, don't tour alternatives.
+- Comments follow CLAUDE.md's "Comments" rules. In short: every public item has a
+  `///` doc comment — a one-line summary, plus any contract the signature can't show
+  (errors, panics, invariants). Every module has a short `//!` header saying what it
+  is for. The design behind the
+  code lives in this document and `docs/dev/`; its history lives in git.
+- Lifetimes stay out of public APIs where an owned type is cheap.
 - Idiomatic code over clever code: `clippy::pedantic` warnings triaged, not silenced;
   no `unsafe` (there is no need at this scale — a CI deny).
-- Tests double as examples: each `journal` invariant test states the invariant in a
-  sentence first.
+- Each `journal` invariant test states the invariant in a sentence first.
 
 ## 5. The Python satellite (`dossier-lab`)
 
@@ -911,7 +904,6 @@ each phase end and recorded in the PR. A phase does not ship over-budget.
 | Journal damage without a conflict file (Proton revert, partial sync) | Local high-water marks per journal + loud `ds status` regression anomaly (§3.3); Syncthing staggered versioning as the restore path |
 | Interaction polish regressions (Esc/verbs/find-fast) | §4.5 invariants are the acceptance checklist for R3–R5; each gets a test |
 | Big-bang cutover surprise | Cutover *rehearsed on a copy* first; parity hard-stop; archived v2 store as rollback; user runs it personally |
-| Learning-codebase pressure vs. shipping | Commenting standard (§4.6) is part of review, not an afterthought; slices stay small |
 
 ## 12. Out of scope for v3.0 (recorded, not forgotten)
 
