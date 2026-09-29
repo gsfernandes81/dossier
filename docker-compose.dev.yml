@@ -1,5 +1,5 @@
 # Remote dev environment for dossier. Bring up + log in to everything in one command:
-#   make dev            (= make dev-up  +  make dev-login)
+#   make -f Makefile.dev dev    (= dev-up + dev-login)
 # then reach the container over the host's sshd:
 #   ssh -t <host-user>@<host-ip> 'docker exec -it ds-dev fish'
 # then hold the work in an abduco session: `abduco -A claude claude`. There is no
@@ -24,7 +24,7 @@ services:
     image: ds-dev
     container_name: ds-dev
     hostname: ${DEV_HOSTNAME:-ds-dev}   # Claude Code shows this as the machine title;
-                                        # make dev-up sets it to <host-hostname>-ds-dev
+                                        # make -f Makefile.dev dev-up sets it to <host-hostname>-ds-dev
     init: true
 
     # A cap, not a reservation. It confines an OOM kill to this container's own cgroup,
@@ -39,7 +39,7 @@ services:
     # every DEV_* it reads; these three are the ones that are not its defaults.
     environment:
       # Names this container in the base's own start-up lines and in the sshd host key's
-      # comment. Without it the base uses $(hostname), which `make dev-up` sets to
+      # comment. Without it the base uses $(hostname), which `make -f Makefile.dev dev-up` sets to
       # <host>-ds-dev — accurate, but not what anything else here calls this container.
       DEV_NAME: ds-dev
 
@@ -65,7 +65,7 @@ services:
       # DEV_SECRETS_DIR/tunnel.json only earns a warning at start.
 
     volumes:
-      - .:/workspace                          # bind-mount the host clone; the base image's dev uid must match this clone's owner (make dev-up checks)
+      - .:/workspace                          # bind-mount the host clone; the base image's dev uid must match this clone's owner (make -f Makefile.dev dev-up checks)
       - ds-uv-cache:/home/dev/.cache/uv        # persist uv cache (fast re-syncs)
       - ds-claude:/home/dev/.claude            # persist Claude Code login/config (incl. ~/.claude.json via CLAUDE_CONFIG_DIR)
       - ds-gh:/home/dev/.config/gh             # persist `gh auth login` (hosts.yml/config.yml under GH_CONFIG_DIR)
@@ -80,7 +80,7 @@ services:
       - ds-cargo-git:/home/dev/.cargo/git
       # CARGO_TARGET_DIR, outside the bind mount (Dockerfile.dev explains why). The biggest
       # thing here — debug + release + the musl cross-build run to several GB — and
-      # `make dev-down-volumes` is what reclaims it.
+      # `make -f Makefile.dev dev-down-volumes` is what reclaims it.
       - ds-cargo-target:/home/dev/cargo-target
     ports:
       - "${DEV_SSH_PORT:-2222}:2222"   # host ${DEV_SSH_PORT} (default 2222) -> container sshd; point a Cloudflare tunnel here for remote access

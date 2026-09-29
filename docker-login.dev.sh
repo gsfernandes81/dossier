@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Interactive one-shot login walkthrough for the dossier dev container. Baked into the
-# image at /home/dev/login.sh; driven from the host by `make dev` (which builds +
-# starts the container first) or `make dev-login` to re-run on demand.
+# image at /home/dev/login.sh; driven from the host by `make -f Makefile.dev dev` (builds +
+# starts the container first) or `make -f Makefile.dev dev-login` to re-run on demand.
 #
 # Every step is IDEMPOTENT: it checks the current auth state and only prompts when
 # you are NOT already signed in, so re-running is safe and near-instant. All three
@@ -113,5 +113,5 @@ cat <<'EOF'
   Attach a shell:   docker exec -it ds-dev fish
   Work in it:       ssh -p <port> dev@<host>  then  abduco -A claude claude
   Idle sessions:    stopped after 90m and left resumable — ~/.local/share/claude-offload.log
-  Re-run logins:    make dev-login
+  Re-run logins:    make -f Makefile.dev dev-login
 EOF

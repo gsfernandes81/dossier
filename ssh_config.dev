@@ -8,7 +8,7 @@
 # keyword. Both halves are in place before the base pulls the clone.
 #
 # SO WHAT THIS FILE IS FOR is the case where the other half is absent: a fresh clone, or a
-# container brought up before `make dev-login` has ever run. It carries NO IdentityFile on purpose.
+# container brought up before `make -f Makefile.dev dev-login` has ever run. It carries NO IdentityFile on purpose.
 # The base's own copy of this file names infra's deploy key, and inheriting that would
 # have made a first `git push` in here fail with "no such identity:
 # /home/dev/.ssh/id_ed25519_infra_deploy" — a message naming another container's
@@ -16,7 +16,7 @@
 # push fails with "Permission denied (publickey)", which is what is actually wrong.
 #
 # The real identity is in /workspace/.dev-ssh/ssh_config.fleet, naming the copy the base
-# makes in ~/.ssh; `make dev-login` writes both when it generates a key.
+# makes in ~/.ssh; `make -f Makefile.dev dev-login` writes both when it generates a key.
 
 # ── defaults — MUST stay last, and here they are also all there is ──────────
 # ssh takes the FIRST value it obtains for each keyword, so a wildcard above a Host block

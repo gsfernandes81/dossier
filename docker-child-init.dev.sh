@@ -63,11 +63,11 @@ if [ -d /workspace/.dev-ssh ]; then
         echo "    Until then the start-up 'git pull' has no identity to offer and says"
         echo "    'pull skipped (not fast-forward, or offline)' whatever the truth is."
     else
-        echo "no ssh identities in .dev-ssh — 'make dev-login' on the host writes them."
+        echo "no ssh identities in .dev-ssh — 'make -f Makefile.dev dev-login' on the host writes them."
     fi
 else
     echo "no /workspace/.dev-ssh — this container cannot push to GitHub over ssh yet."
-    echo "    'make dev-login' on the host creates it."
+    echo "    'make -f Makefile.dev dev-login' on the host creates it."
 fi
 
 # ── the venv ────────────────────────────────────────────────────────────────

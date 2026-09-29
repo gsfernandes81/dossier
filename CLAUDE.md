@@ -55,8 +55,10 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 > The one Docker/Makefile piece we DO mirror is the **remote dev container**
 > (`Dockerfile.dev`, `docker-compose.dev.yml`, `docker-*.dev.sh`, `ssh_config.dev`,
 > `sshd_config.dev.d/`) — both repos are now thin children of the same base image —
-> see [Remote dev container](#remote-dev-container). The `Makefile` exists solely to
-> drive it; day-to-day work is still the `uv run` / `cargo` commands, not make.
+> see [Remote dev container](#remote-dev-container), driven by `Makefile.dev`
+> (`make -f Makefile.dev dev`). The root `Makefile` holds only thin cargo wrappers for
+> the Rust workspace (`make build`, `phone`, `rust-gate`, …); Python work is still the
+> `uv run` commands, not make.
 
 ## Package management — use uv
 
@@ -133,8 +135,12 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
   gh run view <id> --json conclusion,jobs \
     --jq '{overall: .conclusion, jobs: [.jobs[] | {name, conclusion}]}'
   ```
-- The `Makefile` holds **only** the remote-dev-container targets (`make dev`, `dev-up`,
-  `dev-login`, `dev-down`, `dev-down-volumes`) — not part of lint/test/build.
+- The root `Makefile` holds only cargo wrappers for the Rust workspace (`build`,
+  `phone`, `fmt`, `fmt-check`, `clippy`, `rust-test`, `rust-gate`, `run`, `clean`) —
+  `make rust-gate` runs the Rust local gate above, minus the spike. It has no Python
+  targets; the Python gate is the `uv run` commands above. The remote-dev-container
+  targets (`dev`, `dev-up`, `dev-login`, `dev-down`, `dev-down-volumes`) live in
+  `Makefile.dev` and run as `make -f Makefile.dev <target>`.
 
 ## License headers
 
@@ -186,7 +192,7 @@ that repo checked out — the `FROM` pulls.
 
 - **Files:** `Dockerfile.dev`, `docker-compose.dev.yml`, `docker-child-init.dev.sh`,
   `docker-login.dev.sh`, `ssh_config.dev`,
-  `sshd_config.dev.d/`, `Makefile`, `.dockerignore`, `.env-example`.
+  `sshd_config.dev.d/`, `Makefile.dev`, `.dockerignore`, `.env-example`.
 - **Rust is baked in, so the whole Rust local gate runs here:** rustup stable +
   `rustfmt` + `clippy` + the `aarch64-unknown-linux-musl` target (the set CI's `rust`
   workflow installs), with **clang** and `llvm-ar` for `ring`'s cross-build.
@@ -211,17 +217,19 @@ that repo checked out — the `FROM` pulls.
   nothing symlinks it. A clone still holding the old `.dev-ssh/config` keeps working:
   `docker-child-init.dev.sh` copies it into place each start and says to rename it.
 - **The uid matters and is now checked.** The `dev` account is built in the BASE (uid
-  1001 in the published image), not from this clone's owner as it was before. `make
-  dev-up` runs `dev-check-uid`, which compares the container's `id -u` against the clone
+  1001 in the published image), not from this clone's owner as it was before. `make -f
+  Makefile.dev dev-up` runs `dev-check-uid`, which compares the container's `id -u` against the clone
   owner and prints the fix — `cd ~/infra/dev && make base`, which builds the base at the
   right uid under the same name. A mismatch otherwise shows up as an unwritable
   `/workspace` and sshd refusing every login as "bad ownership or modes". Optionally set
   `DEV_SSH_PORT` to change the **host-side** port mapped to the container's sshd (defaults to
   `2222`; the container side stays `2222`) — bump it when `2222` is taken or you run more than
   one dev container, then point Zed / SSH / the Cloudflare tunnel at the port you chose.
-- **Bring up:** `make dev` (build + start + idempotent login walkthrough: git SSH → GitHub
-  → Claude). Re-login later with `make dev-login`; tear down with `make dev-down` (add
-  `-volumes` to also drop the persisted uv/claude/gh/ssh/history volumes).
+- **Bring up:** `make -f Makefile.dev dev` (build + start + idempotent login
+  walkthrough: git SSH → GitHub → Claude). Re-login later with `make -f Makefile.dev
+  dev-login`; tear down with `make -f Makefile.dev dev-down` (add `-volumes` to also drop
+  the persisted uv/claude/gh/ssh/history volumes). Every dev target lives in
+  `Makefile.dev`, not the root `Makefile`.
 - **Attach:** `docker exec -it ds-dev fish`, or over SSH: `ssh -t <host> 'docker exec -it
   ds-dev fish'`. **There is no Remote Control here as of 2026-08-25** — the supervisor is
   deleted, not defaulted off, and every dev container on this host is reached the same
