@@ -1,0 +1,191 @@
+# syntax=docker/dockerfile:1
+
+# ds-dev — a THIN CHILD of gsrpi-dev-base since 2026-08-24. Everything this container
+# shares with its three siblings on the same Pi (infra-dev, or3-dev, dd-dev) lives in
+# infra's `dev/Dockerfile.base` and is pulled, not rebuilt: python:3.13-slim-bookworm,
+# Node + Claude Code, `gh`, abduco, screen, fish, openssh client and server, cloudflared,
+# the `dev` user, every dotfile, and the entrypoint that starts the lot. What is left here
+# is only what makes this image not one of the others — a compiler for source builds,
+# this project's venv with its extras and the `driver` group, and the Rust toolchain the
+# v3 rewrite (REWRITE.md) builds with.
+#
+# This file used to be destiny-director's Dockerfile.dev minus the DB/Railway parts,
+# copied by hand. That is what the base image ends: the shared layers are now the same
+# layers rather than two builds that happen to agree, and a fix to the entrypoint gets
+# made once instead of four times.
+#
+# PINNED TAG, never `latest`: a base rebuild must not change this container until this
+# line moves. The base is PUBLIC on ghcr, built by infra's
+# `.github/workflows/dev-base.yml` on manual dispatch, so there is no cross-repo build
+# order — the FROM pulls, and nothing here needs the infra repo on disk.
+#
+# THE OFFLINE FALLBACK is `make base` in infra's `dev/`. It builds the identical image
+# locally UNDER THE SAME NAME, and docker prefers a local image over a pull — so a GitHub
+# outage, a metered month, or a host whose clone owner is not the uid the CI image bakes
+# means building it there, and this file is none the wiser.
+ARG BASE_TAG=2026.08.25
+FROM ghcr.io/gsfernandes81/gsrpi-dev-base:${BASE_TAG}
+
+# Re-declared, because an ARG stated before FROM is out of scope after it. Recorded as a
+# label so WHICH BASE THIS CONTAINER IS ON is answerable from a running container —
+# `docker inspect ds-dev --format '{{index .Config.Labels "uk.gsrpi.base-tag"}}'` — rather
+# than inferred from behaviour, which is the kind of check that passes for a wrong reason.
+ARG BASE_TAG
+LABEL uk.gsrpi.base-tag="${BASE_TAG}"
+
+# The base ends as the dev user; everything below writes system paths until USER dev.
+USER root
+
+# build-essential is the only apt package the base does not carry: it covers the source
+# builds Claude Code or the TUI driver need on arm64, where a wheel may not exist. git,
+# make, fish, the ssh client and server, curl, gnupg, ca-certificates and tzdata all come
+# from the base — and so does abduco, which is new here: `abduco -A work fish` holds a
+# session across a dropped link with no key handling of its own, which matters more for a
+# full-screen TUI than screen's does.
+#
+# clang and llvm are the CROSS C compiler for the phone target: `ring` (rustls, via the
+# Syncthing REST check) compiles C and assembly, `cc` would look for an
+# `aarch64-linux-musl-gcc` that does not exist, so .cargo/config.toml points CC/AR at
+# clang and llvm-ar, which cross-compile by construction — the same pair CI's `phone` job
+# installs. Debian may ship llvm-ar only under a versioned name (/usr/bin/llvm-ar-<N>);
+# .cargo/config.toml names it unversioned, so that name is linked in if it is missing.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential clang llvm \
+    && rm -rf /var/lib/apt/lists/* \
+    && if ! command -v llvm-ar >/dev/null 2>&1; then \
+         ln -s "$(ls -1 /usr/bin/llvm-ar-* | head -1)" /usr/local/bin/llvm-ar; \
+       fi \
+    && clang --version | head -1 && llvm-ar --version | head -1
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# The dev account's login shell goes back to bash, which the base sets to fish. Not a
+# preference — it is the shell sshd takes from /etc/passwd, so it is what runs every
+# `ssh -p <port> dev@<host> '<cmd>'` and every command Zed's remote bootstrap issues, and
+# this repo's tooling has always assumed a POSIX one there: `VAR=x cmd` prefixes,
+# `$(...)`, and `export` are all fish syntax errors. The pre-base Dockerfile said the same
+# thing in its useradd, and the conversion should not quietly reverse a choice this repo
+# had made. fish is still installed and still what `docker exec -it ds-dev fish` gives.
+RUN usermod --shell /bin/bash dev
+
+# TZ, CLAUDE_CONFIG_DIR, GH_CONFIG_DIR, HISTFILE, SCREENDIR and ABDUCO_CMD are all set in
+# the base and are deliberately not repeated here — a value stated twice is a value that
+# drifts. What is left is this project's own.
+#
+# The venv lives OUTSIDE /workspace so the bind mount cannot shadow it. VIRTUAL_ENV
+# mirrors UV_PROJECT_ENVIRONMENT so ty/ruff/Zed toolchain detection find it over SSH (they
+# key off VIRTUAL_ENV, and this repo has no project-local .venv).
+#
+# PATH IS NEW, and it replaces a line in the old entrypoint. That entrypoint published
+# `PATH=/home/dev/venv/bin:$PATH` into ~/.ssh/environment, so an ssh session had the venv
+# and a `docker exec` did not — the same container answering `python` two different ways
+# depending on how you arrived. Setting it in the image makes both agree, and the base
+# publishes whatever PATH it inherits, so ssh sessions keep it — cargo's bin included.
+#
+# CARGO_TARGET_DIR is outside the bind mount for the venv's reason plus one more: the
+# host may have its own cargo, and a target directory shared between a host toolchain
+# and this image's would be invalidated and rebuilt from scratch on every alternation.
+# It is on a named volume (docker-compose.dev.yml), so an incremental `cargo test
+# --release` survives a rebuild — on a Pi, the difference between seconds and minutes.
+# Consequence to know: the phone binary the Rust gate cross-builds lands at
+#   /home/dev/cargo-target/aarch64-unknown-linux-musl/release/ds
+# and NOT under /workspace/target.
+#
+# CARGO_HOME holds the rustup-installed cargo binaries as well as the registry and git
+# caches, so compose mounts volumes over .cargo/registry and .cargo/git ONLY. A volume
+# over all of ~/.cargo would shadow the toolchain the next rebuild installs with whatever
+# the old volume held.
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0 \
+    UV_PROJECT_ENVIRONMENT=/home/dev/venv \
+    VIRTUAL_ENV=/home/dev/venv \
+    RUSTUP_HOME=/home/dev/.rustup \
+    CARGO_HOME=/home/dev/.cargo \
+    CARGO_TARGET_DIR=/home/dev/cargo-target \
+    PATH=/home/dev/.cargo/bin:/home/dev/venv/bin:$PATH
+
+# Pre-build the full dependency set into /home/dev/venv: the dev group (default), all
+# extras (dedup + scan), and the opt-in `driver` group for the real-terminal TUI harness
+# in tools/. The editable project is added at container start by child-init.sh, once
+# /workspace is mounted. KEEP THESE FLAGS IN SYNC with docker-child-init.dev.sh — a start
+# that syncs with fewer flags than the build used would uninstall the baked extras.
+#
+# RUN AS ROOT AND CHOWNED, which is a change from the pre-base version of this file and is
+# caused by the base rather than chosen. A BuildKit cache mount is created root-owned and
+# takes a NUMERIC uid to be anything else — the old file passed ${USER_UID}, the build arg
+# that no longer exists here because the base owns the account. Rather than guess that
+# number (the CI base bakes 1001, a `make base` bakes the clone owner's), the sync runs as
+# root against a root-owned cache and the venv is handed to dev in the same layer.
+COPY --chown=dev:dev pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_CACHE_DIR=/root/.cache/uv \
+    uv sync --frozen --no-install-project --all-extras --group driver \
+    && chown -R dev:dev /home/dev/venv
+
+USER dev
+
+# The volume mountpoints the base does not already create. It pre-creates .claude,
+# .config/gh, .ssh-host and .local/share as the dev user; the rest are this repo's. A
+# volume that is empty on first use inherits the ownership of the directory it covers, so
+# a mountpoint created by root is one uv, cargo and Zed cannot write to.
+RUN mkdir -p /home/dev/.cache/uv /home/dev/.zed_server \
+        /home/dev/cargo-target /home/dev/.cargo/registry /home/dev/.cargo/git
+
+# ── the Rust toolchain ──────────────────────────────────────────────────────
+# CLAUDE.md's whole Rust local gate has to be runnable in here — fmt, pedantic clippy,
+# `cargo test --release`, and the aarch64-musl cross-build — so: stable with rustfmt and
+# clippy, plus the aarch64-unknown-linux-musl target. The same minimal-profile-plus-
+# components shape .github/workflows/rust.yml installs, on purpose: a local gate that
+# installs a different component set from CI is a local gate that lies. Rust needs no
+# external toolchain for the musl target (rustup ships musl's libc and crt objects and
+# rust-lld links them — settled by the R0.2 spike); clang above is for `ring` alone.
+#
+# Installed AS dev, into RUSTUP_HOME/CARGO_HOME under /home/dev, so `rustup update` in a
+# running container needs no root. Pin RUST_TOOLCHAIN to a version if `stable` ever moves
+# under you; the workspace's floor is rust-version in Cargo.toml. No cache mount: the
+# registry it would populate is what the ds-cargo-registry volume is for at runtime.
+ARG RUST_TOOLCHAIN=stable
+RUN curl -fsSL https://sh.rustup.rs \
+      | sh -s -- -y --no-modify-path --profile minimal \
+          --default-toolchain "${RUST_TOOLCHAIN}" \
+    && rustup component add rustfmt clippy \
+    && rustup target add aarch64-unknown-linux-musl \
+    && rustc --version && cargo --version \
+    && cargo fmt --version && cargo clippy --version \
+    && rustup target list --installed
+
+# ── the seams, which is all a child is meant to need ────────────────────────
+#
+# ~/.ssh/config's baked half. The base prepends /workspace/.dev-ssh/ssh_config.fleet —
+# host-side, gitignored, this repo's actual identities — to it at every start, so what
+# this file carries is only the defaults that must not be wrong when that half is absent.
+# See ssh_config.dev, which explains why it names no key.
+COPY --chown=dev:dev ssh_config.dev /home/dev/ssh_config
+
+# Two sshd drop-ins, and both exist to keep this container behaving as it did before the
+# base. 10-authorized-keys.conf serves the HOST account's authorized_keys, bind-mounted
+# read-only at ~/.host-ssh, where the base would serve ~/.ssh/authorized_keys from its own
+# secrets mount. 20-forwarding.conf puts AllowTcpForwarding back to the OpenSSH default
+# this container's old sshd_config left in place, which the base turns off. sshd takes the
+# first value it obtains for a keyword and the base's Include is at the top of its file,
+# so both win, and entrypoint.sh runs `sshd -t` before exec'ing, so a drop-in that does
+# not parse costs the drop-ins and not the container.
+COPY --chown=dev:dev sshd_config.dev.d/ /home/dev/sshd_config.d/
+
+# The login walkthrough — git SSH, GitHub, Claude. Repo-specific by nature and unchanged.
+COPY --chown=dev:dev docker-login.dev.sh /home/dev/login.sh
+
+# NO REMOTE-CONTROL SUPERVISOR, as of 2026-08-25, and the file is deleted rather than left
+# unreferenced. This container is reached the way the other three are — ssh in, and hold
+# the work in an abduco session: `ssh -p <port> dev@<host>` then `abduco -A claude claude`,
+# which survives a dropped link on its own. The base carries no hook to start a daemon with
+# any more, and runs the opposite job instead: it stops a claude nobody has spoken to in 90
+# minutes and leaves the conversation for `claude --resume`.
+
+# The fifth seam: what this image does at start that the base cannot know about.
+COPY --chown=dev:dev docker-child-init.dev.sh /home/dev/child-init.sh
+
+# WORKDIR, EXPOSE and CMD are inherited. Everything else this container is — its name, its
+# port, its volumes, its secrets directory, whether the base's idle offloader runs — is in
+# docker-compose.dev.yml, which is where the values that genuinely differ belong.

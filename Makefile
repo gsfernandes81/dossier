@@ -1,44 +1,79 @@
-# dossier — this Makefile FORWARDS into dev/, and does nothing else.
+# dossier — dev-container orchestration.
 #
-# The remote dev container's management interface is `dev/Makefile`; everything
-# here is a `dev-`prefixed alias for a target in there, so the names CLAUDE.md has
-# always documented keep working from the repo root:
+# This Makefile exists SOLELY to drive the remote dev container
+# (docker-compose.dev.yml + Dockerfile.dev). dossier's day-to-day workflow is the
+# `uv run ...` commands in CLAUDE.md, NOT make — there are no lint/test/build targets
+# here on purpose. Everything below is the container lifecycle only.
 #
-#   make dev              build + start + walk the logins   (= cd dev && make dev)
-#   make dev-up           build + (re)create
-#   make dev-restart      stop + start (does NOT re-read compose.yaml)
-#   make dev-status       one-screen health check
-#   make dev-verify       status + the toolchain a rebuild should have landed
-#   make dev-login        re-run the interactive logins
-#   make dev-shell        a fish shell in the container
-#   make dev-claude       attach (or start) the container's `claude` session
-#   make dev-logs         follow the container log (= sshd's)
-#   make dev-boot-log     the entrypoint's start-up lines, from the top
-#   make dev-rc-log       the remote-control supervisor's log, when enabled
-#   make dev-down         stop and remove the container (volumes stay)
-#   make dev-down-volumes CONFIRM=yes   also drop the volumes
-#
-# dossier's day-to-day workflow is the `uv run …` and `cargo …` commands in
-# CLAUDE.md, NOT make — there are no lint/test/build targets here on purpose.
-# See dev/README.md for what the container is and how it is used.
+# Ported from the sibling project destiny-director, minus DB/Railway/Atlas (dossier
+# is a local, file-backed TUI).
 
-DEV := $(MAKE) --no-print-directory -C $(CURDIR)/dev
+# Build the image and start it detached. It no longer passes HOST_UID/HOST_GID: since
+# 2026-08-24 the image is a thin child of gsrpi-dev-base and the `dev` user is built in
+# the BASE, at the uid of whoever built THAT — 1001 in the published one. If this host's
+# clone owner is a different uid, build the base locally (`make base` in infra's dev/,
+# which reads its own clone's owner) and this build picks it up, because docker prefers a
+# local image over a pull. DEV_HOSTNAME sets the container's hostname to the docker
+# host's name + `-ds-dev`, so Claude Code shows a stable, meaningful machine title
+# instead of the random container ID.
+dev-up:
+	DEV_HOSTNAME=$$(hostname)-ds-dev docker compose -f docker-compose.dev.yml up -d --build
+	@$(MAKE) --no-print-directory dev-check-uid
 
-.PHONY: dev dev-up dev-restart dev-status dev-verify dev-login dev-shell \
-	dev-claude dev-logs dev-boot-log dev-rc-log dev-down dev-down-volumes
+# The guard that the deleted HOST_UID build arg used to make unnecessary. The base image
+# bakes its `dev` account at whatever uid built it (1001 in the published one), and if
+# that is not this clone's owner the container comes up perfectly and then fails at two
+# things at once, neither of which names a uid: /workspace is read-only from inside, and
+# sshd refuses the bind-mounted authorized_keys under StrictModes as "bad ownership or
+# modes", which reads as a broken key. Checked after the start rather than before the
+# build, because the image's uid is a property of the image and this asks the container
+# itself. A warning and not a failure: the container is up and `docker exec` still works,
+# which is how you would fix it.
+dev-check-uid:
+	@cuid=$$(docker exec ds-dev id -u 2>/dev/null); \
+	owner=$$(stat -c '%u' .); \
+	if [ -z "$$cuid" ]; then \
+	  echo "note: ds-dev is not running yet — skipping the uid check." >&2; \
+	elif [ "$$cuid" != "$$owner" ]; then \
+	  echo "" >&2; \
+	  echo "WARNING: ds-dev's dev user is uid $$cuid; this clone is owned by uid $$owner." >&2; \
+	  echo "         /workspace is not writable from inside the container, and sshd will" >&2; \
+	  echo "         refuse every login as 'bad ownership or modes' on the host account's" >&2; \
+	  echo "         authorized_keys. Neither message says uid." >&2; \
+	  echo "         Fix: build the base at this uid, then re-run make dev-up —" >&2; \
+	  echo "             cd ~/infra/dev && make base" >&2; \
+	  echo "         It reads its own clone's owner and tags the result under the same" >&2; \
+	  echo "         ghcr name, which docker prefers over the pull. If the uid changes," >&2; \
+	  echo "         the named volumes must be recreated too: make dev-down-volumes." >&2; \
+	  echo "" >&2; \
+	fi
 
-dev:              ; @$(DEV) dev
-dev-up:           ; @$(DEV) up
-dev-restart:      ; @$(DEV) restart
-dev-status:       ; @$(DEV) status
-dev-verify:       ; @$(DEV) verify
-dev-login:        ; @$(DEV) login
-dev-shell:        ; @$(DEV) shell
-dev-claude:       ; @$(DEV) claude
-dev-logs:         ; @$(DEV) logs
-dev-boot-log:     ; @$(DEV) boot-log
-dev-rc-log:       ; @$(DEV) rc-log
-dev-down:         ; @$(DEV) down
-# CONFIRM is forwarded rather than absorbed, so the guard in dev/Makefile is the
-# only place that decides whether this is allowed to run.
-dev-down-volumes: ; @$(DEV) down-volumes CONFIRM=$(CONFIRM)
+# One command to stand the whole thing up: build + start the container, wait for it
+# to be running, then walk through any logins that aren't done yet (git SSH, GitHub,
+# Claude) interactively. Every login step is idempotent — already-signed-in services
+# are skipped — so this is safe to re-run. Once Claude is logged in, work in the
+# container the way you work in the others: ssh in and run `abduco -A claude claude`,
+# which holds the session across a dropped link.
+dev: dev-up
+	@echo "Waiting for ds-dev to come up (up to 120s)..."
+	@for i in $$(seq 1 120); do \
+		docker exec ds-dev true 2>/dev/null && break; \
+		[ $$i = 120 ] && { echo "ERROR: ds-dev did not become exec-able within 120s — check 'docker compose -f docker-compose.dev.yml logs dev'." >&2; exit 1; }; \
+		sleep 1; \
+	done
+	@$(MAKE) dev-login
+
+# Re-run the interactive login walkthrough against an already-running container.
+dev-login:
+	docker exec -it ds-dev bash /home/dev/login.sh
+
+dev-down:
+	docker compose -f docker-compose.dev.yml down
+
+# Also drops the named volumes (uv cache, claude/gh config, sshd host key, zed server,
+# shell history, cargo caches and target dir) — use when the BASE image's uid changed and the volumes must be
+# recreated under the new owner.
+dev-down-volumes:
+	docker compose -f docker-compose.dev.yml down -v
+
+.PHONY: dev-up dev-check-uid dev dev-login dev-down dev-down-volumes

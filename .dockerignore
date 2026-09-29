@@ -1,26 +1,20 @@
-# Build-context excludes for the dev image (dev/Dockerfile).
+# Build-context excludes for the dev image (Dockerfile.dev).
 #
-# THE CONTEXT IS THIS DIRECTORY — the repo root — not dev/. That is deliberate:
-# the image pre-builds the Python venv from pyproject.toml + uv.lock, which live
-# here, and a build context cannot reach outside itself. So this file is the one
-# that applies (a dev/.dockerignore would be ignored), and everything the image
-# actually COPYs must stay OUT of the lists below: pyproject.toml, uv.lock, and
-# dev/*.
+# Everything the image actually COPYs must stay OUT of the lists below:
+# pyproject.toml, uv.lock, ssh_config.dev, sshd_config.dev.d/, docker-login.dev.sh
+# and docker-child-init.dev.sh.
 #
 # Nothing else is copied in — the source is bind-mounted at runtime — so the rest
 # of this file exists to keep the context small and to keep secrets and personal
 # data out of it entirely.
 
-# Secrets: dev/.env holds host paths and points at the host user's key material.
+# Secrets: .env holds host paths and points at the host user's key material.
 # Nothing COPYs it, but it should not be uploaded to the docker daemon at all.
-dev/.env
-dev/.env.*
-!dev/.env.example
 *.env
 
 # Big and pointless to upload. target/ especially: debug + release + the musl
 # cross-build run to several GB, and the container builds into its own
-# CARGO_TARGET_DIR volume anyway (see dev/Dockerfile).
+# CARGO_TARGET_DIR volume anyway (see Dockerfile.dev).
 target/
 spike/target/
 .venv

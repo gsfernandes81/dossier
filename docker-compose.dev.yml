@@ -1,0 +1,98 @@
+# Remote dev environment for dossier. Bring up + log in to everything in one command:
+#   make dev            (= make dev-up  +  make dev-login)
+# then reach the container over the host's sshd:
+#   ssh -t <host-user>@<host-ip> 'docker exec -it ds-dev fish'
+# then hold the work in an abduco session: `abduco -A claude claude`. There is no
+# remote-control daemon in this container as of 2026-08-25 — ssh is the way in.
+#
+# dossier is a local, file-backed TUI: there is no database, no Railway deploy, and
+# no data store mounted here on purpose (tests use tmp_path; real documents stay off
+# the dev box). Only the repo clone is bind-mounted.
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      # No USER_UID/USER_GID here any more: since 2026-08-24 this image is a thin child
+      # of gsrpi-dev-base and the `dev` user is built in the BASE, at the uid of whoever
+      # built it — 1001 in the published one, the clone owner's under infra's `make
+      # base`. Same guard as before, one layer down. If this host's clone owner is not
+      # the uid the published base bakes, build the base locally in infra's dev/ and this
+      # FROM picks it up: docker prefers a local image over a pull.
+      args:
+        BASE_TAG: ${BASE_TAG:-2026.08.25}
+    image: ds-dev
+    container_name: ds-dev
+    hostname: ${DEV_HOSTNAME:-ds-dev}   # Claude Code shows this as the machine title;
+                                        # make dev-up sets it to <host-hostname>-ds-dev
+    init: true
+
+    # A cap, not a reservation. It confines an OOM kill to this container's own cgroup,
+    # so a runaway build in here cannot reap a neighbour on the same Pi. Generous on
+    # purpose: the hungriest thing this container does is `cargo test --workspace
+    # --release`, and the release profile is lto="thin" with codegen-units=1 — exactly
+    # the shape that wants headroom. Lower it in .env only if the box needs it back.
+    mem_limit: ${DEV_MEM_LIMIT:-3072m}
+    memswap_limit: ${DEV_MEMSWAP_LIMIT:-4096m}
+
+    # What this container is, told to the base image. entrypoint.sh in the base lists
+    # every DEV_* it reads; these three are the ones that are not its defaults.
+    environment:
+      # Names this container in the base's own start-up lines and in the sshd host key's
+      # comment. Without it the base uses $(hostname), which `make dev-up` sets to
+      # <host>-ds-dev — accurate, but not what anything else here calls this container.
+      DEV_NAME: ds-dev
+
+      # Where the base looks for ssh material. infra-dev's default is a mode-700
+      # directory outside its repo; this container's has always been .dev-ssh/ inside the
+      # bind-mounted clone, gitignored, and that is what this points at. The effect is
+      # that the base's start-up messages about missing keys name THIS repo's directory
+      # rather than a path from another container.
+      #
+      # authorized_keys is NOT here: it comes from the host account's .ssh mount below,
+      # via sshd_config.dev.d/10-authorized-keys.conf.
+      DEV_SECRETS_DIR: /workspace/.dev-ssh
+
+      # DEV_REMOTE_CONTROL IS GONE, 2026-08-25, along with the supervisor this image used
+      # to bake and the hook in the base that started it. The way in is ssh + abduco, on
+      # every dev container on this host. What the base runs instead is the idle
+      # offloader: a claude that has been detached, silent and not working for 90 minutes
+      # is stopped and left resumable. DEV_IDLE_OFFLOAD: "0" here would keep them resident.
+
+      # DEV_TUNNEL_HOSTNAME is deliberately unset. The base can run cloudflared itself,
+      # but this container is reached through the tunnel on the HOST pointed at the
+      # published port below. Setting it here without the credentials the base wants in
+      # DEV_SECRETS_DIR/tunnel.json only earns a warning at start.
+
+    volumes:
+      - .:/workspace                          # bind-mount the host clone; the base image's dev uid must match this clone's owner (make dev-up checks)
+      - ds-uv-cache:/home/dev/.cache/uv        # persist uv cache (fast re-syncs)
+      - ds-claude:/home/dev/.claude            # persist Claude Code login/config (incl. ~/.claude.json via CLAUDE_CONFIG_DIR)
+      - ds-gh:/home/dev/.config/gh             # persist `gh auth login` (hosts.yml/config.yml under GH_CONFIG_DIR)
+      - ${DEV_SSH_AUTHORIZED_KEYS}:/home/dev/.host-ssh:ro   # host user's .ssh dir (from .env); sshd reads authorized_keys here
+      - ds-ssh-host:/home/dev/.ssh-host        # persist sshd host key -> stable known_hosts
+      - ds-zed-server:/home/dev/.zed_server    # persist Zed's remote server binary (no re-download per rebuild)
+      - ds-local-share:/home/dev/.local/share  # persist fish history + bash history (HISTFILE points here)
+      # Cargo. The registry and git caches individually, never all of ~/.cargo: CARGO_HOME
+      # also holds the rustup-installed toolchain, which a whole-directory volume would
+      # shadow with whatever an older image left there.
+      - ds-cargo-registry:/home/dev/.cargo/registry
+      - ds-cargo-git:/home/dev/.cargo/git
+      # CARGO_TARGET_DIR, outside the bind mount (Dockerfile.dev explains why). The biggest
+      # thing here — debug + release + the musl cross-build run to several GB — and
+      # `make dev-down-volumes` is what reclaims it.
+      - ds-cargo-target:/home/dev/cargo-target
+    ports:
+      - "${DEV_SSH_PORT:-2222}:2222"   # host ${DEV_SSH_PORT} (default 2222) -> container sshd; point a Cloudflare tunnel here for remote access
+    # Do NOT mount over /home/dev/venv or all of /home/dev — it would erase the
+    # pre-built venv and the Rust toolchain.
+volumes:
+  ds-uv-cache:
+  ds-claude:
+  ds-gh:
+  ds-ssh-host:
+  ds-zed-server:
+  ds-local-share:
+  ds-cargo-registry:
+  ds-cargo-git:
+  ds-cargo-target:

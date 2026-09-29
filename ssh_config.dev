@@ -1,0 +1,28 @@
+# The BAKED half of ~/.ssh/config inside ds-dev, copied into the image at
+# /home/dev/ssh_config — one of gsrpi-dev-base's seams. At every start the base writes
+#
+#     /workspace/.dev-ssh/ssh_config.fleet    (this repo's identities, host-side)
+#     this file                               (the defaults, and nothing else)
+#
+# into ~/.ssh/config, in that order, because ssh takes the FIRST value it obtains for each
+# keyword. Both halves are in place before the base pulls the clone.
+#
+# SO WHAT THIS FILE IS FOR is the case where the other half is absent: a fresh clone, or a
+# container brought up before `make dev-login` has ever run. It carries NO IdentityFile on purpose.
+# The base's own copy of this file names infra's deploy key, and inheriting that would
+# have made a first `git push` in here fail with "no such identity:
+# /home/dev/.ssh/id_ed25519_infra_deploy" — a message naming another container's
+# credential, in a repo that has nothing to do with it. With no identity named, the same
+# push fails with "Permission denied (publickey)", which is what is actually wrong.
+#
+# The real identity is in /workspace/.dev-ssh/ssh_config.fleet, naming the copy the base
+# makes in ~/.ssh; `make dev-login` writes both when it generates a key.
+
+# ── defaults — MUST stay last, and here they are also all there is ──────────
+# ssh takes the FIRST value it obtains for each keyword, so a wildcard above a Host block
+# silently wins over it. Anything specific belongs in .dev-ssh/ssh_config.fleet,
+# which the base prepends above this.
+Host *
+  IdentitiesOnly yes
+  ServerAliveInterval 30
+  ServerAliveCountMax 3

@@ -52,11 +52,11 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 
 > **Tooling is mirrored from the sibling project `destiny-director`** (same ruff/ty/pytest
 > setup), minus everything Railway/Atlas/DB/Discord-specific, which does not apply here.
-> The one Docker/Makefile piece we DO mirror is the **remote dev container**, which now
-> lives in [`dev/`](dev/) and has since inherited most of its fixes from the further
-> descendant `or3` — see [Remote dev container](#remote-dev-container) and
-> [`dev/README.md`](dev/README.md). The root `Makefile` exists solely to forward into
-> `dev/Makefile`; day-to-day work is still the `uv run` / `cargo` commands below, not make.
+> The one Docker/Makefile piece we DO mirror is the **remote dev container**
+> (`Dockerfile.dev`, `docker-compose.dev.yml`, `docker-*.dev.sh`, `ssh_config.dev`,
+> `sshd_config.dev.d/`) — both repos are now thin children of the same base image —
+> see [Remote dev container](#remote-dev-container). The `Makefile` exists solely to
+> drive it; day-to-day work is still the `uv run` / `cargo` commands, not make.
 
 ## Package management — use uv
 
@@ -133,9 +133,8 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
   gh run view <id> --json conclusion,jobs \
     --jq '{overall: .conclusion, jobs: [.jobs[] | {name, conclusion}]}'
   ```
-- The root `Makefile` holds **only** forwarding aliases for the remote-dev-container
-  targets in `dev/Makefile` (`make dev`, `dev-up`, `dev-status`, `dev-verify`, `dev-login`,
-  `dev-shell`, `dev-down`, `dev-down-volumes`, …) — not part of lint/test/build.
+- The `Makefile` holds **only** the remote-dev-container targets (`make dev`, `dev-up`,
+  `dev-login`, `dev-down`, `dev-down-volumes`) — not part of lint/test/build.
 
 ## License headers
 
@@ -171,55 +170,79 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 
 ## Remote dev container
 
-For developing dossier remotely — on `zero` (Pi 5, 4 GB, arm64), driven over SSH from a
-laptop or from Termux on the phone, and optionally from claude.ai/code or Zed-remote — the
-repo ships a Docker dev environment in **[`dev/`](dev/)**. It descends from
-`destiny-director`'s and has since inherited most of its fixes from the further descendant
-`or3`, **stripped of everything DB/Railway/Atlas**: dossier has no database, no migrations
-and no deploy target. **Read [`dev/README.md`](dev/README.md) before changing it** — it
-carries the rationale for each mechanism, and every one of them was a bug somewhere first.
+For developing dossier remotely (e.g. on a Pi/home server, driven from claude.ai/code, the
+Claude mobile app, or Zed-remote), the repo ships a Docker dev environment. Since
+**2026-08-24** `Dockerfile.dev` no longer builds one — it is a **thin child of
+`gsrpi-dev-base`**, the shared image the four dev containers on that Pi run
+(`infra-dev`, `or3-dev`, `dd-dev`, this): python 3.13-slim, uv's siblings git and `gh`,
+Node + Claude Code, fish, screen, abduco, the ssh client and server, the `dev` user, the
+dotfiles and the entrypoint all come from there, pulled from
+`ghcr.io/gsfernandes81/gsrpi-dev-base` at the tag pinned in `ARG BASE_TAG`. This repo
+adds a compiler, `uv`, its own venv (`--all-extras --group driver`), and the Rust
+toolchain (see the Rust bullet below). The clone is
+**bind-mounted** at `/workspace`; the venv lives at `/home/dev/venv`, outside the mount.
+The base's source is `dev/Dockerfile.base` in the `infra` repo, and nothing here needs
+that repo checked out — the `FROM` pulls.
 
-- **Files:** everything is under `dev/` — `Dockerfile`, `compose.yaml`, `Makefile`,
-  `entrypoint.sh`, `login.sh`, `rc-supervisor.sh`, `status.sh`, `sshd_config`,
-  `config.fish`, `screenrc`, `.env.example`, plus `README.md`. The root keeps the
-  forwarding `Makefile` and the `.dockerignore` (the build context is the repo root, so
-  that is the one that applies).
-- **What is baked in:** the whole toolchain, for **both** languages. Rust via rustup
-  (stable + `rustfmt` + `clippy` + the `aarch64-unknown-linux-musl` target) with **clang**
-  and `llvm-ar` for `ring`, so all four commands of the Rust local gate run in here; uv +
-  a pre-built venv at `/home/dev/venv` (`--all-extras --group driver`); Node 22 + Claude
-  Code; `gh`; fish, `screen` and `abduco`. `make dev-verify` proves each piece landed.
-- **What is outside the bind mount, and why:** `/home/dev/venv` (so the mount cannot
-  shadow it) and `CARGO_TARGET_DIR=/home/dev/cargo-target` on a named volume (so host and
-  container toolchains do not invalidate each other's artefacts, and an incremental
-  `cargo test --release` survives a rebuild). Consequence: **the phone binary is at
-  `/home/dev/cargo-target/aarch64-unknown-linux-musl/release/ds`**, not `target/`.
-- **One-time host setup:** `cp dev/.env.example dev/.env` and set
-  `DEV_SSH_AUTHORIZED_KEYS` to the host user's `.ssh/` **directory** (its
-  `authorized_keys` gates the in-container sshd, so a key added there is live with no
-  restart). `DEV_SSH_PORT` defaults to **2225** on the host side — 2222 is `dd-dev` and
-  2224 is `or3-dev` on the same box; the container side is always 2222.
-  `DEV_SSH_BIND` defaults to `127.0.0.1`, which is the whole of that port's protection —
-  widen it deliberately, not by habit.
+- **Files:** `Dockerfile.dev`, `docker-compose.dev.yml`, `docker-child-init.dev.sh`,
+  `docker-login.dev.sh`, `ssh_config.dev`,
+  `sshd_config.dev.d/`, `Makefile`, `.dockerignore`, `.env-example`.
+- **Rust is baked in, so the whole Rust local gate runs here:** rustup stable +
+  `rustfmt` + `clippy` + the `aarch64-unknown-linux-musl` target (the set CI's `rust`
+  workflow installs), with **clang** and `llvm-ar` for `ring`'s cross-build.
+  `CARGO_TARGET_DIR=/home/dev/cargo-target` sits outside the bind mount on a named
+  volume, so host and container toolchains never invalidate each other's artefacts and
+  an incremental `cargo test --release` survives a rebuild. Consequence: **the phone
+  binary is at `/home/dev/cargo-target/aarch64-unknown-linux-musl/release/ds`**, not
+  `target/`. The cargo registry and git caches are volumes too; `~/.cargo` as a whole is
+  not, because it also holds the toolchain a rebuild installs. A memory cap
+  (`DEV_MEM_LIMIT`, default 3 GB) confines an OOM from a release build to this container.
+- **What this image does at start:** the base's entrypoint pulls the clone, then runs
+  `docker-child-init.dev.sh` — the `.dev-ssh` git identities, and `uv sync --frozen
+  --all-extras --group driver` to add the editable project to the pre-built venv. Keep
+  those flags identical to `Dockerfile.dev`'s build sync: `uv sync` makes the environment
+  match what it is asked for, so a start with fewer flags uninstalls the baked extras. A
+  failed sync warns and the container still comes up.
+- **One-time host setup:** `cp .env-example .env` and set `DEV_SSH_AUTHORIZED_KEYS` to the
+  host user's `.ssh/` dir (its `authorized_keys` gates the in-container sshd). Git
+  identities go in the gitignored `.dev-ssh/`, with the ssh config named
+  **`ssh_config.fleet`** — the base prepends that file to the baked defaults at every
+  start, before it pulls the clone, which is why it is not called `config` and why
+  nothing symlinks it. A clone still holding the old `.dev-ssh/config` keeps working:
+  `docker-child-init.dev.sh` copies it into place each start and says to rename it.
+- **The uid matters and is now checked.** The `dev` account is built in the BASE (uid
+  1001 in the published image), not from this clone's owner as it was before. `make
+  dev-up` runs `dev-check-uid`, which compares the container's `id -u` against the clone
+  owner and prints the fix — `cd ~/infra/dev && make base`, which builds the base at the
+  right uid under the same name. A mismatch otherwise shows up as an unwritable
+  `/workspace` and sshd refusing every login as "bad ownership or modes". Optionally set
+  `DEV_SSH_PORT` to change the **host-side** port mapped to the container's sshd (defaults to
+  `2222`; the container side stays `2222`) — bump it when `2222` is taken or you run more than
+  one dev container, then point Zed / SSH / the Cloudflare tunnel at the port you chose.
 - **Bring up:** `make dev` (build + start + idempotent login walkthrough: git SSH → GitHub
-  → Claude). `make dev-status` / `make dev-verify` for the readouts, `make dev-login` to
-  re-run the logins, `make dev-down` to tear down (`dev-down-volumes CONFIRM=yes` also
-  drops the logins, host key and caches).
-- **Attach:** the front door is SSH — `ssh ds-dev`, and hold the work in abduco with
-  `ssh -t ds-dev abduco -A claude claude`. A session outside abduco dies with the link
-  that carried it, which on a phone means at the lock screen. From a terminal on the host,
-  `make dev-shell` / `make dev-claude` reach the same sessions; `docker exec -it ds-dev
-  fish` still works.
-- **sshd is the container's foreground process**, so `docker logs ds-dev` is sshd's and
-  the container's lifetime is the ssh endpoint's. **Claude Remote Control is opt-in and
-  off by default** (`DS_REMOTE_CONTROL=1` in `dev/.env`, then `make dev-up` — the
-  entrypoint reads it at start, so `make dev-restart` will not pick it up). It runs
-  backgrounded with its own filtered log (`make dev-rc-log`) and cannot take sshd or the
-  container down. This is the inverse of the earlier arrangement, where the supervisor was
-  PID 1 and sshd ran under it. The entrypoint still pre-seeds Claude's headless-hostile
-  first-run flags (`hasTrustDialogAccepted` for `/workspace`, `remoteDialogSeen`, `theme`,
-  `hasCompletedOnboarding`) on every start, because an interactive `claude` over SSH meets
-  them too.
+  → Claude). Re-login later with `make dev-login`; tear down with `make dev-down` (add
+  `-volumes` to also drop the persisted uv/claude/gh/ssh/history volumes).
+- **Attach:** `docker exec -it ds-dev fish`, or over SSH: `ssh -t <host> 'docker exec -it
+  ds-dev fish'`. **There is no Remote Control here as of 2026-08-25** — the supervisor is
+  deleted, not defaulted off, and every dev container on this host is reached the same
+  way: ssh in, then `abduco -A claude claude`, which holds the session across a dropped
+  link. The base still pre-seeds Claude's workspace-trust flag for `/workspace` in
+  `~/.claude.json` so a fresh volume does not meet a dialog nobody can answer.
+- **An idle claude is offloaded after 90 minutes and left resumable.** The base runs
+  `offload-idle-claude.sh`: a session detached, silent and running nothing for longer than
+  a claude can schedule its own wake-up (the runtime clamps that to an hour) is stopped,
+  and `~/.local/share/claude-offload.log` holds the `claude --resume` that brings it back.
+  It never touches an attached session, one with work running under it, or one with no
+  transcript. One idle session's process tree measures over a gigabyte.
+- **sshd is the foreground process**, and it is the only long-lived one: the container's
+  lifetime is the door's. `docker logs ds-dev` shows sshd and the start-up lines.
+- **Two sshd defaults the base changed are put back** in `sshd_config.dev.d/`:
+  `AuthorizedKeysFile` (the host account's, as always here) and `AllowTcpForwarding yes`
+  (the OpenSSH default this container's old config left in place, which the base turns
+  off). The `dev` account's login shell is likewise put back to **bash** in
+  `Dockerfile.dev` — sshd runs it from `/etc/passwd`, so it is what `ssh <host> '<cmd>'`
+  and Zed's remote bootstrap execute under, and this repo's tooling assumes POSIX there.
+  `docker exec -it ds-dev fish` is unchanged.
 - Container/image/volumes are prefixed `ds-` (the CLI name). There is **no MySQL/Atlas/
   Railway** service, and no data store is mounted — tests use `tmp_path`; real documents
   stay off the dev box.
