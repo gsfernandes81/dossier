@@ -31,7 +31,7 @@ structurally impossible and makes a polyglot split free.
 | D1 | **Track B**: Rust core + Python enrichment satellite, communicating only through the journal store. From-scratch core; not weighted by the existing codebase. |
 | D2 | **Rust + Ratatui** for the core. The codebase doubles as the user's **Rust learning material** — see §5.6 commenting requirements. |
 | D3 | **PyPy is off the table** (wrong axis: JIT helps hot loops, not startup; no Android story). |
-| D4 | **Big-bang cutover** (no prolonged side-by-side); the exporter + parity check are still mandatory. |
+| D4 | ~~**Big-bang cutover** (no prolonged side-by-side); the exporter + parity check are still mandatory.~~ **Superseded by D13.** |
 | D5 | **Perf budget: < 100 ms to usable on the phone (target), 150 ms acceptable.** Enforced, not aspirational (§9). |
 | D6 | Phase R0 (measure) and the R0 spike are confirmed first steps. |
 | D7 | Storage = **Q3 journals**: per-writer append-only files synced by Syncthing; single writer per file; state = deterministic fold of the union. Hand-editability of per-doc `.md` files is **dropped** (Obsidian-as-vault goal dies with it). |
@@ -40,6 +40,7 @@ structurally impossible and makes a polyglot split free.
 | D10 | CLI consolidates to the **porcelain-5** + maintenance tier (§4.1); the feature disposition table (§8) is authoritative — anything not marked *Port* is out of scope. |
 | D11 | Backlog filing: visible unfiled counter; **triage by exception** (review cards only for ambiguous cases). **Auto-filing high-confidence proposals is deferred** — desktop-only if ever; never on mobile. |
 | D12 | **The Miller layout is dropped.** A simpler TUI layout will be designed in a **separate follow-up plan** before Phase R3 (see §6, Phase R-UI). This plan intentionally specifies only layout-independent behavior. |
+| D13 | **No migration (2026-09-29).** The v2 data is discarded and v3 starts from an **empty journal, now** — the user was not relying on v2. The exporter and parity check stop being a gate (D4), and §7's cutover rules no longer bind: a journal may exist in the synced tree from the first document on. Whether to delete the v2 Python app, the exporter and the R2 tooling is a separate, unmade call. |
 
 ## 2. Architecture
 
@@ -794,6 +795,10 @@ Sequencing notes: R1 ∥ R2 overlap after §3 freezes; R-UI runs during R1/R2; R
 strictly ordered; R6 can overlap R4/R5 once the adapter exists.
 
 ## 7. Cutover mechanics & data safety
+
+> **D13 (2026-09-29): there is no cutover.** v3 starts empty, so the first three
+> bullets below — the exporter, archiving the v2 store, and "no journal in the
+> synced tree before cutover" — are history, not rules. The rest still binds.
 
 - The exporter is idempotent and read-only w.r.t. the v2 store; parity failure on any
   field is a hard stop.

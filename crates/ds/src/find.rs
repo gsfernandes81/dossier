@@ -221,12 +221,21 @@ fn draw_list(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     model.list = ListGeometry { top: area.y, height: area.height, row_height };
 
     if model.rows.is_empty() {
-        let message = if model.query.is_empty() {
-            "  no documents yet — `ds init` and the filing surface fill this"
-        } else {
-            "  nothing matches"
+        let lines = match (&model.missing_journal, model.query.is_empty()) {
+            // A fresh store: say how to start it, and — because the journal is
+            // born on the first save — where that save will put it, so a wrong
+            // root is caught before anything is written there.
+            (Some(path), true) => vec![
+                "  no documents yet — Space, then n, adds one".to_string(),
+                "  the first one creates the journal at".to_string(),
+                format!("  {path}"),
+            ],
+            (None, true) => vec!["  no documents yet — Space, then n, adds one".to_string()],
+            (_, false) => vec!["  nothing matches".to_string()],
         };
-        frame.render_widget(Paragraph::new(Line::styled(message, theme.style(Tone::Muted))), area);
+        let lines: Vec<Line> =
+            lines.into_iter().map(|text| Line::styled(text, theme.style(Tone::Muted))).collect();
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
         return;
     }
 

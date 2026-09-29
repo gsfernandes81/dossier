@@ -176,7 +176,7 @@ impl Report {
         let mut out = String::new();
         let _ = writeln!(out, "journal   {}", self.journal);
         if !self.present {
-            out.push_str("          not created yet — nothing to fold\n");
+            out.push_str("          not created yet — the first document creates it\n");
         }
         for file in &self.files {
             let malformed = if file.malformed > 0 {

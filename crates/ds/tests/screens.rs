@@ -502,6 +502,21 @@ fn an_empty_store_explains_itself() {
     assert!(lines[26].trim_start().starts_with("0/0"));
 }
 
+/// **A fresh store says how to start it** — the keys that add a document, and
+/// where the first save will create the journal, so a wrong root is caught
+/// before anything is written there. Never a command that would not help.
+#[test]
+fn a_fresh_store_says_how_to_start_and_where() {
+    let mut m = Model::new(Store::default(), "2026-10-20".into(), "2027-01-18".into(), 45, 28);
+    m.missing_journal = Some("/mnt/c/Docs/.dossier/journal".into());
+    let lines = screen(&mut m, 45, 28);
+    let text = lines.join("\n");
+    assert!(lines[1].contains("Space, then n, adds one"), "{text}");
+    assert!(lines[2].contains("the first one creates the journal at"), "{text}");
+    assert_eq!(lines[3].trim_end(), "  /mnt/c/Docs/.dossier/journal", "{text}");
+    assert!(!text.contains("ds init"), "init creates no documents: {text}");
+}
+
 /// A long name is cut with an ellipsis at a **cell** boundary, so a wide-glyph
 /// name cannot push the status column sideways.
 #[test]

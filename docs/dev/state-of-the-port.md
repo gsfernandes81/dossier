@@ -82,6 +82,7 @@ Each is recorded where it belongs; the link is the point of the row.
 
 | Decision | Where |
 |---|---|
+| **No v2 migration** — v3 starts from an empty journal; no cutover, no exporter gate | REWRITE.md D13 |
 | No action bar; three chrome rows on touch | REWRITE-UI §5a |
 | Header expiring count is the touch filter, as a toggle | REWRITE-UI §5a |
 | `Space` on an empty query opens the leader sheet — *the query is the mode* | REWRITE-UI §5a, `crates/ds/src/sheet.rs` |

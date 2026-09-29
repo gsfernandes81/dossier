@@ -441,6 +441,10 @@ pub struct Model {
     pub leader_zone: Zone,
     /// A transient one-line message, cleared by the next key.
     pub flash: Option<String>,
+    /// The journal directory that was looked for, when **nothing was there**
+    /// yet. The empty list names it, because the first save creates it there —
+    /// and a wrong root is better caught before that than after.
+    pub missing_journal: Option<String>,
     /// Terminal width.
     pub cols: u16,
     /// Terminal height.
@@ -482,6 +486,7 @@ impl Model {
             count_zone: Zone::default(),
             leader_zone: Zone::default(),
             flash: None,
+            missing_journal: None,
             cols,
             rows_on_screen: rows,
             list: ListGeometry::default(),

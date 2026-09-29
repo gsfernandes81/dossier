@@ -302,7 +302,9 @@ fn browse(
 ) -> io::Result<()> {
     let ops = loaded.load.lines.len();
     let build_at = start.elapsed();
+    let missing_journal = (!loaded.load.present).then(|| loaded.path.display().to_string());
     let mut model = Model::new(loaded.store, loaded.today, loaded.warn_until, 80, 24);
+    model.missing_journal = missing_journal;
     let theme = Theme::from_env();
 
     // One queue, made here rather than in the loop, because the writer thread
