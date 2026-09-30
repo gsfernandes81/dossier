@@ -103,6 +103,12 @@ Each is recorded where it belongs; the link is the point of the row.
 
 ### Open — needs the user, or needs a phase
 
+- **The code and docs do not yet follow CLAUDE.md's "Comments" rules.** The
+  crates carry about one comment line per two of code — rationale essays in doc
+  comments, spec-section citations, `// rust:` learning notes — and the specs and
+  `docs/dev/` carry dated amendment and approval notes. Both get a cleanup pass:
+  docs first, then code module by module. Measurements go too (most were of the
+  Python app); the edges design below is not blocked by it.
 - **The prompt word.** `>` says nothing, which is why the empty field needs
   `Type to search` at all. `Find:` / `Search:` / `Filter:` — user's call. The
   rest of the minibuffer work rides on it: folding the match count into the
