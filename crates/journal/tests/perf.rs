@@ -106,8 +106,9 @@ fn folding_50k_ops_stays_within_the_budget() {
 }
 
 /// Canonical serialization is part of the startup path for nothing, but it *is*
-/// the parity harness's inner loop (R2 compares ~948 real documents), so a
-/// quadratic surprise here would show up as a mysteriously slow export.
+/// every cross-language fold comparison's inner loop (`fold_dir` against the
+/// Python fold, over a whole store), so a quadratic surprise here would show up
+/// as a mysteriously slow check.
 #[test]
 fn canonical_serialization_of_a_full_store_is_fast() {
     let raw = synthetic_lines();

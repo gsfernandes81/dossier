@@ -19,12 +19,11 @@
 //! cargo run -p journal --example fold_dir -- <journal-dir> [--stats]
 //! ```
 //!
-//! Exists for the R2 rehearsal and the R7 cutover step "confirm the phone folds
-//! it" (REWRITE.md §6): the Python exporter writes a journal, this prints what
-//! the **Rust** core makes of it, and the two canonical strings are compared.
-//! The golden vectors prove the two folds agree on hand-written fixtures; this
-//! proves it on the user's real ~948 documents, which is the case that actually
-//! matters and the only one nobody can write a fixture for.
+//! A general inspection tool: it prints what the **Rust** core makes of any
+//! journal directory, so its canonical string can be diffed against the Python
+//! fold's (`dossier/journal.py`) or against itself across devices. The golden
+//! vectors prove the two folds agree on hand-written fixtures; this checks them
+//! on a real journal, the one case nobody can write a fixture for.
 //!
 //! Read-only. Prints the canonical JSON on stdout and, with `--stats`, a health
 //! summary on stderr so the two never mix in a diff.

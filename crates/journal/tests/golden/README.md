@@ -76,11 +76,13 @@ removed), and a line from a newer format version is retained verbatim rather tha
 rewritten.
 
 `v2-export-shape` is different in kind from the rest. The others are hand-written
-probes of one rule each; that one is a real `dossier/export_journal.py` output —
+probes of one rule each; that one is a real output of the v2 → v3 exporter
+(`dossier/export_journal.py`, deleted 2026-09-30 per REWRITE.md D13) —
 nested `files` objects, a unicode name, ISO dates, a settings entity, a
 namespaced review state, and an enrich payload whose float confidence became an
 integer `confidence_permille`. Its canonical string was produced by the Python
 fold and independently confirmed byte-for-byte by the Rust fold, so it records an
-agreement between two implementations rather than one implementation's output. It
-exists so a change to the exporter's shape fails in **both** language suites and
-has to be a decision.
+agreement between two implementations rather than one implementation's output.
+With the exporter gone it stays as the richest realistic journal either fold is
+checked against — nested values, unicode, settings, namespaced state and an
+`enrich/` payload in one fixture.

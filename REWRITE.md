@@ -40,7 +40,7 @@ structurally impossible and makes a polyglot split free.
 | D10 | CLI consolidates to the **porcelain-5** + maintenance tier (§4.1); the feature disposition table (§8) is authoritative — anything not marked *Port* is out of scope. |
 | D11 | Backlog filing: visible unfiled counter; **triage by exception** (review cards only for ambiguous cases). **Auto-filing high-confidence proposals is deferred** — desktop-only if ever; never on mobile. |
 | D12 | **The Miller layout is dropped.** A simpler TUI layout will be designed in a **separate follow-up plan** before Phase R3 (see §6, Phase R-UI). This plan intentionally specifies only layout-independent behavior. |
-| D13 | **No migration (2026-09-29).** The v2 data is discarded and v3 starts from an **empty journal, now** — the user was not relying on v2. The exporter and parity check stop being a gate (D4), and §7's cutover rules no longer bind: a journal may exist in the synced tree from the first document on. Whether to delete the v2 Python app, the exporter and the R2 tooling is a separate, unmade call. |
+| D13 | **No migration (2026-09-29).** The v2 data is discarded and v3 starts from an **empty journal, now** — the user was not relying on v2. The exporter and parity check stop being a gate (D4), and §7's cutover rules no longer bind: a journal may exist in the synced tree from the first document on. The exporter, its parity harness and the R2 tooling were **deleted on 2026-09-30** (§6 R2); whether to delete the rest of the v2 Python app is a separate, unmade call (R6). |
 
 ## 2. Architecture
 
@@ -522,7 +522,11 @@ until the cutover step the user personally green-lights.
     `serde_json` and `json.dumps`, so §10's cross-language comparison is sound
     rather than aspirational. The drift risk §11 lists is now closed by a test that
     fails in *both* languages the moment either fold changes.
-  - **Slice 2 done (2026-08-16):** `dossier/export_journal.py` — the one-shot
+  - **Slice 2 — deleted per D13 (2026-09-30).** There is no migration, so the
+    exporter, its tests and `tools/export_journal.py` are gone; the record of what
+    it was stays below. The `v2-export-shape` golden vector it produced is kept as
+    a realistic fixture for both folds.
+    *Was:* **done (2026-08-16):** `dossier/export_journal.py` — the one-shot
     converter and the parity harness. Exports documents, locations, bundles, the
     synced settings, reconcile decisions (as per-key `review` state), suggestion
     dismissals, scans and intake proposals. Read-only w.r.t. the v2 store and
@@ -536,19 +540,20 @@ until the cutover step the user personally green-lights.
     documentation; parity failure is its exit code.
   - **Cross-language cutover proof:** `cargo run -p journal --example fold_dir`
     folds a journal directory and prints its canonical JSON. Running it over a
-    Python-exported store gives a **byte-identical** result to the Python fold —
-    the golden vectors prove agreement on hand-written fixtures, this proves it on
-    an exporter's real output, which is the case no fixture can cover. It is also
-    the tool for R7's "confirm the phone folds it" step.
+    Python-exported store gave a **byte-identical** result to the Python fold —
+    the golden vectors prove agreement on hand-written fixtures, this proved it on
+    an exporter's real output, which is the case no fixture can cover. With the
+    exporter deleted (D13) it remains a general tool for diffing any real journal's
+    Rust fold against the Python one.
   - **One format finding, now binding:** v2's `ScanReading.confidence` is a
     **float**, and §3.2 bans floats (they would make the canonical comparison
     between the two folds unimplementable). It is exported as an integer
     `confidence_permille` (0–1000), *renamed* rather than rounded in place so
     nothing can read it as a fraction by accident. The satellite must read and
     write it that way from now on.
-  - **Still to come in R2:** the parity run against the real ~948 documents. That
-    is the user's to make — no real store exists in the dev container, and the
-    standing rule keeps real-store operations read-only and user-initiated.
+  - ~~**Still to come in R2:** the parity run against the real ~948 documents.~~
+    **Moot per D13** — the v2 data is discarded, so there is nothing to export and
+    no parity to run. R2 is complete with slice 1.
 
 - **R3 — Read-only core** *(needs R-UI)*: browse + search (exact→fuzzy, ctrl+t
   content search) + open + `ds status` (counts, syncthing REST checks) + `ds open`.
@@ -785,9 +790,10 @@ until the cutover step the user personally green-lights.
   **(1) install the phone binary and verify it launches** (the phone must never sit
   with a deleted v2 store and no app), **(2) `.stignore` the compaction-temp pattern
   on both devices** (per-device file, never syncs — §3.1), (3) stop edits → export →
-  parity green, (4) archive the old `.dossier/` contents to the local data dir,
-  (5) let the journal layout sync, (6) confirm the phone folds it. Rollback = the
-  archived v2 store (additive, nothing destroyed). Then: README/CLAUDE.md rewrite,
+  parity green *(moot per D13 — the exporter was deleted 2026-09-30)*, (4) archive
+  the old `.dossier/` contents to the local data dir, (5) let the journal layout
+  sync, (6) confirm the phone folds it. Rollback = the archived v2 store (additive,
+  nothing destroyed). Then: README/CLAUDE.md rewrite,
   v2 code deletion, CI finalization, Termux install docs. **The user personally runs
   the cutover.**
 
@@ -797,8 +803,9 @@ strictly ordered; R6 can overlap R4/R5 once the adapter exists.
 ## 7. Cutover mechanics & data safety
 
 > **D13 (2026-09-29): there is no cutover.** v3 starts empty, so the first three
-> bullets below — the exporter, archiving the v2 store, and "no journal in the
-> synced tree before cutover" — are history, not rules. The rest still binds.
+> bullets below — the exporter (deleted 2026-09-30), archiving the v2 store, and
+> "no journal in the synced tree before cutover" — are history, not rules. The rest
+> still binds.
 
 - The exporter is idempotent and read-only w.r.t. the v2 store; parity failure on any
   field is a hard stop.
