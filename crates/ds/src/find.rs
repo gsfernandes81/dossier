@@ -357,67 +357,102 @@ fn two_line_row(
 /// not rendered until its filter is already on — so it could turn one off and
 /// never on.
 fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+    if let Some(picker) = &model.picker {
+        let hits = picker.matching(&model.store);
+        let rows = hits.iter().map(|entry| ("   ".to_string(), entry.label.clone(), "")).collect();
+        let panel = Panel {
+            crumb: picker.crumb(&model.store),
+            filter: &picker.filter,
+            cursor: Some(picker.cursor),
+        };
+        draw_panel(frame, area, &panel, rows, theme);
+        return;
+    }
     let Some(sheet) = &model.sheet else { return };
     let items = crate::sheet::items(sheet.group, model);
     let hits = crate::sheet::matching(&items, &sheet.filter);
+    let rows = hits
+        .iter()
+        .map(|item| {
+            let lead = match item.on {
+                // The box is reserved whether or not it is ticked, so an item never
+                // changes width when it is toggled — a row that reflows on a press
+                // is a row whose next press lands somewhere else.
+                Some(on) => format!(" [{}] ", if on { "✓" } else { " " }),
+                None => format!(" {} ", item.key),
+            };
+            (lead, item.label.to_string(), item.accel)
+        })
+        .collect();
+    // Only a typed filter gives the sheet a cursor: with nothing typed, the keys
+    // are the selection and a highlight would be a second, competing one.
+    let panel = Panel {
+        crumb: crate::sheet::crumb(sheet.group, &sheet.filter),
+        filter: &sheet.filter,
+        cursor: (!sheet.filter.is_empty()).then_some(sheet.cursor),
+    };
+    draw_panel(frame, area, &panel, rows, theme);
+}
+
+/// The heading and selection of a panel drawn over the list.
+struct Panel<'a> {
+    crumb: String,
+    filter: &'a str,
+    cursor: Option<usize>,
+}
+
+/// Draws a list panel at the bottom of `area`: a rule, the heading, then one
+/// row per `(lead, label, right)`.
+fn draw_panel(
+    frame: &mut Frame,
+    area: Rect,
+    panel: &Panel,
+    rows: Vec<(String, String, &str)>,
+    theme: Theme,
+) {
     let cols = area.width as usize;
     let gutter = crate::layout::GUTTER as usize;
-
-    let height = u16::try_from(hits.len() + 2).unwrap_or(u16::MAX).min(area.height);
-    let panel = Rect {
+    let height = u16::try_from(rows.len() + 2).unwrap_or(u16::MAX).min(area.height);
+    let rect = Rect {
         x: area.x,
         y: area.y + area.height.saturating_sub(height),
         width: area.width,
         height,
     };
-
-    let crumb = crate::sheet::crumb(sheet.group, &sheet.filter);
-    let note = if sheet.filter.is_empty() {
+    let note = if panel.filter.is_empty() {
         "type to search".to_string()
     } else {
-        format!("{} match{}", hits.len(), if hits.len() == 1 { "" } else { "es" })
+        format!("{} match{}", rows.len(), if rows.len() == 1 { "" } else { "es" })
     };
-    let head_gap = cols.saturating_sub(width(&crumb) + width(&note) + gutter * 2);
+    let head_gap = cols.saturating_sub(width(&panel.crumb) + width(&note) + gutter * 2);
     let mut lines = vec![
         Line::styled(
             format!(" {}", "─".repeat(cols.saturating_sub(gutter * 2))),
             theme.style(Tone::Muted),
         ),
         Line::from(vec![
-            Span::styled(format!(" {crumb}"), theme.style(Tone::Accent)),
+            Span::styled(format!(" {}", panel.crumb), theme.style(Tone::Accent)),
             Span::raw(" ".repeat(head_gap)),
             Span::styled(note, theme.style(Tone::Muted)),
             Span::raw(" ".repeat(gutter)),
         ]),
     ];
-
-    for (index, item) in hits.iter().enumerate() {
-        let lead = match item.on {
-            // The box is reserved whether or not it is ticked, so an item never
-            // changes width when it is toggled — a row that reflows on a press
-            // is a row whose next press lands somewhere else.
-            Some(on) => format!(" [{}] ", if on { "✓" } else { " " }),
-            None => format!(" {} ", item.key),
-        };
-        let body = format!("{lead}{}", item.label);
-        let gap = cols.saturating_sub(width(&body) + width(item.accel) + gutter);
+    for (index, (lead, label, right)) in rows.into_iter().enumerate() {
+        let gap = cols.saturating_sub(width(&lead) + width(&label) + width(right) + gutter);
         let mut line = Line::from(vec![
             Span::styled(lead, theme.style(Tone::Accent)),
-            Span::raw(item.label.to_string()),
+            Span::raw(label),
             Span::raw(" ".repeat(gap)),
-            Span::styled(item.accel.to_string(), theme.style(Tone::Muted)),
+            Span::styled(right.to_string(), theme.style(Tone::Muted)),
             Span::raw(" ".repeat(gutter)),
         ]);
-        // Only the picker has a cursor: with nothing typed, the keys are the
-        // selection and a highlight would be a second, competing one.
-        if !sheet.filter.is_empty() && index == sheet.cursor {
+        if panel.cursor == Some(index) {
             line = line.style(theme.selected());
         }
         lines.push(line);
     }
-
-    frame.render_widget(ratatui::widgets::Clear, panel);
-    frame.render_widget(Paragraph::new(lines), panel);
+    frame.render_widget(ratatui::widgets::Clear, rect);
+    frame.render_widget(Paragraph::new(lines), rect);
 }
 
 /// The filter chips: what is narrowing the list beyond the query itself.
@@ -653,6 +688,8 @@ fn push_query(spans: &mut Vec<Span<'static>>, model: &Model, room: usize, style:
 fn touch_hints(model: &Model) -> Vec<&'static str> {
     if model.edit.is_some() {
         vec!["⏎ save", "esc discard"]
+    } else if model.picker.is_some() {
+        vec!["⏎ choose", "esc back"]
     } else if model.detail {
         // The record's hints **follow the selector**: the verb is shown when the
         // row under it has one and this session can actually write. A hint for a
@@ -731,6 +768,8 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     // prior knowledge.
     let hints = if model.edit.is_some() {
         "⏎ save  esc discard"
+    } else if model.picker.is_some() {
+        "↑↓ select  ⏎ choose  type to narrow  esc back"
     } else if model.detail && model.write.ready() {
         "⏎ open file  e edit  esc back  space menu  ^q quit"
     } else if model.detail {

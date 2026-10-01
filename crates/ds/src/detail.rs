@@ -74,10 +74,12 @@ impl Row {
     /// The verb that acts on this row, for the hint line — `None` when nothing
     /// does yet, which is a thing to say rather than a thing to hide.
     #[must_use]
-    pub const fn verb(self) -> Option<&'static str> {
+    pub fn verb(self) -> Option<&'static str> {
         match self {
             Row::Editable(_) => Some("e edit"),
-            Row::Fact(_) | Row::File(_) => None,
+            Row::File(_) => Some("e change"),
+            Row::Fact("files") => Some("e attach"),
+            Row::Fact(_) => None,
         }
     }
 }
@@ -225,6 +227,8 @@ fn render_editable(
     use crate::edit::Field;
     let lit = model.edit.as_ref().is_some_and(|edit| edit.doc == doc.id && edit.field == what);
     match what {
+        // Typed from a file row's picker; never a row of its own.
+        Field::Attach => Vec::new(),
         // The title, and the blank line under it. It carries no label, so being
         // edited is marked on the name itself.
         Field::Name => {
@@ -358,13 +362,14 @@ mod tests {
         }
     }
 
-    /// The selector's hint follows the row: editable rows offer the verb, and
-    /// the ones this build cannot change say nothing rather than offering a key
-    /// that would refuse.
+    /// The hint follows the row: rows `e` can change offer it, and the ones
+    /// this build cannot change say nothing rather than offer a key that would
+    /// refuse.
     #[test]
-    fn only_the_editable_rows_carry_the_verb() {
+    fn only_changeable_rows_carry_the_verb() {
         assert_eq!(Row::Editable(Field::Notes).verb(), Some("e edit"));
+        assert_eq!(Row::File(0).verb(), Some("e change"));
+        assert_eq!(Row::Fact("files").verb(), Some("e attach"));
         assert_eq!(Row::Fact("location").verb(), None);
-        assert_eq!(Row::File(0).verb(), None);
     }
 }

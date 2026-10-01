@@ -451,6 +451,8 @@ pub struct Model {
     pub flash: Option<String>,
     /// Where the next typed character lands in the query, in characters.
     pub query_cursor: usize,
+    /// A choice open over a record row.
+    pub picker: Option<crate::pick::Picker>,
     /// The journal directory that was looked for, when **nothing was there**
     /// yet. The empty list names it, because the first save creates it there —
     /// and a wrong root is better caught before that than after.
@@ -497,6 +499,7 @@ impl Model {
             leader_zone: Zone::default(),
             flash: None,
             query_cursor: 0,
+            picker: None,
             missing_journal: None,
             cols,
             rows_on_screen: rows,
@@ -666,6 +669,75 @@ impl Model {
         self.requery();
     }
 
+    fn open_picker(&mut self, purpose: crate::pick::Purpose) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some(doc) = self.current() else { return Effect::Idle };
+        self.picker = Some(crate::pick::Picker::new(&doc.id, purpose));
+        self.sheet = None;
+        Effect::Redraw
+    }
+
+    fn choose(&mut self, picker: &crate::pick::Picker, choice: crate::pick::Choice) -> Effect {
+        use crate::pick::{Choice, Purpose};
+        self.picker = None;
+        let Some(doc) = self.store.index_of(&picker.doc).map(|i| &self.store.docs[i]) else {
+            return Effect::Redraw;
+        };
+        match (picker.purpose, choice) {
+            (Purpose::File(index), Choice::MakePrimary) => {
+                let files = doc
+                    .files
+                    .iter()
+                    .enumerate()
+                    .map(|(i, file)| crate::FileRef { primary: i == index, ..file.clone() })
+                    .collect::<Vec<_>>();
+                self.write_files(&picker.doc, &files)
+            }
+            (Purpose::File(index), Choice::Detach) => {
+                let mut files = doc.files.clone();
+                if index < files.len() {
+                    files.remove(index);
+                }
+                self.write_files(&picker.doc, &files)
+            }
+            (Purpose::File(_), Choice::Attach) => self.open_edit(crate::edit::Field::Attach),
+        }
+    }
+
+    /// Replaces a document's files list, recording the way back.
+    fn write_files(&mut self, doc: &str, files: &[crate::FileRef]) -> Effect {
+        let set_or_unset = |files: &[crate::FileRef]| {
+            if files.is_empty() {
+                journal::Draft::unset("doc", doc, "files")
+            } else {
+                journal::Draft::set("doc", doc, "files", crate::doc::files_value(files))
+            }
+        };
+        let before =
+            self.store.index_of(doc).map(|i| self.store.docs[i].files.clone()).unwrap_or_default();
+        let forward = vec![set_or_unset(files)];
+        self.pending = Some(Change { forward: forward.clone(), back: vec![set_or_unset(&before)] });
+        self.direction = Direction::Forward;
+        self.pending_anchor = Some(doc.to_string());
+        Effect::Append(forward)
+    }
+
+    /// The files list with `path` attached, or why it cannot be.
+    fn attached(&self, doc: &str, path: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let path = path.as_str().unwrap_or_default().to_string();
+        let mut files =
+            self.store.index_of(doc).map(|i| self.store.docs[i].files.clone()).unwrap_or_default();
+        if files.iter().any(|file| file.path == path) {
+            return Err(format!("{path} is already attached"));
+        }
+        let primary = files.is_empty();
+        files.push(crate::FileRef { label: String::new(), path, primary });
+        Ok(crate::doc::files_value(&files))
+    }
+
     /// `Esc` peels exactly one layer per press (invariant 3).
     ///
     /// The order is REWRITE-UI.md §8's: search, then the pushed surface, then
@@ -673,6 +745,15 @@ impl Model {
     /// soft keyboard is dismissed: every press must consume something visible
     /// before it can ever reach "quit", or the app dies on an IME dismissal.
     fn peel(&mut self, was_armed: bool) -> Effect {
+        if let Some(picker) = &mut self.picker {
+            if picker.filter.is_empty() {
+                self.picker = None;
+            } else {
+                picker.filter.clear();
+                picker.cursor = 0;
+            }
+            return Effect::Redraw;
+        }
         // The sheet peels the same way everything else does — one layer per
         // press, outermost first — so `Esc` never needs a second meaning.
         if let Some(sheet) = &mut self.sheet {
@@ -822,6 +903,12 @@ impl Model {
         let row = rows.get(self.record_cursor.min(rows.len().saturating_sub(1))).copied();
         match (key, row) {
             ('e', Some(crate::detail::Row::Editable(field))) => self.open_edit(field),
+            ('e', Some(crate::detail::Row::File(index))) => {
+                self.open_picker(crate::pick::Purpose::File(index))
+            }
+            ('e', Some(crate::detail::Row::Fact("files"))) => {
+                self.open_edit(crate::edit::Field::Attach)
+            }
             ('e', Some(_)) => {
                 self.flash = Some("that row cannot be edited yet".into());
                 Effect::Redraw
@@ -888,6 +975,7 @@ impl Model {
             crate::edit::Field::Issued => doc.issue_date.clone(),
             crate::edit::Field::Tags => Some(doc.tags.join(" ")),
             crate::edit::Field::Notes => Some(doc.notes.clone()),
+            crate::edit::Field::Attach => None,
         };
         self.edit = Some(crate::edit::Edit::new(doc.id.clone(), field, current.as_deref()));
         self.sheet = None;
@@ -1119,6 +1207,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
     // worker messages still fall through, so nothing is trapped.
     if model.edit.is_some() {
         if let Some(effect) = edit_key(model, &msg) {
+            return effect;
+        }
+    }
+
+    if model.picker.is_some() {
+        if let Some(effect) = picker_key(model, &msg) {
             return effect;
         }
     }
@@ -1422,7 +1516,13 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             if edit.saving {
                 Effect::Idle
             } else {
-                match edit.field.validate(&edit.buffer) {
+                let validated = edit.field.validate(&edit.buffer).and_then(|value| match value {
+                    Some(path) if edit.field == crate::edit::Field::Attach => {
+                        model.attached(&edit.doc, &path).map(Some)
+                    }
+                    other => Ok(other),
+                });
+                match validated {
                     Ok(value) => {
                         // **The id is minted here, not when the edit opened**,
                         // because it is made from the name and the name is what
@@ -1545,6 +1645,45 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             };
             Some(Effect::Redraw)
         }
+        _ => None,
+    }
+}
+
+/// Keys while a picker is open. `None` falls through, so `ctrl+q` and `Esc`
+/// keep their meaning.
+fn picker_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    let picker = model.picker.clone()?;
+    let hits = picker.matching(&model.store);
+    let state = model.picker.as_mut()?;
+    match msg {
+        Msg::Char(c) => {
+            state.filter.push(*c);
+            state.cursor = 0;
+            Some(Effect::Redraw)
+        }
+        Msg::Backspace => {
+            if state.filter.pop().is_none() {
+                model.picker = None;
+            }
+            Some(Effect::Redraw)
+        }
+        Msg::Move(Motion::Up) => {
+            state.cursor = state.cursor.saturating_sub(1);
+            Some(Effect::Redraw)
+        }
+        Msg::Move(Motion::Down) => {
+            state.cursor = (state.cursor + 1).min(hits.len().saturating_sub(1));
+            Some(Effect::Redraw)
+        }
+        Msg::Enter => Some(match hits.get(picker.cursor) {
+            Some(entry) => model.choose(&picker, entry.choice),
+            None => Effect::Idle,
+        }),
+        Msg::Tap { .. } => {
+            model.picker = None;
+            Some(Effect::Redraw)
+        }
+        Msg::Move(_) | Msg::Left | Msg::Right | Msg::Leader | Msg::Scroll(_) => Some(Effect::Idle),
         _ => None,
     }
 }
@@ -2472,6 +2611,123 @@ pub(crate) mod tests {
         assert!(m.filter.expiring && m.filter.old_versions);
         update(&mut m, Msg::ToggleExpiring);
         assert!(!m.filter.expiring && m.filter.old_versions);
+    }
+
+    /// A writable model on COC's record, with a second file linked.
+    fn on_coc_with_two_files() -> Model {
+        let mut m = writable();
+        m.store.docs[0].files.push(FileRef {
+            label: String::new(),
+            path: "Marine/coc-back.pdf".into(),
+            primary: false,
+        });
+        update(&mut m, Msg::Enter);
+        m
+    }
+
+    fn select_row(m: &mut Model, wanted: crate::detail::Row) {
+        let rows = crate::detail::rows(m.current().unwrap());
+        m.record_cursor = rows.iter().position(|row| *row == wanted).expect("the row exists");
+    }
+
+    fn files_written(effect: &Effect) -> Option<serde_json::Value> {
+        let Effect::Append(drafts) = effect else { return None };
+        drafts.iter().find(|d| d.f.as_deref() == Some("files")).and_then(|d| d.val.clone())
+    }
+
+    /// `e` on a file row opens its picker; "make primary" rewrites the list
+    /// with that file primary, and the way back is the list as it was.
+    #[test]
+    fn a_file_row_can_be_made_primary_and_undone() {
+        let mut m = on_coc_with_two_files();
+        select_row(&mut m, crate::detail::Row::File(1));
+        update(&mut m, Msg::Char('e'));
+        assert!(m.picker.is_some());
+        let effect = update(&mut m, Msg::Enter);
+        let written = files_written(&effect).expect("a files write");
+        assert_eq!(written[1]["primary"], true);
+        assert_eq!(written[0]["primary"], false);
+        assert!(m.picker.is_none(), "choosing closes the picker");
+        let back = &m.pending.as_ref().unwrap().back[0];
+        assert_eq!(back.val.as_ref().unwrap()[0]["primary"], true, "undo restores the old primary");
+    }
+
+    /// Detaching the only file clears the field rather than storing `[]`.
+    #[test]
+    fn detaching_the_last_file_unsets_the_list() {
+        let mut m = writable();
+        update(&mut m, Msg::Enter);
+        select_row(&mut m, crate::detail::Row::File(0));
+        update(&mut m, Msg::Char('e'));
+        for c in "detach".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        let Effect::Append(drafts) = update(&mut m, Msg::Enter) else { panic!("no append") };
+        assert_eq!(drafts, [journal::Draft::unset("doc", "coc", "files")]);
+    }
+
+    /// With no file linked, `e` on the files row asks for a path straight
+    /// away, and the first file attached is the primary.
+    #[test]
+    fn attaching_a_first_file_makes_it_primary() {
+        let mut m = writable();
+        for c in "passport".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Enter);
+        select_row(&mut m, crate::detail::Row::Fact("files"));
+        update(&mut m, Msg::Char('e'));
+        assert_eq!(m.edit.as_ref().map(|edit| edit.field), Some(crate::edit::Field::Attach));
+        for c in "Identity\\passport.pdf".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        let written = files_written(&update(&mut m, Msg::Enter)).expect("a files write");
+        assert_eq!(written[0]["path"], "Identity/passport.pdf", "stored POSIX");
+        assert_eq!(written[0]["primary"], true);
+    }
+
+    /// A path already linked is refused, and the typing survives.
+    #[test]
+    fn attaching_a_file_twice_is_refused() {
+        let mut m = on_coc_with_two_files();
+        select_row(&mut m, crate::detail::Row::File(0));
+        update(&mut m, Msg::Char('e'));
+        for c in "attach".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Enter);
+        for c in "Marine/coc.pdf".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "nothing appended");
+        assert!(m.flash.as_deref().unwrap_or_default().contains("already attached"));
+        assert_eq!(m.edit.as_ref().unwrap().buffer, "Marine/coc.pdf");
+    }
+
+    /// `Esc` peels the picker one layer at a time: the typed text, then the
+    /// picker, then the record as usual.
+    #[test]
+    fn esc_peels_the_picker() {
+        let mut m = on_coc_with_two_files();
+        select_row(&mut m, crate::detail::Row::File(1));
+        update(&mut m, Msg::Char('e'));
+        update(&mut m, Msg::Char('d'));
+        update(&mut m, Msg::Esc);
+        assert_eq!(m.picker.as_ref().map(|p| p.filter.as_str()), Some(""));
+        update(&mut m, Msg::Esc);
+        assert!(m.picker.is_none());
+        assert!(m.detail);
+    }
+
+    /// A session that cannot write is told so instead of being shown choices.
+    #[test]
+    fn a_read_only_session_gets_no_picker() {
+        let mut m = model();
+        update(&mut m, Msg::Enter);
+        select_row(&mut m, crate::detail::Row::File(0));
+        update(&mut m, Msg::Char('e'));
+        assert!(m.picker.is_none());
+        assert!(m.flash.is_some());
     }
 
     /// A tap selects, and a tap on the selected row drills, as `Enter` would.

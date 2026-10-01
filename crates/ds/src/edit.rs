@@ -58,6 +58,8 @@ pub enum Field {
     Tags,
     /// Free text.
     Notes,
+    /// A path to link as one more file, relative to the Syncthing root.
+    Attach,
 }
 
 impl Field {
@@ -70,6 +72,7 @@ impl Field {
             Field::Issued => "issue_date",
             Field::Tags => "tags",
             Field::Notes => "notes",
+            Field::Attach => "files",
         }
     }
 
@@ -92,6 +95,7 @@ impl Field {
             Field::Issued => doc.issue_date.clone().map(Into::into),
             Field::Tags => (!doc.tags.is_empty()).then(|| doc.tags.clone().into()),
             Field::Notes => (!doc.notes.is_empty()).then(|| doc.notes.clone().into()),
+            Field::Attach => (!doc.files.is_empty()).then(|| crate::doc::files_value(&doc.files)),
         }
     }
 
@@ -108,6 +112,7 @@ impl Field {
             Field::Issued => "issued",
             Field::Tags => "tags",
             Field::Notes => "notes",
+            Field::Attach => "attach",
         }
     }
 
@@ -147,8 +152,32 @@ impl Field {
                 Ok(Some(value.split_whitespace().map(str::to_string).collect::<Vec<_>>().into()))
             }
             Field::Name | Field::Notes => Ok(Some(value.into())),
+            Field::Attach => relative_path(value).map(|path| Some(path.into())),
         }
     }
+}
+
+/// A typed path as it is stored: POSIX, relative to the Syncthing root.
+///
+/// # Errors
+/// A path that is absolute, names a drive, or climbs out with `..` — none of
+/// which would mean the same thing on the other device.
+pub fn relative_path(typed: &str) -> Result<String, String> {
+    let path = typed.trim().replace('\\', "/");
+    let path = path.trim_start_matches("./");
+    let bytes = path.as_bytes();
+    if path.starts_with('/') || (bytes.len() > 1 && bytes[1] == b':') {
+        return Err(format!("{path:?} is absolute — write it relative to the Syncthing folder"));
+    }
+    let parts: Vec<&str> =
+        path.split('/').filter(|part| !part.is_empty() && *part != ".").collect();
+    if parts.is_empty() {
+        return Err("a file needs a path".into());
+    }
+    if parts.contains(&"..") {
+        return Err(format!("{path:?} leaves the Syncthing folder"));
+    }
+    Ok(parts.join("/"))
 }
 
 /// Whether a string is a calendar date in ISO form.
@@ -320,5 +349,16 @@ mod tests {
         assert!(edit.dirty());
         edit.buffer.push('8');
         assert!(!edit.dirty(), "back to what it was is not an edit");
+    }
+
+    /// A typed path is stored POSIX and relative, or refused with the reason.
+    #[test]
+    fn a_typed_path_must_stay_inside_the_root() {
+        assert_eq!(relative_path(r"Marine\coc.pdf").as_deref(), Ok("Marine/coc.pdf"));
+        assert_eq!(relative_path("./Marine//coc.pdf ").as_deref(), Ok("Marine/coc.pdf"));
+        assert!(relative_path("/home/g/coc.pdf").is_err());
+        assert!(relative_path(r"C:\Users\coc.pdf").is_err());
+        assert!(relative_path("Marine/../../etc").is_err());
+        assert!(relative_path("./").is_err());
     }
 }

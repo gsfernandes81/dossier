@@ -131,9 +131,10 @@ Each is recorded where it belongs; the link is the point of the row.
   confirms it is a real pain point. Do not build it speculatively.
 - **The structured fields' verbs and pickers.** The model is REWRITE.md §4.7 and
   is in the code (versions, latest-only list, bundle entries, place slots,
-  composable filter toggles). Still to build, in order: the place→slot picker,
-  the files editor (typed relative path), new version and the versions view,
-  bundles, multi-select. **Open with the user: the verb names and their
+  composable filter toggles), and the files editor works through `e` on a file
+  row (`pick.rs`, drawn in the Space sheet's panel). Still to build: the
+  place→slot picker (needs a way to create places), new version and the
+  versions view, bundles, multi-select. **Open with the user: the verb names and their
   Space-sheet letters** (filter group and the place verb share `f` today) — do
   not bind new keys before they are chosen. Pickers reuse the Space sheet panel;
   `e` on a structured record row opens that row's picker.

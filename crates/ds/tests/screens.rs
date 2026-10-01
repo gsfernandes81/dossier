@@ -496,6 +496,23 @@ fn a_mid_query_cursor_leaves_the_text_in_place() {
     assert!(!lines[27].contains('█'), "and no block is drawn inside it: {:?}", lines[27]);
 }
 
+/// `e` on a file row draws its picker in the sheet's panel: the file it is
+/// about, then the choices, the first one selected.
+#[test]
+fn a_file_row_picker_draws_in_the_panel() {
+    let mut m = writable(45, 28);
+    let doc = m.store.docs.iter().position(|d| !d.files.is_empty()).expect("a doc with a file");
+    m.cursor = m.rows.iter().position(|&i| i == doc).expect("listed");
+    update(&mut m, Msg::Enter);
+    let rows = ds::detail::rows(m.current().unwrap());
+    m.record_cursor = rows.iter().position(|r| matches!(r, ds::detail::Row::File(0))).unwrap();
+    update(&mut m, Msg::Char('e'));
+    let text = screen(&mut m, 45, 28).join("\n");
+    assert!(text.contains("file "), "the heading names the file: {text}");
+    assert!(text.contains("detach") && text.contains("attach another file"), "{text}");
+    assert!(text.contains("⏎ choose"), "and the hints change with it: {text}");
+}
+
 /// The expiring filter shows its chip, so a filtered list can never be mistaken
 /// for the whole store.
 #[test]

@@ -347,7 +347,7 @@ list, no journal format change.
 | **Place** | `perm_location`, `perm_slot`, `perm_subslot` — a container path; slots are fixed labels, several documents may share one, nothing shifts | — |
 | **Place slots** | `slots: <n>` on the `location` entity; absent when there is no slot to pick | — |
 | **Bundle entry** | `bundles: [{bundle, pin?, file?}]`; a bare id reads as `{bundle}` | an entry without `pin` **follows** to the latest versions of its document, so a new version writes nothing to any bundle; `members(bundle)` resolves them |
-| **Files** | `files: [{label, path, primary}]`, paths relative to the root | `Enter` opens the selected file row's file, else the primary |
+| **Files** | `files: [{label, path, primary}]`, paths relative to the root | `Enter` opens the selected file row's file, else the primary; `e` on a file row picks *make primary* / *detach* / *attach another file*, and on an empty files row asks for a path — POSIX, relative, never leaving the root |
 | **Tags** | `tags: [word]` — free words, chiefly areas like `marine` | searched |
 
 - **The list shows latest documents only.** Older versions and bundles join it

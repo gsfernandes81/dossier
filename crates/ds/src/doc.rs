@@ -228,23 +228,7 @@ impl Doc {
         push("perm_location", self.location.clone().map(Into::into));
         push("perm_slot", self.slot.map(Into::into));
         push("perm_subslot", self.subslot.map(Into::into));
-        push(
-            "files",
-            (!self.files.is_empty()).then(|| {
-                Value::Array(
-                    self.files
-                        .iter()
-                        .map(|file| {
-                            serde_json::json!({
-                                "label": file.label,
-                                "path": file.path,
-                                "primary": file.primary,
-                            })
-                        })
-                        .collect(),
-                )
-            }),
-        );
+        push("files", (!self.files.is_empty()).then(|| files_value(&self.files)));
         fields
     }
 
@@ -290,6 +274,19 @@ pub struct Location {
     pub notes: String,
     /// How many slots it has; `None` when it has none to choose from.
     pub slots: Option<u32>,
+}
+
+/// The journal value of a files list.
+#[must_use]
+pub fn files_value(files: &[FileRef]) -> Value {
+    Value::Array(
+        files
+            .iter()
+            .map(|file| {
+                serde_json::json!({ "label": file.label, "path": file.path, "primary": file.primary })
+            })
+            .collect(),
+    )
 }
 
 /// The journal value of a bundles list.

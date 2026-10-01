@@ -80,6 +80,7 @@ pub mod input;
 pub mod layout;
 pub mod load;
 pub mod open;
+pub mod pick;
 pub mod scans;
 pub mod search;
 pub mod sheet;
