@@ -60,19 +60,14 @@ fn key_msg(key: KeyEvent) -> Option<Msg> {
     // namespace, and `alt+s` mirrors `s` while a field is being typed into.
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
-        // `ctrl+c` always quits cleanly and is never bound over (REWRITE-UI.md §3).
+        // Never bound over: `ctrl+c` must always quit cleanly.
         KeyCode::Char('c' | 'q') if ctrl => Some(Msg::Quit),
-        // `ctrl+e` edits the highlighted document's expiry (R4).
-        //
-        // A *control* letter and not a bare one, deliberately. Detail may bind
-        // letters (REWRITE-UI.md §2), but detail is not always what has focus:
-        // on a wide terminal the record is a split beside the list and the list
         KeyCode::Char('t') if ctrl => Some(Msg::ToggleScans),
         KeyCode::Char('x') if ctrl => Some(Msg::ToggleExpiring),
         KeyCode::Esc => Some(Msg::Esc),
         KeyCode::Enter => Some(Msg::Enter),
-        KeyCode::Right => Some(Msg::OpenDetail),
-        KeyCode::Left => Some(Msg::CloseDetail),
+        KeyCode::Right => Some(Msg::Right),
+        KeyCode::Left => Some(Msg::Left),
         KeyCode::Up => Some(Msg::Move(Motion::Up)),
         KeyCode::Down => Some(Msg::Move(Motion::Down)),
         KeyCode::PageUp => Some(Msg::Move(Motion::PageUp)),

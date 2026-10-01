@@ -98,7 +98,8 @@ Each is recorded where it belongs; the link is the point of the row.
 | Twelve-documents-at-45×28 is superseded by the measured sizes | swept through `layout.rs`, `find.rs`, `screens.rs`, REWRITE-UI |
 | The writer opens lazily, on the first append — never at launch | `main.rs::writer_session` |
 | A save re-folds; it never patches the `Store` in place | `main.rs::write_loop` |
-| The edit verb is `ctrl+e`, not a bare letter — the list has focus in the split | `input.rs` |
+| Editing is `e` on the record's selected row | `Model::record_verb` |
+| `Enter` drills, `Esc` peels; `←`/`→` move the query cursor; `Home`/`End` follow the query | REWRITE-UI §5b |
 | Editing is off, with a reason, rather than absent — `WriteState` | `app.rs` |
 
 ### Open — needs the user, or needs a phase
@@ -114,11 +115,6 @@ Each is recorded where it belongs; the link is the point of the row.
   rest of the minibuffer work rides on it: folding the match count into the
   entry line, and letting the prompt change with the question so `:` has
   somewhere to land. Drawn in `docs/dev/mockups/minibuffer.py`.
-- **The verb pair revision** — `Enter` drills, `Esc` peels, arrows move the
-  query cursor. **Approved and deliberately deferred**; the plan is REWRITE-UI
-  §5b and the amendment markers are on REWRITE.md §4.5 invariants 2 and 6. Its
-  one prerequisite — a selection on the detail surface — **now exists** (slice
-  2), so what is left is the key routing and the Home/End resolution.
 - **The arrow modifier tier** (`ctrl`/`alt` + arrows) — reserved, unbound, and
   now unlikely to be used: the same argument that retired `ctrl+e` applies to it.
   Reachable by thumb, teachable by nothing.

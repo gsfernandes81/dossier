@@ -457,7 +457,7 @@ fn undoing_a_delete_restores_every_field() {
     let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
     let before = model.store.docs.iter().find(|d| d.id == "coc").expect("the document").clone();
 
-    update(&mut model, Msg::OpenDetail);
+    update(&mut model, Msg::Enter);
     update(&mut model, Msg::Char('d'));
     let Effect::Append(drafts) = update(&mut model, Msg::Char('d')) else {
         panic!("the second d must ask for an append");

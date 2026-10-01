@@ -207,7 +207,7 @@ fn the_phone_screen_matches_the_approved_mockup() {
     // query, then the count and hints. Both rows are the keyboard target.
     // Status line above, entry line last — Vim's arrangement, and fzf's.
     assert!(lines[26].trim_start().starts_with("14/14"), "matched/total: {:?}", lines[26]);
-    assert!(lines[26].contains("⏎ open"), "the hint line teaches the verbs");
+    assert!(lines[26].contains("⏎ record"), "the hint line teaches the verbs");
     assert!(lines[26].contains("^x expiry") && lines[26].contains("^t scans"));
     assert!(lines[27].starts_with(" > █"), "the query row is last: {:?}", lines[27]);
     assert!(lines[27].contains("SPC"), "and carries the leader chip: {:?}", lines[27]);
@@ -265,7 +265,7 @@ fn the_desktop_screen_is_single_line_rows() {
 #[test]
 fn detail_splits_wide_and_pushes_narrow() {
     let mut wide = model(100, 26);
-    update(&mut wide, Msg::OpenDetail);
+    update(&mut wide, Msg::Enter);
     let lines = screen(&mut wide, 100, 26);
     assert!(lines[1].starts_with("▸ Motorcycle Insurance"), "the list is still there");
     assert!(
@@ -276,7 +276,7 @@ fn detail_splits_wide_and_pushes_narrow() {
     assert!(lines.iter().any(|l| l.contains("expiry")), "the record's fields");
 
     let mut narrow = model(45, 28);
-    update(&mut narrow, Msg::OpenDetail);
+    update(&mut narrow, Msg::Enter);
     let lines = screen(&mut narrow, 45, 28);
     assert!(lines[1].contains("Motorcycle Insurance"), "title: {:?}", lines[1]);
     assert!(!lines[3].contains("RC Book"), "the list is covered, not squeezed");
@@ -284,7 +284,7 @@ fn detail_splits_wide_and_pushes_narrow() {
     // On touch it is the *buttons* that change with the surface — the hint line
     // carries only what they do not (`esc`, `^q`), which is why it can be short
     // enough to share a row with the count.
-    assert!(lines[26].contains("◀ back"), "the hints changed with the surface: {:?}", lines[26]);
+    assert!(lines[26].contains("esc back"), "the hints changed with the surface: {:?}", lines[26]);
 }
 
 /// Below the floor the app says so instead of drawing something broken.
@@ -412,7 +412,7 @@ fn a_monochrome_run_loses_the_band_but_not_the_row() {
     let (lines, _) = render_with(&mut m, 45, 28, Theme { color: false });
     assert!(lines[27].contains("Type to search"), "the words still say it: {:?}", lines[27]);
     assert!(lines[27].contains("SPC"), "and the button is still there");
-    assert!(lines[26].contains("⏎ open"), "and the status line still reads: {:?}", lines[26]);
+    assert!(lines[26].contains("⏎ record"), "and the status line still reads: {:?}", lines[26]);
 }
 
 /// **The touch layout has one button, and it says what it is for.**
@@ -481,6 +481,20 @@ fn typing_narrows_the_list_and_the_count() {
     assert!(lines[26].trim_start().starts_with("1/14"), "matched/total: {:?}", lines[26]);
 }
 
+/// Moving the cursor into the query never shifts the text: the cursor is a
+/// reversed cell over a character, and `█` only past the end.
+#[test]
+fn a_mid_query_cursor_leaves_the_text_in_place() {
+    let mut m = model(45, 28);
+    for c in "coc".chars() {
+        update(&mut m, Msg::Char(c));
+    }
+    update(&mut m, Msg::Left);
+    let lines = screen(&mut m, 45, 28);
+    assert!(lines[27].contains(" coc "), "the text is unbroken: {:?}", lines[27]);
+    assert!(!lines[27].contains('█'), "and no block is drawn inside it: {:?}", lines[27]);
+}
+
 /// The expiring filter shows its chip, so a filtered list can never be mistaken
 /// for the whole store.
 #[test]
@@ -544,7 +558,7 @@ fn a_long_note_hangs_under_its_column() {
     store.docs[0].notes =
         "Revalidation booked at MMD, slot 14 Oct. Bring originals and two photographs.".into();
     let mut m = Model::new(store, "2026-10-20".into(), "2027-01-18".into(), 45, 28);
-    update(&mut m, Msg::OpenDetail);
+    update(&mut m, Msg::Enter);
     let lines = screen(&mut m, 45, 28);
 
     let first = lines.iter().position(|l| l.contains("notes")).expect("the notes field");
@@ -609,14 +623,14 @@ fn the_record_marks_the_field_being_edited() {
 #[test]
 fn the_edit_hint_appears_only_when_this_session_can_write() {
     let mut readonly = model(100, 26);
-    update(&mut readonly, Msg::OpenDetail);
+    update(&mut readonly, Msg::Enter);
     let hints = screen(&mut readonly, 100, 26).join("\n");
-    assert!(!hints.contains("^e"), "a read-only session is not offered an edit");
+    assert!(!hints.contains("e edit"), "a read-only session is not offered an edit");
 
     let mut writing = writable(100, 26);
-    update(&mut writing, Msg::OpenDetail);
+    update(&mut writing, Msg::Enter);
     let hints = screen(&mut writing, 100, 26).join("\n");
-    assert!(hints.contains("^e"), "and a writing one is: {hints}");
+    assert!(hints.contains("e edit"), "and a writing one is: {hints}");
 }
 
 /// A dirty edit says what the second `Esc` will do, in the armed tone the quit
@@ -652,7 +666,7 @@ fn the_editor_survives_no_color() {
 #[test]
 fn the_record_selector_is_drawn_where_it_is() {
     let mut m = model(47, 24);
-    update(&mut m, Msg::OpenDetail);
+    update(&mut m, Msg::Enter);
 
     // It opens on the name, which is the first row and now an editable one.
     let first = modifier_columns(&mut m, 47, 24, 1, ratatui::style::Modifier::REVERSED);

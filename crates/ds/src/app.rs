@@ -80,14 +80,14 @@ pub enum Msg {
     /// A bare printable character. On the Find surface every one of these is
     /// search text (invariant 1) — the surface binds no letter keys at all.
     Char(char),
-    /// Rub out the last character of the query.
+    /// Rubs out the character before the query cursor.
     Backspace,
-    /// `Enter` — open the file (invariant 2).
+    /// `Enter` — drills one layer: the list into the record, the record into a file.
     Enter,
-    /// `→` — open the record.
-    OpenDetail,
-    /// `←` — close it again.
-    CloseDetail,
+    /// `←` — moves the query cursor one character left.
+    Left,
+    /// `→` — moves the query cursor one character right.
+    Right,
     /// Cursor movement.
     Move(Motion),
     /// `Esc` — peel exactly one layer (invariant 3).
@@ -441,6 +441,8 @@ pub struct Model {
     pub leader_zone: Zone,
     /// A transient one-line message, cleared by the next key.
     pub flash: Option<String>,
+    /// Where the next typed character lands in the query, in characters.
+    pub query_cursor: usize,
     /// The journal directory that was looked for, when **nothing was there**
     /// yet. The empty list names it, because the first save creates it there —
     /// and a wrong root is better caught before that than after.
@@ -486,6 +488,7 @@ impl Model {
             count_zone: Zone::default(),
             leader_zone: Zone::default(),
             flash: None,
+            query_cursor: 0,
             missing_journal: None,
             cols,
             rows_on_screen: rows,
@@ -597,20 +600,59 @@ impl Model {
     /// there is nothing to open, so it falls through to the record — which is
     /// the useful thing to do next, and is why this verb can be pressed blind
     /// after typing three characters.
-    fn activate(&mut self) -> Effect {
+    /// Goes one layer deeper: from the list into the record, from the record
+    /// into the selected file row's file, or the primary file on any other row.
+    fn drill(&mut self) -> Effect {
         let Some(doc) = self.current() else {
             self.flash = Some("nothing to open".into());
             return Effect::Redraw;
         };
-        let Some(file) = doc.primary_file() else {
-            let name = doc.name.clone();
-            self.flash = Some(format!("no file linked — showing the record for {name}"));
+        if !self.detail {
             self.detail = true;
+            self.record_cursor = 0;
+            return Effect::Redraw;
+        }
+        let rows = crate::detail::rows(doc);
+        let file = match rows.get(self.record_cursor.min(rows.len().saturating_sub(1))) {
+            Some(crate::detail::Row::File(index)) => doc.files.get(*index),
+            _ => doc.primary_file(),
+        };
+        let Some(file) = file else {
+            self.flash = Some(format!("no file linked to {}", doc.name));
             return Effect::Redraw;
         };
         let path = file.path.clone();
         self.flash = Some(format!("opening {path}"));
         Effect::Open(path)
+    }
+
+    /// Moves the query cursor, clamped to the query. Idle when it cannot move.
+    fn query_cursor_to(&mut self, position: usize) -> Effect {
+        let position = position.min(self.query.chars().count());
+        if position == self.query_cursor {
+            return Effect::Idle;
+        }
+        self.query_cursor = position;
+        Effect::Redraw
+    }
+
+    fn type_char(&mut self, c: char) {
+        self.query_cursor = self.query_cursor.min(self.query.chars().count());
+        self.query.insert(byte_index(&self.query, self.query_cursor), c);
+        self.query_cursor += 1;
+        self.requery();
+    }
+
+    fn rub_out(&mut self) {
+        self.query_cursor = self.query_cursor.min(self.query.chars().count());
+        if self.query_cursor == 0 {
+            return;
+        }
+        let start = byte_index(&self.query, self.query_cursor - 1);
+        let end = byte_index(&self.query, self.query_cursor);
+        self.query.replace_range(start..end, "");
+        self.query_cursor -= 1;
+        self.requery();
     }
 
     /// `Esc` peels exactly one layer per press (invariant 3).
@@ -636,6 +678,7 @@ impl Model {
         }
         if !self.query.is_empty() {
             self.query.clear();
+            self.query_cursor = 0;
             self.requery();
         } else if self.detail {
             self.detail = false;
@@ -1026,6 +1069,11 @@ impl Model {
 }
 
 /// Apply one message. The only entry point to state change.
+/// The byte offset of the `chars`-th character, or the end of `text`.
+fn byte_index(text: &str, chars: usize) -> usize {
+    text.char_indices().nth(chars).map_or(text.len(), |(index, _)| index)
+}
+
 #[allow(clippy::too_many_lines)] // One flat table of rules reads better than five helpers.
 pub fn update(model: &mut Model, msg: Msg) -> Effect {
     // A key press means the user is at the keyboard, so the IME affordance has
@@ -1169,15 +1217,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.sheet = Some(SheetState::default());
             Effect::Redraw
         }
-        Msg::Enter => model.activate(),
-        Msg::OpenDetail => {
-            model.detail = true;
-            model.record_cursor = 0;
-            Effect::Redraw
+        Msg::Enter => model.drill(),
+        Msg::Left | Msg::Right if model.detail => Effect::Idle,
+        Msg::Left => model.query_cursor_to(model.query_cursor.saturating_sub(1)),
+        Msg::Right => model.query_cursor_to(model.query_cursor + 1),
+        // Home and End belong to the query once there is one, and to the list
+        // until then — the same rule that makes Space the leader.
+        Msg::Move(Motion::Home) if !model.detail && !model.query.is_empty() => {
+            model.query_cursor_to(0)
         }
-        Msg::CloseDetail => {
-            model.detail = false;
-            Effect::Redraw
+        Msg::Move(Motion::End) if !model.detail && !model.query.is_empty() => {
+            model.query_cursor_to(usize::MAX)
         }
         // **The record owns `↑`/`↓` while it is open.** They used to move the
         // list cursor underneath it, so the record silently became a different
@@ -1192,9 +1242,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             Effect::Redraw
         }
         Msg::Backspace => {
-            if model.query.pop().is_some() {
-                model.requery();
-            }
+            model.rub_out();
             Effect::Redraw
         }
         // Find-fast (invariant 1): a bare printable starts the search and the
@@ -1211,8 +1259,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         Msg::Char(c) if model.detail => model.record_verb(c),
         Msg::Char(' ') if model.query.is_empty() => update(model, Msg::Leader),
         Msg::Char(c) => {
-            model.query.push(c);
-            model.requery();
+            model.type_char(c);
             Effect::Redraw
         }
         // `ctrl+t` on the browse surface. The modifier combination Termux's
@@ -1302,11 +1349,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                     model.raise_keyboard()
                 }
             } else if let Some(index) = model.row_at(row) {
-                // Tap selects; a tap on the already-selected row opens
-                // (invariant 6). Two taps, never a double-tap timer — timing
-                // gestures are miserable on a laggy terminal.
+                // Two taps, never a double-tap timer: timing gestures are
+                // miserable on a laggy terminal.
                 if index == model.cursor {
-                    model.activate()
+                    model.drill()
                 } else {
                     model.cursor = index;
                     Effect::Redraw
@@ -1433,16 +1479,13 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
                 return Some(Effect::Redraw);
             }
         }
-        // Swallowed: they belong to the list, and the list is not what is being
-        // edited. `Home`/`End` come back as text motions with §5b's query
-        // cursor, which is when this arm gets something to do.
-        // Pressing the verb again from inside its own editor must not reseed
-        // the buffer — that would throw away typing with a key that reads like
-        // it should do nothing.
+        // Swallowed: the edit buffer has no cursor of its own yet, and these
+        // would otherwise act on the list or query under the editor. Pressing
+        // the verb again must not reseed the buffer and lose the typing.
         Msg::EditField(_)
         | Msg::Move(_)
-        | Msg::OpenDetail
-        | Msg::CloseDetail
+        | Msg::Left
+        | Msg::Right
         | Msg::Leader
         | Msg::Tap { .. }
         | Msg::Scroll(_) => Effect::Idle,
@@ -1490,11 +1533,6 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
                 Msg::Move(Motion::Up) => state.cursor.saturating_sub(1),
                 _ => (state.cursor + 1).min(last),
             };
-            Some(Effect::Redraw)
-        }
-        // `←` closes the sheet, matching what it does to a record.
-        Msg::CloseDetail => {
-            model.sheet = None;
             Some(Effect::Redraw)
         }
         _ => None,
@@ -1951,7 +1989,7 @@ pub(crate) mod tests {
     #[test]
     fn redo_with_nothing_undone_says_so() {
         let mut m = writable();
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         assert_eq!(update(&mut m, Msg::Char('r')), Effect::Redraw);
         assert!(m.flash.as_deref().is_some_and(|say| say.contains("nothing to redo")));
     }
@@ -1978,7 +2016,7 @@ pub(crate) mod tests {
     #[test]
     fn delete_takes_two_presses_and_names_what_it_would_remove() {
         let mut m = writable();
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
 
         assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw, "the first press only asks");
         assert!(m.delete_armed);
@@ -1998,7 +2036,7 @@ pub(crate) mod tests {
     #[test]
     fn any_other_key_disarms_a_pending_delete() {
         let mut m = writable();
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         update(&mut m, Msg::Char('d'));
         assert!(m.delete_armed);
 
@@ -2015,7 +2053,7 @@ pub(crate) mod tests {
         let mut m = writable();
         m.store.docs[0].tags = vec!["marine".into()];
         m.store.docs[0].notes = "the one with the stamp".into();
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         let expected = m.current().expect("a document").as_fields().len();
 
         update(&mut m, Msg::Char('d'));
@@ -2039,7 +2077,7 @@ pub(crate) mod tests {
     #[test]
     fn delete_is_refused_with_a_reason_when_the_session_cannot_write() {
         let mut m = model();
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         update(&mut m, Msg::Char('d'));
         assert!(!m.delete_armed, "it did not even arm");
         assert!(m.flash.is_some());
@@ -2050,7 +2088,7 @@ pub(crate) mod tests {
     #[test]
     fn undo_is_refused_with_a_reason_when_the_session_cannot_write() {
         let mut m = model();
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         update(&mut m, Msg::Char('u'));
         assert!(m.flash.is_some());
     }
@@ -2228,32 +2266,131 @@ pub(crate) mod tests {
         assert_eq!(m.current().unwrap().id, "coc");
     }
 
-    /// **Cold start → type → `Enter` → open, in five keystrokes** (the R-UI
-    /// acceptance check). Four here, and the fifth is spare.
+    /// Cold start to an open file is five keystrokes for a three-letter query:
+    /// type, `Enter` into the record, `Enter` into its file.
     #[test]
-    fn four_keystrokes_open_a_file_from_a_cold_start() {
+    fn five_keystrokes_open_a_file_from_a_cold_start() {
         let mut m = model();
-        let keys = [Msg::Char('e'), Msg::Char('n'), Msg::Char('g'), Msg::Enter];
-        let mut opened = None;
-        for key in keys {
-            if let Effect::Open(path) = update(&mut m, key) {
-                opened = Some(path);
-            }
-        }
+        let keys = [Msg::Char('e'), Msg::Char('n'), Msg::Char('g'), Msg::Enter, Msg::Enter];
+        let opened = keys.into_iter().find_map(|key| match update(&mut m, key) {
+            Effect::Open(path) => Some(path),
+            _ => None,
+        });
         assert_eq!(opened.as_deref(), Some("Marine/eng1.pdf"));
     }
 
-    /// **`Enter` never dies** (invariant 2). No file linked is not an error; it
-    /// is a reason to show the record.
+    /// `Enter` and `Esc` are inverses: each drills or peels exactly one layer.
     #[test]
-    fn enter_falls_through_to_the_record_when_there_is_no_file() {
+    fn enter_drills_one_layer_and_esc_peels_it() {
+        let mut m = model();
+        update(&mut m, Msg::Move(Motion::Down));
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
+        assert!(m.detail, "the list drills into the record, never straight to a file");
+        update(&mut m, Msg::Esc);
+        assert!(!m.detail);
+        assert_eq!(m.cursor, 1, "and the list is where it was");
+    }
+
+    /// With no file, `Enter` on the record says so and stays put.
+    #[test]
+    fn enter_on_a_record_without_a_file_says_so() {
         let mut m = model();
         for c in "passport".chars() {
             update(&mut m, Msg::Char(c));
         }
+        update(&mut m, Msg::Enter);
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "no open effect, and no panic");
-        assert!(m.detail, "it fell through to the record");
+        assert!(m.detail);
         assert!(m.flash.unwrap().contains("no file linked"));
+    }
+
+    /// On a file row `Enter` opens that file; on any other row, the primary.
+    #[test]
+    fn enter_opens_the_file_row_it_is_on() {
+        let mut m = model();
+        m.store.docs[0].files.push(FileRef {
+            label: "back".into(),
+            path: "Marine/coc-back.pdf".into(),
+            primary: false,
+        });
+        update(&mut m, Msg::Enter);
+        let rows = crate::detail::rows(m.current().unwrap());
+        m.record_cursor =
+            rows.iter().position(|row| *row == crate::detail::Row::File(1)).expect("a file row");
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Open("Marine/coc-back.pdf".into()));
+        m.record_cursor = 0;
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Open("Marine/coc.pdf".into()));
+    }
+
+    /// `←` and `→` move through the query, and typing lands at the cursor.
+    #[test]
+    fn arrows_move_the_query_cursor_and_typing_lands_there() {
+        let mut m = model();
+        update(&mut m, Msg::Char('c'));
+        update(&mut m, Msg::Char('c'));
+        update(&mut m, Msg::Left);
+        update(&mut m, Msg::Char('o'));
+        assert_eq!((m.query.as_str(), m.query_cursor), ("coc", 2));
+        assert_eq!(m.current().unwrap().id, "coc");
+
+        update(&mut m, Msg::Backspace);
+        assert_eq!((m.query.as_str(), m.query_cursor), ("cc", 1), "it rubs out before the cursor");
+        assert_eq!(update(&mut m, Msg::Right), Effect::Redraw);
+        assert_eq!(update(&mut m, Msg::Right), Effect::Idle, "the end is the end");
+    }
+
+    /// Multibyte characters are one cursor step each.
+    #[test]
+    fn the_query_cursor_counts_characters_not_bytes() {
+        let mut m = model();
+        for c in "né".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Left);
+        update(&mut m, Msg::Char('x'));
+        assert_eq!(m.query, "nxé");
+        update(&mut m, Msg::Right);
+        update(&mut m, Msg::Backspace);
+        assert_eq!(m.query, "nx");
+    }
+
+    /// `Home`/`End` jump within a query, and jump the list when there is none.
+    #[test]
+    fn home_and_end_follow_the_query() {
+        let mut m = model();
+        update(&mut m, Msg::Move(Motion::End));
+        assert_eq!(m.cursor, m.rows.len() - 1, "an empty query leaves them to the list");
+
+        for c in "co".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        let cursor = m.cursor;
+        update(&mut m, Msg::Move(Motion::Home));
+        assert_eq!(m.query_cursor, 0);
+        update(&mut m, Msg::Move(Motion::End));
+        assert_eq!(m.query_cursor, 2);
+        assert_eq!(m.cursor, cursor, "the list did not move");
+    }
+
+    /// Clearing the query with `Esc` puts the cursor back at the start.
+    #[test]
+    fn peeling_the_query_resets_its_cursor() {
+        let mut m = model();
+        update(&mut m, Msg::Char('c'));
+        update(&mut m, Msg::Esc);
+        assert_eq!(m.query_cursor, 0);
+        update(&mut m, Msg::Char('e'));
+        assert_eq!(m.query, "e");
+    }
+
+    /// On the record the arrows are inert: there is no query to move through.
+    #[test]
+    fn arrows_do_nothing_on_the_record() {
+        let mut m = model();
+        update(&mut m, Msg::Enter);
+        assert_eq!(update(&mut m, Msg::Left), Effect::Idle);
+        assert_eq!(update(&mut m, Msg::Right), Effect::Idle);
+        assert!(m.detail, "`←` no longer closes the record; `Esc` does");
     }
 
     /// **Esc peels exactly one layer per press** (invariant 3), in the order
@@ -2262,7 +2399,7 @@ pub(crate) mod tests {
     fn esc_peels_one_layer_at_a_time_and_quits_only_at_the_end() {
         let mut m = model();
         update(&mut m, Msg::Char('c'));
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
 
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw);
         assert!(m.query.is_empty(), "first press cleared the search");
@@ -2291,19 +2428,17 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw, "arms again rather than quitting");
     }
 
-    /// **Tap selects; a tap on the selected row opens** (invariant 6) — two
-    /// taps, no double-tap timer.
+    /// A tap selects, and a tap on the selected row drills, as `Enter` would.
     #[test]
-    fn tap_then_tap_opens() {
+    fn tap_then_tap_drills() {
         let mut m = model();
         m.list = ListGeometry { top: 1, height: 24, row_height: 2 };
         // Row 1 of the list is the second document (two screen lines each).
         assert_eq!(update(&mut m, Msg::Tap { col: 5, row: 3 }), Effect::Redraw);
         assert_eq!(m.cursor, 1);
-        assert_eq!(
-            update(&mut m, Msg::Tap { col: 5, row: 3 }),
-            Effect::Open("Marine/eng1.pdf".into())
-        );
+        assert!(!m.detail);
+        assert_eq!(update(&mut m, Msg::Tap { col: 5, row: 3 }), Effect::Redraw);
+        assert!(m.detail);
     }
 
     /// A tap on empty space below the last row changes nothing at all — and
@@ -2445,7 +2580,7 @@ pub(crate) mod tests {
         let mut m = model();
         crate::find::draw_for_test(&mut m, 45, 28);
         let zone = m.count_zone;
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         crate::find::draw_for_test(&mut m, 45, 28);
 
         update(&mut m, Msg::Tap { col: zone.col, row: 0 });
@@ -2461,7 +2596,7 @@ pub(crate) mod tests {
     fn arrows_move_the_record_selector_and_not_the_list() {
         let mut m = model();
         let before = m.cursor;
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         assert_eq!(m.record_cursor, 0, "drilling in starts at the top");
 
         update(&mut m, Msg::Move(Motion::Down));
@@ -2479,7 +2614,7 @@ pub(crate) mod tests {
     #[test]
     fn the_record_selector_cannot_run_off_either_end() {
         let mut m = model();
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         update(&mut m, Msg::Move(Motion::Up));
         assert_eq!(m.record_cursor, 0);
 
@@ -2496,7 +2631,7 @@ pub(crate) mod tests {
     #[test]
     fn letters_are_verbs_on_the_record_not_query_text() {
         let mut m = model();
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         update(&mut m, Msg::Char('z'));
         assert!(m.query.is_empty(), "nothing reached the query");
         assert!(m.flash.is_some(), "and an unknown verb says so rather than doing nothing");
@@ -2508,7 +2643,7 @@ pub(crate) mod tests {
     fn e_edits_the_selected_row_and_says_so_when_it_cannot() {
         let mut m = model();
         m.write = WriteState::Ready { device: "desk".into() };
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         let rows = crate::detail::rows(m.current().unwrap());
         let expiry = rows
             .iter()
@@ -2539,7 +2674,7 @@ pub(crate) mod tests {
     fn the_sheet_offers_the_record_verb_too() {
         let mut m = model();
         m.write = WriteState::Ready { device: "desk".into() };
-        update(&mut m, Msg::OpenDetail);
+        update(&mut m, Msg::Enter);
         m.record_cursor = crate::detail::rows(m.current().unwrap())
             .iter()
             .position(|row| matches!(row, crate::detail::Row::Editable(crate::edit::Field::Expiry)))

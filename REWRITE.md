@@ -292,20 +292,13 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
 
 1. **Find-fast**: a bare printable typed anywhere on the browse surface starts a
    search (first character kept); the surface binds **no letter keys**. Cold start →
-   type → `Enter` → file open, ≤ 5 keystrokes.
-2. **The verb pair**: `Enter` opens the **file**, `→` opens the **record/detail** —
-   applied by row kind everywhere (*amended 2026-09-29:* the list shows documents
-   only — files appear on the filing card and the record's file rows, never as
-   list rows); `Enter` never mutates and never dies (falls through to the record when
-   there's no file).
-
-   > **Amendment approved 2026-08-20, not yet implemented — see REWRITE-UI.md
-   > §5b.** The pair becomes **`Enter` drills one layer, `Esc` peels one layer**
-   > (exact inverses), freeing `←`/`→` to move the cursor inside the query.
-   > Invariant 6 follows it (tap-on-selected drills), and invariant 1's
-   > five-keystroke budget is met exactly rather than with margin. Deferred until
-   > the port is more full-featured: the drill chain's far end needs a selection
-   > on the detail surface, which R4 builds.
+   file open is five keystrokes for a three-character query: type, `Enter`, `Enter`.
+2. **The verb pair**: **`Enter` drills one layer, `Esc` peels one layer** — exact
+   inverses. On the list `Enter` opens the record; on the record it opens the
+   selected file row's file, or the primary file from any other row. `Enter` never
+   mutates. `←`/`→` move the cursor inside the query; `Home`/`End` jump within a
+   non-empty query and jump the list when it is empty (REWRITE-UI.md §5b). The
+   list shows documents only.
 3. **Esc peels exactly one layer per press**; at base state it arms, second
    consecutive Esc quits; any other key disarms. Termux's IME-dismiss Esc must never
    quit spuriously.
@@ -315,7 +308,7 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
    (`!`/`~`) alongside optional glyphs; sort keys with explicit tiebreakers so order
    never jitters.
 6. **Touch/Termux**: SGR mouse on; first tap selects, tap-on-selected opens
-   (**drills**, once the invariant-2 amendment above lands);
+   (drills, exactly as `Enter` does);
    the ⌨/search affordance momentarily drops mouse mode so the next tap raises the
    IME, restored on submit/blur. Mouse mode owns scrolling (Termux #4302).
 7. **Never block the render thread**: tree walks, syncthing polls, journal compaction

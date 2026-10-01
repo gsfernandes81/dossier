@@ -13,7 +13,7 @@ Miller three-column implementation itself is **not** ported (REWRITE.md D12).
 |---|---|
 | U1 | **Single list + drill-down stack.** One full-width searchable list is the base surface; every other surface pushes onto a back-stack and `Esc` pops. No persistent multi-pane home. |
 | U2 | **No location group headers.** The list is flat; location is per-row data and a *filter*, never a header row or a pane. |
-| U3 | **Detail is a sticky toggle.** `→` opens detail; on wide terminals it splits beside the list and follows the cursor until closed; on narrow it is a full-screen push. |
+| U3 | **Detail is a sticky toggle.** `Enter` opens detail; on wide terminals it splits beside the list and follows the cursor until closed; on narrow it is a full-screen push. |
 | U4 | **Command drill-down, very limited hotkeys.** Secondary surfaces are reached via `:` commands; letter hotkeys exist only for the most common tasks, and never on the base list (which is type-to-search). |
 
 ## 1. The base surface: Find
@@ -50,13 +50,13 @@ The app *is* a finder that happens to have management surfaces behind it.
   Each count names its `:` command; on touch, tapping a count jumps there.
 - **Footer**: 3–5 hints for *this* surface, `?` for the full reference. Per-surface
   hints only — never another surface's verbs (v2's `check_action` lesson).
-- **Verbs**: `Enter` opens the file, `→` opens detail (invariant 2). No letter
+- **Verbs**: `Enter` drills into the record, and again into its file (§5b). No letter
   bindings on this surface at all — the v2 find-fast rule, which also satisfies U4.
 
 ## 2. Detail (U3)
 
-- `→` opens detail for the highlighted row. **Wide (≥ ~100 cols)**: a right split
-  (~45%), list keeps focus, detail follows the cursor; `Esc` (or `←`) closes it.
+- `Enter` opens detail for the highlighted row. **Wide (≥ ~100 cols)**: a right split
+  (~45%), list keeps focus, detail follows the cursor; `Esc` closes it.
   **Narrow**: full-screen push; `Esc` pops back to the list, cursor preserved.
 - Detail is the **only editing surface** (v2 Phase 4 conclusion stands): every field
   inline — name, dates, location/slot with neighbour-shift, tags (flat), bundle
@@ -310,65 +310,25 @@ The reasoning, the alternatives and the arithmetic are in
 *The Leader Key*, *Space Without a Spacebar*, *The Empty Field*, and
 *Find at 47×45* for the finished screens.
 
-## 5b · The verb pair, revised — approved, deferred
+## 5b · The verb pair
 
-**Approved by the user (2026-08-20). Not implemented, and deliberately not
-scheduled yet: it lands once the port is more full-featured, because two of its
-four parts want surfaces R4 has not built.**
+Drilling and peeling share one axis, and the arrows belong to the query:
 
-Today drilling is on one axis (`→`/`←`) and peeling on another (`Esc`), and
-`Enter` does a third thing. The revision collapses that to one axis:
+| | key |
+|---|---|
+| drill one layer (list → record → file) | `Enter` |
+| peel one layer | `Esc` |
+| move the query cursor | `←` `→` |
+| ends of the query, or of the list when the query is empty | `Home` `End` |
+| list jumps, unconditionally | `PgUp` `PgDn` |
 
-| | now | after |
-|---|---|---|
-| drill one layer | `→` | **`Enter`** |
-| peel one layer | `Esc` | `Esc` (unchanged) |
-| open the file | `Enter` | `Enter` again, from inside the record |
-| move the text cursor | — | **`←` `→`** |
-
-**`Enter` and `Esc` become exact inverses.** That is the whole argument: one
-axis instead of two, and it frees the arrow pair for the thing a phone actually
-needs — positioning a cursor in the query, which is miserable by tapping and
-which the app does not hit-test inside the field at all.
-
-It also retires a special case. Invariant 2's *"`Enter` never dies, falls
-through to the record when there's no file"* exists only because `Enter` skips
-the record; once it always goes there first, the fallthrough has nothing to do.
-
-### What it changes in REWRITE.md §4.5
-
-- **Invariant 2** is rewritten: the verb pair becomes `Enter` drills / `Esc`
-  peels. This is the binding invariant the change exists to amend.
-- **Invariant 6** follows it: tap-on-selected *drills* rather than opens, or
-  touch and keyboard diverge.
-- **Invariant 1's budget survives, with nothing to spare.** "Cold start → type →
-  `Enter` → file open, ≤ 5 keystrokes" becomes `c-o-c-⏎-⏎` — exactly five. A
-  four-character query would break it, so the budget's wording should say
-  *five keystrokes for a three-character query* rather than pretend to a margin
-  it no longer has.
-
-### `Home` / `End`
-
-They are list jumps today, and on the phone they are the swipe-ups on `◀`/`▶` —
-the very keys becoming cursor keys. Once `←`/`→` move through text, `Home`/`End`
-must mean the ends of the query.
-
-**Resolution: let the query decide**, the same rule that makes `Space` the
-leader. Empty query → they jump the list; non-empty → they jump within the text.
-One rule to learn rather than two. `PgUp`/`PgDn` keep the list jumps
-unconditionally and long-pressing `▲`/`▼` still repeats, so nothing becomes
-unreachable.
-
-### Why it waits
-
-The work is one change, not two — rebinding without a query cursor leaves
-`←`/`→` doing nothing at all, which is a regression with no upside. And the
-query cursor is the bulk of it: a position beside `Model::query`, insert and
-delete at that position, and the block cursor drawn where it *is* rather than
-always at the end.
-
-The part that genuinely needs R4 is the far end of the drill chain. `Enter`
-inside a record opens the primary file, which works now; but the record has no
-cursor, so "drill into the file you are looking at" cannot exist until the
-detail surface has a selection. Building the rebinding first would ship a chain
-whose last link is hardcoded.
+- **`Enter` and `Esc` are exact inverses**, which frees the arrow pair for what a
+  phone needs: positioning a cursor in the query, which tapping cannot do.
+- **On the record, `Enter` opens the file row it is on**, or the primary file from
+  any other row. With no file it says so and stays on the record.
+- **Tap-on-selected drills**, so touch and keyboard agree.
+- **`Home`/`End` follow the query**, the same rule that makes `Space` the leader:
+  on the phone they are the swipe-ups on `◀`/`▶`, the keys that move the cursor.
+- **The cursor never shifts the text**: it is a reversed cell over the character it
+  sits on, and `█` only past the end.
+- The edit buffer's cursor stays at the end; arrows are swallowed while editing.

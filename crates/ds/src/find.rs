@@ -457,14 +457,13 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         let tail = format!("{count} ");
         let prompt = " > ";
         let span = cols.saturating_sub(width(prompt) + width(&tail));
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(prompt, theme.style(Tone::Accent)),
-                Span::raw(fit(&format!("{}{}█", model.query, chips(model)), span)),
-                Span::styled(tail, theme.style(Tone::Muted)),
-            ])),
-            area,
-        );
+        let chips = chips(model);
+        let mut line = vec![Span::styled(prompt, theme.style(Tone::Accent))];
+        let used =
+            push_query(&mut line, model, span.saturating_sub(width(&chips)), Style::default());
+        line.push(Span::raw(fit(&chips, span.saturating_sub(used))));
+        line.push(Span::styled(tail, theme.style(Tone::Muted)));
+        frame.render_widget(Paragraph::new(Line::from(line)), area);
         return;
     }
 
@@ -540,7 +539,9 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
             field.push(Span::styled(" ".repeat(span.saturating_sub(3 + width(invite))), under));
         }
     } else {
-        field.push(Span::styled(fit(&format!(" {}█", model.query), span), under));
+        field.push(Span::styled(" ", under));
+        let used = 1 + push_query(&mut field, model, span.saturating_sub(1), under);
+        field.push(Span::styled(" ".repeat(span.saturating_sub(used)), under));
     }
     field.push(Span::styled(
         key,
@@ -594,11 +595,9 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 /// The entry line while a field is being edited: the field's own prompt, what
 /// has been typed, and the block cursor.
 ///
-/// The prompt is the field's name rather than `>`, which is the minibuffer's
-/// whole trick — one row that says which question it is asking. The cursor is
-/// the same `█` the query uses, drawn at the end because that is where typing
-/// goes; a cursor that can be moved through the text arrives with REWRITE-UI.md
-/// §5b's query cursor, and both get it from the same mechanism when it does.
+/// The prompt is the field's name rather than `>`, so the row says which
+/// question it is asking. Unlike the query, the buffer's cursor is always at
+/// the end.
 fn edit_row(edit: &crate::edit::Edit, cols: usize) -> Line<'static> {
     let prompt = format!(" {}: ", edit.prompt());
     let room = cols.saturating_sub(width(&prompt) + 1);
@@ -618,6 +617,38 @@ fn edit_row(edit: &crate::edit::Edit, cols: usize) -> Line<'static> {
     ])
 }
 
+/// Pushes the query with its cursor, cut to `room` columns around the cursor,
+/// and returns the columns used.
+///
+/// The cursor is a reversed cell over the character it sits on, or a `█` past
+/// the end, so moving it never shifts the text.
+fn push_query(spans: &mut Vec<Span<'static>>, model: &Model, room: usize, style: Style) -> usize {
+    let chars: Vec<char> = model.query.chars().collect();
+    let at = model.query_cursor.min(chars.len());
+    let mut before: Vec<char> = chars[..at].to_vec();
+    let under = chars.get(at).copied();
+    let mut after: Vec<char> = chars.get(at + 1..).map(<[char]>::to_vec).unwrap_or_default();
+    let text = |part: &[char]| part.iter().collect::<String>();
+    let cell = under.map_or_else(|| "█".to_string(), String::from);
+    let total =
+        |before: &[char], after: &[char]| width(&text(before)) + width(&cell) + width(&text(after));
+    while total(&before, &after) > room && !after.is_empty() {
+        after.pop();
+    }
+    while total(&before, &after) > room && !before.is_empty() {
+        before.remove(0);
+    }
+    let used = total(&before, &after);
+    spans.push(Span::styled(text(&before), style));
+    spans.push(if under.is_some() {
+        Span::styled(cell, style.add_modifier(Modifier::REVERSED))
+    } else {
+        Span::styled(cell, style)
+    });
+    spans.push(Span::styled(text(&after), style));
+    used
+}
+
 /// The hints a touch layout shows, most sheddable first.
 fn touch_hints(model: &Model) -> Vec<&'static str> {
     if model.edit.is_some() {
@@ -629,7 +660,7 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
         // what a per-field control key forced — one key advertised everywhere,
         // working in one place.
         let verb = model.write.ready().then(|| selected_row(model)).flatten();
-        let mut hints = vec!["◀ back", "⏎ open file"];
+        let mut hints = vec!["esc back", "⏎ open file"];
         hints.extend(verb.and_then(crate::detail::Row::verb));
         // Offered only once there is something to take back, and likewise for
         // the way forward. A hint on a session that has written nothing teaches
@@ -648,7 +679,7 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
         }
         hints
     } else {
-        vec!["⏎ open", "^x expiry", "^t scans"]
+        vec!["⏎ record", "^x expiry", "^t scans"]
     }
 }
 
@@ -701,11 +732,11 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     let hints = if model.edit.is_some() {
         "⏎ save  esc discard"
     } else if model.detail && model.write.ready() {
-        "⏎ open  ^e edit expiry  ← close  esc back  ^q quit"
+        "⏎ open file  e edit  esc back  space menu  ^q quit"
     } else if model.detail {
-        "⏎ open  ← close  esc back  ^q quit"
+        "⏎ open file  esc back  space menu  ^q quit"
     } else {
-        "space menu  ⏎ open  → detail  ^x expiring  ^t scans  ^q quit"
+        "space menu  ⏎ record  ^x expiring  ^t scans  ^q quit"
     };
     (hints.into(), Tone::Muted)
 }
