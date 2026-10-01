@@ -62,19 +62,33 @@ fn synthetic_lines() -> Vec<String> {
     lines
 }
 
+/// Timed runs per measurement; the fastest is the one compared.
+const RUNS: usize = 5;
+
 /// Folding a full-sized store must stay far inside the startup budget.
 #[test]
 fn folding_50k_ops_stays_within_the_budget() {
     let raw = synthetic_lines();
     assert_eq!(raw.len(), DOCS * OPS_PER_DOC);
 
-    let parse_start = Instant::now();
-    let lines: Vec<Line> = raw.iter().map(|line| parse_line(line)).collect();
-    let parse = parse_start.elapsed();
+    // Best of several runs: noise on a shared runner only ever adds time, while
+    // an algorithmic regression shows in every run. One sample on the Windows
+    // runner has swung from 36 ms to 55 ms between identical commits.
+    let mut parse = std::time::Duration::MAX;
+    let mut lines: Vec<Line> = Vec::new();
+    for _ in 0..RUNS {
+        let start = Instant::now();
+        lines = raw.iter().map(|line| parse_line(line)).collect();
+        parse = parse.min(start.elapsed());
+    }
 
-    let fold_start = Instant::now();
-    let state = fold(&lines);
-    let fold_time = fold_start.elapsed();
+    let mut fold_time = std::time::Duration::MAX;
+    let mut state = fold(&lines);
+    for _ in 0..RUNS {
+        let start = Instant::now();
+        state = fold(&lines);
+        fold_time = fold_time.min(start.elapsed());
+    }
 
     assert_eq!(state.entities.len(), DOCS);
     assert_eq!(state.stats.folded, DOCS * OPS_PER_DOC);
