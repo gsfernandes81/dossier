@@ -333,6 +333,36 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
   no `unsafe` (there is no need at this scale — a CI deny).
 - Each `journal` invariant test states the invariant in a sentence first.
 
+### 4.7 The document model
+
+Every relationship is its own field on the `doc` entity, stored on the document's
+side, so two devices editing different relationships of one document — or the same
+relationship of different documents — never write the same field. No generic edge
+list, no journal format change.
+
+| Concept | Stored as | Derived |
+|---|---|---|
+| **Version** | `supersedes: <older id>` on the newer version | **latest** = a version nothing supersedes; `versions(id)` walks both ways, oldest first, cycle-guarded |
+| **Kind** | `kind: "bundle"` on a bundle; absent on a document | — |
+| **Place** | `perm_location`, `perm_slot`, `perm_subslot` — a container path; slots are fixed labels, several documents may share one, nothing shifts | — |
+| **Place slots** | `slots: <n>` on the `location` entity; absent when there is no slot to pick | — |
+| **Bundle entry** | `bundles: [{bundle, pin?, file?}]`; a bare id reads as `{bundle}` | an entry without `pin` **follows** to the latest versions of its document, so a new version writes nothing to any bundle; `members(bundle)` resolves them |
+| **Files** | `files: [{label, path, primary}]`, paths relative to the root | `Enter` opens the selected file row's file, else the primary |
+| **Tags** | `tags: [word]` — free words, chiefly areas like `marine` | searched |
+
+- **The list shows latest documents only.** Older versions and bundles join it
+  only through their filter toggles, which compose with the expiring toggle.
+- **Expiry is per version.** Each version keeps its own dates and shows its own
+  validity; the **watch, the header count and the expiring filter follow the
+  latest version only**, never a bundle.
+- **Two latest versions of one document** can only come from an offline
+  duplicate. Both stay listed; merging them is the merge verb's job.
+- **A bundle** is a record — name, notes, optional date — hidden from the list
+  and from the expiring count by default. Search on its name finds its members,
+  including the latest version reached by a following entry.
+- **New version** copies name, tags and place; dates, files and notes start
+  empty, and the new record supersedes the old.
+
 ## 5. The Python satellite (`dossier-lab`)
 
 - **Keeps** (moves under a `service`-oriented CLI, e.g. `ds-lab`): VLM scan +

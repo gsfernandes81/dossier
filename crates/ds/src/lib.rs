@@ -89,5 +89,5 @@ pub mod theme;
 pub mod wsl;
 
 pub use app::{update, Effect, Model, Msg};
-pub use doc::{Doc, FileRef, Location, Status, Store};
+pub use doc::{Doc, FileRef, Kind, Location, Member, Membership, Status, Store};
 pub use theme::Theme;

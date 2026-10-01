@@ -123,7 +123,7 @@ impl Report {
                     malformed: file.malformed,
                 })
                 .collect(),
-            docs: store.docs.len(),
+            docs: store.listed(),
             tracked,
             expired,
             soon,
@@ -290,6 +290,7 @@ mod tests {
         Doc {
             id: id.into(),
             name: id.into(),
+            kind: crate::Kind::Document,
             tags: Vec::new(),
             bundles: Vec::new(),
             issue_date: None,

@@ -145,7 +145,7 @@ fn draw_too_small(frame: &mut Frame, area: Rect, theme: Theme) {
 fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let wide = area.width >= 72;
     let attention = model.attention_count();
-    let total = model.store.docs.len();
+    let total = model.store.listed();
     let touch = crate::layout::touch_layout(area.width);
     let left = " dossier";
     let docs = format!("{total} docs  ");
@@ -423,7 +423,7 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
 /// The filter chips: what is narrowing the list beyond the query itself.
 fn chips(model: &Model) -> String {
     let mut chips = String::new();
-    if model.filter == Filter::Expiring {
+    if model.filter == Filter::EXPIRING {
         chips.push_str("  [expiring]");
     }
     match model.scan_search {
@@ -443,7 +443,7 @@ fn chips(model: &Model) -> String {
 /// decoration: the whole block is the keyboard target, and one terminal row is
 /// too small a thing to ask a thumb to hit against the screen edge.
 fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
-    let count = format!("{}/{}", model.rows.len(), model.store.docs.len());
+    let count = format!("{}/{}", model.rows.len(), model.store.listed());
     let cols = area.width as usize;
     let gutter = crate::layout::GUTTER as usize;
     let touch = area.height > 1;

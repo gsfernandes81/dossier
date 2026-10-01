@@ -261,14 +261,22 @@ impl Default for WriteState {
     }
 }
 
-/// Which documents the list is showing.
+/// What narrows or widens the list beyond the query. The toggles combine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Filter {
-    /// Everything, in shelf order.
-    #[default]
-    All,
-    /// Only documents in the expiry watch, soonest first (`:expiring`).
-    Expiring,
+pub struct Filter {
+    /// Only documents in the expiry watch, soonest first.
+    pub expiring: bool,
+    /// Older versions as well as the latest.
+    pub old_versions: bool,
+    /// Bundles as well as documents.
+    pub bundles: bool,
+}
+
+impl Filter {
+    /// No toggle on: the latest version of every document, in shelf order.
+    pub const ALL: Self = Self { expiring: false, old_versions: false, bundles: false };
+    /// Only what the expiry watch is tracking.
+    pub const EXPIRING: Self = Self { expiring: true, ..Self::ALL };
 }
 
 /// Whether `ctrl+t` is on, and whether the text it needs has arrived.
@@ -466,7 +474,7 @@ impl Model {
             query: String::new(),
             scan_search: ScanSearch::Off,
             scans: None,
-            filter: Filter::All,
+            filter: Filter::ALL,
             rows: Vec::new(),
             cursor: 0,
             offset: 0,
@@ -533,10 +541,7 @@ impl Model {
     /// haystacks — R0.2 measured 0.33 ms for filter-plus-repaint at store scale
     /// on the phone, which is why there is no index and no debounce.
     fn requery(&mut self) {
-        let base = match self.filter {
-            Filter::All => None,
-            Filter::Expiring => Some(self.store.expiring()),
-        };
+        let base = self.filter.expiring.then(|| self.store.expiring());
         let mut matched = self.store.search(&self.query);
         // `ctrl+t` widens the haystack rather than replacing it: a document
         // whose *name* matches must never drop out of the list because its scan
@@ -562,6 +567,12 @@ impl Model {
                 matched.sort_unstable();
             }
         }
+        let filter = self.filter;
+        matched.retain(|&i| {
+            let doc = &self.store.docs[i];
+            (filter.old_versions || !doc.superseded)
+                && (filter.bundles || doc.kind == crate::doc::Kind::Document)
+        });
         self.rows = match base {
             None => matched,
             Some(expiring) if self.query.is_empty() => expiring,
@@ -682,8 +693,8 @@ impl Model {
             self.requery();
         } else if self.detail {
             self.detail = false;
-        } else if self.filter != Filter::All {
-            self.filter = Filter::All;
+        } else if self.filter != Filter::ALL {
+            self.filter = Filter::ALL;
             self.requery();
         } else if was_armed {
             return Effect::Quit;
@@ -751,7 +762,7 @@ impl Model {
             }
             crate::sheet::Act::Clear => {
                 self.sheet = None;
-                self.filter = Filter::All;
+                self.filter = Filter::ALL;
                 self.scan_search = ScanSearch::Off;
                 self.cursor = 0;
                 self.offset = 0;
@@ -1299,8 +1310,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             Effect::Redraw
         }
         Msg::ToggleExpiring => {
-            model.filter =
-                if model.filter == Filter::Expiring { Filter::All } else { Filter::Expiring };
+            model.filter = Filter { expiring: !model.filter.expiring, ..model.filter };
             model.cursor = 0;
             model.offset = 0;
             model.requery();
@@ -1585,6 +1595,7 @@ pub(crate) mod tests {
         Doc {
             id: id.into(),
             name: name.into(),
+            kind: crate::Kind::Document,
             tags: Vec::new(),
             bundles: Vec::new(),
             issue_date: None,
@@ -2428,6 +2439,41 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw, "arms again rather than quitting");
     }
 
+    /// The default list is the latest version of each document: an older
+    /// version and a bundle stay out until their toggle brings them in.
+    #[test]
+    fn the_list_shows_latest_documents_unless_a_toggle_widens_it() {
+        let mut m = model();
+        m.store.docs[2].superseded = true;
+        m.store.docs[3].kind = crate::Kind::Bundle;
+        m.requery();
+        let shown =
+            |m: &Model| m.rows.iter().map(|&i| m.store.docs[i].id.clone()).collect::<Vec<_>>();
+        assert_eq!(shown(&m), ["coc", "eng1"]);
+
+        m.filter.old_versions = true;
+        m.requery();
+        assert!(shown(&m).contains(&"passport".to_string()));
+        m.filter.bundles = true;
+        m.requery();
+        assert_eq!(m.rows.len(), 4);
+
+        update(&mut m, Msg::Esc);
+        assert_eq!(m.filter, Filter::ALL, "Esc clears every toggle in one peel");
+        assert_eq!(shown(&m), ["coc", "eng1"]);
+    }
+
+    /// The expiring toggle composes with the others instead of replacing them.
+    #[test]
+    fn toggles_compose() {
+        let mut m = model();
+        m.filter.old_versions = true;
+        update(&mut m, Msg::ToggleExpiring);
+        assert!(m.filter.expiring && m.filter.old_versions);
+        update(&mut m, Msg::ToggleExpiring);
+        assert!(!m.filter.expiring && m.filter.old_versions);
+    }
+
     /// A tap selects, and a tap on the selected row drills, as `Enter` would.
     #[test]
     fn tap_then_tap_drills() {
@@ -2480,18 +2526,18 @@ pub(crate) mod tests {
             let mut m = model();
             crate::find::draw_for_test(&mut m, 45, 28);
             update(&mut m, Msg::Tap { col, row: 0 });
-            assert_eq!(m.filter, Filter::Expiring, "col {col} filters");
+            assert_eq!(m.filter, Filter::EXPIRING, "col {col} filters");
             // A toggle, not a jump: the second tap peels it off, exactly as
             // `ctrl+x` does.
             update(&mut m, Msg::Tap { col, row: 0 });
-            assert_eq!(m.filter, Filter::All, "col {col} toggles back");
+            assert_eq!(m.filter, Filter::ALL, "col {col} toggles back");
         }
 
         // A column outside it is not a button.
         let mut m = model();
         crate::find::draw_for_test(&mut m, 45, 28);
         update(&mut m, Msg::Tap { col: zone.col - 1, row: 0 });
-        assert_eq!(m.filter, Filter::All);
+        assert_eq!(m.filter, Filter::ALL);
     }
 
     /// A keyboard layout has no touch affordances, so its zones are empty and
@@ -2540,7 +2586,7 @@ pub(crate) mod tests {
         for c in [' ', 'f', 'x'] {
             update(&mut m, Msg::Char(c));
         }
-        assert_eq!(m.filter, Filter::Expiring);
+        assert_eq!(m.filter, Filter::EXPIRING);
         assert!(m.sheet.is_none(), "running an item closes the sheet");
     }
 
@@ -2554,7 +2600,7 @@ pub(crate) mod tests {
         let sheet = m.sheet.clone().expect("still open while filtering");
         assert_eq!(sheet.filter, "exp", "the letters became a search, not keys");
         update(&mut m, Msg::Enter);
-        assert_eq!(m.filter, Filter::Expiring);
+        assert_eq!(m.filter, Filter::EXPIRING);
     }
 
     /// The sheet peels one layer per `Esc`, like everything else on the surface.
@@ -2584,7 +2630,7 @@ pub(crate) mod tests {
         crate::find::draw_for_test(&mut m, 45, 28);
 
         update(&mut m, Msg::Tap { col: zone.col, row: 0 });
-        assert_eq!(m.filter, Filter::All, "the count is not a button here");
+        assert_eq!(m.filter, Filter::ALL, "the count is not a button here");
         assert_eq!(update(&mut m, Msg::Tap { col: 3, row: 26 }), Effect::Idle);
         assert!(m.mouse_on, "and the field did not drop reporting either");
     }
@@ -2757,9 +2803,9 @@ pub(crate) mod tests {
         assert_eq!(m.rows.len(), 1, "search narrows inside the filter");
 
         update(&mut m, Msg::Esc);
-        assert_eq!(m.filter, Filter::Expiring, "the first peel took the search");
+        assert_eq!(m.filter, Filter::EXPIRING, "the first peel took the search");
         update(&mut m, Msg::Esc);
-        assert_eq!(m.filter, Filter::All);
+        assert_eq!(m.filter, Filter::ALL);
         assert_eq!(m.rows.len(), 4);
     }
 
@@ -2807,7 +2853,7 @@ pub(crate) mod tests {
         let many: Vec<Doc> =
             (0..50).map(|i| doc(&format!("d{i}"), &format!("Doc {i}"), None, None)).collect();
         m.store = Store { docs: many, ..Store::default() };
-        m.filter = Filter::All;
+        m.filter = Filter::ALL;
         m.query.clear();
         m.requery();
         update(&mut m, Msg::Scroll(10));

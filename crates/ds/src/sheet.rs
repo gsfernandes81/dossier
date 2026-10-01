@@ -114,7 +114,7 @@ pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
         ],
         Some('f') => vec![
             Item {
-                on: Some(model.filter == Filter::Expiring),
+                on: Some(model.filter == Filter::EXPIRING),
                 accel: "^x",
                 ..item('x', "expiring only", Act::Expiring)
             },
@@ -171,7 +171,7 @@ mod tests {
         let off = items(Some('f'), &model);
         assert_eq!(off[0].on, Some(false), "expiring is off and still listed");
 
-        model.filter = Filter::Expiring;
+        model.filter = Filter::EXPIRING;
         let on = items(Some('f'), &model);
         assert_eq!(on[0].on, Some(true));
         assert_eq!(off.len(), on.len(), "the sheet does not change shape when a filter flips");

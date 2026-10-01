@@ -167,7 +167,9 @@ fn render_row(
         Row::Editable(what) => render_editable(what, doc, model, inner, theme),
         Row::Fact("location") => vec![field("location", &nonempty(doc.place()), inner, theme)],
         Row::Fact("bundles") => {
-            vec![field("bundles", &nonempty(doc.bundles.join(" · ")), inner, theme)]
+            let names: Vec<&str> =
+                doc.bundles.iter().map(|entry| model.store.name_of(&entry.bundle)).collect();
+            vec![field("bundles", &nonempty(names.join(" · ")), inner, theme)]
         }
         Row::Fact("files") => vec![field("files", "none", inner, theme)],
         // One line each, with the primary marked — the file `Enter` opens is the

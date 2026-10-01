@@ -1,7 +1,9 @@
 # The model rethink — edges, chains, bundles
 
-**Status: design in progress. Nothing here is implemented, and nothing here should
-be implemented without the user.** R4's verb set is complete (create, edit, undo,
+**The document model as decided is REWRITE.md §4.7**, and it wins where this
+note differs — in particular, relationships stay separate per-field values
+rather than one edge list, and "chains" are called *versions*. **Nothing here
+should be implemented without the user.** R4's verb set is complete (create, edit, undo,
 redo, delete) and the port is deliberately paused at that point.
 
 This note exists because the plan below R4 was never really *designed*. §8's

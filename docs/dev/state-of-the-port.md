@@ -129,15 +129,14 @@ Each is recorded where it belongs; the link is the point of the row.
   run: the glyph row and dim-on-band — still assumptions.)*
 - **The succession reversal** on the filing card — deferred until the user
   confirms it is a real pain point. Do not build it speculatively.
-- **The structured fields** — slots with insert-and-shift, supersession, bundle
-  membership, file attach/detach/primary — plus settings ops and `ds reset`.
-  Creating, editing, undo/redo and delete are done; these are what is left, and
-  each needs a picker rather than a text buffer (a slot move shifts its
-  neighbours; `bundles`/`renews` are memberships of another entity, not values).
-  **Do not start these without the user.** They asked to stop after delete and
-  think about what a tool like this actually needs — the standard being *"as
-  simple at base yet as versatile as git"* — and named the pickers specifically
-  as something to decide the shape of before building.
+- **The structured fields' verbs and pickers.** The model is REWRITE.md §4.7 and
+  is in the code (versions, latest-only list, bundle entries, place slots,
+  composable filter toggles). Still to build, in order: the place→slot picker,
+  the files editor (typed relative path), new version and the versions view,
+  bundles, multi-select. **Open with the user: the verb names and their
+  Space-sheet letters** (filter group and the place verb share `f` today) — do
+  not bind new keys before they are chosen. Pickers reuse the Space sheet panel;
+  `e` on a structured record row opens that row's picker.
 - **The model rethink is under way in
   [`model-rethink.md`](model-rethink.md)** — edges instead of four membership
   mechanisms, succession chains instead of a document taxonomy, the list showing

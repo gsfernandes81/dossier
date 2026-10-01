@@ -82,6 +82,7 @@ fn sample_store() -> Store {
         .map(|(id, name, location, slot, tag, expiry, file)| Doc {
             id: (*id).into(),
             name: (*name).into(),
+            kind: ds::Kind::Document,
             tags: vec![(*tag).into()],
             bundles: Vec::new(),
             issue_date: None,
@@ -501,7 +502,7 @@ fn a_mid_query_cursor_leaves_the_text_in_place() {
 fn the_expiring_filter_is_visible_in_the_bar() {
     let mut m = model(45, 28);
     update(&mut m, Msg::ToggleExpiring);
-    assert_eq!(m.filter, Filter::Expiring);
+    assert_eq!(m.filter, Filter::EXPIRING);
     let lines = screen(&mut m, 45, 28);
     assert!(lines[26].contains("[expiring]"), "the chip: {:?}", lines[26]);
     assert!(lines[1].contains("Motorcycle Insurance"), "soonest first: {:?}", lines[1]);
