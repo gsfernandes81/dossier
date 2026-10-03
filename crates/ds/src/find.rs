@@ -361,6 +361,10 @@ fn two_line_row(
 /// not rendered until its filter is already on — so it could turn one off and
 /// never on.
 fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+    if let Some(picker) = &model.locpick {
+        draw_locpick(frame, area, model, picker, theme);
+        return;
+    }
     if let Some(picker) = &model.picker {
         let hits = picker.matching(&model.store);
         let rows = hits.iter().map(|entry| ("   ".to_string(), entry.label.clone(), "")).collect();
@@ -396,6 +400,207 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
         cursor: (!sheet.filter.is_empty()).then_some(sheet.cursor),
     };
     draw_panel(frame, area, &panel, rows, theme);
+}
+
+/// The location picker: a three-row heading, then the tree.
+///
+/// Full screen in the single-pane layout; over the bottom of the view when the
+/// terminal splits.
+fn draw_locpick(
+    frame: &mut Frame,
+    area: Rect,
+    model: &Model,
+    picker: &crate::locpick::LocationPicker,
+    theme: Theme,
+) {
+    let store = &model.store;
+    let cols = area.width as usize;
+    let (mut head, current) = locpick_heading(store, picker, cols, theme);
+    let rows = picker.rows(store);
+    let cursor_row =
+        rows.iter().position(|row| row.target().as_ref() == Some(&picker.cursor)).unwrap_or(0);
+    let full = !crate::layout::splits(area.width);
+    let room = (area.height as usize).saturating_sub(head.len());
+    let offset = cursor_row.saturating_sub(room.saturating_sub(1));
+    for (index, row) in rows.iter().enumerate().skip(offset).take(room) {
+        let mut line = tree_line(store, picker, row, current.as_deref(), cols, theme);
+        if index == cursor_row {
+            line = line.style(theme.selected());
+        }
+        head.push(line);
+    }
+    let height = if full {
+        area.height
+    } else {
+        u16::try_from(head.len()).unwrap_or(u16::MAX).min(area.height)
+    };
+    let rect = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(height),
+        width: area.width,
+        height,
+    };
+    frame.render_widget(ratatui::widgets::Clear, rect);
+    frame.render_widget(Paragraph::new(head), rect);
+}
+
+/// The location picker's three heading rows between rules, and the location
+/// the subject is in now.
+fn locpick_heading(
+    store: &crate::Store,
+    picker: &crate::locpick::LocationPicker,
+    cols: usize,
+    theme: Theme,
+) -> (Vec<Line<'static>>, Option<String>) {
+    use crate::locpick::Mode;
+    use crate::place::HardCopy;
+    let gutter = crate::layout::GUTTER as usize;
+    let rule = || {
+        Line::styled(
+            format!(" {}", "─".repeat(cols.saturating_sub(gutter * 2))),
+            theme.style(Tone::Muted),
+        )
+    };
+    let current = match &picker.mode {
+        Mode::File(doc) => {
+            store.index_of(doc).and_then(|i| match store.hard_copy(&store.docs[i]) {
+                HardCopy::At(id) => Some(id.to_string()),
+                HardCopy::Unfiled | HardCopy::DigitalOnly => None,
+            })
+        }
+        Mode::Move(moving) => store.locations.parent(moving).map(str::to_string),
+    };
+    let (crumb, subject, kind, now) = match &picker.mode {
+        Mode::File(doc) => {
+            let doc = store.index_of(doc).map(|i| &store.docs[i]);
+            let now = match doc.map(|doc| store.hard_copy(doc)) {
+                Some(HardCopy::At(id)) => store.locations.path(id),
+                Some(HardCopy::DigitalOnly) => "digital only".into(),
+                Some(HardCopy::Unfiled) | None => "unfiled".into(),
+            };
+            ("SPC l  location", doc.map_or("", |doc| doc.name.as_str()), "document", now)
+        }
+        Mode::Move(moving) => {
+            let name = store.locations.get(moving).map_or("", |l| l.name.as_str());
+            let now = current
+                .as_deref()
+                .map_or_else(|| "top level".into(), |id| store.locations.path(id));
+            ("SPC m  move…", name, "physical location", now)
+        }
+    };
+    let kind_cols = width(kind) + gutter;
+    let head = vec![
+        rule(),
+        Line::styled(format!(" {crumb}"), theme.style(Tone::Accent)),
+        Line::from(vec![
+            Span::styled(
+                format!(" {}", fit(subject, cols.saturating_sub(kind_cols + 2))),
+                theme.style(Tone::Title),
+            ),
+            Span::raw(" "),
+            Span::styled(kind.to_string(), theme.style(Tone::Muted)),
+        ]),
+        Line::styled(
+            format!(" now: {}", crate::layout::truncate_left(&now, cols.saturating_sub(7))),
+            theme.style(Tone::Muted),
+        ),
+        rule(),
+    ];
+
+    (head, current)
+}
+
+/// One row of the location tree.
+fn tree_line(
+    store: &crate::Store,
+    picker: &crate::locpick::LocationPicker,
+    row: &crate::locpick::Row,
+    current: Option<&str>,
+    cols: usize,
+    theme: Theme,
+) -> Line<'static> {
+    use crate::locpick::Row;
+    let gutter = crate::layout::GUTTER as usize;
+    match row {
+        Row::Root => {
+            let label = picker
+                .root
+                .as_deref()
+                .map_or_else(|| "locations".into(), |id| store.locations.path(id));
+            Line::styled(
+                format!(" {}", crate::layout::truncate_left(&label, cols.saturating_sub(2))),
+                theme.style(Tone::Title),
+            )
+        }
+        Row::Location { id, lead, open, .. } => {
+            let name = store.locations.get(id).map_or("", |l| l.name.as_str());
+            let chevron = match open {
+                Some(true) => "▾ ",
+                Some(false) => "▸ ",
+                None => "  ",
+            };
+            let right = if current == Some(id.as_str()) {
+                "now".to_string()
+            } else if *open == Some(true) {
+                String::new()
+            } else {
+                let used = 1 + width(lead) + 2 + width(name) + 1 + gutter;
+                count(store, picker, id, cols.saturating_sub(used))
+            };
+            let room = cols.saturating_sub(1 + width(lead) + 2 + width(&right) + 1 + gutter);
+            let name = truncate(name, room);
+            let gap =
+                cols.saturating_sub(1 + width(lead) + 2 + width(&name) + width(&right) + gutter);
+            Line::from(vec![
+                Span::styled(format!(" {lead}"), theme.style(Tone::Muted)),
+                Span::styled(chevron, theme.style(Tone::Accent)),
+                Span::raw(name),
+                Span::raw(" ".repeat(gap)),
+                Span::styled(right, theme.style(Tone::Muted)),
+                Span::raw(" ".repeat(gutter)),
+            ])
+        }
+        Row::Doc { index, lead } => Line::from(vec![
+            Span::styled(format!(" {lead}"), theme.style(Tone::Muted)),
+            Span::styled(
+                truncate(&store.docs[*index].name, cols.saturating_sub(1 + width(lead) + gutter)),
+                theme.style(Tone::Muted),
+            ),
+        ]),
+        Row::More { lead, hidden, .. } => {
+            Line::styled(format!(" {lead}{hidden} more"), theme.style(Tone::Muted))
+        }
+    }
+}
+
+/// What a closed location's row says on the right: what it holds, in short
+/// words only when `room` is too narrow for the long ones.
+fn count(
+    store: &crate::Store,
+    picker: &crate::locpick::LocationPicker,
+    id: &str,
+    room: usize,
+) -> String {
+    let held = if picker.doc().is_some() { store.held(id) } else { 0 };
+    let inside = store
+        .locations
+        .subtree(id)
+        .iter()
+        .filter(|at| !matches!(&picker.mode, crate::locpick::Mode::Move(moving) if store.locations.is_within(at, moving)))
+        .count()
+        .saturating_sub(1);
+    let (n, long, short) = match (held, inside) {
+        (0, 0) => return "empty".into(),
+        (0, n) => (n, "location", "loc"),
+        (n, _) => (n, "document", "doc"),
+    };
+    let plural = if n == 1 { "" } else { "s" };
+    let words = format!("{n} {long}{plural}");
+    if width(&words) <= room {
+        words
+    } else {
+        format!("{n} {short}{plural}")
+    }
 }
 
 /// The heading and selection of a panel drawn over the list.
@@ -688,10 +893,24 @@ fn push_query(spans: &mut Vec<Span<'static>>, model: &Model, room: usize, style:
     used
 }
 
+/// The location picker's hints, which follow what the cursor is on.
+fn locpick_hints(picker: &crate::locpick::LocationPicker) -> Vec<&'static str> {
+    use crate::locpick::{Mode, Target};
+    match (&picker.cursor, &picker.mode) {
+        (Target::More(_), _) => vec!["⏎ show all", "esc back"],
+        (_, Mode::Move(_)) => vec!["⏎ move here", "→ open", "esc cancel"],
+        (Target::Root, _) if picker.root.is_none() => vec!["↓ pick a location", "esc back"],
+        (Target::Root, _) => vec!["⏎ file here", "← up", "esc back"],
+        _ => vec!["⏎ file here", "→ open", "← close", "esc back"],
+    }
+}
+
 /// The hints a touch layout shows, most sheddable first.
 fn touch_hints(model: &Model) -> Vec<&'static str> {
     if model.edit.is_some() {
         vec!["⏎ save", "esc discard"]
+    } else if let Some(picker) = &model.locpick {
+        locpick_hints(picker)
     } else if model.picker.is_some() {
         vec!["⏎ choose", "esc back"]
     } else if model.detail {
@@ -770,6 +989,9 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     // The keyboard layout teaches every verb it has. `^t scans` used to appear
     // in no desktop hint at all, which made content search reachable only by
     // prior knowledge.
+    if let Some(picker) = &model.locpick {
+        return (locpick_hints(picker).join("  "), Tone::Muted);
+    }
     let hints = if model.edit.is_some() {
         "⏎ save  esc discard"
     } else if model.picker.is_some() {

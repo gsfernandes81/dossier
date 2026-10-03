@@ -65,7 +65,8 @@ impl Row {
             Row::File(_) => Some("e change"),
             Row::Fact("files") => Some("e attach"),
             Row::DigitalOnly => Some("e toggle"),
-            Row::Fact(_) | Row::Location => None,
+            Row::Location => Some("e choose"),
+            Row::Fact(_) => None,
         }
     }
 }

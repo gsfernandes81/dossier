@@ -57,6 +57,8 @@ pub enum Act {
     Redo,
     /// Tombstone the record's document.
     Delete,
+    /// Choose where the record's hard copy is filed.
+    Location,
     /// Leave.
     Quit,
 }
@@ -94,6 +96,7 @@ pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
         // the app never sees a moment between the modifier and the letter).
         None if model.detail => vec![
             Item { accel: "e", ..item('e', "edit this row", Act::Edit) },
+            item('l', "location", Act::Location),
             // Offered here as well as on the list. Creating a document is not a
             // thing about the record you happen to be reading, and making the
             // user peel back to a surface that admits it would teach that it is.

@@ -460,6 +460,8 @@ pub struct Model {
     pub query_cursor: usize,
     /// A choice open over a record row.
     pub picker: Option<crate::pick::Picker>,
+    /// The location picker, when one is open.
+    pub locpick: Option<crate::locpick::LocationPicker>,
     /// The journal directory that was looked for, when **nothing was there**
     /// yet. The empty list names it, because the first save creates it there —
     /// and a wrong root is better caught before that than after.
@@ -508,6 +510,7 @@ impl Model {
             flash: None,
             query_cursor: 0,
             picker: None,
+            locpick: None,
             missing_journal: None,
             cols,
             rows_on_screen: rows,
@@ -765,6 +768,41 @@ impl Model {
         Effect::Append(forward)
     }
 
+    /// Opens the location picker on the current document.
+    fn open_locations(&mut self) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some(doc) = self.current() else { return Effect::Idle };
+        if doc.kind != crate::Kind::Document {
+            self.flash = Some("a bundle has no hard copy".into());
+            return Effect::Redraw;
+        }
+        self.locpick = Some(crate::locpick::LocationPicker::file(&self.store, &doc.id));
+        self.sheet = None;
+        self.detail = true;
+        Effect::Redraw
+    }
+
+    /// Files a document's hard copy in `location`, recording the way back.
+    fn file_in(&mut self, doc: &str, location: &str) -> Effect {
+        let Some(index) = self.store.index_of(doc) else { return Effect::Redraw };
+        let was = self.store.docs[index].location.clone();
+        let field = |value: Option<&str>| match value {
+            Some(value) => {
+                journal::Draft::set("doc", doc, "location", serde_json::Value::from(value))
+            }
+            None => journal::Draft::unset("doc", doc, "location"),
+        };
+        let forward = vec![field(Some(location))];
+        self.pending = Some(Change { forward: forward.clone(), back: vec![field(was.as_deref())] });
+        self.direction = Direction::Forward;
+        self.pending_anchor = Some(doc.to_string());
+        self.saved_note = Some(format!("filed in {}", self.store.locations.path(location)));
+        Effect::Append(forward)
+    }
+
     /// The files list with `path` attached, or why it cannot be.
     fn attached(&self, doc: &str, path: &serde_json::Value) -> Result<serde_json::Value, String> {
         let path = path.as_str().unwrap_or_default().to_string();
@@ -906,6 +944,10 @@ impl Model {
                 self.sheet = None;
                 self.redo()
             }
+            crate::sheet::Act::Location => {
+                self.sheet = None;
+                self.open_locations()
+            }
             crate::sheet::Act::Delete => {
                 self.sheet = None;
                 self.delete()
@@ -950,6 +992,7 @@ impl Model {
                 self.open_edit(crate::edit::Field::Attach)
             }
             ('e', Some(crate::detail::Row::DigitalOnly)) => self.toggle_digital_only(),
+            ('e', Some(crate::detail::Row::Location)) => self.open_locations(),
             ('e', Some(_)) => {
                 self.flash = Some("that row cannot be edited yet".into());
                 Effect::Redraw
@@ -1248,6 +1291,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
     // worker messages still fall through, so nothing is trapped.
     if model.edit.is_some() {
         if let Some(effect) = edit_key(model, &msg) {
+            return effect;
+        }
+    }
+
+    if model.locpick.is_some() {
+        if let Some(effect) = locpick_key(model, &msg) {
             return effect;
         }
     }
@@ -1699,6 +1748,61 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         }
         _ => None,
     }
+}
+
+/// Keys while the location picker is open. `None` falls through, so `ctrl+q`,
+/// `ctrl+z` and worker messages keep their meaning.
+fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    use crate::locpick::{Mode, Target};
+    let mut picker = model.locpick.clone()?;
+    let effect = match msg {
+        Msg::Move(Motion::Up) => {
+            picker.step(&model.store, false);
+            Effect::Redraw
+        }
+        Msg::Move(Motion::Down) => {
+            picker.step(&model.store, true);
+            Effect::Redraw
+        }
+        Msg::Right => {
+            picker.right(&model.store);
+            Effect::Redraw
+        }
+        Msg::Left => {
+            picker.left(&model.store);
+            Effect::Redraw
+        }
+        Msg::Esc => {
+            model.locpick = None;
+            return Some(Effect::Redraw);
+        }
+        Msg::Enter => match (&picker.cursor, picker.chosen(), &picker.mode) {
+            (Target::More(id), _, _) => {
+                picker.expanded.insert(id.clone());
+                Effect::Redraw
+            }
+            (_, Some(location), Mode::File(doc)) => {
+                let (doc, location) = (doc.clone(), location.to_string());
+                model.locpick = None;
+                return Some(model.file_in(&doc, &location));
+            }
+            (_, None, Mode::File(_)) => {
+                model.flash = Some("pick a location".into());
+                Effect::Redraw
+            }
+            (_, _, Mode::Move(_)) => Effect::Idle,
+        },
+        Msg::Char(_)
+        | Msg::Backspace
+        | Msg::Leader
+        | Msg::Tap { .. }
+        | Msg::Scroll(_)
+        | Msg::Move(_)
+        | Msg::EditField(_) => Effect::Idle,
+        _ => return None,
+    };
+    model.locpick = Some(picker);
+    Some(effect)
 }
 
 /// Keys while a picker is open. `None` falls through, so `ctrl+q` and `Esc`
@@ -2199,6 +2303,70 @@ pub(crate) mod tests {
             Effect::Append(vec![journal::Draft::unset("doc", "coc", "location")])
         );
         assert_eq!(m.pending.as_ref().map(|change| change.back.clone()), Some(vec![set("none")]));
+    }
+
+    fn with_locations(mut m: Model) -> Model {
+        let at = |id: &str, parent: Option<&str>| crate::Location {
+            id: id.into(),
+            name: id.into(),
+            parent: parent.map(str::to_string),
+        };
+        m.store.locations = crate::Tree::new([
+            at("shelf", None),
+            at("cert-file", Some("shelf")),
+            at("drawer", None),
+        ]);
+        m
+    }
+
+    /// Space l opens the picker on the record's document; Enter on another
+    /// location files the hard copy there in one write whose way back is the
+    /// location it had.
+    #[test]
+    fn the_location_picker_files_the_hard_copy() {
+        let mut m = with_locations(writable());
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::Leader);
+        update(&mut m, Msg::Char('l'));
+        let picker = m.locpick.as_ref().expect("the picker is open");
+        assert_eq!(picker.root.as_deref(), Some("shelf"));
+        assert_eq!(picker.cursor, crate::locpick::Target::Location("cert-file".into()));
+
+        update(&mut m, Msg::Left);
+        update(&mut m, Msg::Move(Motion::Up));
+        update(&mut m, Msg::Left);
+        assert_eq!(m.locpick.as_ref().unwrap().root, None, "← on the root moves it up");
+        update(&mut m, Msg::Move(Motion::Up));
+        let set = |value: &str| {
+            journal::Draft::set("doc", "coc", "location", serde_json::Value::from(value))
+        };
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Append(vec![set("drawer")]));
+        assert!(m.locpick.is_none(), "filing closes the picker");
+        assert_eq!(
+            m.pending.as_ref().map(|change| change.back.clone()),
+            Some(vec![set("cert-file")])
+        );
+        let store = m.store.clone();
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert_eq!(m.flash.as_deref(), Some("filed in drawer"));
+    }
+
+    /// The top of the tree is not a place, so Enter on it is refused; Esc
+    /// closes the picker and writes nothing.
+    #[test]
+    fn the_top_of_the_tree_is_not_a_place() {
+        let mut m = with_locations(writable());
+        m.store.docs[0].location = None;
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::Leader);
+        update(&mut m, Msg::Char('l'));
+        update(&mut m, Msg::Move(Motion::Up));
+        assert_eq!(m.locpick.as_ref().unwrap().cursor, crate::locpick::Target::Root);
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
+        assert_eq!(m.flash.as_deref(), Some("pick a location"));
+        update(&mut m, Msg::Esc);
+        assert!(m.locpick.is_none());
+        assert!(m.detail, "Esc closed the picker, not the Details view");
     }
 
     /// `ctrl+z` and `ctrl+y` undo and redo from the Find view too, and do

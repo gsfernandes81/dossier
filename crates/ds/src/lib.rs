@@ -80,6 +80,7 @@ pub mod init;
 pub mod input;
 pub mod layout;
 pub mod load;
+pub mod locpick;
 pub mod open;
 pub mod pick;
 pub mod place;
