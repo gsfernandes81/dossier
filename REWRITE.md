@@ -354,7 +354,7 @@ list, no journal format change.
 |---|---|---|
 | **Version** | `supersedes: <older id>` on the newer version | **latest** = a version nothing supersedes; `versions(id)` walks both ways, oldest first, cycle-guarded |
 | **Kind** | `kind: "bundle"` on a bundle; absent on a document | — |
-| **Physical location** | a `location` entity: `name`, and `parent: <location id>`, absent at the top level | a tree of any depth. A slot is just a child location. Siblings sort by name, numbers compared as numbers (`slot 2` before `slot 10`). A location whose parent chain loops, or names a deleted location, reads as top level |
+| **Physical location** | a `location` entity: `name`, and `parent: <location id>`, absent at the top level | a tree of any depth. A slot is just a child location. Siblings sort by name, numbers compared as numbers (`slot 2` before `slot 10`). A location whose parent names a deleted location reads as top level, and so does each location *in* a loop; one whose chain merely reaches a loop stays under it |
 | **Hard copy** | `location: <location id>` on the document, or `location: "none"` for **digital only** | absent, or naming a deleted location, is **unfiled**. One field, so a concurrent "file it here" and "digital only" resolve to one winner instead of both |
 | **Bundle entry** | `bundles: [{bundle, pin?, file?}]`; a bare id reads as `{bundle}` | a bundle entry without `pin` **follows** to the latest version, so a new version writes nothing to any bundle; `members(bundle)` resolves them |
 | **Soft copies** | `files: [{label, path, primary}]`, paths relative to the root | `Enter` opens the selected file row's file, else the primary; `e` on a file row picks *make primary* / *detach* / *attach another file*, and on an empty files row asks for a path — POSIX, relative, never leaving the root |
@@ -377,8 +377,12 @@ list, no journal format change.
   points at a deleted location and they read as unfiled, and undo re-creates the
   locations, which files them again. To keep a child location, move it out first.
 - **Moving a location** writes its `parent`; a location can never be moved into
-  itself or its own subtree. Two devices moving two locations into each other
-  is the loop the fold reads as top level.
+  itself or its own subtree. A loop can still arise from two offline devices
+  each moving one location into the other. The fold shows the looped locations
+  at the top level, and `ds status` and the status line name them and say to
+  move one; a future locations view marks them as errors.
+- **Creating a location from the picker files the hard copy there** in the same
+  change, so one undo takes back both.
 
 ## 5. The Python satellite (`dossier-lab`)
 

@@ -127,9 +127,10 @@ Each is recorded where it belongs; the link is the point of the row.
   has the older place model, `perm_location`/`perm_slot`/`perm_subslot` and
   `Location.slots`. Still to build: the physical location tree and its
   picker, digital only, the `+ new` rows, the filter checkbox list, new version
-  and the Versions view, the bundles list and a bundle's Details view, and
-  `ctrl+z`/`ctrl+y`. Deferred by the user: marking several documents at once, and flipping the Find view
-  fzf-style, best match at the bottom. Before the slices after the location
+  and the Versions view, and the bundles list and a bundle's Details view.
+  Deferred by the user: marking several documents at once, flipping the Find
+  view fzf-style (best match at the bottom), matching fzf's colours, and a
+  locations view that flags looped locations as errors. Before the slices after the location
   tree: what a Versions view row shows, and a bundle's Details view.
 - **The model rethink is under way in
   [`model-rethink.md`](model-rethink.md)** — edges instead of four membership

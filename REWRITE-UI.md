@@ -403,7 +403,7 @@ name**: creating or renaming to a sibling's name, compared as search compares,
 is refused. Two offline devices can still produce a pair, and both are shown.
 
 The Details view's row for it is **hard copy location**, showing the path or
-*unfiled*. The path is cut from the left when it does not fit, so the innermost
+*unfiled*; `e` on it opens the location picker, as `Space l` does. The path is cut from the left when it does not fit, so the innermost
 location stays readable.
 
 ### The location picker
@@ -412,12 +412,16 @@ location stays readable.
 is the first row, in bold, followed by its children with `├ │ └` connectors two
 columns per level. A location with anything inside shows `▸` closed or `▾` open;
 an empty one keeps the same column blank, so siblings line up. A closed location
-shows a count on the right: `9 hard copies`, counting every hard copy anywhere
-inside, old versions included; `2 locations` when it holds locations and no hard
-copies; or `empty`.
+shows a count on the right: `9 documents`, counting every document whose hard
+copy is anywhere inside, old versions included and bundles never; `2 locations`
+when it holds locations and no documents; or `empty`. The words shorten to
+`docs` and `locs` only where the full word would cut the name.
 
 - **It opens rooted one level above where the hard copy is now**, with that
-  location selected and open; an unfiled document opens at the top level.
+  location selected and open; an unfiled document opens at the top, where the
+  root row reads `locations`.
+- **`Enter` on the `locations` row is refused** with "pick a location": the top
+  of the tree is not a place. In Move… it is, and means the top level.
 - **At most two levels show beneath the root, counting documents.** `→` opens a
   location in place; where its contents would be a third level, the root moves
   down one instead, so the opened location is the first level. `←` closes, and
@@ -428,9 +432,11 @@ copies; or `empty`.
   cursor skips them. After two, a `N more` row stands in for the rest, the
   cursor does stop on it, and `Enter` there shows them all.
 - **Typing searches every physical location**, not just those under the root.
-  Each match is one row with its full path. `+ new` creates the typed name
-  inside the location that was selected when typing began, and says which.
-- **Rename** edits the name in place. **Move…** opens the same tree with *top
+  Each match is one row with its full path, matched as the Find view matches.
+  `+ new` creates the typed name inside the location that was selected when
+  typing began, says which, and files the hard copy there in the same change.
+- **Rename** (`SPC r  rename`) types the new name on the bottom line, the old
+  name already in it, as every other edit does. **Move…** opens the same tree with *top
   level* as its root and the moving location left out, so it can never go inside
   itself. **Delete** of an empty location is immediate. Of one with anything
   inside, it warns on the status line, which grows to as many rows as the
@@ -439,6 +445,6 @@ copies; or `empty`.
   `d` confirms.
 
 **Digital only** is a checkbox row on the Details view, not a place in the
-picker. Ticking it removes the hard copy's location in the same change, and the
+picker; `e` or a tap toggles it. Ticking it removes the hard copy's location in the same change, and the
 status line names the location it came from; filing the document from `Space l`
 unticks it.
