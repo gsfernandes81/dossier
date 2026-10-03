@@ -303,7 +303,8 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
 3. **Esc peels exactly one layer per press**; at base state it arms, second
    consecutive Esc quits; any other key disarms. Termux's IME-dismiss Esc must never
    quit spuriously.
-4. **Command line, not palette**: `:`/`>` for occasional commands; one shared command
+4. **Command line, not palette**: `:` for occasional commands, as in Helix; `>` is
+   the search prompt, as in fzf; one shared command
    catalog; a `check_action`-style gate decides actionability.
 5. **Narrow-first**: usable at ~40–60 cols portrait Termux; ASCII status fallbacks
    (`!`/`~`) alongside optional glyphs; sort keys with explicit tiebreakers so order

@@ -66,8 +66,9 @@ The app *is* a finder that happens to have management surfaces behind it.
 ## 3. Secondary surfaces (U4)
 
 Reached by `:` command (each pushed on the stack, `Esc` pops); the base list stays
-letter-free. Command mode lives in the same bottom bar (`:` or `>` switches it, v2
-style); prefix-matched with completion.
+letter-free. Command mode lives in the same bottom bar: `:` as the first character
+switches it, as in Helix, and the prompt becomes `:`; prefix-matched with
+completion. `>` stays the search prompt, as in fzf.
 
 | Surface | Command | Content |
 |---|---|---|

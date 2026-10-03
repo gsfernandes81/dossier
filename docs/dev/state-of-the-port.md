@@ -100,6 +100,7 @@ Each is recorded where it belongs; the link is the point of the row.
 | The writer opens lazily, on the first append — never at launch | `main.rs::writer_session` |
 | A save re-folds; it never patches the `Store` in place | `main.rs::write_loop` |
 | Editing is `e` on the record's selected row | `Model::record_verb` |
+| The search prompt is `>`, as in fzf; `:` alone opens the command line, as in Helix; `Space` is the leader | REWRITE.md §4.5, REWRITE-UI §3 |
 | `Enter` drills, `Esc` peels; `←`/`→` move the query cursor; `Home`/`End` follow the query | REWRITE-UI §5b |
 | Editing is off, with a reason, rather than absent — `WriteState` | `app.rs` |
 
@@ -111,11 +112,6 @@ Each is recorded where it belongs; the link is the point of the row.
   `docs/dev/` carry dated amendment and approval notes. Both get a cleanup pass:
   docs first, then code module by module. Measurements go too (most were of the
   Python app); the edges design below is not blocked by it.
-- **The prompt word.** `>` says nothing, which is why the empty field needs
-  `Type to search` at all. `Find:` / `Search:` / `Filter:` — user's call. The
-  rest of the minibuffer work rides on it: folding the match count into the
-  entry line, and letting the prompt change with the question so `:` has
-  somewhere to land. Drawn in `docs/dev/mockups/minibuffer.py`.
 - **The arrow modifier tier** (`ctrl`/`alt` + arrows) — reserved, unbound, and
   now unlikely to be used: the same argument that retired `ctrl+e` applies to it.
   Reachable by thumb, teachable by nothing.
@@ -132,8 +128,8 @@ Each is recorded where it belongs; the link is the point of the row.
   `Location.slots`. Still to build: the physical location tree and its
   picker, digital only, the `+ new` rows, the filter checkbox list, new version
   and the Versions view, the bundles list and a bundle's Details view, and
-  `ctrl+z`/`ctrl+y`. **Open with the user:** the prompt word (below), and
-  whether the header's document total earns its place at all. Deferred by the
+  `ctrl+z`/`ctrl+y`. **Open with the user:** whether the header's document total
+  earns its place at all. Deferred by the
   user: marking several documents at once, and flipping the Find view
   fzf-style, best match at the bottom. Before the slices after the location
   tree: what a Versions view row shows, and a bundle's Details view.
