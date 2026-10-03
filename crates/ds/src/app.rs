@@ -437,6 +437,9 @@ pub struct Model {
     /// Whether the forward append in flight is a deletion — the one write that
     /// leaves nothing to look at afterwards, and so needs its own word for it.
     pending_delete: bool,
+    /// What the status line says when the append in flight lands, instead of
+    /// "saved".
+    saved_note: Option<String>,
     /// One more `d` and the record's document is tombstoned.
     ///
     /// The same arming idiom `Esc` and quit already use, for the same reason:
@@ -498,6 +501,7 @@ impl Model {
             pending_anchor: None,
             direction: Direction::Forward,
             pending_delete: false,
+            saved_note: None,
             delete_armed: false,
             count_zone: Zone::default(),
             leader_zone: Zone::default(),
@@ -729,6 +733,38 @@ impl Model {
         Effect::Append(forward)
     }
 
+    /// Ticks or unticks digital only on the current document.
+    ///
+    /// Ticking it takes the hard copy out of its location in the same write,
+    /// because the two are one field.
+    fn toggle_digital_only(&mut self) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some(doc) = self.current() else { return Effect::Idle };
+        let id = doc.id.clone();
+        let was = doc.location.clone();
+        let place = self.store.place(doc);
+        let ticking = was.as_deref() != Some(crate::place::DIGITAL_ONLY);
+        let field = |value: Option<&str>| match value {
+            Some(value) => {
+                journal::Draft::set("doc", &id, "location", serde_json::Value::from(value))
+            }
+            None => journal::Draft::unset("doc", &id, "location"),
+        };
+        let forward = vec![field(ticking.then_some(crate::place::DIGITAL_ONLY))];
+        self.pending = Some(Change { forward: forward.clone(), back: vec![field(was.as_deref())] });
+        self.direction = Direction::Forward;
+        self.pending_anchor = Some(id.clone());
+        self.saved_note = Some(match (ticking, place.is_empty()) {
+            (true, false) => format!("digital only — no longer filed in {place}"),
+            (true, true) => "digital only".into(),
+            (false, _) => "has a hard copy — unfiled".into(),
+        });
+        Effect::Append(forward)
+    }
+
     /// The files list with `path` attached, or why it cannot be.
     fn attached(&self, doc: &str, path: &serde_json::Value) -> Result<serde_json::Value, String> {
         let path = path.as_str().unwrap_or_default().to_string();
@@ -913,6 +949,7 @@ impl Model {
             ('e', Some(crate::detail::Row::Fact("files"))) => {
                 self.open_edit(crate::edit::Field::Attach)
             }
+            ('e', Some(crate::detail::Row::DigitalOnly)) => self.toggle_digital_only(),
             ('e', Some(_)) => {
                 self.flash = Some("that row cannot be edited yet".into());
                 Effect::Redraw
@@ -1283,7 +1320,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 model.record_cursor = 0;
                 model.flash = Some("created".into());
             } else if kept {
-                model.flash = Some("saved".into());
+                model.flash = Some(model.saved_note.take().unwrap_or_else(|| "saved".into()));
             } else {
                 // The document is no longer in the list the query and filter
                 // describe, so the record above it would be showing something
@@ -1312,6 +1349,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.pending_anchor = None;
             model.direction = Direction::Forward;
             model.pending_delete = false;
+            model.saved_note = None;
             model.delete_armed = false;
             model.flash = Some(reason.clone());
             // A refusal that will refuse again takes editing off the table for
@@ -2123,6 +2161,44 @@ pub(crate) mod tests {
         assert_eq!(m.flash.as_deref(), Some("redone"));
         assert!(m.redo.is_empty(), "and it went back where it came from");
         assert_eq!(m.undo.len(), 1, "so it can be undone again");
+    }
+
+    /// Ticking digital only takes the hard copy out of its location in the same
+    /// write, and the way back puts the location it had back.
+    #[test]
+    fn digital_only_is_one_write_with_its_way_back() {
+        let mut m = writable();
+        update(&mut m, Msg::Enter);
+        let rows = crate::detail::rows(m.current().unwrap());
+        m.record_cursor =
+            rows.iter().position(|row| *row == crate::detail::Row::DigitalOnly).unwrap();
+
+        let set = |value: &str| {
+            journal::Draft::set("doc", "coc", "location", serde_json::Value::from(value))
+        };
+        assert_eq!(update(&mut m, Msg::Char('e')), Effect::Append(vec![set("none")]));
+        assert_eq!(
+            m.pending.as_ref().map(|change| change.back.clone()),
+            Some(vec![set("cert-file")])
+        );
+        let mut store = m.store.clone();
+        store.docs[0].location = Some("none".into());
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert_eq!(m.flash.as_deref(), Some("digital only"));
+        assert!(
+            !crate::detail::rows(m.current().unwrap()).contains(&crate::detail::Row::Location),
+            "no hard copy location row once there is no hard copy"
+        );
+
+        m.record_cursor = crate::detail::rows(m.current().unwrap())
+            .iter()
+            .position(|row| *row == crate::detail::Row::DigitalOnly)
+            .unwrap();
+        assert_eq!(
+            update(&mut m, Msg::Char('e')),
+            Effect::Append(vec![journal::Draft::unset("doc", "coc", "location")])
+        );
+        assert_eq!(m.pending.as_ref().map(|change| change.back.clone()), Some(vec![set("none")]));
     }
 
     /// `ctrl+z` and `ctrl+y` undo and redo from the Find view too, and do

@@ -702,12 +702,26 @@ fn the_editor_survives_no_color() {
     assert!(entry.contains("expiry:") && entry.contains("2026-07-31"), "{entry:?}");
 }
 
+/// The Details view says where the hard copy is, cut from the left so the
+/// innermost location survives the phone's width, and offers digital only.
+#[test]
+fn the_details_view_shows_the_hard_copy_location() {
+    let mut m = model(47, 24);
+    update(&mut m, Msg::Enter);
+    let lines = screen(&mut m, 47, 24);
+    assert!(
+        lines.iter().any(|l| l.contains("hard copy location blue folder › slot 1")),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|l| l.contains("[ ] digital only (no hard copy)")), "{lines:?}");
+}
+
 /// **The selector is visible, and it is the row the verbs act on.**
 ///
-/// Reverse video, the same texture the list's cursor uses — the record is a
-/// wall of small text at 47 columns, and a highlight that moves predictably is
-/// what makes it followable. It is drawn from the same `detail::rows` the
-/// selector walks, so a highlight can never land on a row the reader is not on.
+/// The same texture the list's cursor uses — the record is a wall of small
+/// text at 47 columns, and a highlight that moves predictably is what makes it
+/// followable. It is drawn from the same `detail::rows` the selector walks, so
+/// a highlight can never land on a row the reader is not on.
 #[test]
 fn the_record_selector_is_drawn_where_it_is() {
     let mut m = model(47, 24);

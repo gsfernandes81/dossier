@@ -13,33 +13,14 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The record: everything about one document on one screen.
+//! The Details view: one document's rows, and the selector its verbs act on.
 //!
-//! REWRITE-UI.md §2 and the approved phone mockup — location, expiry with its
-//! standing spelled out, issue date, tags, bundles, the file list with the
-//! primary marked, what it renews, and notes. The user's review call was
-//! *"detail looks good for now"*, so this renders that layout and nothing more.
+//! The layout is REWRITE-UI.md §2 and §5c. `e` edits the selected row, so one
+//! bare letter covers every field; a `ctrl` combination could not be offered by
+//! the Space sheet, because Termux delivers it as one finished key.
 //!
-//! **R4 made it the editing surface** (v2's Phase 4 conclusion stands: editing
-//! lives in one place, not scattered across pickers), and it has **a selector**:
-//! one highlighted row that `↑`/`↓` move and the verbs act on.
-//!
-//! The selector is why this surface needs no control keys. `ctrl+e` briefly
-//! existed and was retired: Termux latches `CTRL` in its own UI layer, so the
-//! app never sees the modifier go down — a `ctrl+`combination arrives as one
-//! finished key event, and **there is no moment at which a which-key panel
-//! could offer what follows it**. That tier can only ever be memorised. A
-//! selector plus a bare letter can be shown, so that is what this surface uses:
-//! `e` edits *the row you are on*, and one verb covers every field instead of
-//! one key per field.
-//!
-//! [`rows`] is the list the selector walks and the renderer draws — one
-//! function, so a highlight can never land on a row the reader is not looking
-//! at.
-//!
-//! The remaining verbs (`s` supersede, `b` bundle, `u` undo) arrive with the
-//! slices that implement them, not before: a hint is only ever shown for
-//! something that works.
+//! [`rows`] is the list the selector walks and the renderer draws, so a
+//! highlight can never land on a row the reader is not looking at.
 
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -47,7 +28,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::Model;
-use crate::layout::{truncate, wrap};
+use crate::layout::{truncate, width, wrap};
 use crate::theme::{Theme, Tone};
 use crate::Status;
 
@@ -68,6 +49,10 @@ pub enum Row {
     Fact(&'static str),
     /// One linked file, by index into `doc.files`.
     File(usize),
+    /// Where the hard copy is filed.
+    Location,
+    /// The digital-only checkbox.
+    DigitalOnly,
 }
 
 impl Row {
@@ -79,7 +64,8 @@ impl Row {
             Row::Editable(_) => Some("e edit"),
             Row::File(_) => Some("e change"),
             Row::Fact("files") => Some("e attach"),
-            Row::Fact(_) => None,
+            Row::DigitalOnly => Some("e toggle"),
+            Row::Fact(_) | Row::Location => None,
         }
     }
 }
@@ -97,14 +83,19 @@ impl Row {
 #[must_use]
 pub fn rows(doc: &crate::Doc) -> Vec<Row> {
     use crate::edit::Field;
-    let mut rows = vec![
-        Row::Editable(Field::Name),
-        Row::Fact("location"),
+    let mut rows = vec![Row::Editable(Field::Name)];
+    if doc.kind == crate::Kind::Document {
+        if doc.location.as_deref() != Some(crate::place::DIGITAL_ONLY) {
+            rows.push(Row::Location);
+        }
+        rows.push(Row::DigitalOnly);
+    }
+    rows.extend([
         Row::Editable(Field::Expiry),
         Row::Editable(Field::Issued),
         Row::Editable(Field::Tags),
         Row::Fact("bundles"),
-    ];
+    ]);
     if doc.files.is_empty() {
         rows.push(Row::Fact("files"));
     } else {
@@ -167,8 +158,25 @@ fn render_row(
 ) -> Vec<Line<'static>> {
     match row {
         Row::Editable(what) => render_editable(what, doc, model, inner, theme),
-        Row::Fact("location") => {
-            vec![field("location", &nonempty(model.store.place(doc)), inner, theme)]
+        Row::Location => {
+            let label = "hard copy location";
+            let place = model.store.place(doc);
+            let value = if place.is_empty() { "unfiled".to_string() } else { place };
+            let room = inner.saturating_sub(width(label) + 2);
+            vec![Line::from(vec![
+                Span::styled(format!(" {label} "), theme.style(Tone::Muted)),
+                Span::raw(crate::layout::truncate_left(&value, room)),
+            ])]
+        }
+        Row::DigitalOnly => {
+            let on = doc.location.as_deref() == Some(crate::place::DIGITAL_ONLY);
+            vec![Line::from(vec![
+                Span::styled(
+                    format!(" [{}] ", if on { "x" } else { " " }),
+                    theme.style(Tone::Accent),
+                ),
+                Span::raw("digital only (no hard copy)"),
+            ])]
         }
         Row::Fact("bundles") => {
             let names: Vec<&str> =
