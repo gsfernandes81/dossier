@@ -98,8 +98,8 @@ pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
             // thing about the record you happen to be reading, and making the
             // user peel back to a surface that admits it would teach that it is.
             item('n', "new document", Act::New),
-            Item { accel: "u", ..item('u', "undo last change", Act::Undo) },
-            Item { accel: "r", ..item('r', "redo", Act::Redo) },
+            Item { accel: "u ^z", ..item('u', "undo last change", Act::Undo) },
+            Item { accel: "r ^y", ..item('r', "redo", Act::Redo) },
             // Record-only, and it is the record's document it deletes — you
             // should be able to see the thing you are removing.
             Item { accel: "d d", ..item('d', "delete this document", Act::Delete) },
@@ -108,8 +108,8 @@ pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
         None => vec![
             item('f', "filter", Act::Enter('f')),
             item('n', "new document", Act::New),
-            item('u', "undo last change", Act::Undo),
-            item('r', "redo", Act::Redo),
+            Item { accel: "^z", ..item('u', "undo last change", Act::Undo) },
+            Item { accel: "^y", ..item('r', "redo", Act::Redo) },
             item('q', "quit", Act::Quit),
         ],
         Some('f') => vec![

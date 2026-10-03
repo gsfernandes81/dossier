@@ -98,6 +98,10 @@ pub enum Msg {
     ToggleScans,
     /// `ctrl+x` — the expiring filter (a filter, never a mode).
     ToggleExpiring,
+    /// `ctrl+z` — undo the last change this session wrote.
+    Undo,
+    /// `ctrl+y` — redo the last change undone.
+    Redo,
     /// The `⌨` affordance: drop mouse reporting so the next tap raises the IME.
     RaiseKeyboard,
     /// `Space` on an empty query, or the `SPC` chip: open the leader sheet.
@@ -1410,6 +1414,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.requery();
             Effect::Redraw
         }
+        Msg::Undo => {
+            model.sheet = None;
+            model.undo()
+        }
+        Msg::Redo => {
+            model.sheet = None;
+            model.redo()
+        }
         Msg::RaiseKeyboard => model.raise_keyboard(),
         Msg::Resize { cols, rows } => {
             model.cols = cols;
@@ -1593,6 +1605,8 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         // would otherwise act on the list or query under the editor. Pressing
         // the verb again must not reseed the buffer and lose the typing.
         Msg::EditField(_)
+        | Msg::Undo
+        | Msg::Redo
         | Msg::Move(_)
         | Msg::Left
         | Msg::Right
@@ -2111,6 +2125,31 @@ pub(crate) mod tests {
         assert_eq!(m.flash.as_deref(), Some("redone"));
         assert!(m.redo.is_empty(), "and it went back where it came from");
         assert_eq!(m.undo.len(), 1, "so it can be undone again");
+    }
+
+    /// `ctrl+z` and `ctrl+y` undo and redo from the Find view too, and do
+    /// nothing while a field is open.
+    #[test]
+    fn ctrl_z_and_ctrl_y_work_everywhere_but_an_open_field() {
+        let mut m = saved_edit("2027-04-01");
+        let forward = m.undo.last().expect("something to undo").forward.clone();
+
+        update(&mut m, Msg::EditField(crate::edit::Field::Notes));
+        assert_eq!(update(&mut m, Msg::Undo), Effect::Idle, "the field keeps the keyboard");
+        assert_eq!(m.undo.len(), 1, "and nothing was undone");
+        for _ in 0..2 {
+            if m.edit.is_some() {
+                update(&mut m, Msg::Esc);
+            }
+        }
+        assert!(m.edit.is_none());
+        update(&mut m, Msg::Esc);
+        assert!(!m.detail, "back on the Find view");
+
+        assert!(matches!(update(&mut m, Msg::Undo), Effect::Append(_)));
+        let store = m.store.clone();
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert_eq!(update(&mut m, Msg::Redo), Effect::Append(forward));
     }
 
     /// **An ordinary write clears the redo stack.** Once history has branched,

@@ -64,6 +64,8 @@ fn key_msg(key: KeyEvent) -> Option<Msg> {
         KeyCode::Char('c' | 'q') if ctrl => Some(Msg::Quit),
         KeyCode::Char('t') if ctrl => Some(Msg::ToggleScans),
         KeyCode::Char('x') if ctrl => Some(Msg::ToggleExpiring),
+        KeyCode::Char('z') if ctrl => Some(Msg::Undo),
+        KeyCode::Char('y') if ctrl => Some(Msg::Redo),
         KeyCode::Esc => Some(Msg::Esc),
         KeyCode::Enter => Some(Msg::Enter),
         KeyCode::Right => Some(Msg::Right),
@@ -126,7 +128,7 @@ mod tests {
     #[test]
     fn a_modified_letter_never_reaches_the_query() {
         for modifiers in [KeyModifiers::ALT, KeyModifiers::CONTROL | KeyModifiers::ALT] {
-            for c in ['f', 's', 'b', 'z'] {
+            for c in ['f', 's', 'b', 'g'] {
                 assert_eq!(
                     to_msg(&press(KeyCode::Char(c), modifiers)),
                     None,
@@ -184,6 +186,8 @@ mod tests {
             to_msg(&press(KeyCode::Char('x'), KeyModifiers::CONTROL)),
             Some(Msg::ToggleExpiring)
         );
+        assert_eq!(to_msg(&press(KeyCode::Char('z'), KeyModifiers::CONTROL)), Some(Msg::Undo));
+        assert_eq!(to_msg(&press(KeyCode::Char('y'), KeyModifiers::CONTROL)), Some(Msg::Redo));
     }
 
     /// **A key release is not a key press.** Terminals that negotiated the kitty
