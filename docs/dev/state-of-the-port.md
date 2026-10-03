@@ -132,10 +132,11 @@ Each is recorded where it belongs; the link is the point of the row.
   `Location.slots`. Still to build: the physical location tree and its
   picker, digital only, the `+ new` rows, the filter checkbox list, new version
   and the Versions view, the bundles list and a bundle's Details view, and
-  `ctrl+z`/`ctrl+y`. **Open with the user:** marking several entries at once
-  (deferred); the header noun (`14 docs` or entries);
-  flipping the Find view fzf-style, best match at the bottom (deferred); and
-  whether *entry* goes back to *document* — one word, swapped everywhere.
+  `ctrl+z`/`ctrl+y`. **Open with the user:** the prompt word (below), and
+  whether the header's document total earns its place at all. Deferred by the
+  user: marking several documents at once, and flipping the Find view
+  fzf-style, best match at the bottom. Before the slices after the location
+  tree: what a Versions view row shows, and a bundle's Details view.
 - **The model rethink is under way in
   [`model-rethink.md`](model-rethink.md)** — edges instead of four membership
   mechanisms, succession chains instead of a document taxonomy, the list showing

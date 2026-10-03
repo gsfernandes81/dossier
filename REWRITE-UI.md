@@ -244,7 +244,7 @@ Touch chrome is now three rows, the same as a keyboard layout:
   would have run it. It **covers** the list rather than shrinking it.
 - **A chord is a shortcut for a verb, never a second implementation.** Every
   sheet item goes through the same `update` the keyboard reaches.
-- **Creating an entry is search-first** — the `+ new` row (§5c). `SPC n` is new
+- **Creating a document is search-first** — the `+ new` row (§5c). `SPC n` is new
   version, on the Details view.
 - **`SPC` is the sheet's touch trigger**, replacing the `⌨` chip: Termux has its
   own keyboard key and tapping the field already raises the IME. The empty
@@ -332,19 +332,19 @@ Drilling and peeling share one axis, and the arrows belong to the query:
 
 ## 5c · Vocabulary, panels and the Space sheet
 
-The words are REWRITE.md §4.7's — **entry**, **document**, **hard copy**, **soft
-copy**, **physical location**, **version**, **latest**, **bundle** — and the UI
-uses no others for the same things. An entry with no physical location and no
+The words are REWRITE.md §4.7's — **document**, **hard copy**, **soft copy**,
+**physical location**, **version**, **latest**, **bundle** — and the UI uses no
+others for the same things. A document with no physical location and no
 digital-only mark is **unfiled**.
 
 **Views** fill the screen: the **Find view** (the base list), the **Details
-view** (one entry's rows), the **Versions view** and the **Filing view**.
+view** (one document's rows), the **Versions view** and the **Filing view**.
 **Panels** open over a view: the Space sheet and every picker. A panel is full
 screen in the single-pane layout and sits over the bottom of the view when the
 terminal is split-capable (§4).
 
 **Every panel opens with the same three rows**: what you are doing (`SPC l
-location`); the subject in bold with its kind (`Passport (IN)` · entry, or
+location`); the subject in bold with its kind (`Passport (IN)` · document, or
 `leather folder` · physical location); then where it is now, dim. The subject
 never moves and is never styled differently.
 
@@ -362,34 +362,47 @@ letter of its verb**, except where two verbs collide. Typing filters it.
 
 - **`ctrl+z` undoes and `ctrl+y` redoes on every view and panel**, and the sheet
   shows them beside undo and redo. Where `r` is rename, redo has no letter and
-  `ctrl+y` is its only key. `ctrl+shift+z` is not bound: Termux and WSL in Windows
-  Terminal send it as `ctrl+z`.
+  `ctrl+y` is its only key. While a text field is open they do nothing: `Esc`
+  already throws the typing away. `ctrl+shift+z` is not bound: Termux and WSL in
+  Windows Terminal send it as `ctrl+z`.
 - **`^x` and `^t`** stay the accelerators for the expiring filter and scan-text
   search. Every `ctrl` key is an accelerator the sheet shows beside its verb;
   none is the only way to a verb except redo beside rename.
-- **Creating an entry is search-first** (below), not a letter.
+- **Creating a document is search-first** (below), not a letter.
 
 ### Checkbox lists
 
 `f` filter and `b` bundles are searchable checkbox lists, and so is any list
 where several can be on at once. Boxes are `[x]` and `[ ]`, plain ASCII so they
-render in any font and differ without colour. A tap toggles a box. With nothing typed `Space`
-toggles the selected box; once typing, `Space` types a space and `Enter`
-toggles. `Esc` clears the typed text, then closes. Toggles take effect at once.
-Filter's last row is **clear all**.
+render in any font and differ without colour. A tap toggles a box. With nothing
+typed `Space` toggles the selected box; once typing, `Space` types a space and
+`Enter` toggles. `Esc` clears the typed text, then closes. Toggles take effect
+at once. Filter's last row is **clear all**.
 
 - **Filter:** expiring only · old versions · bundles · search scan text.
-- **Bundles:** ticking a bundle makes the entry a member that follows to the
+- **Bundles:** ticking a bundle makes the document a member that follows to the
   latest version; ticking it on an old version pins that version. Per-member pin
   and soft-copy choice are on the bundle's Details view, through `e`.
 
 ### Search-first creation
 
-Wherever a search lists things that can be created — entries in the Find view,
-physical locations in the location picker, bundles in the bundles list — a
+Wherever a search lists things that can be created — documents in the Find
+view, physical locations in the location picker, bundles in the bundles list — a
 **`+ new "<typed>"` row is pinned above the matches**. The cursor starts on the
 first match, one `↑` from it, and on `+ new` when nothing matches, so the user
-sees what already exists before naming a new one.
+sees what already exists before naming a new one. In the Find view, `+ new`
+creates the document with the typed name and opens its Details view.
+
+### Physical locations
+
+Locations are created, renamed, moved and deleted only from the location
+picker; there is no locations view of their own. **Two siblings never share a
+name**: creating or renaming to a sibling's name, compared as search compares,
+is refused. Two offline devices can still produce a pair, and both are shown.
+
+The Details view's row for it is **hard copy location**, showing the path or
+*unfiled*. The path is cut from the left when it does not fit, so the innermost
+location stays readable.
 
 ### The location picker
 
@@ -397,17 +410,19 @@ sees what already exists before naming a new one.
 is the first row, in bold, followed by its children with `├ │ └` connectors two
 columns per level. A location with anything inside shows `▸` closed or `▾` open;
 an empty one keeps the same column blank, so siblings line up. A closed location
-shows a count on the right (`9 entries`, `2 locations`, `empty`).
+shows a count on the right: `9 hard copies`, counting every hard copy anywhere
+inside, old versions included; `2 locations` when it holds locations and no hard
+copies; or `empty`.
 
 - **It opens rooted one level above where the hard copy is now**, with that
-  location selected and open; an unfiled entry opens at the top level.
-- **At most two levels show beneath the root, counting entries.** `→` opens a
+  location selected and open; an unfiled document opens at the top level.
+- **At most two levels show beneath the root, counting documents.** `→` opens a
   location in place; where its contents would be a third level, the root moves
   down one instead, so the opened location is the first level. `←` closes, and
   on the root row it moves the root up one. Tapping `▸`/`▾` toggles.
 - **`Enter` files the hard copy in the selected location**, root included. It
   is the picker's only meaning for `Enter`, except on a **more** row.
-- **Entries filed in a location** are listed under it, dim, one per row; the
+- **Documents filed in a location** are listed under it, dim, one per row; the
   cursor skips them. After two, a `N more` row stands in for the rest, the
   cursor does stop on it, and `Enter` there shows them all.
 - **Typing searches every physical location**, not just those under the root.
@@ -415,12 +430,13 @@ shows a count on the right (`9 entries`, `2 locations`, `empty`).
   inside the location that was selected when typing began, and says which.
 - **Rename** edits the name in place. **Move…** opens the same tree with *top
   level* as its root and the moving location left out, so it can never go inside
-  itself. **Delete** of an empty location is immediate; of one with anything
-  inside, it warns on the status line with what it holds — `leather folder holds
-  4 locations and 9 hard copies — they become unfiled. d again` — and a second
+  itself. **Delete** of an empty location is immediate. Of one with anything
+  inside, it warns on the status line, which grows to as many rows as the
+  warning needs — `Caution: Leather folder holds 4 locations and 9 hard copies.
+  Press d again to delete and remove their location attributes` — and a second
   `d` confirms.
 
 **Digital only** is a checkbox row on the Details view, not a place in the
 picker. Ticking it removes the hard copy's location in the same change, and the
-status line names the location it came from; filing the entry from `Space l`
+status line names the location it came from; filing the document from `Space l`
 unticks it.
