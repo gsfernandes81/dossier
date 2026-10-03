@@ -740,6 +740,32 @@ fn the_location_picker_is_a_tree_on_the_phone() {
     assert!(lines[9].starts_with(" ├ ▸ slot 2") && lines[9].ends_with("1 document "), "{lines:?}");
 }
 
+/// Typing in the picker shows the text in its heading, a pinned `+ new` row,
+/// and every matching location as one row with its full path.
+#[test]
+fn the_location_picker_searches_by_path() {
+    let mut m = writable(47, 24);
+    update(&mut m, Msg::Enter);
+    update(&mut m, Msg::Leader);
+    update(&mut m, Msg::Char('l'));
+    for c in "slot 2".chars() {
+        update(&mut m, Msg::Char(c));
+    }
+    let lines = screen(&mut m, 47, 24);
+    for line in &lines {
+        println!("|{line}|");
+    }
+    assert!(
+        lines[2].starts_with(" SPC l  location  slot 2█") && lines[2].ends_with("2 matches "),
+        "{lines:?}"
+    );
+    assert!(lines[6].starts_with(r#" + new "slot 2" in blue folder › slot 1"#), "{lines:?}");
+    assert!(
+        lines[7].starts_with(" blue folder › slot 2") && lines[7].ends_with("1 document "),
+        "{lines:?}"
+    );
+}
+
 /// **The selector is visible, and it is the row the verbs act on.**
 ///
 /// The same texture the list's cursor uses — the record is a wall of small

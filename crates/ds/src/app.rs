@@ -785,6 +785,64 @@ impl Model {
         Effect::Redraw
     }
 
+    /// Creates a location named `name` inside `parent` and files the document's
+    /// hard copy in it, as one change; or says why it cannot.
+    fn create_and_file(
+        &mut self,
+        doc: &str,
+        name: &str,
+        parent: Option<&str>,
+    ) -> Result<Effect, String> {
+        let tree = &self.store.locations;
+        let place = parent.map_or_else(|| "the top level".into(), |id| tree.path(id));
+        if name.is_empty() {
+            return Err("type a name first".into());
+        }
+        if tree.sibling_named(parent, name, None).is_some() {
+            return Err(format!("{place} already has a {name}"));
+        }
+        let Some(index) = self.store.index_of(doc) else { return Ok(Effect::Redraw) };
+        let taken = tree.iter().map(|location| location.id.as_str()).collect();
+        let id = crate::id::mint(name, self.write.device().unwrap_or_default(), &taken);
+        let path =
+            parent.map_or_else(|| name.to_string(), |p| format!("{} › {name}", tree.path(p)));
+        let mut forward = vec![
+            journal::Draft::create("location", &id),
+            journal::Draft::set("location", &id, "name", serde_json::Value::from(name)),
+        ];
+        if let Some(parent) = parent {
+            forward.push(journal::Draft::set(
+                "location",
+                &id,
+                "parent",
+                serde_json::Value::from(parent),
+            ));
+        }
+        forward.push(journal::Draft::set(
+            "doc",
+            doc,
+            "location",
+            serde_json::Value::from(id.as_str()),
+        ));
+        let back = vec![
+            match &self.store.docs[index].location {
+                Some(was) => journal::Draft::set(
+                    "doc",
+                    doc,
+                    "location",
+                    serde_json::Value::from(was.as_str()),
+                ),
+                None => journal::Draft::unset("doc", doc, "location"),
+            },
+            journal::Draft::delete("location", &id),
+        ];
+        self.pending = Some(Change { forward: forward.clone(), back });
+        self.direction = Direction::Forward;
+        self.pending_anchor = Some(doc.to_string());
+        self.saved_note = Some(format!("filed in {path}"));
+        Ok(Effect::Append(forward))
+    }
+
     /// Files a document's hard copy in `location`, recording the way back.
     fn file_in(&mut self, doc: &str, location: &str) -> Effect {
         let Some(index) = self.store.index_of(doc) else { return Effect::Redraw };
@@ -1772,14 +1830,41 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             picker.left(&model.store);
             Effect::Redraw
         }
+        Msg::Esc if !picker.filter.is_empty() => {
+            picker.clear_search(&model.store);
+            Effect::Redraw
+        }
         Msg::Esc => {
             model.locpick = None;
             return Some(Effect::Redraw);
+        }
+        Msg::Char(' ') if picker.filter.is_empty() => Effect::Idle,
+        Msg::Char(c) => {
+            picker.type_char(&model.store, *c);
+            Effect::Redraw
+        }
+        Msg::Backspace => {
+            picker.rub_out(&model.store);
+            Effect::Redraw
         }
         Msg::Enter => match (&picker.cursor, picker.chosen(), &picker.mode) {
             (Target::More(id), _, _) => {
                 picker.expanded.insert(id.clone());
                 Effect::Redraw
+            }
+            (Target::New, _, Mode::File(doc)) => {
+                let (doc, name, parent) =
+                    (doc.clone(), picker.new_name().to_string(), picker.anchor.clone());
+                match model.create_and_file(&doc, &name, parent.as_deref()) {
+                    Ok(effect) => {
+                        model.locpick = None;
+                        return Some(effect);
+                    }
+                    Err(reason) => {
+                        model.flash = Some(reason);
+                        Effect::Redraw
+                    }
+                }
             }
             (_, Some(location), Mode::File(doc)) => {
                 let (doc, location) = (doc.clone(), location.to_string());
@@ -1792,13 +1877,9 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             }
             (_, _, Mode::Move(_)) => Effect::Idle,
         },
-        Msg::Char(_)
-        | Msg::Backspace
-        | Msg::Leader
-        | Msg::Tap { .. }
-        | Msg::Scroll(_)
-        | Msg::Move(_)
-        | Msg::EditField(_) => Effect::Idle,
+        Msg::Leader | Msg::Tap { .. } | Msg::Scroll(_) | Msg::Move(_) | Msg::EditField(_) => {
+            Effect::Idle
+        }
         _ => return None,
     };
     model.locpick = Some(picker);
@@ -2349,6 +2430,66 @@ pub(crate) mod tests {
         let store = m.store.clone();
         update(&mut m, Msg::Saved(Box::new(store)));
         assert_eq!(m.flash.as_deref(), Some("filed in drawer"));
+    }
+
+    /// `+ new` creates the typed name inside the location selected when typing
+    /// began and files the hard copy there, as one change one undo takes back.
+    #[test]
+    fn new_creates_a_location_and_files_into_it() {
+        let mut m = with_locations(writable());
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::Leader);
+        update(&mut m, Msg::Char('l'));
+        for c in "box".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(m.locpick.as_ref().unwrap().cursor, crate::locpick::Target::New);
+        let Effect::Append(drafts) = update(&mut m, Msg::Enter) else { panic!("an append") };
+        let id = match &drafts[0] {
+            journal::Draft { op: journal::OpKind::Create, ent, id, .. } if ent == "location" => {
+                id.clone()
+            }
+            other => panic!("the location is created first: {other:?}"),
+        };
+        assert!(drafts.contains(&journal::Draft::set(
+            "location",
+            &id,
+            "parent",
+            serde_json::Value::from("cert-file")
+        )));
+        assert_eq!(
+            drafts.last(),
+            Some(&journal::Draft::set(
+                "doc",
+                "coc",
+                "location",
+                serde_json::Value::from(id.as_str())
+            ))
+        );
+        let back = m.pending.as_ref().unwrap().back.clone();
+        assert_eq!(back.last(), Some(&journal::Draft::delete("location", &id)));
+    }
+
+    /// A name a sibling already has is refused, and the typing stays.
+    #[test]
+    fn new_refuses_a_name_a_sibling_has() {
+        let mut m = with_locations(writable());
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::Leader);
+        update(&mut m, Msg::Char('l'));
+        update(&mut m, Msg::Move(Motion::Up));
+        for c in "Cert-File".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Move(Motion::Up));
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
+        assert_eq!(m.flash.as_deref(), Some("shelf already has a Cert-File"));
+        assert_eq!(m.locpick.as_ref().map(|p| p.filter.as_str()), Some("Cert-File"));
+        update(&mut m, Msg::Esc);
+        assert!(
+            m.locpick.as_ref().is_some_and(|p| p.filter.is_empty()),
+            "Esc clears the search first"
+        );
     }
 
     /// The top of the tree is not a place, so Enter on it is refused; Esc

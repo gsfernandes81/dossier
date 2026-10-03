@@ -475,3 +475,35 @@ fn undoing_a_delete_restores_every_field() {
     let after = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("it is back");
     assert_eq!(after, &before, "and it is the same document, field for field");
 }
+
+/// **Creating a location from the picker is one change.** Filed into a new
+/// location, reloaded, then undone: the location is tombstoned and the document
+/// is unfiled again, with nothing left half-done in between.
+#[test]
+fn a_location_created_while_filing_is_taken_back_whole() {
+    let (dir, journal) = journal_with_a_document("new-location");
+    let (mut model, loaded) = load_model(&journal);
+    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+
+    update(&mut model, Msg::Enter);
+    update(&mut model, Msg::Leader);
+    update(&mut model, Msg::Char('l'));
+    for c in "grey box".chars() {
+        update(&mut model, Msg::Char(c));
+    }
+    let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
+        panic!("+ new must ask for an append");
+    };
+    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    let doc = model.store.docs.iter().find(|d| d.id == "coc").expect("the document");
+    assert_eq!(model.store.place(doc), "grey box");
+    assert_eq!(model.flash.as_deref(), Some("filed in grey box"));
+
+    let Effect::Append(drafts) = update(&mut model, Msg::Undo) else {
+        panic!("undo must ask for an append");
+    };
+    write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    let doc = model.store.docs.iter().find(|d| d.id == "coc").expect("the document");
+    assert_eq!(doc.location, None, "unfiled again");
+    assert!(model.store.locations.is_empty(), "and the location is gone");
+}

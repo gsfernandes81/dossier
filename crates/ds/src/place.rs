@@ -174,6 +174,26 @@ impl Tree {
         out
     }
 
+    /// The locations whose path matches `query`, in shelf order: exact matches,
+    /// or fuzzy ones only when nothing matches exactly, as the Find view does.
+    #[must_use]
+    pub fn search(&self, query: &str) -> Vec<&str> {
+        let paths: Vec<(&str, String)> =
+            self.shelf().into_iter().map(|id| (id, crate::search::fold(&self.path(id)))).collect();
+        let pass = |fuzzy: bool| -> Vec<&str> {
+            paths
+                .iter()
+                .filter(|(_, path)| crate::search::matches(path, query, fuzzy))
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        let exact = pass(false);
+        if !exact.is_empty() || !crate::search::can_fuzz(query) {
+            return exact;
+        }
+        pass(true)
+    }
+
     /// The locations two devices moved into each other, which read as top level.
     #[must_use]
     pub fn looped(&self) -> &BTreeSet<String> {
@@ -340,6 +360,16 @@ mod tests {
         assert_eq!(tree.sibling_named(Some("folder"), " Slot 2", None), Some("s2"));
         assert_eq!(tree.sibling_named(Some("folder"), "slot 2", Some("s2")), None);
         assert_eq!(tree.sibling_named(None, "slot 2", None), None);
+    }
+
+    /// Search matches the full path, so a slot is found by its folder's name.
+    #[test]
+    fn search_matches_the_whole_path() {
+        let tree = desk();
+        assert_eq!(tree.search("folder slot"), ["s2", "s10"], "word by word");
+        assert_eq!(tree.search("leather"), ["folder", "s2", "s10"]);
+        assert_eq!(tree.search("slot 1"), ["s10"]);
+        assert_eq!(tree.search("pasport"), ["pouch"], "the typo falls back to fuzzy");
     }
 
     /// A raw `location` reads as a hard copy only when it names a live location.

@@ -45,6 +45,10 @@ pub enum Target {
     Location(String),
     /// The "more" row under a location.
     More(String),
+    /// The `+ new` row while searching.
+    New,
+    /// A search match.
+    Match(String),
 }
 
 /// One drawn row of the tree.
@@ -70,6 +74,10 @@ pub enum Row {
         /// The connectors before it.
         lead: String,
     },
+    /// Creates the typed name inside the anchor.
+    New,
+    /// A location matching the search, drawn with its full path.
+    Match(String),
     /// Stands in for the documents not listed under a location.
     More {
         /// The location they are in.
@@ -89,6 +97,8 @@ impl Row {
             Row::Root => Some(Target::Root),
             Row::Location { id, .. } => Some(Target::Location(id.clone())),
             Row::More { id, .. } => Some(Target::More(id.clone())),
+            Row::New => Some(Target::New),
+            Row::Match(id) => Some(Target::Match(id.clone())),
             Row::Doc { .. } => None,
         }
     }
@@ -107,6 +117,10 @@ pub struct LocationPicker {
     pub expanded: BTreeSet<String>,
     /// The selection.
     pub cursor: Target,
+    /// Typed text searching every location.
+    pub filter: String,
+    /// Where `+ new` creates: what was selected when typing began.
+    pub anchor: Option<String>,
 }
 
 impl LocationPicker {
@@ -124,6 +138,8 @@ impl LocationPicker {
             open: at.iter().cloned().collect(),
             expanded: BTreeSet::new(),
             cursor: at.map_or(Target::Root, Target::Location),
+            filter: String::new(),
+            anchor: None,
         };
         if picker.cursor == Target::Root {
             picker.cursor = picker.selectable(store).get(1).cloned().unwrap_or(Target::Root);
@@ -140,6 +156,8 @@ impl LocationPicker {
             open: BTreeSet::new(),
             expanded: BTreeSet::new(),
             cursor: Target::Root,
+            filter: String::new(),
+            anchor: None,
         }
     }
 
@@ -155,6 +173,21 @@ impl LocationPicker {
     /// Every row, top to bottom.
     #[must_use]
     pub fn rows(&self, store: &Store) -> Vec<Row> {
+        if self.searching() {
+            let mut rows = Vec::new();
+            if matches!(self.mode, Mode::File(_)) {
+                rows.push(Row::New);
+            }
+            rows.extend(
+                store
+                    .locations
+                    .search(&self.filter)
+                    .into_iter()
+                    .filter(|id| !self.left_out(store, id))
+                    .map(|id| Row::Match(id.to_string())),
+            );
+            return rows;
+        }
         let mut rows = vec![Row::Root];
         self.level(store, self.root.as_deref(), 1, "", &mut rows);
         rows
@@ -171,9 +204,69 @@ impl LocationPicker {
     pub fn chosen(&self) -> Option<&str> {
         match &self.cursor {
             Target::Root => self.root.as_deref(),
-            Target::Location(id) => Some(id),
-            Target::More(_) => None,
+            Target::Location(id) | Target::Match(id) => Some(id),
+            Target::More(_) | Target::New => None,
         }
+    }
+
+    /// Whether typed text is narrowing the tree to a search.
+    #[must_use]
+    pub fn searching(&self) -> bool {
+        !self.filter.trim().is_empty()
+    }
+
+    /// The name `+ new` would create.
+    #[must_use]
+    pub fn new_name(&self) -> &str {
+        self.filter.trim()
+    }
+
+    /// Types a character into the search, anchoring `+ new` at the first one.
+    pub fn type_char(&mut self, store: &Store, c: char) {
+        if self.filter.is_empty() {
+            self.anchor = match &self.cursor {
+                Target::Root => self.root.clone(),
+                Target::Location(id) | Target::More(id) | Target::Match(id) => Some(id.clone()),
+                Target::New => self.anchor.clone(),
+            };
+        }
+        self.filter.push(c);
+        self.first_match(store);
+    }
+
+    /// Rubs out the last typed character; with none left, the tree comes back
+    /// on what was selected before.
+    pub fn rub_out(&mut self, store: &Store) {
+        self.filter.pop();
+        if self.searching() {
+            self.first_match(store);
+        } else {
+            self.clear_search(store);
+        }
+    }
+
+    /// Drops the search and puts the cursor back where typing began.
+    pub fn clear_search(&mut self, store: &Store) {
+        self.filter.clear();
+        self.cursor = self.anchor.clone().map_or(Target::Root, Target::Location);
+        if !self.selectable(store).contains(&self.cursor) {
+            self.cursor = Target::Root;
+        }
+    }
+
+    fn first_match(&mut self, store: &Store) {
+        let targets = self.selectable(store);
+        self.cursor = targets
+            .iter()
+            .find(|t| matches!(t, Target::Match(_)))
+            .or_else(|| targets.first())
+            .cloned()
+            .unwrap_or(Target::Root);
+    }
+
+    /// Whether this mode hides `id`: the moving location and everything in it.
+    fn left_out(&self, store: &Store, id: &str) -> bool {
+        matches!(&self.mode, Mode::Move(moving) if store.locations.is_within(id, moving))
     }
 
     /// How many levels below the root `id` is drawn; 0 for the root.
@@ -219,7 +312,7 @@ impl LocationPicker {
             let inside = |target: &Target| match target {
                 Target::Location(child) => store.locations.parent(child) == Some(id.as_str()),
                 Target::More(at) => *at == id,
-                Target::Root => false,
+                Target::Root | Target::New | Target::Match(_) => false,
             };
             let next = self.selectable(store).into_iter().skip_while(|t| *t != self.cursor).nth(1);
             if let Some(next) = next.filter(inside) {
@@ -237,6 +330,7 @@ impl LocationPicker {
                 self.open = BTreeSet::from([root.clone()]);
                 self.cursor = Target::Location(root);
             }
+            Target::New | Target::Match(_) => {}
             Target::Location(id) if self.open.remove(&id) => {}
             Target::Location(id) | Target::More(id) => {
                 let parent = if matches!(self.cursor, Target::More(_)) {
@@ -408,6 +502,8 @@ mod tests {
                 }
                 Row::Doc { index, lead } => format!("{lead}{}", store.docs[*index].id),
                 Row::More { lead, hidden, .. } => format!("{lead}{hidden} more"),
+                Row::New => format!("+ new {}", picker.new_name()),
+                Row::Match(id) => id.clone(),
             })
             .collect()
     }
@@ -489,6 +585,30 @@ mod tests {
         assert_eq!(picker.cursor, Target::More("slot3".into()));
         picker.expanded.insert("slot3".into());
         assert!(shape(&picker, &store).contains(&"  └ stcw".to_string()));
+    }
+
+    /// Typing searches every location; the cursor starts on the first match,
+    /// `+ new` is pinned above it and anchored where typing began, and rubbing
+    /// the text out brings the tree back on that row.
+    #[test]
+    fn typing_searches_with_new_pinned_above() {
+        let store = store();
+        let mut picker = LocationPicker::file(&store, "passport");
+        for c in "slot".chars() {
+            picker.type_char(&store, c);
+        }
+        assert_eq!(shape(&picker, &store), ["+ new slot", "slot1", "slot3"]);
+        assert_eq!(picker.cursor, Target::Match("slot1".into()));
+        assert_eq!(picker.anchor.as_deref(), Some("pouch"));
+        for c in " 9".chars() {
+            picker.type_char(&store, c);
+        }
+        assert_eq!(picker.cursor, Target::New, "nothing matches, so + new is selected");
+        for _ in 0..7 {
+            picker.rub_out(&store);
+        }
+        assert!(!picker.searching());
+        assert_eq!(picker.cursor, Target::Location("pouch".into()));
     }
 
     /// Moving a location never offers it, or anything inside it, as a place

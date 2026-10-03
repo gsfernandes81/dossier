@@ -491,7 +491,34 @@ fn locpick_heading(
     let kind_cols = width(kind) + gutter;
     let head = vec![
         rule(),
-        Line::styled(format!(" {crumb}"), theme.style(Tone::Accent)),
+        {
+            let typed = if picker.filter.is_empty() {
+                String::new()
+            } else {
+                format!("  {}█", picker.filter)
+            };
+            let note = if picker.searching() {
+                let n = picker
+                    .rows(store)
+                    .iter()
+                    .filter(|row| matches!(row, crate::locpick::Row::Match(_)))
+                    .count();
+                format!("{n} match{}", if n == 1 { "" } else { "es" })
+            } else {
+                "type to search".to_string()
+            };
+            let left = truncate(
+                &format!(" {crumb}{typed}"),
+                cols.saturating_sub(width(&note) + gutter + 1),
+            );
+            let gap = cols.saturating_sub(width(&left) + width(&note) + gutter);
+            Line::from(vec![
+                Span::styled(left, theme.style(Tone::Accent)),
+                Span::raw(" ".repeat(gap)),
+                Span::styled(note, theme.style(Tone::Muted)),
+                Span::raw(" ".repeat(gutter)),
+            ])
+        },
         Line::from(vec![
             Span::styled(
                 format!(" {}", fit(subject, cols.saturating_sub(kind_cols + 2))),
@@ -569,6 +596,33 @@ fn tree_line(
         ]),
         Row::More { lead, hidden, .. } => {
             Line::styled(format!(" {lead}{hidden} more"), theme.style(Tone::Muted))
+        }
+        Row::New => {
+            let place = picker
+                .anchor
+                .as_deref()
+                .map_or_else(|| "top level".into(), |id| store.locations.path(id));
+            let text = format!("+ new \"{}\" in {place}", picker.new_name());
+            Line::styled(
+                format!(" {}", truncate(&text, cols.saturating_sub(1 + gutter))),
+                theme.style(Tone::Accent),
+            )
+        }
+        Row::Match(id) => {
+            let right = if current == Some(id.as_str()) {
+                "now".to_string()
+            } else {
+                count(store, picker, id, cols / 3)
+            };
+            let room = cols.saturating_sub(1 + width(&right) + 1 + gutter);
+            let path = crate::layout::truncate_left(&store.locations.path(id), room);
+            let gap = cols.saturating_sub(1 + width(&path) + width(&right) + gutter);
+            Line::from(vec![
+                Span::raw(format!(" {path}")),
+                Span::raw(" ".repeat(gap)),
+                Span::styled(right, theme.style(Tone::Muted)),
+                Span::raw(" ".repeat(gutter)),
+            ])
         }
     }
 }
@@ -898,6 +952,8 @@ fn locpick_hints(picker: &crate::locpick::LocationPicker) -> Vec<&'static str> {
     use crate::locpick::{Mode, Target};
     match (&picker.cursor, &picker.mode) {
         (Target::More(_), _) => vec!["⏎ show all", "esc back"],
+        (Target::New, _) => vec!["⏎ create and file here", "esc clear"],
+        (Target::Match(_), Mode::File(_)) => vec!["⏎ file here", "↑ new", "esc clear"],
         (_, Mode::Move(_)) => vec!["⏎ move here", "→ open", "esc cancel"],
         (Target::Root, _) if picker.root.is_none() => vec!["↓ pick a location", "esc back"],
         (Target::Root, _) => vec!["⏎ file here", "← up", "esc back"],
