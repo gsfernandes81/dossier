@@ -342,25 +342,40 @@ others for the same things. A document with no physical location and no
 digital-only mark is **unfiled**.
 
 **Views** fill the screen: the **Find view** (the base list), the **Details
-view** (one document's rows), the **Versions view** and the **Filing view**.
-**Panels** open over a view: the Space sheet and every picker. A panel is full
+view** (one document's rows), the **Versions view**, the **Bundles view** and
+the **Filing view**. On a split-capable terminal the Details view, the Versions
+view and a bundle's Details view sit beside the list; the Bundles view takes
+the list's place.
+**Panels** open over a view: the Space sheet and every picker. A picker is full
 screen in the single-pane layout and sits over the bottom of the view when the
-terminal is split-capable (§4).
+terminal is split-capable (§4). The Space sheet always sits over the bottom, so
+what it acts on stays in sight.
 
-**Every panel opens with the same three rows**: what you are doing (`SPC l
+**Every picker opens with the same three rows**: what you are doing (`SPC l
 location`); the subject in bold with its kind (`Passport (IN)` · document, or
 `leather folder` · physical location); then where it is now, dim. The subject
-never moves and is never styled differently.
+never moves and is never styled differently. The Space sheet has only its `SPC`
+row: on the Find view it acts on no one thing, and on the Details view the
+document's name is already on screen. The sheet over a location in the picker
+names the location, because the tree does not show which one is meant.
 
 ### The Space sheet
 
 `Space` on an empty query opens it on every view and over every picker, drawn by
 the same code; only its letters follow what is selected. **A letter is the first
-letter of its verb**, except where two verbs collide. Typing filters it.
+letter of its verb**, except where two verbs collide. Wherever a letter is shown
+— a heading, a hint, the sheet — the word beside it is that letter's verb, so
+`e` always reads `e edit`, whatever the row: a different word would make the
+letter look arbitrary and harder to remember. `ctrl` keys are exempt: they follow habit
+(`^z`/`^y`) and what Termux can deliver, and the sheet shows each beside its
+plain letter. Letters run verbs and
+nothing searches it; finding a command by name is the `:` command line's job.
+Pickers and checkbox lists are the opposite: they have no letter keys, and
+typing searches them.
 
 | On | Letters |
 |---|---|
-| Find view | `f` filter · `u` undo · `r` redo · `q` quit |
+| Find view | `f` filter · `b` bundles (the Bundles view) · `u` undo · `r` redo · `q` quit |
 | Details view | `e` edit row · `n` new version · `l` location · `v` versions · `b` bundles · `u` undo · `r` redo · `d d` delete · `q` quit |
 | A physical location, in the location picker | `r` rename · `m` move… · `d` delete · `u` undo · redo · `q` quit |
 
@@ -369,24 +384,27 @@ letter of its verb**, except where two verbs collide. Typing filters it.
   `ctrl+y` is its only key. While a text field is open they do nothing: `Esc`
   already throws the typing away. `ctrl+shift+z` is not bound: Termux and WSL in
   Windows Terminal send it as `ctrl+z`.
-- **`^x` and `^t`** stay the accelerators for the expiring filter and scan-text
-  search. Every `ctrl` key is an accelerator the sheet shows beside its verb;
-  none is the only way to a verb except redo beside rename.
+- **There is no `^x` or `^t`.** Expiring only and search scan text live in the
+  filter list alone; a tap on the header's expiring count still toggles
+  expiring only. The `ctrl` keys are `^z`, `^y`, and `^c`/`^q` to quit.
 - **Creating a document is search-first** (below), not a letter.
 
 ### Checkbox lists
 
 `f` filter and `b` bundles are searchable checkbox lists, and so is any list
-where several can be on at once. Boxes are `[x]` and `[ ]`, plain ASCII so they
+where several can be on at once. They have no letter keys. Boxes are `[x]` and `[ ]`, plain ASCII so they
 render in any font and differ without colour. A tap toggles a box. With nothing
 typed `Space` toggles the selected box; once typing, `Space` types a space and
 `Enter` toggles. `Esc` clears the typed text, then closes. Toggles take effect
 at once. Filter's last row is **clear all**.
 
-- **Filter:** expiring only · old versions · bundles · search scan text.
-- **Bundles:** ticking a bundle makes the document a member that follows to the
-  latest version; ticking it on an old version pins that version. Per-member pin
-  and soft-copy choice are on the bundle's Details view, through `e`.
+- **Filter:** expiring only (expired, or due inside the warn window, as the
+  header's count means it) · include old versions · search scan text, all off
+  by default. Bundles are not a filter: they have their own view. A filter that is on
+  shows as a chip on the status line beside the count (`3/14  [expiring]`), where
+  fzf puts its own info.
+- **Bundles:** ticking a bundle adds this exact version to it. A bundle never
+  follows a document to its newer versions.
 
 ### Search-first creation
 
@@ -394,8 +412,41 @@ Wherever a search lists things that can be created — documents in the Find
 view, physical locations in the location picker, bundles in the bundles list — a
 **`+ new "<typed>"` row is pinned above the matches**. The cursor starts on the
 first match, one `↑` from it, and on `+ new` when nothing matches, so the user
-sees what already exists before naming a new one. In the Find view, `+ new`
-creates the document with the typed name and opens its Details view.
+sees what already exists before naming a new one. In the Find view an empty
+search lists every document, as fzf does, and `+ new` appears only once
+something is typed; it creates the document with the typed name and opens its
+Details view, and the search is still there when you come back.
+
+### The Bundles view
+
+`b` on the Find view's Space sheet. One row per bundle: its name, how many
+documents it holds, and its date when it has one (`US visa application  6 docs
+03-27`). Newest date first; undated bundles last, by name.
+
+### A bundle's Details view
+
+Its own rows — name, date, notes — then one row per document in it, marked on
+the right when a newer version of that document exists. `Enter` opens the
+document. `e` on it (headed `e  edit`, the document, and `now:` with the
+version and soft copies the bundle has) offers: another version of it (the newer one first, when
+there is one), which soft copy the bundle uses, and removing it from the bundle.
+
+### The Versions view
+
+`v` on the Details view: every version of the document, newest first. Each is
+two lines, as the Find view's rows are on the phone: its issue and expiry dates
+with `latest` or its own standing on the right, then, dim, where that version's
+hard copy is filed. `Enter` opens that version's Details view, where every
+change to it is made; the view's Space sheet has only undo, redo and quit.
+A version is an ordinary document whose only extra field is the link to the
+one it replaces: `e` on the Details view's `renews` row picks a different
+older document, or none.
+
+### Settings
+
+R4 has none. The warn window is a constant, 90 days, until there are enough
+settings to deserve a view. This device's name, Syncthing root and API key
+stay with `ds init`; the folder rules for `ds file` arrive with it in R5.
 
 ### Physical locations
 
