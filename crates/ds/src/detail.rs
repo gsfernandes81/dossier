@@ -109,15 +109,16 @@ pub fn rows(doc: &crate::Doc) -> Vec<Row> {
     rows
 }
 
-/// Draw the record for the highlighted row.
-pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+/// Draws the Details view for the highlighted document, and returns where each
+/// row landed so a tap can find it.
+pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) -> crate::app::RowGeometry {
     let inner = area.width.saturating_sub(2) as usize;
     let Some(doc) = model.current() else {
         frame.render_widget(
             Paragraph::new(Line::styled(" nothing selected", theme.style(Tone::Muted))),
             area,
         );
-        return;
+        return crate::app::RowGeometry::default();
     };
 
     let rows = rows(doc);
@@ -126,12 +127,14 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     // Where each row's lines start, so the pane can be scrolled to keep the
     // selection on screen without the renderer counting anything twice.
     let mut starts = Vec::with_capacity(rows.len());
+    let mut owners = Vec::new();
     for (index, row) in rows.iter().enumerate() {
         starts.push(lines.len());
         let mut drawn = render_row(*row, doc, model, inner, theme);
         if index == selected {
             drawn = drawn.into_iter().map(|line| line.style(theme.selected())).collect();
         }
+        owners.extend(std::iter::repeat_n(index, drawn.len()));
         lines.extend(drawn);
     }
 
@@ -142,11 +145,13 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     let end = starts.get(selected + 1).copied().unwrap_or(lines.len());
     let skip = end.saturating_sub(height);
     let lines: Vec<Line> = lines.into_iter().skip(skip).collect();
+    let items = owners.into_iter().skip(skip).take(height).collect();
 
     // No widget-level wrap: everything above is already laid out to this pane's
     // width, and letting the widget wrap as well would put a continuation line
     // at the left margin, where it reads as a new field.
     frame.render_widget(Paragraph::new(lines), area);
+    crate::app::RowGeometry { top: area.y, left: area.x, width: area.width, items }
 }
 
 /// The lines one row occupies.

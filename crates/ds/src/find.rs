@@ -185,6 +185,7 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 
 /// The list, and the detail pane beside or instead of it (U3).
 fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
+    model.record = crate::app::RowGeometry::default();
     let (list_area, detail_area) = match (model.detail, crate::layout::splits(area.width)) {
         (true, true) => {
             let split = Layout::default()
@@ -204,7 +205,7 @@ fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         None => model.list = ListGeometry::default(),
     }
     if let Some(detail_area) = detail_area {
-        crate::detail::draw(frame, detail_area, model, theme);
+        model.record = crate::detail::draw(frame, detail_area, model, theme);
     }
 }
 
@@ -361,9 +362,11 @@ fn two_line_row(
 /// as well as on. The status chips below could never do it, because a chip is
 /// not rendered until its filter is already on — so it could turn one off and
 /// never on.
-fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
+fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
+    model.tree = crate::app::RowGeometry::default();
     if let Some(picker) = &model.locpick {
-        draw_locpick(frame, area, model, picker, theme);
+        let tree = draw_locpick(frame, area, model, picker, theme);
+        model.tree = tree;
         if model.sheet.is_none() {
             return;
         }
@@ -422,7 +425,7 @@ fn draw_locpick(
     model: &Model,
     picker: &crate::locpick::LocationPicker,
     theme: Theme,
-) {
+) -> crate::app::RowGeometry {
     let store = &model.store;
     let cols = area.width as usize;
     let renaming = model
@@ -437,7 +440,10 @@ fn draw_locpick(
     let full = !crate::layout::splits(area.width);
     let room = (area.height as usize).saturating_sub(head.len());
     let offset = cursor_row.saturating_sub(room.saturating_sub(1));
+    let heading = head.len();
+    let mut items = Vec::new();
     for (index, row) in rows.iter().enumerate().skip(offset).take(room) {
+        items.push(index);
         let mut line = tree_line(store, picker, row, current.as_deref(), cols, theme);
         if index == cursor_row {
             line = line.style(theme.selected());
@@ -457,6 +463,12 @@ fn draw_locpick(
     };
     frame.render_widget(ratatui::widgets::Clear, rect);
     frame.render_widget(Paragraph::new(head), rect);
+    crate::app::RowGeometry {
+        top: rect.y + u16::try_from(heading).unwrap_or(u16::MAX),
+        left: rect.x,
+        width: rect.width,
+        items,
+    }
 }
 
 /// The location picker's three heading rows between rules, and the location

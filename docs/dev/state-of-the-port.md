@@ -126,8 +126,8 @@ Each is recorded where it belongs; the link is the point of the row.
   REWRITE.md §4.7). Built: the soft-copy editor (`pick.rs`), `ctrl+z`/`ctrl+y`,
   the location tree (`place.rs`), digital only, and the location picker
   (`locpick.rs`) with search, `+ new`, and rename, move and delete from its
-  Space sheet. Still to build: tapping the tree and the Details rows, the
-  three heading rows on the Find and Details Space sheets, `+ new` in the
+  Space sheet, all answering taps. Still to build: the three heading rows on
+  the Find and Details Space sheets, `+ new` in the
   Find view, the filter checkbox list, new version and the Versions view, and
   the bundles list and a bundle's Details view. Deferred by the user: marking several documents at once,
   flipping the Find view fzf-style (best match at the bottom), matching fzf's

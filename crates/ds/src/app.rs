@@ -350,6 +350,32 @@ pub struct ListGeometry {
     pub row_height: u16,
 }
 
+/// Screen rows the renderer last drew items into, so a tap can name the item:
+/// the row at `top` holds item `first`, and each further row the next one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RowGeometry {
+    /// The terminal row of the first item drawn.
+    pub top: u16,
+    /// The column the rows start at.
+    pub left: u16,
+    /// How many columns they span.
+    pub width: u16,
+    /// Which item each drawn row belongs to, top to bottom.
+    pub items: Vec<usize>,
+}
+
+impl RowGeometry {
+    /// The item drawn at a terminal cell, if any.
+    #[must_use]
+    pub fn at(&self, col: u16, row: u16) -> Option<usize> {
+        if col < self.left || col >= self.left + self.width {
+            return None;
+        }
+        let offset = row.checked_sub(self.top)?;
+        self.items.get(usize::from(offset)).copied()
+    }
+}
+
 /// Everything the renderer reads and the event loop changes.
 ///
 /// The flags are independent facts about the screen — detail open, quit armed,
@@ -474,6 +500,10 @@ pub struct Model {
     pub rows_on_screen: u16,
     /// Where the rows were last drawn (see [`ListGeometry`]).
     pub list: ListGeometry,
+    /// Where the location picker's rows were drawn.
+    pub tree: RowGeometry,
+    /// Where the Details view's rows were drawn.
+    pub record: RowGeometry,
 }
 
 impl Model {
@@ -518,6 +548,8 @@ impl Model {
             cols,
             rows_on_screen: rows,
             list: ListGeometry::default(),
+            tree: RowGeometry::default(),
+            record: RowGeometry::default(),
         };
         model.requery();
         model
@@ -737,6 +769,23 @@ impl Model {
         self.direction = Direction::Forward;
         self.pending_anchor = Some(doc.to_string());
         Effect::Append(forward)
+    }
+
+    /// A tap on a Details row: the checkbox toggles at once, any other row is
+    /// selected, and a tap on the selected row does what `Enter` does.
+    fn record_tap(&mut self, index: usize) -> Effect {
+        let Some(doc) = self.current() else { return Effect::Idle };
+        let rows = crate::detail::rows(doc);
+        let Some(row) = rows.get(index) else { return Effect::Idle };
+        if *row == crate::detail::Row::DigitalOnly {
+            self.record_cursor = index;
+            self.toggle_digital_only()
+        } else if index == self.record_cursor {
+            self.drill()
+        } else {
+            self.record_cursor = index;
+            Effect::Redraw
+        }
     }
 
     /// Ticks or unticks digital only on the current document.
@@ -1780,6 +1829,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                     // type", so it is what drops mouse reporting for one tap.
                     model.raise_keyboard()
                 }
+            } else if let Some(index) = model.detail.then(|| model.record.at(col, row)).flatten() {
+                model.record_tap(index)
             } else if let Some(index) = model.row_at(row) {
                 // Two taps, never a double-tap timer: timing gestures are
                 // miserable on a laggy terminal.
@@ -2053,7 +2104,37 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             Effect::Redraw
         }
         Msg::Enter => return Some(locpick_enter(model, picker)),
-        Msg::Tap { .. } | Msg::Scroll(_) | Msg::Move(_) | Msg::EditField(_) => Effect::Idle,
+        Msg::Tap { col, row } => {
+            let Some(index) = model.tree.at(*col, *row) else { return Some(Effect::Idle) };
+            let rows = picker.rows(&model.store);
+            let Some(tapped) = rows.get(index) else { return Some(Effect::Idle) };
+            let chevron = match tapped {
+                crate::locpick::Row::Location { lead, open: Some(open), id, .. } => {
+                    let at = model.tree.left
+                        + 1
+                        + u16::try_from(crate::layout::width(lead)).unwrap_or(0);
+                    (*col >= at && *col < at + 2).then(|| (id.clone(), *open))
+                }
+                _ => None,
+            };
+            match (chevron, tapped.target()) {
+                (Some((id, true)), _) => {
+                    picker.open.remove(&id);
+                    picker.cursor = crate::locpick::Target::Location(id);
+                }
+                (Some((id, false)), _) => {
+                    picker.cursor = crate::locpick::Target::Location(id);
+                    picker.right(&model.store);
+                }
+                (None, Some(target)) if target == picker.cursor => {
+                    return Some(locpick_enter(model, picker));
+                }
+                (None, Some(target)) => picker.cursor = target,
+                (None, None) => {}
+            }
+            Effect::Redraw
+        }
+        Msg::Scroll(_) | Msg::Move(_) | Msg::EditField(_) => Effect::Idle,
         _ => return None,
     };
     model.locpick = Some(picker);

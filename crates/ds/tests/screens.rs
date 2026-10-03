@@ -797,6 +797,61 @@ fn the_location_sheet_and_its_caution_fit_the_phone() {
     assert!(lines[23].starts_with(" >"), "the entry line stays last: {lines:?}");
 }
 
+/// Taps on the tree: the chevron opens and closes, a first tap selects, and a
+/// tap on the selected row files the hard copy, as Enter does.
+#[test]
+fn the_tree_answers_taps() {
+    let mut m = writable(47, 24);
+    update(&mut m, Msg::Enter);
+    update(&mut m, Msg::Leader);
+    update(&mut m, Msg::Char('l'));
+    let lines = screen(&mut m, 47, 24);
+    let row = |lines: &[String], text: &str| {
+        u16::try_from(lines.iter().position(|l| l.contains(text)).expect(text)).unwrap()
+    };
+
+    let slot2 = row(&lines, "slot 2");
+    update(&mut m, Msg::Tap { col: 3, row: slot2 });
+    let lines = screen(&mut m, 47, 24);
+    assert!(lines[usize::from(slot2)].contains("▾ slot 2"), "the chevron opened it: {lines:?}");
+    update(&mut m, Msg::Tap { col: 3, row: slot2 });
+    let lines = screen(&mut m, 47, 24);
+    assert!(lines[usize::from(slot2)].contains("▸ slot 2"), "and closed it: {lines:?}");
+
+    let slot3 = row(&lines, "slot 3");
+    assert_eq!(update(&mut m, Msg::Tap { col: 10, row: slot3 }), ds::Effect::Redraw);
+    screen(&mut m, 47, 24);
+    let ds::Effect::Append(drafts) = update(&mut m, Msg::Tap { col: 10, row: slot3 }) else {
+        panic!("a tap on the selected row files the hard copy");
+    };
+    assert_eq!(drafts.len(), 1, "{drafts:?}");
+}
+
+/// A tap on the digital-only row ticks it at once; on any other row a first
+/// tap selects it.
+#[test]
+fn the_details_rows_answer_taps() {
+    let mut m = writable(47, 24);
+    update(&mut m, Msg::Enter);
+    let lines = screen(&mut m, 47, 24);
+    let at = |text: &str| {
+        u16::try_from(lines.iter().position(|l| l.contains(text)).expect(text)).unwrap()
+    };
+    let tags = at("tags");
+    assert_eq!(update(&mut m, Msg::Tap { col: 5, row: tags }), ds::Effect::Redraw);
+    let rows = ds::detail::rows(m.current().unwrap());
+    assert_eq!(rows[m.record_cursor], ds::detail::Row::Editable(ds::edit::Field::Tags));
+
+    let ds::Effect::Append(drafts) = update(&mut m, Msg::Tap { col: 5, row: at("digital only") })
+    else {
+        panic!("the checkbox toggles on a tap");
+    };
+    assert_eq!(
+        drafts,
+        vec![journal::Draft::set("doc", "insurance", "location", serde_json::Value::from("none"))]
+    );
+}
+
 /// **The selector is visible, and it is the row the verbs act on.**
 ///
 /// The same texture the list's cursor uses — the record is a wall of small
