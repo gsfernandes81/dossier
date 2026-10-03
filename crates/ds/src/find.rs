@@ -182,7 +182,7 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
             Span::styled(left, theme.style(Tone::Title)),
             Span::raw(" ".repeat(gap)),
             Span::styled(docs, theme.style(Tone::Muted)),
-            Span::styled(count, if touch { theme.selected() } else { theme.style(Tone::Accent) }),
+            Span::styled(count, if touch { theme.pressable() } else { theme.style(Tone::Accent) }),
             Span::raw(" ".repeat(tail)),
         ])),
         area,
@@ -584,7 +584,7 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
             // Lit while the sheet is up, so it reads as the thing that opened it.
             theme.style(Tone::Armed).add_modifier(Modifier::REVERSED)
         } else {
-            theme.selected()
+            theme.pressable()
         },
     ));
     field.push(Span::raw(" ".repeat(gutter)));

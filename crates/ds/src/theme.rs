@@ -195,13 +195,24 @@ impl Theme {
         }
     }
 
-    /// The selection style: reverse video, never an indent shift.
+    /// The selection style: an ANSI 8 background, or reverse video without colour.
     ///
-    /// v2's rule, kept: shifting the row by a column as the cursor moves makes
-    /// the whole list twitch, and on a phone that reads as the app being slow
-    /// even when it is not.
+    /// A background rather than reverse video so every span keeps its own
+    /// colour on the selected row; reverse turns a cyan word into a cyan block.
+    /// Never an indent shift: a row that moves as the cursor does makes the list
+    /// twitch.
     #[must_use]
     pub fn selected(self) -> Style {
+        if self.color {
+            Style::default().bg(Color::DarkGray)
+        } else {
+            Style::default().add_modifier(Modifier::REVERSED)
+        }
+    }
+
+    /// The style of something a tap presses: reverse video.
+    #[must_use]
+    pub fn pressable(self) -> Style {
         Style::default().add_modifier(Modifier::REVERSED)
     }
 
@@ -246,9 +257,10 @@ mod tests {
         assert_eq!(band.bg, Some(Color::Gray), "ANSI 7 behind");
         assert_eq!(band.fg, Some(Color::Black), "ANSI 0 in front");
         assert!(band.add_modifier.is_empty(), "a colour pair, never reverse video");
+        assert_eq!(theme.selected().bg, Some(Color::DarkGray), "the selection is ANSI 8");
         assert!(
-            theme.selected().add_modifier.contains(Modifier::REVERSED),
-            "which is what the selection is, and they must not converge"
+            Theme { color: false }.selected().add_modifier.contains(Modifier::REVERSED),
+            "and reverse video without colour, where there is no band"
         );
     }
 

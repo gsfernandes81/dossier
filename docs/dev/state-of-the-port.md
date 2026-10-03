@@ -90,6 +90,7 @@ Each is recorded where it belongs; the link is the point of the row.
 | A chord is a shortcut for a verb, never a second implementation | `Model::run` |
 | Entry line **last**; the row above is a lit status line | REWRITE-UI §5a |
 | The band is ANSI 7 on ANSI 0, status row only, edge to edge | `Theme::band` |
+| The selected row is an ANSI 8 background, reverse video only under `NO_COLOR`; chosen on the phone from `tools/probe-attrs.fish` §4 | `Theme::selected`, REWRITE-UI §6 |
 | Tones on the band differ from tones off it | `Theme::on_band` |
 | Three verb tiers: a key / a leader chord / a command | REWRITE-UI §5a |
 | **No `ctrl`-only verbs.** Every `ctrl` key (`^x`, `^t`, `^z`, `^y`) is an accelerator the Space sheet shows beside its verb. A which-key panel for `ctrl` is *impossible*, not unbuilt: Termux latches `CTRL` in its own UI, so the app sees one finished `ctrl+e` event and never a moment between modifier and letter. That tier can only be memorised. | `detail.rs` module docs, `input.rs`, REWRITE-UI §5c |
@@ -132,8 +133,7 @@ Each is recorded where it belongs; the link is the point of the row.
   picker, digital only, the `+ new` rows, the filter checkbox list, new version
   and the Versions view, the bundles list and a bundle's Details view, and
   `ctrl+z`/`ctrl+y`. **Open with the user:** marking several entries at once
-  (deferred); the selected-row style (`tools/probe-attrs.fish` §4, on the
-  phone); the header noun (`14 docs` or entries);
+  (deferred); the header noun (`14 docs` or entries);
   flipping the Find view fzf-style, best match at the bottom (deferred); and
   whether *entry* goes back to *document* — one word, swapped everywhere.
 - **The model rethink is under way in

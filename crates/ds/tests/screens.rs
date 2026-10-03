@@ -136,6 +136,15 @@ fn modifier_columns(
     (0..cols).filter(|x| buffer[(*x, row)].style().add_modifier.contains(modifier)).collect()
 }
 
+/// The columns of one row drawn as the selection.
+fn selected_columns(model: &mut Model, cols: u16, rows: u16, row: u16) -> Vec<u16> {
+    let mut terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
+    terminal.draw(|frame| find::draw(frame, model, Theme { color: true })).expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let selected = Theme { color: true }.selected().bg;
+    (0..cols).filter(|x| buffer[(*x, row)].style().bg == selected).collect()
+}
+
 /// The columns of one row whose background is not the terminal's own.
 fn banded_columns(model: &mut Model, cols: u16, rows: u16, row: u16, theme: Theme) -> Vec<u16> {
     let mut terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
@@ -687,15 +696,12 @@ fn the_record_selector_is_drawn_where_it_is() {
     update(&mut m, Msg::Enter);
 
     // It opens on the name, which is the first row and now an editable one.
-    let first = modifier_columns(&mut m, 47, 24, 1, ratatui::style::Modifier::REVERSED);
+    let first = selected_columns(&mut m, 47, 24, 1);
     assert!(!first.is_empty(), "the top row of the record is highlighted");
 
     update(&mut m, Msg::Move(ds::app::Motion::Down));
-    assert!(
-        modifier_columns(&mut m, 47, 24, 1, ratatui::style::Modifier::REVERSED).is_empty(),
-        "and it left the row above"
-    );
-    let second = modifier_columns(&mut m, 47, 24, 3, ratatui::style::Modifier::REVERSED);
+    assert!(selected_columns(&mut m, 47, 24, 1).is_empty(), "and it left the row above");
+    let second = selected_columns(&mut m, 47, 24, 3);
     assert!(!second.is_empty(), "for the next one down");
 
     let lines = screen(&mut m, 47, 24);
@@ -704,8 +710,5 @@ fn the_record_selector_is_drawn_where_it_is() {
     // And the blank line under the name is never highlighted — a reversed empty
     // row would read as a second selection.
     update(&mut m, Msg::Move(ds::app::Motion::Up));
-    assert!(
-        modifier_columns(&mut m, 47, 24, 2, ratatui::style::Modifier::REVERSED).is_empty(),
-        "the blank under the name stays blank"
-    );
+    assert!(selected_columns(&mut m, 47, 24, 2).is_empty(), "the blank under the name stays blank");
 }

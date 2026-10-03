@@ -146,9 +146,11 @@ its cell keeps its key and drops the word rather than being truncated.
   to terminal ANSI colors by default so the user's terminal theme carries the
   palette; `NO_COLOR` honored; every color signal paired with a glyph/letter
   (`!`/`~`/`⚠`, ASCII-first with optional Nerd-Font icons per v2's glyphs toggle).
-- **No borders inside surfaces** — the split uses a single vertical rule; selection
-  is reverse-video/background, never an indent shift (v2 rule). One frame max
-  between terminal edge and content.
+- **No borders inside surfaces** — the split uses a single vertical rule. The
+  selection is an **ANSI 8 background**, so each part of the row keeps its own
+  colour; under `NO_COLOR` it is reverse video. Never an indent shift, and no
+  marker glyph in the gutter: on the location tree, columns at the left edge are
+  structure. One frame max between terminal edge and content.
 - Usable in monochrome by construction (weight + reverse + markers).
 
 ## 7. What this deletes relative to v2
