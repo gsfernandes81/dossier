@@ -46,7 +46,8 @@ The app *is* a finder that happens to have management surfaces behind it.
   fzf-style `matched/total` count; exact-pass-then-fuzzy exactly as v2's `fuzz`
   contract; `ctrl+t` toggles search-inside-scans. Filters render as dim chips in the
   bar row (`loc:cert-file`, `bundle:us-visa`, `expiring`).
-- **Header**: title + attention counts (expiring · unfiled · journal anomalies).
+- **Header**: title + attention counts (expiring · unfiled · journal anomalies),
+  never a total of documents.
   Each count names its `:` command; on touch, tapping a count jumps there.
 - **Footer**: 3–5 hints for *this* surface, `?` for the full reference. Per-surface
   hints only — never another surface's verbs (v2's `check_action` lesson).
@@ -149,9 +150,9 @@ its cell keeps its key and drops the word rather than being truncated.
   (`!`/`~`/`⚠`, ASCII-first with optional Nerd-Font icons per v2's glyphs toggle).
 - **No borders inside surfaces** — the split uses a single vertical rule. The
   selection is an **ANSI 8 background**, so each part of the row keeps its own
-  colour; under `NO_COLOR` it is reverse video. Never an indent shift, and no
-  marker glyph in the gutter: on the location tree, columns at the left edge are
-  structure. One frame max between terminal edge and content.
+  colour; under `NO_COLOR` it is reverse video. Never an indent shift. A
+  pointer in the gutter, as fzf draws one, is not ruled out, but on the location
+  tree the left columns are structure, so it must never read as a level. One frame max between terminal edge and content.
 - Usable in monochrome by construction (weight + reverse + markers).
 
 ## 7. What this deletes relative to v2

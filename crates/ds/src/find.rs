@@ -145,10 +145,8 @@ fn draw_too_small(frame: &mut Frame, area: Rect, theme: Theme) {
 fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let wide = area.width >= 72;
     let attention = model.attention_count();
-    let total = model.store.listed();
     let touch = crate::layout::touch_layout(area.width);
     let left = " dossier";
-    let docs = format!("{total} docs  ");
     // On a touch layout the expiring count is the one verb a thumb cannot
     // otherwise produce while browsing — with the keyboard down there is no
     // letter for `CTRL` to land on. **You tap the number that told you there
@@ -159,14 +157,10 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         if wide { format!(" ! {attention} expiring ") } else { format!(" ! {attention} exp ") };
     let tail = crate::layout::GUTTER as usize;
     let room = (area.width as usize).saturating_sub(width(left) + tail);
-    let (docs, count) = if width(&docs) + width(&count) <= room {
-        (docs, count)
-    } else {
-        (String::new(), truncate(&count, room))
-    };
-    let gap = room.saturating_sub(width(&docs) + width(&count));
+    let count = truncate(&count, room);
+    let gap = room.saturating_sub(width(&count));
 
-    let start = width(left) + gap + width(&docs);
+    let start = width(left) + gap;
     model.count_zone = if touch {
         Zone {
             row: area.y,
@@ -181,7 +175,6 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         Paragraph::new(Line::from(vec![
             Span::styled(left, theme.style(Tone::Title)),
             Span::raw(" ".repeat(gap)),
-            Span::styled(docs, theme.style(Tone::Muted)),
             Span::styled(count, if touch { theme.pressable() } else { theme.style(Tone::Accent) }),
             Span::raw(" ".repeat(tail)),
         ])),

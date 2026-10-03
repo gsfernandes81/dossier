@@ -201,7 +201,7 @@ fn the_phone_screen_matches_the_approved_mockup() {
     assert_eq!(lines.len(), 28);
     assert!(lines[0].starts_with(" dossier"), "header: {:?}", lines[0]);
     assert!(lines[0].contains("exp"), "the attention count survives phone width");
-    assert!(lines[0].contains("14 docs"));
+    assert!(!lines[0].contains("docs"), "no document total: {:?}", lines[0]);
 
     // Twelve documents, two lines each, starting on row 1.
     assert!(lines[1].starts_with("▸ Motorcycle Insurance"), "shelf order: {:?}", lines[1]);
