@@ -378,7 +378,7 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
                 // The box is reserved whether or not it is ticked, so an item never
                 // changes width when it is toggled — a row that reflows on a press
                 // is a row whose next press lands somewhere else.
-                Some(on) => format!(" [{}] ", if on { "✓" } else { " " }),
+                Some(on) => format!(" [{}] ", if on { "x" } else { " " }),
                 None => format!(" {} ", item.key),
             };
             (lead, item.label.to_string(), item.accel)

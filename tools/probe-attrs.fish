@@ -50,7 +50,24 @@ echo "   The search-glyph idea (a glyph normally, > when the leader is pressed)"
 echo "   depends on one of the prompt candidates rendering properly."
 echo
 
-echo "── 4 · size ────────────────────────────────────────────"
+echo "── 4 · the selected row ────────────────────────────────"
+echo "   One list row (accent, plain, dim count, red marker) under each candidate"
+echo "   selection, with an unselected row above for comparison. Pick the one"
+echo "   that is easy to find at a glance without being the brightest thing on"
+echo "   the screen, and check the dim count is still readable on it."
+echo
+set -l row '\e[36m+ new\e[39m slot 3   \e[2m6 entries\e[22m  \e[31m!\e[39m'
+printf "   unselected       $row\e[0m\n"
+printf "   a  reverse       \e[7m$row\e[0m\n"
+printf "   b  ANSI 8 bg     \e[100m$row \e[0m\n"
+printf "   c  b + marker    \e[100;36m▌\e[39m$row \e[0m\n"
+printf "   d  256-colour    \e[48;5;236m$row \e[0m\n"
+echo
+echo "   b, c and d keep each part's colour; a turns colours into backgrounds."
+echo "   d ignores the terminal theme: it is a fixed dark grey."
+echo
+
+echo "── 5 · size ────────────────────────────────────────────"
 printf '   cols %s   lines %s\n' (tput cols) (tput lines)
 echo "   (47x45 keyboard down, 47x24 keyboard up, on the measured device)"
 echo

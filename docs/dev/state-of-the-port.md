@@ -132,7 +132,8 @@ Each is recorded where it belongs; the link is the point of the row.
   picker, digital only, the `+ new` rows, the filter checkbox list, new version
   and the Versions view, the bundles list and a bundle's Details view, and
   `ctrl+z`/`ctrl+y`. **Open with the user:** marking several entries at once
-  (deferred); the checkbox glyph; the header noun (`14 docs` or entries);
+  (deferred); the selected-row style (`tools/probe-attrs.fish` §4, on the
+  phone); the header noun (`14 docs` or entries);
   flipping the Find view fzf-style, best match at the bottom (deferred); and
   whether *entry* goes back to *document* — one word, swapped everywhere.
 - **The model rethink is under way in

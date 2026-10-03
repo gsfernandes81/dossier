@@ -360,7 +360,7 @@ fn the_leader_sheet_opens_over_the_list() {
     update(&mut m, Msg::Char(' '));
     update(&mut m, Msg::Char('f'));
     let on = screen(&mut m, 45, 28);
-    assert!(on.iter().any(|l| l.contains("[✓]")), "and on, in the same place: {on:?}");
+    assert!(on.iter().any(|l| l.contains("[x]")), "and on, in the same place: {on:?}");
 }
 
 /// **The status line is a lit rule between the list and the entry line**, and

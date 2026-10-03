@@ -370,7 +370,8 @@ letter of its verb**, except where two verbs collide. Typing filters it.
 ### Checkbox lists
 
 `f` filter and `b` bundles are searchable checkbox lists, and so is any list
-where several can be on at once. A tap toggles a box. With nothing typed `Space`
+where several can be on at once. Boxes are `[x]` and `[ ]`, plain ASCII so they
+render in any font and differ without colour. A tap toggles a box. With nothing typed `Space`
 toggles the selected box; once typing, `Space` types a space and `Enter`
 toggles. `Esc` clears the typed text, then closes. Toggles take effect at once.
 Filter's last row is **clear all**.
