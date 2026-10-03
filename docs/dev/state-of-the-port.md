@@ -38,7 +38,7 @@ Three facts that shape what the rest of R4 costs:
   Its one cost is that a journal another `ds` holds is discovered at the first
   save rather than at launch.
 - **The binary has three subcommands**, `status`, `open` and `init`, plus the
-  TUI. Every other verb in REWRITE.md's module map — `reset`, `file`, `export`,
+  TUI. Every other verb in REWRITE.md's module map — `file`, `export`,
   `organize`, the review filters — is unbuilt. `ds init` so far asks only for the
   device name and the root; the Syncthing key and the Termux checks §4.1 wants
   are one more `ask` each.
@@ -126,14 +126,16 @@ Each is recorded where it belongs; the link is the point of the row.
   REWRITE.md §4.7). Built: the soft-copy editor (`pick.rs`), `ctrl+z`/`ctrl+y`,
   the location tree (`place.rs`), digital only, and the location picker
   (`locpick.rs`) with search, `+ new`, and rename, move and delete from its
-  Space sheet, all answering taps. Still to build: the three heading rows on
-  the Find and Details Space sheets, `+ new` in the
-  Find view, the filter checkbox list, new version and the Versions view, and
-  the bundles list and a bundle's Details view. Deferred by the user: marking several documents at once,
+  Space sheet, all answering taps. The rest of R4 is designed (REWRITE-UI
+  §5c): sheet letters and `e edit` hints, dropping `^x`/`^t`, `+ new` in the
+  Find view, the filter checkbox list, new version, the Versions view and the
+  `renews` picker, bundles holding exact versions with the Bundles view and a
+  bundle's Details view, and the warn window as a constant. No settings view
+  and no `ds reset`. Deferred by the user: marking several documents at once,
   flipping the Find view fzf-style (best match at the bottom), matching fzf's
-  colours, and a locations view that flags looped locations as errors. Before
-  the slices after the location tree: what a Versions view row shows, and a
-  bundle's Details view.
+  colours (with it, structure for the Details views, which read as a wall of
+  text: dividers or tinted rows), and a locations view that flags looped
+  locations as errors.
 - **The model rethink is under way in
   [`model-rethink.md`](model-rethink.md)** — edges instead of four membership
   mechanisms, succession chains instead of a document taxonomy, the list showing

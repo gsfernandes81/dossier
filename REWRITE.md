@@ -221,13 +221,12 @@ Daily (what `ds --help` leads with):
 | `ds export <bundle> <dest>` | materialize a bundle (copies + manifest), v2 semantics. |
 
 Maintenance (listed under a separate heading): `ds init` (conversational; sets device
-id, root, termux checks, syncthing API key — absorbs v2 `ds syncthing key/address`),
-`ds reset` (same hard guarantee: never touches anything outside `.dossier/`),
-`ds organize` (canonical renames, plan → `--apply`). Bundle rename lives in the TUI
-command line (`:bundle rename old new`), emitting the bundle-entity ops plus a
-per-member `set bundles` op — the v2 "rewrites all members atomically" guarantee
-becomes "emitted as one consecutive op run from one writer". Hidden: a self-timing
-flag (§9).
+id, root, termux checks, syncthing API key — absorbs v2 `ds syncthing key/address`)
+and `ds organize` (canonical renames, plan → `--apply`). There is no `ds reset`: it
+existed to wipe a store between test runs, and wiping a synced journal deletes it on
+every device; tests use throwaway journals. A bundle is renamed by editing its name on
+its Details view; members hold its id, so nothing else is written. Hidden: a
+self-timing flag (§9).
 
 Gone from the binary entirely: `migrate` (Notion cutover is history), `resolve`
 (no conflicts to resolve), `profile` (replaced by built-in timing), `ask`, `scan`,
@@ -353,10 +352,10 @@ list, no journal format change.
 | Concept | Stored as | Derived |
 |---|---|---|
 | **Version** | `supersedes: <older id>` on the newer version | **latest** = a version nothing supersedes; `versions(id)` walks both ways, oldest first, cycle-guarded |
-| **Kind** | `kind: "bundle"` on a bundle; absent on a document | — |
+| **Bundle** | a `bundle` entity: `name`, `date`, `notes` | its own record type, as a location is: one type per kind of thing, so no document code ever has to skip bundles |
 | **Physical location** | a `location` entity: `name`, and `parent: <location id>`, absent at the top level | a tree of any depth. A slot is just a child location. Siblings sort by name, numbers compared as numbers (`slot 2` before `slot 10`). A location whose parent names a deleted location reads as top level, and so does each location *in* a loop; one whose chain merely reaches a loop stays under it |
 | **Hard copy** | `location: <location id>` on the document, or `location: "none"` for **digital only** | absent, or naming a deleted location, is **unfiled**. One field, so a concurrent "file it here" and "digital only" resolve to one winner instead of both |
-| **Bundle entry** | `bundles: [{bundle, pin?, file?}]`; a bare id reads as `{bundle}` | a bundle entry without `pin` **follows** to the latest version, so a new version writes nothing to any bundle; `members(bundle)` resolves them |
+| **Bundle entry** | `bundles: [{bundle, file?}]` on the version that is in the bundle; a bare id reads as `{bundle}` | a bundle holds **exact versions**: a new version writes nothing to any bundle, and the bundle keeps the one it had. `members(bundle)` lists them; whether a newer version exists is derived |
 | **Soft copies** | `files: [{label, path, primary}]`, paths relative to the root | `Enter` opens the selected file row's file, else the primary; `e` on a file row picks *make primary* / *detach* / *attach another file*, and on an empty files row asks for a path — POSIX, relative, never leaving the root |
 | **Tags** | `tags: [word]` — free words, chiefly areas like `marine` | searched |
 
@@ -367,11 +366,15 @@ list, no journal format change.
   latest version only**, never a bundle.
 - **Two latest versions of one document** can only come from an offline
   duplicate. Both stay listed; merging them is the merge verb's job.
-- **A bundle** is a document — name, notes, optional date — hidden from the Find
-  view and from the expiring count by default. Search on its name finds its
-  members, including the latest version reached by a following entry.
+- **A bundle** is its own record, never a document: name, optional date, notes.
+  It is short-lived or historical, which is why it holds exact versions. The
+  Bundles view lists bundles and the Find view lists documents, and neither
+  filters the other out. Search on a bundle's name finds its members.
 - **New version** copies name, tags and physical location; dates, soft copies
-  and notes start empty, and the new version supersedes the old.
+  and notes start empty, and the new version supersedes the old. The old
+  version keeps its location, so both papers are filed in the same place
+  until one is moved. It opens on the new version's Details view, on its name, as a
+  freshly created document does.
 - **Deleting a physical location deletes everything inside it** — one delete op
   per location in the subtree. Documents are never rewritten: their `location`
   points at a deleted location and they read as unfiled, and undo re-creates the
@@ -693,7 +696,7 @@ until the cutover step the user personally green-lights.
     - **Startup is unchanged at 12 ms** for 950 docs / 6,650 ops: the enrich
       namespace costs nothing until something asks for it.
 - **R4 — Editing**: detail editing via ops, undo (inverse ops), the physical
-  location tree (§4.7), supersession, bundle membership, settings ops, `ds init`/`reset`.
+  location tree (§4.7), supersession, bundle membership, `ds init`.
   - **Slice 1 done (2026-08-21) — the write path, end to end.** `ds init` names
     the device (the first half of its writer id), and `ctrl+e` on a record edits
     the expiry: a `set` when the date parses, an **`unset`** when the buffer is
