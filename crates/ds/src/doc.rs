@@ -970,7 +970,7 @@ mod tests {
         let rebuilt = build(vec![doc(100, "bare", &fields)]);
         assert_eq!(rebuilt.docs[0].location, None);
         assert_eq!(rebuilt.docs[0].slot, None);
-        assert!(rebuilt.docs[0].files.is_empty());
+        assert!(rebuilt.docs[0].files.is_empty(), "{:?}", rebuilt.docs[0].files);
     }
 
     /// **Shelf order, with explicit tiebreakers.** U2 drops the location
@@ -1210,7 +1210,7 @@ mod tests {
         };
         assert_eq!(ids("medical"), ["medical"], "an exact hit stands alone");
         assert_eq!(ids("medicla"), ["medical"], "the typo falls back to fuzzy");
-        assert!(ids("zzzz").is_empty());
+        assert!(ids("zzzz").is_empty(), "{:?}", ids("zzzz"));
     }
 
     /// Locations and synced settings come through the same fold.

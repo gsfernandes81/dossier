@@ -341,7 +341,7 @@ mod tests {
         let load = journal.load(Namespace::Meta).expect("loads");
         assert!(load.present);
         assert_eq!(load.files.len(), 2);
-        assert!(load.anomalies.is_empty());
+        assert!(load.anomalies.is_empty(), "{:?}", load.anomalies);
 
         let state = fold(&load.lines);
         assert!(state.get("doc", "a").is_some() && state.get("doc", "b").is_some());

@@ -192,7 +192,8 @@ mod tests {
     fn growth_is_not_damage() {
         let mut water = HighWater::default();
         water.observe(&marks(&[("desk-core", 100, 5_000)]));
-        assert!(water.check(&marks(&[("desk-core", 250, 9_000)])).is_empty());
+        let damage = water.check(&marks(&[("desk-core", 250, 9_000)]));
+        assert!(damage.is_empty(), "{damage:?}");
     }
 
     /// **The row that must not cry wolf.** Compaction can shrink a file by any
@@ -242,9 +243,8 @@ mod tests {
     fn a_new_writer_is_not_damage() {
         let mut water = HighWater::default();
         water.observe(&marks(&[("desk-core", 900, 200_000)]));
-        assert!(water
-            .check(&marks(&[("desk-core", 900, 200_000), ("phone-core", 5, 100)]))
-            .is_empty());
+        let damage = water.check(&marks(&[("desk-core", 900, 200_000), ("phone-core", 5, 100)]));
+        assert!(damage.is_empty(), "{damage:?}");
     }
 
     /// The mark only climbs, so a revert keeps being reported until the data
@@ -269,7 +269,8 @@ mod tests {
         let mut water = HighWater::default();
         water.observe(&marks(&[("desk-core", 900, 200_000)]));
         water.accept("desk-core", Mark { max_ts: 400, bytes: 150_000 });
-        assert!(water.check(&marks(&[("desk-core", 400, 150_000)])).is_empty());
+        let damage = water.check(&marks(&[("desk-core", 400, 150_000)]));
+        assert!(damage.is_empty(), "{damage:?}");
     }
 
     /// Marks round-trip through the local state file.

@@ -137,7 +137,7 @@ fn clearing_the_field_removes_it_from_the_folded_store() {
     let doc = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("the document");
     assert_eq!(doc.expiry_date, None, "the field is gone, not blank");
     assert!(!doc.is_tracked(), "so it is out of the expiry watch");
-    assert!(reloaded.store.expiring().is_empty());
+    assert!(reloaded.store.expiring().is_empty(), "{:?}", reloaded.store.expiring());
 }
 
 /// **A journal another process is writing degrades this one to read-only, and

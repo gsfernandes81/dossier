@@ -384,7 +384,7 @@ mod tests {
 
         let long = wrap("supercalifragilistic", 8);
         assert_eq!(long, ["superca…"], "a word wider than the pane is cut, never overflowed");
-        assert!(wrap("", 10).is_empty());
+        assert!(wrap("", 10).is_empty(), "{:?}", wrap("", 10));
     }
 
     /// The compact date is month-year, and a non-date is left alone.

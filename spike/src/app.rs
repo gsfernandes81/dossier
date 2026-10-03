@@ -482,7 +482,7 @@ mod tests {
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.panel as u8, Panel::None as u8);
         press(&mut app, KeyCode::Esc);
-        assert!(app.query.is_empty());
+        assert!(app.query.is_empty(), "{:?}", app.query);
         press(&mut app, KeyCode::Esc);
         assert!(!app.detail);
         press(&mut app, KeyCode::Esc);
@@ -541,7 +541,7 @@ mod tests {
         let mut release = KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE);
         release.kind = KeyEventKind::Release;
         app.handle(&Event::Key(release));
-        assert!(app.query.is_empty());
+        assert!(app.query.is_empty(), "{:?}", app.query);
     }
 
     /// Scrolling keeps the cursor inside the viewport — the list owns scrolling

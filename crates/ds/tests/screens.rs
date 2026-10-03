@@ -417,7 +417,8 @@ fn the_status_line_is_a_band_and_the_entry_line_is_not() {
 #[test]
 fn a_monochrome_run_loses_the_band_but_not_the_row() {
     let mut m = model(45, 28);
-    assert!(banded_columns(&mut m, 45, 28, 26, Theme { color: false }).is_empty());
+    let band = banded_columns(&mut m, 45, 28, 26, Theme { color: false });
+    assert!(band.is_empty(), "{band:?}");
 
     let (lines, _) = render_with(&mut m, 45, 28, Theme { color: false });
     assert!(lines[27].contains("Type to search"), "the words still say it: {:?}", lines[27]);

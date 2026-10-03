@@ -3088,7 +3088,7 @@ pub(crate) mod tests {
         for c in "zzzz".chars() {
             update(&mut m, Msg::Char(c));
         }
-        assert!(m.rows.is_empty());
+        assert!(m.rows.is_empty(), "{:?}", m.rows);
         assert!(m.current().is_none());
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
         assert_eq!(m.flash.as_deref(), Some("nothing to open"));
@@ -3145,7 +3145,7 @@ pub(crate) mod tests {
         // Off again, and the word is nowhere in any name.
         update(&mut m, Msg::ToggleScans);
         assert_eq!(m.scan_search, ScanSearch::Off);
-        assert!(m.rows.is_empty());
+        assert!(m.rows.is_empty(), "{:?}", m.rows);
     }
 
     /// **Scan text widens the result, never replaces it.** A document whose name

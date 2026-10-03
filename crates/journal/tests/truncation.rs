@@ -102,7 +102,7 @@ fn a_vanished_writer_file_is_caught() {
     let mut water = HighWater::default();
     let (docs, damage) = launch(&journal, &mut water);
     assert_eq!(docs, 2);
-    assert!(damage.is_empty());
+    assert!(damage.is_empty(), "{damage:?}");
 
     std::fs::remove_file(meta.join("phone-core.jsonl")).expect("remove");
     let (docs, damage) = launch(&journal, &mut water);
