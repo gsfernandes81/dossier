@@ -60,6 +60,8 @@ pub enum Field {
     Notes,
     /// A path to link as one more file, relative to the Syncthing root.
     Attach,
+    /// A physical location's name; the edit's id is the location's.
+    Rename,
 }
 
 impl Field {
@@ -67,7 +69,7 @@ impl Field {
     #[must_use]
     pub fn journal_field(self) -> &'static str {
         match self {
-            Field::Name => "name",
+            Field::Name | Field::Rename => "name",
             Field::Expiry => "expiry_date",
             Field::Issued => "issue_date",
             Field::Tags => "tags",
@@ -96,6 +98,7 @@ impl Field {
             Field::Tags => (!doc.tags.is_empty()).then(|| doc.tags.clone().into()),
             Field::Notes => (!doc.notes.is_empty()).then(|| doc.notes.clone().into()),
             Field::Attach => (!doc.files.is_empty()).then(|| crate::doc::files_value(&doc.files)),
+            Field::Rename => None,
         }
     }
 
@@ -113,6 +116,7 @@ impl Field {
             Field::Tags => "tags",
             Field::Notes => "notes",
             Field::Attach => "attach",
+            Field::Rename => "rename",
         }
     }
 
@@ -131,10 +135,10 @@ impl Field {
         if value.is_empty() {
             // A name is the one field with nothing sensible to fall back to: a
             // document called nothing cannot be found, listed or talked about.
-            return if self == Field::Name {
-                Err("a document needs a name".into())
-            } else {
-                Ok(None)
+            return match self {
+                Field::Name => Err("a document needs a name".into()),
+                Field::Rename => Err("a location needs a name".into()),
+                _ => Ok(None),
             };
         }
         match self {
@@ -151,7 +155,7 @@ impl Field {
             Field::Tags => {
                 Ok(Some(value.split_whitespace().map(str::to_string).collect::<Vec<_>>().into()))
             }
-            Field::Name | Field::Notes => Ok(Some(value.into())),
+            Field::Name | Field::Notes | Field::Rename => Ok(Some(value.into())),
             Field::Attach => relative_path(value).map(|path| Some(path.into())),
         }
     }

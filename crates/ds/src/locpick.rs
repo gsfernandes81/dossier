@@ -121,6 +121,8 @@ pub struct LocationPicker {
     pub filter: String,
     /// Where `+ new` creates: what was selected when typing began.
     pub anchor: Option<String>,
+    /// The picker Move… was opened from, put back when the move is done.
+    pub back: Option<Box<LocationPicker>>,
 }
 
 impl LocationPicker {
@@ -140,6 +142,7 @@ impl LocationPicker {
             cursor: at.map_or(Target::Root, Target::Location),
             filter: String::new(),
             anchor: None,
+            back: None,
         };
         if picker.cursor == Target::Root {
             picker.cursor = picker.selectable(store).get(1).cloned().unwrap_or(Target::Root);
@@ -158,6 +161,7 @@ impl LocationPicker {
             cursor: Target::Root,
             filter: String::new(),
             anchor: None,
+            back: None,
         }
     }
 

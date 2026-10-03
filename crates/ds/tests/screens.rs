@@ -766,6 +766,37 @@ fn the_location_picker_searches_by_path() {
     );
 }
 
+/// Space over the picker opens the same Space sheet, headed by the location it
+/// acts on; deleting a full location grows the status line to fit its caution.
+#[test]
+fn the_location_sheet_and_its_caution_fit_the_phone() {
+    let mut m = writable(47, 24);
+    update(&mut m, Msg::Enter);
+    update(&mut m, Msg::Leader);
+    update(&mut m, Msg::Char('l'));
+    update(&mut m, Msg::Move(ds::app::Motion::Up));
+    update(&mut m, Msg::Char(' '));
+    let lines = screen(&mut m, 47, 24);
+    for line in &lines {
+        println!("|{line}|");
+    }
+    assert!(
+        lines.iter().any(|l| l.starts_with(" blue folder") && l.ends_with("physical location ")),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|l| l.starts_with(" r rename")), "{lines:?}");
+    assert!(lines.iter().any(|l| l.starts_with("   redo") && l.contains("^y")), "{lines:?}");
+
+    update(&mut m, Msg::Char('d'));
+    let lines = screen(&mut m, 47, 24);
+    for line in &lines {
+        println!("|{line}|");
+    }
+    assert_eq!(lines[20].trim(), "Caution: blue folder holds 3 locations and 3", "{lines:?}");
+    assert_eq!(lines[22].trim(), "remove their location attributes", "{lines:?}");
+    assert!(lines[23].starts_with(" >"), "the entry line stays last: {lines:?}");
+}
+
 /// **The selector is visible, and it is the row the verbs act on.**
 ///
 /// The same texture the list's cursor uses — the record is a wall of small

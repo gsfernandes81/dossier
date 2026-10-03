@@ -200,6 +200,20 @@ impl Tree {
         &self.looped
     }
 
+    /// What to tell the user about a loop, naming the locations in it.
+    #[must_use]
+    pub fn loop_message(&self) -> Option<String> {
+        let mut names: Vec<&str> =
+            self.looped.iter().map(|id| self.nodes[id].name.as_str()).collect();
+        let last = names.pop()?;
+        let names = if names.is_empty() {
+            last.to_string()
+        } else {
+            format!("{} and {last}", names.join(", "))
+        };
+        Some(format!("{names} were moved into each other on two devices — move one"))
+    }
+
     /// The sibling of a new or renamed location already called `name`, if any.
     ///
     /// Names compare as search compares, so `Slot 1` and `slot 1` clash.
@@ -350,6 +364,11 @@ mod tests {
         assert_eq!(tree.parent("b"), None);
         assert_eq!(tree.parent("c"), None);
         assert_eq!(tree.shelf(), ["b", "a", "c"]);
+        assert_eq!(
+            tree.loop_message().as_deref(),
+            Some("b and c were moved into each other on two devices — move one")
+        );
+        assert_eq!(desk().loop_message(), None);
     }
 
     /// Sibling names clash as search compares them, and a location never

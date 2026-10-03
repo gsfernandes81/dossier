@@ -40,7 +40,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{Filter, ListGeometry, Model, ScanSearch, Zone};
-use crate::layout::{fit, pad_left, short_date, truncate, width};
+use crate::layout::{fit, pad_left, short_date, truncate, width, wrap};
 use crate::theme::{Theme, Tone};
 use crate::{Doc, Status};
 
@@ -73,10 +73,11 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
     // already has on Termux's extra-keys row, and the two it did not are in the
     // leader sheet, where a toggle can show its off state as well as its on one.
     let touch = crate::layout::touch_layout(area.width);
+    let status = status_rows(model, area.width);
     let constraints = if touch {
-        vec![Constraint::Min(1), Constraint::Length(2)]
+        vec![Constraint::Min(1), Constraint::Length(1 + status)]
     } else {
-        vec![Constraint::Min(1), Constraint::Length(1), Constraint::Length(1)]
+        vec![Constraint::Min(1), Constraint::Length(status), Constraint::Length(1)]
     };
     // **The entry line is last, on both layouts.** Emacs's minibuffer is the
     // frame's final line, Vim's `:` is the final line below the status line, and
@@ -363,7 +364,9 @@ fn two_line_row(
 fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     if let Some(picker) = &model.locpick {
         draw_locpick(frame, area, model, picker, theme);
-        return;
+        if model.sheet.is_none() {
+            return;
+        }
     }
     if let Some(picker) = &model.picker {
         let hits = picker.matching(&model.store);
@@ -372,6 +375,7 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
             crumb: picker.crumb(&model.store),
             filter: &picker.filter,
             cursor: Some(picker.cursor),
+            subject: None,
         };
         draw_panel(frame, area, &panel, rows, theme);
         return;
@@ -387,6 +391,7 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
                 // changes width when it is toggled — a row that reflows on a press
                 // is a row whose next press lands somewhere else.
                 Some(on) => format!(" [{}] ", if on { "x" } else { " " }),
+                None if item.key == crate::sheet::NO_KEY => "   ".to_string(),
                 None => format!(" {} ", item.key),
             };
             (lead, item.label.to_string(), item.accel)
@@ -394,10 +399,15 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
         .collect();
     // Only a typed filter gives the sheet a cursor: with nothing typed, the keys
     // are the selection and a highlight would be a second, competing one.
+    let subject = model.locpick.as_ref().and_then(|picker| picker.chosen()).and_then(|id| {
+        let location = model.store.locations.get(id)?;
+        Some((location.name.clone(), "physical location", model.store.locations.path(id)))
+    });
     let panel = Panel {
         crumb: crate::sheet::crumb(sheet.group, &sheet.filter),
         filter: &sheet.filter,
         cursor: (!sheet.filter.is_empty()).then_some(sheet.cursor),
+        subject,
     };
     draw_panel(frame, area, &panel, rows, theme);
 }
@@ -415,7 +425,12 @@ fn draw_locpick(
 ) {
     let store = &model.store;
     let cols = area.width as usize;
-    let (mut head, current) = locpick_heading(store, picker, cols, theme);
+    let renaming = model
+        .edit
+        .as_ref()
+        .filter(|edit| edit.field == crate::edit::Field::Rename)
+        .map(|edit| edit.doc.as_str());
+    let (mut head, current) = locpick_heading(store, picker, renaming, cols, theme);
     let rows = picker.rows(store);
     let cursor_row =
         rows.iter().position(|row| row.target().as_ref() == Some(&picker.cursor)).unwrap_or(0);
@@ -449,6 +464,7 @@ fn draw_locpick(
 fn locpick_heading(
     store: &crate::Store,
     picker: &crate::locpick::LocationPicker,
+    renaming: Option<&str>,
     cols: usize,
     theme: Theme,
 ) -> (Vec<Line<'static>>, Option<String>) {
@@ -470,8 +486,14 @@ fn locpick_heading(
         }
         Mode::Move(moving) => store.locations.parent(moving).map(str::to_string),
     };
-    let (crumb, subject, kind, now) = match &picker.mode {
-        Mode::File(doc) => {
+    let (crumb, subject, kind, now) = match (&picker.mode, renaming) {
+        (_, Some(id)) => (
+            "SPC r  rename",
+            store.locations.get(id).map_or("", |l| l.name.as_str()),
+            "physical location",
+            store.locations.path(id),
+        ),
+        (Mode::File(doc), None) => {
             let doc = store.index_of(doc).map(|i| &store.docs[i]);
             let now = match doc.map(|doc| store.hard_copy(doc)) {
                 Some(HardCopy::At(id)) => store.locations.path(id),
@@ -480,7 +502,7 @@ fn locpick_heading(
             };
             ("SPC l  location", doc.map_or("", |doc| doc.name.as_str()), "document", now)
         }
-        Mode::Move(moving) => {
+        (Mode::Move(moving), None) => {
             let name = store.locations.get(moving).map_or("", |l| l.name.as_str());
             let now = current
                 .as_deref()
@@ -662,6 +684,8 @@ struct Panel<'a> {
     crumb: String,
     filter: &'a str,
     cursor: Option<usize>,
+    /// What it acts on, its kind, and where it is now.
+    subject: Option<(String, &'static str, String)>,
 }
 
 /// Draws a list panel at the bottom of `area`: a rule, the heading, then one
@@ -675,7 +699,8 @@ fn draw_panel(
 ) {
     let cols = area.width as usize;
     let gutter = crate::layout::GUTTER as usize;
-    let height = u16::try_from(rows.len() + 2).unwrap_or(u16::MAX).min(area.height);
+    let extra = if panel.subject.is_some() { 2 } else { 0 };
+    let height = u16::try_from(rows.len() + 2 + extra).unwrap_or(u16::MAX).min(area.height);
     let rect = Rect {
         x: area.x,
         y: area.y + area.height.saturating_sub(height),
@@ -700,6 +725,19 @@ fn draw_panel(
             Span::raw(" ".repeat(gutter)),
         ]),
     ];
+    if let Some((name, kind, now)) = &panel.subject {
+        let room = cols.saturating_sub(width(kind) + gutter + 2);
+        let gap = cols.saturating_sub(1 + width(&truncate(name, room)) + width(kind) + gutter);
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {}", truncate(name, room)), theme.style(Tone::Title)),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(kind.to_string(), theme.style(Tone::Muted)),
+        ]));
+        lines.push(Line::styled(
+            format!(" now: {}", crate::layout::truncate_left(now, cols.saturating_sub(7))),
+            theme.style(Tone::Muted),
+        ));
+    }
     for (index, (lead, label, right)) in rows.into_iter().enumerate() {
         let gap = cols.saturating_sub(width(&lead) + width(&label) + width(right) + gutter);
         let mut line = Line::from(vec![
@@ -860,11 +898,35 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     // see [`Theme::on_band`]. A light row needs a named grey where the rest of
     // the screen uses `DIM`, and red where it uses yellow.
     let (message, tone) = status_text(model, true);
-    let info_row = if model.flash.is_some() || model.esc_armed {
-        Line::styled(
-            format!(" {}", fit(&message, cols.saturating_sub(gutter))),
-            theme.on_band(tone),
-        )
+    let info_row = info_row(model, &count, &message, tone, cols, theme);
+
+    // **Status line above, entry line below**, and only the status line is lit.
+    // Two widgets rather than one, because a `Paragraph`'s style paints its
+    // whole area rather than only the cells its text reaches — which is what
+    // makes the band edge to edge, and what keeps it off the row underneath.
+    let status = area.height.saturating_sub(1);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(status), Constraint::Length(1)])
+        .split(area);
+    let info = if status > 1 { caution_lines(&message, cols, tone, theme) } else { vec![info_row] };
+    frame.render_widget(Paragraph::new(info).style(theme.band()), rows[0]);
+    frame.render_widget(Paragraph::new(query_row), rows[1]);
+}
+
+/// The touch bar's status row: a message when there is one, else the count,
+/// the filter chips and the hints.
+fn info_row(
+    model: &Model,
+    count: &str,
+    message: &str,
+    tone: Tone,
+    cols: usize,
+    theme: Theme,
+) -> Line<'static> {
+    let gutter = crate::layout::GUTTER as usize;
+    if model.flash.is_some() || model.esc_armed {
+        Line::styled(format!(" {}", fit(message, cols.saturating_sub(gutter))), theme.on_band(tone))
     } else {
         let left = format!(" {count}{}", chips(model));
         let room = cols.saturating_sub(width(&left) + gutter);
@@ -876,18 +938,27 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
             Span::styled(hint, theme.on_band(Tone::Muted)),
             Span::raw(" ".repeat(gutter)),
         ])
-    };
+    }
+}
 
-    // **Status line above, entry line below**, and only the status line is lit.
-    // Two widgets rather than one, because a `Paragraph`'s style paints its
-    // whole area rather than only the cells its text reaches — which is what
-    // makes the band edge to edge, and what keeps it off the row underneath.
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1)])
-        .split(area);
-    frame.render_widget(Paragraph::new(info_row).style(theme.band()), rows[0]);
-    frame.render_widget(Paragraph::new(query_row), rows[1]);
+/// How many rows the status line needs: one, or as many as an armed location
+/// delete's caution wraps to.
+fn status_rows(model: &Model, cols: u16) -> u16 {
+    match (&model.remove_armed, &model.flash) {
+        (Some(_), Some(flash)) => {
+            u16::try_from(wrap(flash, cols.saturating_sub(2) as usize).len().clamp(1, 4))
+                .unwrap_or(1)
+        }
+        _ => 1,
+    }
+}
+
+/// A status message wrapped onto the band, one line per row.
+fn caution_lines(message: &str, cols: usize, tone: Tone, theme: Theme) -> Vec<Line<'static>> {
+    wrap(message, cols.saturating_sub(2))
+        .into_iter()
+        .map(|line| Line::styled(format!(" {line}"), theme.on_band(tone)))
+        .collect()
 }
 
 /// The entry line while a field is being edited: the field's own prompt, what
@@ -965,6 +1036,8 @@ fn locpick_hints(picker: &crate::locpick::LocationPicker) -> Vec<&'static str> {
 fn touch_hints(model: &Model) -> Vec<&'static str> {
     if model.edit.is_some() {
         vec!["⏎ save", "esc discard"]
+    } else if model.locpick.is_some() && model.sheet.is_some() {
+        vec!["letter runs it", "esc back"]
     } else if let Some(picker) = &model.locpick {
         locpick_hints(picker)
     } else if model.picker.is_some() {
@@ -1046,7 +1119,12 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     // in no desktop hint at all, which made content search reachable only by
     // prior knowledge.
     if let Some(picker) = &model.locpick {
-        return (locpick_hints(picker).join("  "), Tone::Muted);
+        let hints = if model.sheet.is_some() {
+            vec!["letter runs it", "esc back"]
+        } else {
+            locpick_hints(picker)
+        };
+        return (hints.join("  "), Tone::Muted);
     }
     let hints = if model.edit.is_some() {
         "⏎ save  esc discard"
@@ -1067,9 +1145,13 @@ fn draw_footer(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
     let (message, tone) = status_text(model, false);
     // Lit, like the touch layout's — a keyboard layout has the same two rows in
     // the same order, and the same rule dividing the list from the entry line.
-    let line = Line::styled(
-        format!(" {}", truncate(&message, area.width as usize - 1)),
-        theme.on_band(tone),
-    );
-    frame.render_widget(Paragraph::new(line).style(theme.band()), area);
+    let lines = if area.height > 1 {
+        caution_lines(&message, area.width as usize, tone, theme)
+    } else {
+        vec![Line::styled(
+            format!(" {}", truncate(&message, area.width as usize - 1)),
+            theme.on_band(tone),
+        )]
+    };
+    frame.render_widget(Paragraph::new(lines).style(theme.band()), area);
 }

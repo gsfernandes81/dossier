@@ -507,3 +507,50 @@ fn a_location_created_while_filing_is_taken_back_whole() {
     assert_eq!(doc.location, None, "unfiled again");
     assert!(model.store.locations.is_empty(), "and the location is gone");
 }
+
+/// **Deleting a location takes everything inside it, and undo puts all of it
+/// back.** The documents filed there are never rewritten: they read as unfiled
+/// while the locations are gone, and as filed again once undo recreates them.
+#[test]
+fn a_deleted_location_comes_back_with_everything_inside() {
+    let (dir, journal) = journal_with_a_document("delete-location");
+    let lines = [
+        r#"{"v":1,"ts":1700000000004,"w":"desk-core","op":"create","ent":"location","id":"desk"}"#,
+        r#"{"v":1,"ts":1700000000005,"w":"desk-core","op":"set","ent":"location","id":"desk","f":"name","val":"desk"}"#,
+        r#"{"v":1,"ts":1700000000006,"w":"desk-core","op":"create","ent":"location","id":"folder"}"#,
+        r#"{"v":1,"ts":1700000000007,"w":"desk-core","op":"set","ent":"location","id":"folder","f":"name","val":"leather folder"}"#,
+        r#"{"v":1,"ts":1700000000008,"w":"desk-core","op":"set","ent":"location","id":"folder","f":"parent","val":"desk"}"#,
+        r#"{"v":1,"ts":1700000000009,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"location","val":"folder"}"#,
+    ];
+    let file = dir.join("meta").join("desk-core.jsonl");
+    let mut text = std::fs::read_to_string(&file).expect("read");
+    text.push_str(&format!("{}\n", lines.join("\n")));
+    std::fs::write(&file, text).expect("write");
+
+    let (mut model, loaded) = load_model(&journal);
+    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let place = |model: &Model| {
+        let doc = model.store.docs.iter().find(|d| d.id == "coc").expect("the document");
+        model.store.place(doc)
+    };
+    assert_eq!(place(&model), "desk › leather folder");
+
+    update(&mut model, Msg::Enter);
+    update(&mut model, Msg::Leader);
+    update(&mut model, Msg::Char('l'));
+    update(&mut model, Msg::Move(ds::app::Motion::Up));
+    update(&mut model, Msg::Char(' '));
+    update(&mut model, Msg::Char('d'));
+    let Effect::Append(drafts) = update(&mut model, Msg::Char('d')) else {
+        panic!("the second d must ask for an append");
+    };
+    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    assert!(model.store.locations.is_empty(), "both locations are gone");
+    assert_eq!(place(&model), "", "the hard copy reads as unfiled");
+
+    let Effect::Append(drafts) = update(&mut model, Msg::Undo) else {
+        panic!("undo must ask for an append");
+    };
+    write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    assert_eq!(place(&model), "desk › leather folder", "filed again, where it was");
+}

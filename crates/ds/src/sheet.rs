@@ -59,6 +59,12 @@ pub enum Act {
     Delete,
     /// Choose where the record's hard copy is filed.
     Location,
+    /// Rename the selected physical location.
+    Rename,
+    /// Move the selected physical location into another.
+    Move,
+    /// Delete the selected physical location and everything inside it.
+    Remove,
     /// Leave.
     Quit,
 }
@@ -79,6 +85,10 @@ pub struct Item {
     pub accel: &'static str,
 }
 
+/// The key of an item reached only by its accelerator or by typing its name:
+/// redo beside rename, where `r` is taken.
+pub const NO_KEY: char = '\0';
+
 const fn item(key: char, label: &'static str, act: Act) -> Item {
     Item { key, label, act, on: None, accel: "" }
 }
@@ -89,6 +99,14 @@ const fn item(key: char, label: &'static str, act: Act) -> Item {
 #[must_use]
 pub fn items(group: Option<char>, model: &Model) -> Vec<Item> {
     match group {
+        None if model.locpick.is_some() => vec![
+            item('r', "rename", Act::Rename),
+            item('m', "move…", Act::Move),
+            item('d', "delete", Act::Remove),
+            Item { accel: "^z", ..item('u', "undo last change", Act::Undo) },
+            Item { accel: "^y", ..item(NO_KEY, "redo", Act::Redo) },
+            item('q', "quit", Act::Quit),
+        ],
         // The top level is contextual: an open record adds the verbs that act
         // on it. This is the whole reason the record needs no control keys —
         // `e` is a bare letter *and* it can be read off the sheet, which a

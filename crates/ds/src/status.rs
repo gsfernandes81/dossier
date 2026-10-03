@@ -65,6 +65,8 @@ pub struct Report {
     pub malformed: usize,
     /// Everything the loader thought was worth reporting.
     pub anomalies: Vec<String>,
+    /// Locations two devices moved into each other, said as what to do.
+    pub loops: Option<String>,
     /// What the local Syncthing daemon says, when there is one to ask.
     pub sync: Option<crate::syncthing::Status>,
 }
@@ -135,6 +137,7 @@ impl Report {
             // The loader's own wording, verbatim: an anomaly this report
             // reworded would be an anomaly nothing else agrees with.
             anomalies: load.anomalies.iter().map(ToString::to_string).collect(),
+            loops: store.locations.loop_message(),
             sync: None,
         }
     }
@@ -147,6 +150,7 @@ impl Report {
     #[must_use]
     pub fn healthy(&self) -> bool {
         self.anomalies.is_empty()
+            && self.loops.is_none()
             && self.malformed == 0
             && self.duplicate_keys == 0
             && self.sync_healthy()
@@ -252,6 +256,9 @@ impl Report {
         }
         for anomaly in &self.anomalies {
             let _ = writeln!(out, "anomaly   {anomaly}");
+        }
+        if let Some(loops) = &self.loops {
+            let _ = writeln!(out, "locations {loops}");
         }
         // Syncthing problems belong in the quiet form too: a paused folder or a
         // daemon that has been off for a week is exactly the silent failure a
