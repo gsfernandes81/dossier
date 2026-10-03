@@ -50,7 +50,7 @@ The app *is* a finder that happens to have management surfaces behind it.
   Each count names its `:` command; on touch, tapping a count jumps there.
 - **Footer**: 3–5 hints for *this* surface, `?` for the full reference. Per-surface
   hints only — never another surface's verbs (v2's `check_action` lesson).
-- **Verbs**: `Enter` drills into the record, and again into its file (§5b). No letter
+- **Verbs**: `Enter` drills into the Details view, and again into its soft copy (§5b). No letter
   bindings on this surface at all — the v2 find-fast rule, which also satisfies U4.
 
 ## 2. Detail (U3)
@@ -58,13 +58,10 @@ The app *is* a finder that happens to have management surfaces behind it.
 - `Enter` opens detail for the highlighted row. **Wide (≥ ~100 cols)**: a right split
   (~45%), list keeps focus, detail follows the cursor; `Esc` closes it.
   **Narrow**: full-screen push; `Esc` pops back to the list, cursor preserved.
-- Detail is the **only editing surface** (v2 Phase 4 conclusion stands): every field
-  inline — name, dates, location/slot with neighbour-shift, tags (flat), bundle
-  membership, copy flags, files list + primary, ignore-expiry, notes. Save/discard
-  semantics as v2: explicit save, double-`Esc` discards an edit in progress.
-- Because detail is not a search surface, it may bind letters (U4's "common tasks"):
-  `s` supersede picker, `b` bundle picker, `u` undo (inverse op). All also `: `
-  commands.
+- The Details view is the **only editing surface**: every field is a row — name,
+  dates, physical location, digital only, tags, bundles, soft copies, notes.
+- Because it is not a search surface, it binds bare letters; they are listed in
+  §5c.
 
 ## 3. Secondary surfaces (U4)
 
@@ -245,10 +242,8 @@ Touch chrome is now three rows, the same as a keyboard layout:
   would have run it. It **covers** the list rather than shrinking it.
 - **A chord is a shortcut for a verb, never a second implementation.** Every
   sheet item goes through the same `update` the keyboard reaches.
-- **`SPC n` creates a document**, and asks only for its name. It is listed on the
-  record's sheet as well as the list's: creating a document is not a thing about
-  the record you happen to be reading, and making the user peel back to a surface
-  that admits it would teach that it is.
+- **Creating an entry is search-first** — the `+ new` row (§5c). `SPC n` is new
+  version, on the Details view.
 - **`SPC` is the sheet's touch trigger**, replacing the `⌨` chip: Termux has its
   own keyboard key and tapping the field already raises the IME. The empty
   field's second phrase runs into the chip and finishes the sentence, because a
@@ -316,7 +311,7 @@ Drilling and peeling share one axis, and the arrows belong to the query:
 
 | | key |
 |---|---|
-| drill one layer (list → record → file) | `Enter` |
+| drill one layer (Find view → Details view → soft copy) | `Enter` |
 | peel one layer | `Esc` |
 | move the query cursor | `←` `→` |
 | ends of the query, or of the list when the query is empty | `Home` `End` |
@@ -324,11 +319,105 @@ Drilling and peeling share one axis, and the arrows belong to the query:
 
 - **`Enter` and `Esc` are exact inverses**, which frees the arrow pair for what a
   phone needs: positioning a cursor in the query, which tapping cannot do.
-- **On the record, `Enter` opens the file row it is on**, or the primary file from
-  any other row. With no file it says so and stays on the record.
+- **On the Details view, `Enter` opens the soft copy row it is on**, or the
+  primary one from any other row. With none it says so and stays.
 - **Tap-on-selected drills**, so touch and keyboard agree.
 - **`Home`/`End` follow the query**, the same rule that makes `Space` the leader:
   on the phone they are the swipe-ups on `◀`/`▶`, the keys that move the cursor.
 - **The cursor never shifts the text**: it is a reversed cell over the character it
   sits on, and `█` only past the end.
 - The edit buffer's cursor stays at the end; arrows are swallowed while editing.
+
+## 5c · Vocabulary, panels and the Space sheet
+
+The words are REWRITE.md §4.7's — **entry**, **document**, **hard copy**, **soft
+copy**, **physical location**, **version**, **latest**, **bundle** — and the UI
+uses no others for the same things. An entry with no physical location and no
+digital-only mark is **unfiled**.
+
+**Views** fill the screen: the **Find view** (the base list), the **Details
+view** (one entry's rows), the **Versions view** and the **Filing view**.
+**Panels** open over a view: the Space sheet and every picker. A panel is full
+screen in the single-pane layout and sits over the bottom of the view when the
+terminal is split-capable (§4).
+
+**Every panel opens with the same three rows**: what you are doing (`SPC l
+location`); the subject in bold with its kind (`Passport (IN)` · entry, or
+`leather folder` · physical location); then where it is now, dim. The subject
+never moves and is never styled differently.
+
+### The Space sheet
+
+`Space` on an empty query opens it on every view and over every picker, drawn by
+the same code; only its letters follow what is selected. **A letter is the first
+letter of its verb**, except where two verbs collide. Typing filters it.
+
+| On | Letters |
+|---|---|
+| Find view | `f` filter · `u` undo · `r` redo · `q` quit |
+| Details view | `e` edit row · `n` new version · `l` location · `v` versions · `b` bundles · `u` undo · `r` redo · `d d` delete · `q` quit |
+| A physical location, in the location picker | `r` rename · `m` move… · `d` delete · `u` undo · redo · `q` quit |
+
+- **`ctrl+z` undoes and `ctrl+y` redoes on every view and panel**, and the sheet
+  shows them beside undo and redo. Where `r` is rename, redo has no letter and
+  `ctrl+y` is its only key. `ctrl+shift+z` is not bound: Termux and WSL in Windows
+  Terminal send it as `ctrl+z`.
+- **`^x` and `^t`** stay the accelerators for the expiring filter and scan-text
+  search. Every `ctrl` key is an accelerator the sheet shows beside its verb;
+  none is the only way to a verb except redo beside rename.
+- **Creating an entry is search-first** (below), not a letter.
+
+### Checkbox lists
+
+`f` filter and `b` bundles are searchable checkbox lists, and so is any list
+where several can be on at once. A tap toggles a box. With nothing typed `Space`
+toggles the selected box; once typing, `Space` types a space and `Enter`
+toggles. `Esc` clears the typed text, then closes. Toggles take effect at once.
+Filter's last row is **clear all**.
+
+- **Filter:** expiring only · old versions · bundles · search scan text.
+- **Bundles:** ticking a bundle makes the entry a member that follows to the
+  latest version; ticking it on an old version pins that version. Per-member pin
+  and soft-copy choice are on the bundle's Details view, through `e`.
+
+### Search-first creation
+
+Wherever a search lists things that can be created — entries in the Find view,
+physical locations in the location picker, bundles in the bundles list — a
+**`+ new "<typed>"` row is pinned above the matches**. The cursor starts on the
+first match, one `↑` from it, and on `+ new` when nothing matches, so the user
+sees what already exists before naming a new one.
+
+### The location picker
+
+`Space l` on the Details view. It is drawn like the `tree` command: the **root**
+is the first row, in bold, followed by its children with `├ │ └` connectors two
+columns per level. A location with anything inside shows `▸` closed or `▾` open;
+an empty one keeps the same column blank, so siblings line up. A closed location
+shows a count on the right (`9 entries`, `2 locations`, `empty`).
+
+- **It opens rooted one level above where the hard copy is now**, with that
+  location selected and open; an unfiled entry opens at the top level.
+- **At most two levels show beneath the root, counting entries.** `→` opens a
+  location in place; where its contents would be a third level, the root moves
+  down one instead, so the opened location is the first level. `←` closes, and
+  on the root row it moves the root up one. Tapping `▸`/`▾` toggles.
+- **`Enter` files the hard copy in the selected location**, root included. It
+  is the picker's only meaning for `Enter`, except on a **more** row.
+- **Entries filed in a location** are listed under it, dim, one per row; the
+  cursor skips them. After two, a `N more` row stands in for the rest, the
+  cursor does stop on it, and `Enter` there shows them all.
+- **Typing searches every physical location**, not just those under the root.
+  Each match is one row with its full path. `+ new` creates the typed name
+  inside the location that was selected when typing began, and says which.
+- **Rename** edits the name in place. **Move…** opens the same tree with *top
+  level* as its root and the moving location left out, so it can never go inside
+  itself. **Delete** of an empty location is immediate; of one with anything
+  inside, it warns on the status line with what it holds — `leather folder holds
+  4 locations and 9 hard copies — they become unfiled. d again` — and a second
+  `d` confirms.
+
+**Digital only** is a checkbox row on the Details view, not a place in the
+picker. Ticking it removes the hard copy's location in the same change, and the
+status line names the location it came from; filing the entry from `Space l`
+unticks it.

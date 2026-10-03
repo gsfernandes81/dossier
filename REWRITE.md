@@ -294,11 +294,12 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
    search (first character kept); the surface binds **no letter keys**. Cold start →
    file open is five keystrokes for a three-character query: type, `Enter`, `Enter`.
 2. **The verb pair**: **`Enter` drills one layer, `Esc` peels one layer** — exact
-   inverses. On the list `Enter` opens the record; on the record it opens the
-   selected file row's file, or the primary file from any other row. `Enter` never
-   mutates. `←`/`→` move the cursor inside the query; `Home`/`End` jump within a
-   non-empty query and jump the list when it is empty (REWRITE-UI.md §5b). The
-   list shows documents only.
+   inverses. On the Find view `Enter` opens the Details view; on the Details view
+   it opens the selected soft copy, or the primary one from any other row. `Enter`
+   never mutates, except in a picker, where it is the choice. `←`/`→` move the
+   cursor inside the query; `Home`/`End` jump within a non-empty query and jump the
+   list when it is empty (REWRITE-UI.md §5b). The Find view shows latest entries
+   only (§4.7).
 3. **Esc peels exactly one layer per press**; at base state it arms, second
    consecutive Esc quits; any other key disarms. Termux's IME-dismiss Esc must never
    quit spuriously.
@@ -333,35 +334,50 @@ R3 begins. What *is* binding — the layout-independent interaction invariants v
   no `unsafe` (there is no need at this scale — a CI deny).
 - Each `journal` invariant test states the invariant in a sentence first.
 
-### 4.7 The document model
+### 4.7 The entry model
 
-Every relationship is its own field on the `doc` entity, stored on the document's
-side, so two devices editing different relationships of one document — or the same
-relationship of different documents — never write the same field. No generic edge
+**Words.** An **entry** is what `ds` stores about one real **document**. A
+**hard copy** is the paper and a **soft copy** is a file on a PC or phone; an
+entry has at most one hard copy and any number of soft copies, one of them
+primary. Only the hard copy has a **physical location**. Entries replace each
+other as **versions**; the chain has no name, and the **latest** version is the
+one nothing replaces. A **bundle** is a named set of entries. These words are
+used in the UI exactly as defined here (REWRITE-UI §5c).
+
+Every relationship is its own field on the `doc` entity, stored on the entry's
+side, so two devices editing different relationships of one entry — or the same
+relationship of different entries — never write the same field. No generic edge
 list, no journal format change.
 
 | Concept | Stored as | Derived |
 |---|---|---|
 | **Version** | `supersedes: <older id>` on the newer version | **latest** = a version nothing supersedes; `versions(id)` walks both ways, oldest first, cycle-guarded |
-| **Kind** | `kind: "bundle"` on a bundle; absent on a document | — |
-| **Place** | `perm_location`, `perm_slot`, `perm_subslot` — a container path; slots are fixed labels, several documents may share one, nothing shifts | — |
-| **Place slots** | `slots: <n>` on the `location` entity; absent when there is no slot to pick | — |
-| **Bundle entry** | `bundles: [{bundle, pin?, file?}]`; a bare id reads as `{bundle}` | an entry without `pin` **follows** to the latest versions of its document, so a new version writes nothing to any bundle; `members(bundle)` resolves them |
-| **Files** | `files: [{label, path, primary}]`, paths relative to the root | `Enter` opens the selected file row's file, else the primary; `e` on a file row picks *make primary* / *detach* / *attach another file*, and on an empty files row asks for a path — POSIX, relative, never leaving the root |
+| **Kind** | `kind: "bundle"` on a bundle; absent on an entry for a document | — |
+| **Physical location** | a `location` entity: `name`, and `parent: <location id>`, absent at the top level | a tree of any depth. A slot is just a child location. Siblings sort by name, numbers compared as numbers (`slot 2` before `slot 10`). A location whose parent chain loops, or names a deleted location, reads as top level |
+| **Hard copy** | `location: <location id>` on the entry, or `location: "none"` for **digital only** | absent, or naming a deleted location, is **unfiled**. One field, so a concurrent "file it here" and "digital only" resolve to one winner instead of both |
+| **Bundle entry** | `bundles: [{bundle, pin?, file?}]`; a bare id reads as `{bundle}` | an entry without `pin` **follows** to the latest version, so a new version writes nothing to any bundle; `members(bundle)` resolves them |
+| **Soft copies** | `files: [{label, path, primary}]`, paths relative to the root | `Enter` opens the selected file row's file, else the primary; `e` on a file row picks *make primary* / *detach* / *attach another file*, and on an empty files row asks for a path — POSIX, relative, never leaving the root |
 | **Tags** | `tags: [word]` — free words, chiefly areas like `marine` | searched |
 
-- **The list shows latest documents only.** Older versions and bundles join it
+- **The Find view shows latest entries only.** Older versions and bundles join it
   only through their filter toggles, which compose with the expiring toggle.
 - **Expiry is per version.** Each version keeps its own dates and shows its own
   validity; the **watch, the header count and the expiring filter follow the
   latest version only**, never a bundle.
 - **Two latest versions of one document** can only come from an offline
   duplicate. Both stay listed; merging them is the merge verb's job.
-- **A bundle** is a record — name, notes, optional date — hidden from the list
-  and from the expiring count by default. Search on its name finds its members,
-  including the latest version reached by a following entry.
-- **New version** copies name, tags and place; dates, files and notes start
-  empty, and the new record supersedes the old.
+- **A bundle** is an entry — name, notes, optional date — hidden from the Find
+  view and from the expiring count by default. Search on its name finds its
+  members, including the latest version reached by a following entry.
+- **New version** copies name, tags and physical location; dates, soft copies
+  and notes start empty, and the new entry supersedes the old.
+- **Deleting a physical location deletes everything inside it** — one delete op
+  per location in the subtree. Entries are never rewritten: their `location`
+  points at a deleted location and they read as unfiled, and undo re-creates the
+  locations, which files them again. To keep a child location, move it out first.
+- **Moving a location** writes its `parent`; a location can never be moved into
+  itself or its own subtree. Two devices moving two locations into each other
+  is the loop the fold reads as top level.
 
 ## 5. The Python satellite (`dossier-lab`)
 

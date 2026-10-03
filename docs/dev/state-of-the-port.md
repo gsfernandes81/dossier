@@ -92,7 +92,7 @@ Each is recorded where it belongs; the link is the point of the row.
 | The band is ANSI 7 on ANSI 0, status row only, edge to edge | `Theme::band` |
 | Tones on the band differ from tones off it | `Theme::on_band` |
 | Three verb tiers: a key / a leader chord / a command | REWRITE-UI §5a |
-| **No new `ctrl` verbs.** A which-key panel for `ctrl` is *impossible*, not unbuilt: Termux latches `CTRL` in its own UI, so the app sees one finished `ctrl+e` event and never a moment between modifier and letter. That tier can only be memorised. | `detail.rs` module docs, `input.rs` |
+| **No `ctrl`-only verbs.** Every `ctrl` key (`^x`, `^t`, `^z`, `^y`) is an accelerator the Space sheet shows beside its verb. A which-key panel for `ctrl` is *impossible*, not unbuilt: Termux latches `CTRL` in its own UI, so the app sees one finished `ctrl+e` event and never a moment between modifier and letter. That tier can only be memorised. | `detail.rs` module docs, `input.rs`, REWRITE-UI §5c |
 | The record is a surface with its own verbs: search locked out, bare letters free, `e` edits the selected row | `detail.rs`, `Model::record_verb` |
 | The record has a selector; `↑`/`↓` drive it and never the list underneath | `Model::move_record` |
 | Twelve-documents-at-45×28 is superseded by the measured sizes | swept through `layout.rs`, `find.rs`, `screens.rs`, REWRITE-UI |
@@ -118,10 +118,6 @@ Each is recorded where it belongs; the link is the point of the row.
 - **The arrow modifier tier** (`ctrl`/`alt` + arrows) — reserved, unbound, and
   now unlikely to be used: the same argument that retired `ctrl+e` applies to it.
   Reachable by thumb, teachable by nothing.
-- **`s` supersede and `b` bundle** — specced in REWRITE-UI §2, unbuilt (`u`/`r`
-  undo and redo are built).
-  They are bare letters on the record surface, which is legal now that search is
-  locked out there. Add them with the slices that implement them.
 - ~~Does Termux honour `SGR 2`?~~ **Answered on the device, 2026-08-21: yes.**
   The user ran `tools/probe-attrs.fish` on the phone and reports dim, bold,
   reverse and underline all clearly distinguishable. Dim is a real texture on
@@ -129,15 +125,16 @@ Each is recorded where it belongs; the link is the point of the row.
   run: the glyph row and dim-on-band — still assumptions.)*
 - **The succession reversal** on the filing card — deferred until the user
   confirms it is a real pain point. Do not build it speculatively.
-- **The structured fields' verbs and pickers.** The model is REWRITE.md §4.7 and
-  is in the code (versions, latest-only list, bundle entries, place slots,
-  composable filter toggles), and the files editor works through `e` on a file
-  row (`pick.rs`, drawn in the Space sheet's panel). Still to build: the
-  place→slot picker (needs a way to create places), new version and the
-  versions view, bundles, multi-select. **Open with the user: the verb names and their
-  Space-sheet letters** (filter group and the place verb share `f` today) — do
-  not bind new keys before they are chosen. Pickers reuse the Space sheet panel;
-  `e` on a structured record row opens that row's picker.
+- **The R4 verbs are named and lettered** (REWRITE-UI §5c; the model is
+  REWRITE.md §4.7). The soft-copy editor is built (`pick.rs`); the code still
+  has the older place model, `perm_location`/`perm_slot`/`perm_subslot` and
+  `Location.slots`. Still to build: the physical location tree and its
+  picker, digital only, the `+ new` rows, the filter checkbox list, new version
+  and the Versions view, the bundles list and a bundle's Details view, and
+  `ctrl+z`/`ctrl+y`. **Open with the user:** marking several entries at once
+  (deferred); the checkbox glyph; the header noun (`14 docs` or entries);
+  flipping the Find view fzf-style, best match at the bottom (deferred); and
+  whether *entry* goes back to *document* — one word, swapped everywhere.
 - **The model rethink is under way in
   [`model-rethink.md`](model-rethink.md)** — edges instead of four membership
   mechanisms, succession chains instead of a document taxonomy, the list showing
