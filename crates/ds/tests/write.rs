@@ -445,8 +445,7 @@ fn undoing_a_delete_restores_every_field() {
         r#"{"v":1,"ts":1700000000002,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"name","val":"COC Certificate"}"#,
         r#"{"v":1,"ts":1700000000003,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"expiry_date","val":"2026-09-28"}"#,
         r#"{"v":1,"ts":1700000000004,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"tags","val":["marine","ticket"]}"#,
-        r#"{"v":1,"ts":1700000000005,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"perm_location","val":"cert-file"}"#,
-        r#"{"v":1,"ts":1700000000006,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"perm_slot","val":8}"#,
+        r#"{"v":1,"ts":1700000000005,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"location","val":"cert-file"}"#,
         r#"{"v":1,"ts":1700000000007,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"notes","val":"the one with the stamp"}"#,
         r#"{"v":1,"ts":1700000000008,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"files","val":[{"label":"complete","path":"Marine/coc.pdf","primary":true}]}"#,
     ];

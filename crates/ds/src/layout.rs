@@ -198,6 +198,29 @@ pub fn truncate(text: &str, max: usize) -> String {
     out
 }
 
+/// Truncate from the left, starting with `…` when it had to cut, so the end of
+/// a path — its innermost location — stays readable.
+#[must_use]
+pub fn truncate_left(text: &str, max: usize) -> String {
+    if text.width() <= max {
+        return text.to_string();
+    }
+    if max <= 1 {
+        return "…".into();
+    }
+    let mut kept = Vec::new();
+    let mut used = 0usize;
+    for ch in text.chars().rev() {
+        let w = ch.width().unwrap_or(0);
+        if used + w > max - 1 {
+            break;
+        }
+        kept.push(ch);
+        used += w;
+    }
+    std::iter::once('…').chain(kept.into_iter().rev()).collect()
+}
+
 /// Truncate, then pad on the right, so the result is exactly `cols` wide.
 #[must_use]
 pub fn fit(text: &str, cols: usize) -> String {
@@ -280,6 +303,14 @@ pub fn short_date(iso: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A path cut to fit keeps its end, where the innermost location is.
+    #[test]
+    fn a_path_is_cut_from_the_left() {
+        assert_eq!(truncate_left("desk › leather folder › slot 3", 12), "…er › slot 3");
+        assert_eq!(truncate_left("short", 12), "short");
+        assert_eq!(width(&truncate_left("desk › leather folder › slot 3", 12)), 12);
+    }
 
     /// **Two states, no ladder.** The phone and a 60-column tmux split get the
     /// same single-pane layout; the split appears only when there is really room

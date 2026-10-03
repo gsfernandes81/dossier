@@ -239,10 +239,11 @@ fn draw_list(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         let doc = &model.store.docs[index];
         let selected = model.offset + slot == model.cursor;
         let status = model.status(doc);
+        let place = model.store.place(doc);
         if row_height == 1 {
-            lines.push(single_line_row(doc, status, area.width, selected, theme));
+            lines.push(single_line_row(doc, &place, status, area.width, selected, theme));
         } else {
-            let (first, second) = two_line_row(doc, status, area.width, selected, theme);
+            let (first, second) = two_line_row(doc, &place, status, area.width, selected, theme);
             lines.push(first);
             lines.push(second);
         }
@@ -271,6 +272,7 @@ fn cursor_cell(selected: bool) -> &'static str {
 /// Wide layout: name, tags, location, status — each in a fixed column.
 fn single_line_row(
     doc: &Doc,
+    place: &str,
     status: Status,
     cols: u16,
     selected: bool,
@@ -285,7 +287,10 @@ fn single_line_row(
     if tags_cols > 0 {
         spans.push(Span::styled(fit(&doc.tags.join(" "), tags_cols), theme.style(Tone::Muted)));
     }
-    spans.push(Span::styled(pad_left(&doc.place(), place_cols), theme.style(Tone::Muted)));
+    spans.push(Span::styled(
+        pad_left(&crate::layout::truncate_left(place, place_cols), place_cols),
+        theme.style(Tone::Muted),
+    ));
     spans.push(Span::raw("  "));
     spans.push(Span::styled(status_cell(doc, status), theme.status(status)));
 
@@ -304,6 +309,7 @@ fn single_line_row(
 /// while browsing and ten while typing.
 fn two_line_row(
     doc: &Doc,
+    place: &str,
     status: Status,
     cols: u16,
     selected: bool,
@@ -317,8 +323,13 @@ fn two_line_row(
         Span::styled(status_cell(doc, status), theme.status(status)),
     ]);
 
-    let place = doc.place();
     let tags = doc.tags.join(" ");
+    let room = total.saturating_sub(4);
+    let place = if tags.is_empty() {
+        crate::layout::truncate_left(place, room)
+    } else {
+        crate::layout::truncate_left(place, room.saturating_sub(width(&tags) + 3).max(room / 2))
+    };
     let under = match (place.is_empty(), tags.is_empty()) {
         (true, true) => String::new(),
         (false, true) => place,

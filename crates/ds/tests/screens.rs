@@ -89,9 +89,11 @@ fn sample_store() -> Store {
             expiry_date: expiry.map(str::to_string),
             ignore_expiry: false,
             supersedes: None,
-            location: Some((*location).into()),
-            slot: (*slot > 0).then_some(*slot),
-            subslot: None,
+            location: Some(if *slot == 0 {
+                ds::place::DIGITAL_ONLY.into()
+            } else {
+                format!("{location}-{slot}")
+            }),
             files: if file.is_empty() {
                 Vec::new()
             } else {
@@ -106,7 +108,22 @@ fn sample_store() -> Store {
             haystack: ds::search::fold(&format!("{name} {tag}")),
         })
         .collect();
-    Store { docs, ..Store::default() }
+    let mut locations = Vec::new();
+    for (_, _, location, slot, ..) in rows.iter().filter(|row| row.3 > 0) {
+        if !locations.iter().any(|l: &ds::Location| l.id == *location) {
+            locations.push(ds::Location {
+                id: (*location).into(),
+                name: location.replace('-', " "),
+                parent: None,
+            });
+        }
+        locations.push(ds::Location {
+            id: format!("{location}-{slot}"),
+            name: format!("slot {slot}"),
+            parent: Some((*location).into()),
+        });
+    }
+    Store { docs, locations: ds::Tree::new(locations), ..Store::default() }
 }
 
 fn model(cols: u16, rows: u16) -> Model {
@@ -205,7 +222,7 @@ fn the_phone_screen_matches_the_approved_mockup() {
 
     // Twelve documents, two lines each, starting on row 1.
     assert!(lines[1].starts_with("▸ Motorcycle Insurance"), "shelf order: {:?}", lines[1]);
-    assert!(lines[2].contains("blue-folder 1 · motorcycle"), "under-line: {:?}", lines[2]);
+    assert!(lines[2].contains("blue folder › slot 1 · motorcycle"), "under-line: {:?}", lines[2]);
     assert!(lines[3].starts_with("  RC Book"), "second row is not selected: {:?}", lines[3]);
     assert_eq!(ds::layout::visible_rows(45, 28), 12);
 
@@ -265,7 +282,7 @@ fn the_desktop_screen_is_single_line_rows() {
     let lines = screen(&mut m, 100, 26);
     assert!(lines[1].starts_with("▸ Motorcycle Insurance"));
     assert!(lines[1].contains("motorcycle"), "tags column: {:?}", lines[1]);
-    assert!(lines[1].contains("blue-folder 1"));
+    assert!(lines[1].contains("…e folder › slot 1"), "the path, cut from the left: {:?}", lines[1]);
     assert!(lines[2].starts_with("  RC Book"), "no under-line at this width: {:?}", lines[2]);
     assert!(!lines[23].contains("⏎ Open"), "no touch action bar on the desktop");
 }

@@ -1,7 +1,8 @@
 # A demo journal
 
-A synthetic v3 journal — 24 documents, five locations, a superseded pair, notes,
-bundles, and three scan readings in `enrich/` so `ctrl+t` has something to find.
+A synthetic v3 journal — 24 documents filed in a tree of physical locations, a
+superseded pair, notes, bundles, and three scan readings in `enrich/` so `ctrl+t`
+has something to find.
 Entirely made up; **no personal data is here and none ever goes here** (real
 documents and `.dossier/` contents are gitignored and stay that way).
 

@@ -298,8 +298,6 @@ mod tests {
             ignore_expiry: false,
             supersedes: None,
             location: None,
-            slot: None,
-            subslot: None,
             files: Vec::new(),
             notes: String::new(),
             superseded: false,

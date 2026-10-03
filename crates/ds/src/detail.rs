@@ -167,7 +167,9 @@ fn render_row(
 ) -> Vec<Line<'static>> {
     match row {
         Row::Editable(what) => render_editable(what, doc, model, inner, theme),
-        Row::Fact("location") => vec![field("location", &nonempty(doc.place()), inner, theme)],
+        Row::Fact("location") => {
+            vec![field("location", &nonempty(model.store.place(doc)), inner, theme)]
+        }
         Row::Fact("bundles") => {
             let names: Vec<&str> =
                 doc.bundles.iter().map(|entry| model.store.name_of(&entry.bundle)).collect();

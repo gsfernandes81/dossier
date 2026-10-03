@@ -30,6 +30,7 @@
 //!
 //! - [`doc`] — a folded journal turned into documents: shelf order, expiry
 //!   standing, the file `Enter` opens, the search haystack.
+//! - [`place`] — the tree of physical locations a hard copy is filed in.
 //! - [`search`] — v2's typo-tolerant matching contract, ported: exact always
 //!   wins, and a short query never fuzzes.
 //! - [`app`] — the Elm-style loop's update half: `Msg` in, state changed,
@@ -81,6 +82,7 @@ pub mod layout;
 pub mod load;
 pub mod open;
 pub mod pick;
+pub mod place;
 pub mod scans;
 pub mod search;
 pub mod sheet;
@@ -90,5 +92,6 @@ pub mod theme;
 pub mod wsl;
 
 pub use app::{update, Effect, Model, Msg};
-pub use doc::{Doc, FileRef, Kind, Location, Member, Membership, Status, Store};
+pub use doc::{Doc, FileRef, Kind, Member, Membership, Status, Store};
+pub use place::{HardCopy, Location, Tree};
 pub use theme::Theme;

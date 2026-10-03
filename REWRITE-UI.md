@@ -36,10 +36,12 @@ The app *is* a finder that happens to have management surfaces behind it.
 - **Rows** (single line when the pane is ≥ ~70 cols): name left, truncated with `…`;
   right-aligned: dim `location slot`, expiry (status-colored, `!`/`~`/`⚠` ASCII
   markers per v2), `·` when none. Below ~70 cols rows go **two-line** (v2 pattern):
-  line 1 name + status, line 2 dim `location · slot · tags`. Alignment via
+  line 1 name + status, line 2 dim `location path · tags`, the path cut from the
+  left so its innermost location stays. Alignment via
   cell-width-aware truncation (unicode-width), never `len()`.
-- **Default order**: location → slot → subslot → name (explicit tiebreakers, v2
-  rule) — physical shelf order survives U2 as *sort*, not headers. The list is
+- **Default order**: the location tree in sibling order, then name, then id;
+  unfiled and digital-only last — physical shelf order survives U2 as *sort*,
+  not headers. The list is
   virtualized (948+ rows).
 - **Search bar docked at the bottom** (thumb-reachable — a v2 lesson that stands):
   any printable typed anywhere on this surface lands in it (find-fast, invariant 1);

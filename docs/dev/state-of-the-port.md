@@ -123,15 +123,15 @@ Each is recorded where it belongs; the link is the point of the row.
 - **The succession reversal** on the filing card — deferred until the user
   confirms it is a real pain point. Do not build it speculatively.
 - **The R4 verbs are named and lettered** (REWRITE-UI §5c; the model is
-  REWRITE.md §4.7). The soft-copy editor is built (`pick.rs`); the code still
-  has the older place model, `perm_location`/`perm_slot`/`perm_subslot` and
-  `Location.slots`. Still to build: the physical location tree and its
-  picker, digital only, the `+ new` rows, the filter checkbox list, new version
-  and the Versions view, and the bundles list and a bundle's Details view.
-  Deferred by the user: marking several documents at once, flipping the Find
-  view fzf-style (best match at the bottom), matching fzf's colours, and a
-  locations view that flags looped locations as errors. Before the slices after the location
-  tree: what a Versions view row shows, and a bundle's Details view.
+  REWRITE.md §4.7). Built: the soft-copy editor (`pick.rs`), `ctrl+z`/`ctrl+y`,
+  and the location tree in the model (`place.rs`). Still to build: the
+  location picker, digital only, the `+ new` rows, the filter checkbox list,
+  new version and the Versions view, and the bundles list and a bundle's
+  Details view. Deferred by the user: marking several documents at once,
+  flipping the Find view fzf-style (best match at the bottom), matching fzf's
+  colours, and a locations view that flags looped locations as errors. Before
+  the slices after the location tree: what a Versions view row shows, and a
+  bundle's Details view.
 - **The model rethink is under way in
   [`model-rethink.md`](model-rethink.md)** — edges instead of four membership
   mechanisms, succession chains instead of a document taxonomy, the list showing

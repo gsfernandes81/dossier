@@ -1756,8 +1756,6 @@ pub(crate) mod tests {
             ignore_expiry: false,
             supersedes: None,
             location: Some("cert-file".into()),
-            slot: None,
-            subslot: None,
             files: file
                 .map(|path| {
                     vec![FileRef { label: "complete".into(), path: path.into(), primary: true }]

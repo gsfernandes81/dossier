@@ -692,8 +692,8 @@ until the cutover step the user personally green-lights.
       message is not a keystroke.
     - **Startup is unchanged at 12 ms** for 950 docs / 6,650 ops: the enrich
       namespace costs nothing until something asks for it.
-- **R4 — Editing**: detail editing via ops, undo (inverse ops), slots with
-  insert-and-shift, supersession, bundle membership, settings ops, `ds init`/`reset`.
+- **R4 — Editing**: detail editing via ops, undo (inverse ops), the physical
+  location tree (§4.7), supersession, bundle membership, settings ops, `ds init`/`reset`.
   - **Slice 1 done (2026-08-21) — the write path, end to end.** `ds init` names
     the device (the first half of its writer id), and `ctrl+e` on a record edits
     the expiry: a `set` when the date parses, an **`unset`** when the buffer is
@@ -875,7 +875,7 @@ strictly ordered; R6 can overlap R4/R5 once the adapter exists.
 
 | Feature (v2) | Disposition |
 |---|---|
-| Browse/search/open, detail editing, slots+shift, supersession | **Port** (Rust; layout per R-UI) |
+| Browse/search/open, detail editing, physical locations, supersession | **Port** (Rust; layout per R-UI) |
 | Expiry watch | **Port as filter** + header count; watch *mode* dropped |
 | Review: orphans/missing/duplicates/succession/integrity | **Rehome, no surface** (amended 2026-09-29): orphans + file-side dups → `ds file`; missing + doc-side dups → list filters (+ merge verb); succession → record suggestion; integrity → `ds status`. *Acknowledge missing* is **dropped** — unlink, or wait for sync. Conflicts tab dropped. |
 | Suggestions accept/dismiss | **Port**; name-parse source in Rust, reading source from satellite |

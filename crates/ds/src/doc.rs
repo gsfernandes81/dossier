@@ -19,14 +19,14 @@
 //! that is what the format is. Everything above it wants documents — with a
 //! name, a place on a shelf, an expiry status and a search haystack. This module
 //! is that boundary, and it is deliberately the *only* place that knows field
-//! names like `perm_location`.
+//! names like `expiry_date`.
 //!
 //! Two rules from the plan are implemented here rather than in the renderer,
 //! because they are facts about the data and not about the screen:
 //!
-//! * **Shelf order** (REWRITE-UI.md §1): location → slot → subslot → name, with
-//!   every tiebreaker explicit so the list never jitters between frames. U2
-//!   drops the location *headers*, not the ordering they used to imply.
+//! * **Shelf order** (REWRITE-UI.md §1): the location tree in sibling order,
+//!   then name, then id, so the list never jitters between frames. Unfiled and
+//!   digital-only documents come last.
 //! * **The expiry watch is opt-out** (DESIGN §14): a document is tracked if it
 //!   has an expiry date and is neither superseded by a newer document nor
 //!   explicitly ignored. Being superseded is a *collection-level* fact — some
@@ -36,6 +36,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use journal::{Entity, Fold};
+
+use crate::place::{HardCopy, Location, Tree};
 use serde_json::Value;
 
 /// A document's expiry standing, as the row renders it.
@@ -142,12 +144,9 @@ pub struct Doc {
     pub ignore_expiry: bool,
     /// The id of the document this one replaces.
     pub supersedes: Option<String>,
-    /// Location slug — where it physically lives, or `softcopy`.
+    /// The `location` field as stored: a location id, or
+    /// [`crate::place::DIGITAL_ONLY`]. Read it through [`Store::hard_copy`].
     pub location: Option<String>,
-    /// Slot within the location.
-    pub slot: Option<u32>,
-    /// Subslot within the slot.
-    pub subslot: Option<u32>,
     /// Linked files.
     pub files: Vec<FileRef>,
     /// Free text.
@@ -225,22 +224,9 @@ impl Doc {
         push("expiry_date", self.expiry_date.clone().map(Into::into));
         push("ignore_expiry", self.ignore_expiry.then(|| true.into()));
         push("supersedes", self.supersedes.clone().map(Into::into));
-        push("perm_location", self.location.clone().map(Into::into));
-        push("perm_slot", self.slot.map(Into::into));
-        push("perm_subslot", self.subslot.map(Into::into));
+        push("location", self.location.clone().map(Into::into));
         push("files", (!self.files.is_empty()).then(|| files_value(&self.files)));
         fields
-    }
-
-    /// `cert-file 8` / `cert-file 8.2` / `softcopy` — the dim right-hand column.
-    #[must_use]
-    pub fn place(&self) -> String {
-        let Some(location) = &self.location else { return String::new() };
-        match (self.slot, self.subslot) {
-            (Some(slot), Some(sub)) => format!("{location} {slot}.{sub}"),
-            (Some(slot), None) => format!("{location} {slot}"),
-            _ => location.clone(),
-        }
     }
 
     /// The file to open when `Enter` is pressed: the primary if one is marked,
@@ -261,19 +247,6 @@ pub struct Member {
     pub pinned: bool,
     /// The one file the bundle uses, if not all of them.
     pub file: Option<String>,
-}
-
-/// A physical location: a folder, a pouch, a file box.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Location {
-    /// Slug — how documents reference it.
-    pub id: String,
-    /// Display name.
-    pub title: String,
-    /// Free text.
-    pub notes: String,
-    /// How many slots it has; `None` when it has none to choose from.
-    pub slots: Option<u32>,
 }
 
 /// The journal value of a files list.
@@ -318,8 +291,8 @@ pub fn memberships_value(memberships: &[Membership]) -> Value {
 pub struct Store {
     /// Documents in shelf order.
     pub docs: Vec<Doc>,
-    /// Locations by slug.
-    pub locations: BTreeMap<String, Location>,
+    /// The physical locations.
+    pub locations: Tree,
     /// Synced settings, as folded (`expiry_threshold_days`, scope globs, …).
     pub settings: BTreeMap<String, Value>,
 }
@@ -329,10 +302,6 @@ pub const DEFAULT_WARN_DAYS: i64 = 90;
 
 fn string(entity: &Entity, field: &str) -> Option<String> {
     entity.fields.get(field).and_then(Value::as_str).map(str::to_string)
-}
-
-fn number(entity: &Entity, field: &str) -> Option<u32> {
-    entity.fields.get(field).and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok())
 }
 
 fn flag(entity: &Entity, field: &str) -> bool {
@@ -469,9 +438,7 @@ impl Store {
                         expiry_date: string(entity, "expiry_date"),
                         ignore_expiry: flag(entity, "ignore_expiry"),
                         supersedes: string(entity, "supersedes"),
-                        location: string(entity, "perm_location"),
-                        slot: number(entity, "perm_slot"),
-                        subslot: number(entity, "perm_subslot"),
+                        location: string(entity, "location"),
                         files: files(entity),
                         notes,
                         superseded: superseded.contains(id),
@@ -480,37 +447,19 @@ impl Store {
                 })
                 .collect();
 
-        // Shelf order, with every tiebreaker spelled out. Documents with no
-        // location sort last — they are the softcopy-only ones, and putting them
-        // first would push the physical shelf off the top of a phone screen.
-        docs.sort_by(|a, b| {
-            let key = |d: &Doc| {
-                (
-                    d.location.is_none(),
-                    d.location.clone().unwrap_or_default(),
-                    d.slot,
-                    d.subslot,
-                    d.name.to_lowercase(),
-                    d.id.clone(),
-                )
-            };
-            key(a).cmp(&key(b))
-        });
+        let locations = Tree::new(fold.kind("location").map(|(id, entity)| Location {
+            id: id.to_string(),
+            name: string(entity, "name").unwrap_or_else(|| id.to_string()),
+            parent: string(entity, "parent"),
+        }));
 
-        let locations = fold
-            .kind("location")
-            .map(|(id, entity)| {
-                (
-                    id.to_string(),
-                    Location {
-                        id: id.to_string(),
-                        title: string(entity, "title").unwrap_or_else(|| id.to_string()),
-                        notes: string(entity, "notes").unwrap_or_default(),
-                        slots: number(entity, "slots"),
-                    },
-                )
-            })
-            .collect();
+        let shelf: BTreeMap<&str, usize> =
+            locations.shelf().into_iter().enumerate().map(|(rank, id)| (id, rank)).collect();
+        let rank = |doc: &Doc| match locations.hard_copy(doc.location.as_deref()) {
+            HardCopy::At(id) => shelf.get(id).copied().unwrap_or(usize::MAX),
+            HardCopy::Unfiled | HardCopy::DigitalOnly => usize::MAX,
+        };
+        docs.sort_by_cached_key(|doc| (rank(doc), doc.name.to_lowercase(), doc.id.clone()));
 
         let settings =
             fold.get("settings", "synced").map(|entity| entity.fields.clone()).unwrap_or_default();
@@ -522,6 +471,35 @@ impl Store {
     #[must_use]
     pub fn listed(&self) -> usize {
         self.docs.iter().filter(|doc| doc.listed()).count()
+    }
+
+    /// Where a document's hard copy is.
+    #[must_use]
+    pub fn hard_copy(&self, doc: &Doc) -> HardCopy<'_> {
+        self.locations.hard_copy(doc.location.as_deref())
+    }
+
+    /// The path of a document's hard copy location, or empty when it has none.
+    #[must_use]
+    pub fn place(&self, doc: &Doc) -> String {
+        match self.hard_copy(doc) {
+            HardCopy::At(id) => self.locations.path(id),
+            HardCopy::Unfiled | HardCopy::DigitalOnly => String::new(),
+        }
+    }
+
+    /// How many documents have their hard copy in `id` or anywhere inside it,
+    /// old versions included and bundles never.
+    #[must_use]
+    pub fn held(&self, id: &str) -> usize {
+        self.docs
+            .iter()
+            .filter(|doc| doc.kind == Kind::Document)
+            .filter(|doc| match self.hard_copy(doc) {
+                HardCopy::At(at) => self.locations.is_within(at, id),
+                HardCopy::Unfiled | HardCopy::DigitalOnly => false,
+            })
+            .count()
     }
 
     /// The position of the record with this id.
@@ -766,8 +744,6 @@ mod tests {
             ignore_expiry: true,
             supersedes: Some("coc-2019".into()),
             location: Some("cert-file".into()),
-            slot: Some(8),
-            subslot: Some(2),
             files: vec![
                 FileRef { label: "complete".into(), path: "Marine/coc.pdf".into(), primary: true },
                 FileRef { label: "back".into(), path: "Marine/coc-b.pdf".into(), primary: false },
@@ -931,19 +907,22 @@ mod tests {
         assert_eq!(old.expiry_date.as_deref(), Some("2029-01-01"));
     }
 
-    /// A place reads its slot count.
+    /// A location reads its name and parent; one with no name shows its id.
     #[test]
-    fn a_location_reads_its_slots() {
+    fn a_location_reads_its_name_and_parent() {
         let ops = [
-            (100, "create", "location", "blue", "", Value::Null),
-            (101, "set", "location", "blue", "title", Value::from("Blue folder")),
-            (102, "set", "location", "blue", "slots", Value::from(12)),
+            (100, "create", "location", "desk", "", Value::Null),
+            (101, "set", "location", "desk", "name", Value::from("desk")),
+            (102, "create", "location", "folder", "", Value::Null),
+            (103, "set", "location", "folder", "parent", Value::from("desk")),
         ];
-        assert_eq!(store(&ops).locations["blue"].slots, Some(12));
+        let tree = store(&ops).locations;
+        assert_eq!(tree.get("folder").map(|l| l.name.as_str()), Some("folder"));
+        assert_eq!(tree.parent("folder"), Some("desk"));
     }
 
     /// A document with nothing but a name round-trips too — the absent fields
-    /// stay absent rather than coming back as empty strings and zero slots.
+    /// stay absent rather than coming back as empty strings.
     #[test]
     fn an_empty_document_round_trips_without_inventing_fields() {
         let fields = Doc {
@@ -957,8 +936,6 @@ mod tests {
             ignore_expiry: false,
             supersedes: None,
             location: None,
-            slot: None,
-            subslot: None,
             files: Vec::new(),
             notes: String::new(),
             superseded: false,
@@ -969,90 +946,94 @@ mod tests {
 
         let rebuilt = build(vec![doc(100, "bare", &fields)]);
         assert_eq!(rebuilt.docs[0].location, None);
-        assert_eq!(rebuilt.docs[0].slot, None);
         assert!(rebuilt.docs[0].files.is_empty(), "{:?}", rebuilt.docs[0].files);
     }
 
-    /// **Shelf order, with explicit tiebreakers.** U2 drops the location
-    /// headers; it does not drop the ordering they implied — the list still
-    /// reads in the order the documents physically sit.
+    fn location(ts: i64, id: &str, name: &str, parent: Option<&str>) -> Vec<OwnedOp> {
+        let mut ops = vec![
+            (ts, "create".into(), "location".into(), id.into(), String::new(), Value::Null),
+            (ts + 1, "set".into(), "location".into(), id.into(), "name".into(), name.into()),
+        ];
+        if let Some(parent) = parent {
+            ops.push((
+                ts + 2,
+                "set".into(),
+                "location".into(),
+                id.into(),
+                "parent".into(),
+                parent.into(),
+            ));
+        }
+        ops
+    }
+
+    fn filed(ts: i64, id: &str, name: &str, at: Option<&str>) -> Vec<OwnedOp> {
+        let mut fields = vec![("name", Value::from(name))];
+        if let Some(at) = at {
+            fields.push(("location", at.into()));
+        }
+        doc(ts, id, &fields)
+    }
+
+    /// **Shelf order** follows the location tree in sibling order, then the
+    /// name; unfiled and digital-only documents come last.
     #[test]
     fn documents_sort_in_shelf_order() {
         let s = build(vec![
-            doc(
-                100,
-                "b",
-                &[
-                    ("name", "B".into()),
-                    ("perm_location", "cert-file".into()),
-                    ("perm_slot", 8.into()),
-                ],
-            ),
-            doc(
-                200,
-                "a",
-                &[
-                    ("name", "A".into()),
-                    ("perm_location", "cert-file".into()),
-                    ("perm_slot", 3.into()),
-                ],
-            ),
-            doc(300, "z", &[("name", "Z softcopy".into())]),
-            doc(
-                400,
-                "c",
-                &[
-                    ("name", "C".into()),
-                    ("perm_location", "blue-folder".into()),
-                    ("perm_slot", 1.into()),
-                ],
-            ),
+            location(10, "cert", "cert file", None),
+            location(20, "s8", "slot 8", Some("cert")),
+            location(30, "s3", "slot 3", Some("cert")),
+            location(40, "blue", "blue folder", None),
+            filed(100, "b", "B", Some("s8")),
+            filed(200, "a", "A", Some("s3")),
+            filed(300, "z", "Z", Some(crate::place::DIGITAL_ONLY)),
+            filed(400, "c", "C", Some("blue")),
+            filed(500, "y", "Y", None),
+            filed(600, "x", "X", Some("cert")),
         ]);
         let order: Vec<&str> = s.docs.iter().map(|d| d.id.as_str()).collect();
-        assert_eq!(
-            order,
-            ["c", "a", "b", "z"],
-            "blue-folder, then cert-file 3, 8, then no location"
-        );
+        assert_eq!(order, ["c", "x", "a", "b", "y", "z"]);
     }
 
-    /// Sub-slots break ties inside a slot, and the name breaks ties inside that.
+    /// Inside one location the name breaks ties, then the id.
     #[test]
-    fn subslot_then_name_break_the_tie() {
+    fn name_then_id_break_the_tie() {
         let s = build(vec![
-            doc(
-                100,
-                "second",
-                &[
-                    ("name", "Zulu".into()),
-                    ("perm_location", "f".into()),
-                    ("perm_slot", 1.into()),
-                    ("perm_subslot", 2.into()),
-                ],
-            ),
+            location(10, "f", "f", None),
+            filed(100, "second", "Zulu", Some("f")),
+            filed(200, "third", "Alpha", Some("f")),
+            filed(300, "first", "Alpha", Some("f")),
+        ]);
+        let order: Vec<&str> = s.docs.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(order, ["first", "third", "second"]);
+    }
+
+    /// A count of hard copies takes in everything inside a location, old
+    /// versions included and bundles never.
+    #[test]
+    fn a_location_counts_every_hard_copy_inside_it() {
+        let s = build(vec![
+            location(10, "desk", "desk", None),
+            location(20, "folder", "leather folder", Some("desk")),
+            filed(100, "old", "Passport", Some("folder")),
             doc(
                 200,
-                "first",
+                "new",
                 &[
-                    ("name", "Alpha".into()),
-                    ("perm_location", "f".into()),
-                    ("perm_slot", 1.into()),
-                    ("perm_subslot", 1.into()),
+                    ("name", "Passport".into()),
+                    ("supersedes", "old".into()),
+                    ("location", "desk".into()),
                 ],
             ),
             doc(
                 300,
-                "third",
-                &[
-                    ("name", "Alpha".into()),
-                    ("perm_location", "f".into()),
-                    ("perm_slot", 1.into()),
-                    ("perm_subslot", 2.into()),
-                ],
+                "set",
+                &[("name", "Set".into()), ("kind", "bundle".into()), ("location", "folder".into())],
             ),
         ]);
-        let order: Vec<&str> = s.docs.iter().map(|d| d.id.as_str()).collect();
-        assert_eq!(order, ["first", "third", "second"]);
+        assert_eq!(s.held("desk"), 2);
+        assert_eq!(s.held("folder"), 1);
+        assert_eq!(s.place(&s.docs[s.index_of("old").unwrap()]), "desk › leather folder");
     }
 
     /// **The watch is opt-out.** A renewal removes the old document from it
@@ -1114,37 +1095,22 @@ mod tests {
         }
     }
 
-    /// The place column reads the way the mockups show it.
+    /// The place column is the hard copy's path, and empty when there is none.
     #[test]
-    fn the_place_column_reads_as_location_slot() {
+    fn the_place_column_reads_as_the_path() {
         let s = build(vec![
-            doc(
-                100,
-                "a",
-                &[
-                    ("name", "A".into()),
-                    ("perm_location", "cert-file".into()),
-                    ("perm_slot", 8.into()),
-                ],
-            ),
-            doc(
-                200,
-                "b",
-                &[
-                    ("name", "B".into()),
-                    ("perm_location", "file-4096".into()),
-                    ("perm_slot", 1.into()),
-                    ("perm_subslot", 2.into()),
-                ],
-            ),
-            doc(300, "c", &[("name", "C".into()), ("perm_location", "softcopy".into())]),
-            doc(400, "d", &[("name", "D".into())]),
+            location(10, "cert", "cert file", None),
+            location(20, "s8", "slot 8", Some("cert")),
+            filed(100, "a", "A", Some("s8")),
+            filed(200, "c", "C", Some(crate::place::DIGITAL_ONLY)),
+            filed(300, "d", "D", None),
+            filed(400, "e", "E", Some("deleted")),
         ]);
-        let place = |id: &str| s.docs.iter().find(|d| d.id == id).unwrap().place();
-        assert_eq!(place("a"), "cert-file 8");
-        assert_eq!(place("b"), "file-4096 1.2");
-        assert_eq!(place("c"), "softcopy");
+        let place = |id: &str| s.place(&s.docs[s.index_of(id).unwrap()]);
+        assert_eq!(place("a"), "cert file › slot 8");
+        assert_eq!(place("c"), "");
         assert_eq!(place("d"), "");
+        assert_eq!(place("e"), "");
     }
 
     /// **Enter never dies.** With no file linked there is nothing to open, and
@@ -1218,11 +1184,11 @@ mod tests {
     fn locations_and_settings_are_read_from_the_fold() {
         let s = store(&[
             (10, "create", "location", "cert-file", "", Value::Null),
-            (11, "set", "location", "cert-file", "title", "Cert File".into()),
+            (11, "set", "location", "cert-file", "name", "Cert File".into()),
             (20, "create", "settings", "synced", "", Value::Null),
             (21, "set", "settings", "synced", "expiry_threshold_days", 270.into()),
         ]);
-        assert_eq!(s.locations["cert-file"].title, "Cert File");
+        assert_eq!(s.locations.get("cert-file").map(|l| l.name.as_str()), Some("Cert File"));
         assert_eq!(s.warn_days(), 270);
     }
 
@@ -1236,7 +1202,7 @@ mod tests {
     /// half-written record invisible instead of fixable.
     #[test]
     fn a_nameless_document_still_appears() {
-        let s = build(vec![doc(100, "orphan", &[("perm_location", "cert-file".into())])]);
+        let s = build(vec![doc(100, "orphan", &[("location", "cert-file".into())])]);
         assert_eq!(s.docs.len(), 1);
         assert_eq!(s.docs[0].name, "");
     }
