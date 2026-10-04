@@ -133,8 +133,8 @@ pub struct Folder {
     /// Whether syncing is paused — the one setting that silently stops
     /// everything while looking fine.
     pub paused: bool,
-    /// The versioning type, empty when off. **This is the backup**: the design
-    /// leans on Syncthing versioning instead of shipping its own undo history.
+    /// The versioning type, empty when off: Syncthing's file-level backup;
+    /// edits are undone through the journal.
     pub versioning: String,
     /// `idle`, `scanning`, `syncing`, … as the daemon reports it.
     pub folder_state: Option<String>,
@@ -292,13 +292,9 @@ pub fn is_loopback(host: &str) -> bool {
     host == "localhost" || host == "::1" || host.starts_with("127.")
 }
 
-/// What an unanswered loopback means under WSL, and the two ways out.
-///
-/// WSL's default NAT networking gives the Linux side its own `127.0.0.1`, and
-/// Windows' Syncthing binds only Windows' — so the daemon is running and simply
-/// not reachable from here. Mirrored networking shares the loopback. Pointing `address` at the Windows host instead is not offered:
-/// it would need Syncthing listening beyond loopback and the TLS exception
-/// stretched to match, which is the trade the loopback rule exists to refuse.
+/// WSL2's default NAT gives Linux its own loopback, which Windows' Syncthing is
+/// not on. Pointing `address` at the Windows host would need the TLS exception
+/// beyond loopback, so it is never suggested.
 pub const WSL_LOOPBACK_HINT: &str =
     "under WSL's default NAT networking 127.0.0.1 is Linux's own loopback, not \
      Windows' — set `networkingMode=mirrored` under `[wsl2]` in \
@@ -314,9 +310,8 @@ pub fn query(settings: &Settings, root: &Path, wsl: Option<&Wsl>) -> Status {
     // Under WSL with NAT networking both of the unhappy states below usually
     // have the same cause — Windows' daemon is not on this loopback — and the
     // Refused one is the user's first attempt to route around it.
-    let nat = wsl.is_some();
     let explain = |detail: String| {
-        if nat {
+        if wsl.is_some() {
             format!("{detail} — {WSL_LOOPBACK_HINT}")
         } else {
             detail
