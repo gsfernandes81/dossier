@@ -1088,15 +1088,8 @@ fn caution_lines(message: &str, cols: usize, tone: Tone, theme: Theme) -> Vec<Li
 fn edit_row(edit: &crate::edit::Edit, cols: usize) -> Line<'static> {
     let prompt = format!(" {}: ", edit.prompt());
     let room = cols.saturating_sub(width(&prompt) + 1);
-    // The *tail* of an over-long value is what matters while typing: the end is
-    // where the next character lands.
-    let shown: String = {
-        let mut chars: Vec<char> = edit.buffer.chars().collect();
-        while width(&chars.iter().collect::<String>()) > room && !chars.is_empty() {
-            chars.remove(0);
-        }
-        chars.into_iter().collect()
-    };
+    // The tail is kept: the end is where the next character lands.
+    let shown = crate::layout::truncate_left(&edit.buffer, room);
     Line::from(vec![
         Span::styled(prompt, Style::default().add_modifier(Modifier::REVERSED)),
         Span::raw(shown),
