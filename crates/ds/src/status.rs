@@ -297,7 +297,6 @@ mod tests {
         Doc {
             id: id.into(),
             name: id.into(),
-            kind: crate::Kind::Document,
             tags: Vec::new(),
             bundles: Vec::new(),
             issue_date: None,

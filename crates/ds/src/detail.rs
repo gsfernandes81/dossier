@@ -85,12 +85,10 @@ impl Row {
 pub fn rows(doc: &crate::Doc) -> Vec<Row> {
     use crate::edit::Field;
     let mut rows = vec![Row::Editable(Field::Name)];
-    if doc.kind == crate::Kind::Document {
-        if doc.location.as_deref() != Some(crate::place::DIGITAL_ONLY) {
-            rows.push(Row::Location);
-        }
-        rows.push(Row::DigitalOnly);
+    if doc.location.as_deref() != Some(crate::place::DIGITAL_ONLY) {
+        rows.push(Row::Location);
     }
+    rows.push(Row::DigitalOnly);
     rows.extend([
         Row::Editable(Field::Expiry),
         Row::Editable(Field::Issued),
@@ -186,7 +184,7 @@ fn render_row(
         }
         Row::Fact("bundles") => {
             let names: Vec<&str> =
-                doc.bundles.iter().map(|entry| model.store.name_of(&entry.bundle)).collect();
+                model.store.bundles_of(doc).map(|bundle| bundle.name.as_str()).collect();
             vec![field("bundles", &nonempty(names.join(" · ")), inner, theme)]
         }
         Row::Fact("files") => vec![field("files", "none", inner, theme)],

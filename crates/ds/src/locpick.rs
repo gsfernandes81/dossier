@@ -21,7 +21,7 @@
 use std::collections::BTreeSet;
 
 use crate::place::HardCopy;
-use crate::{Kind, Store};
+use crate::Store;
 
 /// Documents listed under a location before a "more" row stands in.
 pub const SHOWN: usize = 2;
@@ -372,7 +372,6 @@ impl LocationPicker {
             .docs
             .iter()
             .enumerate()
-            .filter(|(_, doc)| doc.kind == Kind::Document)
             .filter(|(_, doc)| store.hard_copy(doc) == HardCopy::At(id))
             .map(|(index, _)| index)
             .collect()
@@ -450,7 +449,6 @@ mod tests {
         Doc {
             id: id.into(),
             name: id.into(),
-            kind: Kind::Document,
             tags: Vec::new(),
             bundles: Vec::new(),
             issue_date: None,
@@ -484,6 +482,7 @@ mod tests {
                 place("pouch", "passport pouch", Some("desk")),
                 place("bag", "ship bag", None),
             ]),
+            ..Store::default()
         }
     }
 

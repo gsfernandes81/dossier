@@ -82,7 +82,6 @@ fn sample_store() -> Store {
         .map(|(id, name, location, slot, tag, expiry, file)| Doc {
             id: (*id).into(),
             name: (*name).into(),
-            kind: ds::Kind::Document,
             tags: vec![(*tag).into()],
             bundles: Vec::new(),
             issue_date: None,
@@ -123,7 +122,7 @@ fn sample_store() -> Store {
             parent: Some((*location).into()),
         });
     }
-    Store { docs, locations: ds::Tree::new(locations) }
+    Store { docs, locations: ds::Tree::new(locations), ..Store::default() }
 }
 
 fn model(cols: u16, rows: u16) -> Model {

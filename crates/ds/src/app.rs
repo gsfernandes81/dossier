@@ -564,8 +564,7 @@ impl Model {
     /// a store with no documents, so the first launch is never a dead end.
     #[must_use]
     pub fn offers_new(&self) -> bool {
-        !self.query.trim().is_empty()
-            || !self.store.docs.iter().any(|doc| doc.kind == crate::doc::Kind::Document)
+        !self.query.trim().is_empty() || self.store.docs.is_empty()
     }
 
     /// The expiry standing of a document, against today and the warn window.
@@ -627,7 +626,7 @@ impl Model {
         let filter = self.filter;
         matched.retain(|&i| {
             let doc = &self.store.docs[i];
-            (filter.old_versions || !doc.superseded) && doc.kind == crate::doc::Kind::Document
+            filter.old_versions || !doc.superseded
         });
         self.rows = match base {
             None => matched,
@@ -849,10 +848,6 @@ impl Model {
             return Effect::Redraw;
         }
         let Some(doc) = self.current() else { return Effect::Idle };
-        if doc.kind != crate::Kind::Document {
-            self.flash = Some("a bundle has no hard copy".into());
-            return Effect::Redraw;
-        }
         self.locpick = Some(crate::locpick::LocationPicker::file(&self.store, &doc.id));
         self.sheet = false;
         self.detail = true;
@@ -2351,7 +2346,6 @@ pub(crate) mod tests {
         Doc {
             id: id.into(),
             name: name.into(),
-            kind: crate::Kind::Document,
             tags: Vec::new(),
             bundles: Vec::new(),
             issue_date: None,
@@ -3559,25 +3553,23 @@ pub(crate) mod tests {
     }
 
     /// The default list is the latest version of each document: an older
-    /// version stays out until its toggle brings it in, and a bundle never shows.
+    /// version stays out until its toggle brings it in.
     #[test]
     fn the_list_shows_latest_documents_unless_a_toggle_widens_it() {
         let mut m = model();
         m.store.docs[2].superseded = true;
-        m.store.docs[3].kind = crate::Kind::Bundle;
         m.requery();
         let shown =
             |m: &Model| m.rows.iter().map(|&i| m.store.docs[i].id.clone()).collect::<Vec<_>>();
-        assert_eq!(shown(&m), ["coc", "eng1"]);
+        assert!(!shown(&m).contains(&"passport".to_string()));
 
         m.filter.old_versions = true;
         m.requery();
         assert!(shown(&m).contains(&"passport".to_string()));
-        assert!(!shown(&m).contains(&"testimonial".to_string()), "bundles live elsewhere");
 
         update(&mut m, Msg::Esc);
         assert_eq!(m.filter, Filter::ALL, "Esc clears every toggle in one peel");
-        assert_eq!(shown(&m), ["coc", "eng1"]);
+        assert!(!shown(&m).contains(&"passport".to_string()));
     }
 
     /// The expiring toggle composes with the others instead of replacing them.

@@ -83,33 +83,7 @@ pub struct FileRef {
     pub primary: bool,
 }
 
-/// What a record is. Written by the program, never typed by the user.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Kind {
-    /// A document someone holds.
-    #[default]
-    Document,
-    /// A named set of documents, kept for a purpose.
-    Bundle,
-}
-
-impl Kind {
-    fn from_field(value: Option<&str>) -> Self {
-        match value {
-            Some("bundle") => Kind::Bundle,
-            _ => Kind::Document,
-        }
-    }
-
-    fn as_field(self) -> Option<&'static str> {
-        match self {
-            Kind::Document => None,
-            Kind::Bundle => Some("bundle"),
-        }
-    }
-}
-
-/// One entry of a document in a bundle.
+/// One entry of a document in a bundle: this exact version.
 ///
 /// Stored on the document, so two devices adding different documents to one
 /// bundle never write the same field.
@@ -117,10 +91,21 @@ impl Kind {
 pub struct Membership {
     /// The bundle's id.
     pub bundle: String,
-    /// Stays on this version instead of following to the latest one.
-    pub pinned: bool,
     /// The path of the one file the bundle uses, if not all of them.
     pub file: Option<String>,
+}
+
+/// A named set of document versions, kept for a purpose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Bundle {
+    /// The journal entity id.
+    pub id: String,
+    /// What it is called.
+    pub name: String,
+    /// ISO date it is for, if any.
+    pub date: Option<String>,
+    /// Free text.
+    pub notes: String,
 }
 
 /// A document as the browse surface needs it.
@@ -130,8 +115,6 @@ pub struct Doc {
     pub id: String,
     /// Display name — the left column and the main search target.
     pub name: String,
-    /// A document or a bundle.
-    pub kind: Kind,
     /// Flat tags (hierarchical tags are dropped, §8).
     pub tags: Vec<String>,
     /// The bundles this version was added to.
@@ -171,7 +154,7 @@ impl Doc {
     /// Whether the default list shows it: a document's latest version.
     #[must_use]
     pub fn listed(&self) -> bool {
-        self.kind == Kind::Document && !self.superseded
+        !self.superseded
     }
 
     /// The expiry standing, given today and the warn window.
@@ -216,7 +199,6 @@ impl Doc {
                 fields.push((key, value));
             }
         };
-        push("kind", self.kind.as_field().map(Into::into));
         push("notes", (!self.notes.is_empty()).then(|| self.notes.clone().into()));
         push("tags", (!self.tags.is_empty()).then(|| self.tags.clone().into()));
         push("bundles", (!self.bundles.is_empty()).then(|| memberships_value(&self.bundles)));
@@ -238,13 +220,11 @@ impl Doc {
     }
 }
 
-/// A document as a bundle lists it.
+/// A document version as a bundle lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Member {
     /// Index into [`Store::docs`].
     pub doc: usize,
-    /// Kept on that version rather than following.
-    pub pinned: bool,
     /// The one file the bundle uses, if not all of them.
     pub file: Option<String>,
 }
@@ -271,9 +251,6 @@ pub fn memberships_value(memberships: &[Membership]) -> Value {
             .map(|entry| {
                 let mut object = serde_json::Map::new();
                 object.insert("bundle".into(), entry.bundle.clone().into());
-                if entry.pinned {
-                    object.insert("pin".into(), true.into());
-                }
                 if let Some(file) = &entry.file {
                     object.insert("file".into(), file.clone().into());
                 }
@@ -293,6 +270,8 @@ pub struct Store {
     pub docs: Vec<Doc>,
     /// The physical locations.
     pub locations: Tree,
+    /// Bundles, newest first; undated ones last, by name.
+    pub bundles: Vec<Bundle>,
 }
 
 /// Days before expiry that count as expiring.
@@ -315,7 +294,7 @@ fn strings(entity: &Entity, field: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// A bare string reads as an entry that follows the latest version.
+/// A bare string reads as an entry with no file chosen.
 fn memberships(entity: &Entity) -> Vec<Membership> {
     let Some(items) = entity.fields.get("bundles").and_then(Value::as_array) else {
         return Vec::new();
@@ -323,12 +302,9 @@ fn memberships(entity: &Entity) -> Vec<Membership> {
     items
         .iter()
         .filter_map(|item| match item {
-            Value::String(bundle) => {
-                Some(Membership { bundle: bundle.clone(), pinned: false, file: None })
-            }
+            Value::String(bundle) => Some(Membership { bundle: bundle.clone(), file: None }),
             Value::Object(object) => Some(Membership {
                 bundle: object.get("bundle").and_then(Value::as_str)?.to_string(),
-                pinned: object.get("pin").and_then(Value::as_bool).unwrap_or(false),
                 file: object.get("file").and_then(Value::as_str).map(str::to_string),
             }),
             _ => None,
@@ -375,75 +351,55 @@ impl Store {
         let superseded: BTreeSet<String> =
             fold.kind("doc").filter_map(|(_, entity)| string(entity, "supersedes")).collect();
 
-        let bundle_names: BTreeMap<&str, String> = fold
-            .kind("doc")
-            .filter(|(_, entity)| {
-                Kind::from_field(string(entity, "kind").as_deref()) == Kind::Bundle
+        let mut bundles: Vec<Bundle> = fold
+            .kind("bundle")
+            .map(|(id, entity)| Bundle {
+                id: id.to_string(),
+                name: string(entity, "name").unwrap_or_else(|| id.to_string()),
+                date: string(entity, "date"),
+                notes: string(entity, "notes").unwrap_or_default(),
             })
-            .map(|(id, entity)| (id, string(entity, "name").unwrap_or_else(|| id.to_string())))
             .collect();
-        let entities: BTreeMap<&str, &Entity> = fold.kind("doc").collect();
-        let replaces: BTreeMap<&str, String> = entities
-            .iter()
-            .filter_map(|(id, entity)| Some((*id, string(entity, "supersedes")?)))
-            .collect();
+        let bundle_names: BTreeMap<&str, &str> =
+            bundles.iter().map(|bundle| (bundle.id.as_str(), bundle.name.as_str())).collect();
 
-        let mut docs: Vec<Doc> =
-            fold.kind("doc")
-                .map(|(id, entity)| {
-                    let name = string(entity, "name").unwrap_or_default();
-                    let notes = string(entity, "notes").unwrap_or_default();
-                    let tags = strings(entity, "tags");
-                    let bundles = memberships(entity);
-                    // A later version is found under the bundles its older versions
-                    // were added to, because those entries follow it.
-                    let mut in_bundles: Vec<&str> =
-                        bundles.iter().map(|entry| entry.bundle.as_str()).collect();
-                    let mut seen = BTreeSet::from([id]);
-                    let mut older = replaces.get(id);
-                    while let Some(old) = older.filter(|old| seen.insert(old.as_str())) {
-                        if let Some(entity) = entities.get(old.as_str()) {
-                            in_bundles.extend(
-                                memberships(entity)
-                                    .into_iter()
-                                    .filter(|entry| !entry.pinned)
-                                    .filter_map(|entry| {
-                                        bundle_names
-                                            .get_key_value(entry.bundle.as_str())
-                                            .map(|(k, _)| *k)
-                                    }),
-                            );
-                        }
-                        older = replaces.get(old.as_str());
-                    }
-                    let haystack = crate::search::fold(
-                        &[name.as_str(), notes.as_str()]
-                            .into_iter()
-                            .chain(tags.iter().map(String::as_str))
-                            .chain(in_bundles.iter().map(|bundle| {
-                                bundle_names.get(bundle).map_or(*bundle, String::as_str)
-                            }))
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    );
-                    Doc {
-                        id: id.to_string(),
-                        name,
-                        kind: Kind::from_field(string(entity, "kind").as_deref()),
-                        tags,
-                        bundles,
-                        issue_date: string(entity, "issue_date"),
-                        expiry_date: string(entity, "expiry_date"),
-                        ignore_expiry: flag(entity, "ignore_expiry"),
-                        supersedes: string(entity, "supersedes"),
-                        location: string(entity, "location"),
-                        files: files(entity),
-                        notes,
-                        superseded: superseded.contains(id),
-                        haystack,
-                    }
-                })
-                .collect();
+        let mut docs: Vec<Doc> = fold
+            .kind("doc")
+            .map(|(id, entity)| {
+                let name = string(entity, "name").unwrap_or_default();
+                let notes = string(entity, "notes").unwrap_or_default();
+                let tags = strings(entity, "tags");
+                let bundles = memberships(entity);
+                let haystack = crate::search::fold(
+                    &[name.as_str(), notes.as_str()]
+                        .into_iter()
+                        .chain(tags.iter().map(String::as_str))
+                        .chain(
+                            bundles
+                                .iter()
+                                .filter_map(|entry| bundle_names.get(entry.bundle.as_str()))
+                                .copied(),
+                        )
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
+                Doc {
+                    id: id.to_string(),
+                    name,
+                    tags,
+                    bundles,
+                    issue_date: string(entity, "issue_date"),
+                    expiry_date: string(entity, "expiry_date"),
+                    ignore_expiry: flag(entity, "ignore_expiry"),
+                    supersedes: string(entity, "supersedes"),
+                    location: string(entity, "location"),
+                    files: files(entity),
+                    notes,
+                    superseded: superseded.contains(id),
+                    haystack,
+                }
+            })
+            .collect();
 
         let locations = Tree::new(fold.kind("location").map(|(id, entity)| Location {
             id: id.to_string(),
@@ -458,8 +414,16 @@ impl Store {
             HardCopy::Unfiled | HardCopy::DigitalOnly => usize::MAX,
         };
         docs.sort_by_cached_key(|doc| (rank(doc), doc.name.to_lowercase(), doc.id.clone()));
+        bundles.sort_by_cached_key(|bundle| {
+            (
+                bundle.date.is_none(),
+                std::cmp::Reverse(bundle.date.clone()),
+                bundle.name.to_lowercase(),
+                bundle.id.clone(),
+            )
+        });
 
-        Self { docs, locations }
+        Self { docs, locations, bundles }
     }
 
     /// How many records the default list shows.
@@ -484,12 +448,11 @@ impl Store {
     }
 
     /// How many documents have their hard copy in `id` or anywhere inside it,
-    /// old versions included and bundles never.
+    /// old versions included.
     #[must_use]
     pub fn held(&self, id: &str) -> usize {
         self.docs
             .iter()
-            .filter(|doc| doc.kind == Kind::Document)
             .filter(|doc| match self.hard_copy(doc) {
                 HardCopy::At(at) => self.locations.is_within(at, id),
                 HardCopy::Unfiled | HardCopy::DigitalOnly => false,
@@ -501,12 +464,6 @@ impl Store {
     #[must_use]
     pub fn index_of(&self, id: &str) -> Option<usize> {
         self.docs.iter().position(|doc| doc.id == id)
-    }
-
-    /// The name of the record with this id, or the id when there is none.
-    #[must_use]
-    pub fn name_of<'a>(&'a self, id: &'a str) -> &'a str {
-        self.index_of(id).map_or(id, |i| self.docs[i].name.as_str())
     }
 
     /// Every version of the document `id` belongs to, oldest first.
@@ -544,48 +501,32 @@ impl Store {
         out
     }
 
-    /// The documents in bundle `id`: pinned entries as written, following
-    /// entries resolved to the latest versions that replace them.
+    /// The bundle with this id.
     #[must_use]
-    pub fn members(&self, id: &str) -> Vec<Member> {
-        let mut out: Vec<Member> = Vec::new();
-        for (i, doc) in self.docs.iter().enumerate() {
-            for entry in doc.bundles.iter().filter(|entry| entry.bundle == id) {
-                let targets = if entry.pinned {
-                    vec![i]
-                } else {
-                    self.versions(&doc.id)
-                        .into_iter()
-                        .filter(|&v| !self.docs[v].superseded && self.descends_from(v, i))
-                        .collect()
-                };
-                for doc in targets {
-                    let member = Member { doc, pinned: entry.pinned, file: entry.file.clone() };
-                    if !out.contains(&member) {
-                        out.push(member);
-                    }
-                }
-            }
-        }
-        out
+    pub fn bundle(&self, id: &str) -> Option<&Bundle> {
+        self.bundles.iter().find(|bundle| bundle.id == id)
     }
 
-    /// Whether version `newer` is `older` or replaces it, directly or not.
-    fn descends_from(&self, newer: usize, older: usize) -> bool {
-        let mut seen = BTreeSet::new();
-        let mut at = newer;
-        loop {
-            if at == older {
-                return true;
-            }
-            if !seen.insert(at) {
-                return false;
-            }
-            match self.docs[at].supersedes.as_deref().and_then(|id| self.index_of(id)) {
-                Some(next) => at = next,
-                None => return false,
-            }
-        }
+    /// The document versions in bundle `id`, in shelf order.
+    #[must_use]
+    pub fn members(&self, id: &str) -> Vec<Member> {
+        self.docs
+            .iter()
+            .enumerate()
+            .flat_map(|(doc, entry)| {
+                entry
+                    .bundles
+                    .iter()
+                    .filter(|entry| entry.bundle == id)
+                    .map(move |entry| Member { doc, file: entry.file.clone() })
+            })
+            .collect()
+    }
+
+    /// The bundles a document version is in, skipping entries whose bundle
+    /// was deleted.
+    pub fn bundles_of<'a>(&'a self, doc: &'a Doc) -> impl Iterator<Item = &'a Bundle> + 'a {
+        doc.bundles.iter().filter_map(|entry| self.bundle(&entry.bundle))
     }
 
     /// Row indices matching `query`, in list order.
@@ -715,15 +656,10 @@ mod tests {
         let original = Doc {
             id: "coc".into(),
             name: "COC Certificate".into(),
-            kind: Kind::Document,
             tags: vec!["marine".into(), "ticket".into()],
             bundles: vec![
-                Membership {
-                    bundle: "sea-service".into(),
-                    pinned: true,
-                    file: Some("Marine/coc-b.pdf".into()),
-                },
-                Membership { bundle: "joining".into(), pinned: false, file: None },
+                Membership { bundle: "sea-service".into(), file: Some("Marine/coc-b.pdf".into()) },
+                Membership { bundle: "joining".into(), file: None },
             ],
             issue_date: Some("2021-09-28".into()),
             expiry_date: Some("2026-09-28".into()),
@@ -736,11 +672,10 @@ mod tests {
             ],
             notes: "the one with the stamp".into(),
             // Derived, never stored: `superseded` is a fact about the
-            // collection and `haystack` is built from the fields above.
+            // collection and `haystack` is built from the fields above. Neither
+            // bundle exists here, so their names are not in it.
             superseded: false,
-            haystack: crate::search::fold(
-                "COC Certificate the one with the stamp marine ticket sea-service joining",
-            ),
+            haystack: crate::search::fold("COC Certificate the one with the stamp marine ticket"),
         };
 
         let fields: Vec<(&str, Value)> = original.as_fields();
@@ -759,26 +694,53 @@ mod tests {
         indices.iter().map(|&i| store.docs[i].id.clone()).collect()
     }
 
-    /// A bundle keeps its kind through the journal; a document writes none.
-    #[test]
-    fn a_bundle_round_trips_its_kind() {
-        let store = build(vec![named(100, "joining", "Joining", &[("kind", "bundle".into())])]);
-        let bundle = &store.docs[0];
-        assert_eq!(bundle.kind, Kind::Bundle);
-        assert!(bundle.as_fields().contains(&("kind", Value::from("bundle"))));
-        let plain = build(vec![named(100, "coc", "COC", &[])]);
-        assert!(plain.docs[0].as_fields().iter().all(|(key, _)| *key != "kind"));
+    fn bundle(ts: i64, id: &str, name: &str, date: Option<&str>) -> Vec<OwnedOp> {
+        let mut ops = vec![
+            (ts, "create".into(), "bundle".into(), id.into(), String::new(), Value::Null),
+            (ts + 1, "set".into(), "bundle".into(), id.into(), "name".into(), name.into()),
+        ];
+        if let Some(date) = date {
+            ops.push((
+                ts + 2,
+                "set".into(),
+                "bundle".into(),
+                id.into(),
+                "date".into(),
+                date.into(),
+            ));
+        }
+        ops
     }
 
-    /// A bare bundle id in the list reads as an entry that follows.
+    /// A bundle is its own record, never a document.
     #[test]
-    fn a_bare_bundle_entry_follows() {
+    fn a_bundle_is_not_a_document() {
+        let store = build(vec![bundle(100, "joining", "Joining", Some("2026-11-01"))]);
+        assert!(store.docs.is_empty(), "{:?}", store.docs);
+        let joining = store.bundle("joining").expect("built");
+        assert_eq!(joining.name, "Joining");
+        assert_eq!(joining.date.as_deref(), Some("2026-11-01"));
+    }
+
+    /// Bundles run newest first, and undated ones come last by name.
+    #[test]
+    fn bundles_run_newest_first_and_undated_last() {
+        let store = build(vec![
+            bundle(100, "old", "Old trip", Some("2025-03-01")),
+            bundle(110, "zeta", "Zeta", None),
+            bundle(120, "new", "New trip", Some("2026-09-01")),
+            bundle(130, "alpha", "alpha", None),
+        ]);
+        let order: Vec<&str> = store.bundles.iter().map(|b| b.id.as_str()).collect();
+        assert_eq!(order, ["new", "old", "alpha", "zeta"]);
+    }
+
+    /// A bare bundle id in the list reads as an entry with no file chosen.
+    #[test]
+    fn a_bare_bundle_entry_reads_as_the_whole_version() {
         let store =
             build(vec![named(100, "coc", "COC", &[("bundles", serde_json::json!(["joining"]))])]);
-        assert_eq!(
-            store.docs[0].bundles,
-            [Membership { bundle: "joining".into(), pinned: false, file: None }]
-        );
+        assert_eq!(store.docs[0].bundles, [Membership { bundle: "joining".into(), file: None }]);
     }
 
     /// Versions come back oldest first, and only the newest is listed.
@@ -820,12 +782,12 @@ mod tests {
         assert_eq!(store.versions("a").len(), 2);
     }
 
-    /// An entry that follows resolves to the latest version without anything
-    /// being written to it; a pinned entry stays on its version.
+    /// **A bundle holds exact versions**: a newer version is not a member,
+    /// and an entry whose bundle was deleted reads as nothing.
     #[test]
-    fn a_following_entry_resolves_to_the_latest_version_and_a_pin_stays() {
+    fn a_bundle_holds_the_exact_version_it_was_given() {
         let store = build(vec![
-            named(100, "joining", "Joining Documents", &[("kind", "bundle".into())]),
+            bundle(100, "joining", "Joining Documents", None),
             named(110, "pp-2019", "Passport (IN)", &[("bundles", serde_json::json!(["joining"]))]),
             named(120, "pp-2029", "Passport (IN)", &[("supersedes", "pp-2019".into())]),
             named(
@@ -834,52 +796,45 @@ mod tests {
                 "COC",
                 &[(
                     "bundles",
-                    serde_json::json!([{"bundle": "joining", "pin": true, "file": "coc-front.pdf"}]),
+                    serde_json::json!([
+                        {"bundle": "joining", "file": "coc-front.pdf"},
+                        {"bundle": "gone"},
+                    ]),
                 )],
             ),
         ]);
-        let members: Vec<(String, bool, Option<String>)> = store
+        let members: Vec<(String, Option<String>)> = store
             .members("joining")
             .into_iter()
-            .map(|m| (store.docs[m.doc].id.clone(), m.pinned, m.file))
+            .map(|m| (store.docs[m.doc].id.clone(), m.file))
             .collect();
-        assert!(members.contains(&("pp-2029".into(), false, None)), "{members:?}");
-        assert!(members.contains(&("coc".into(), true, Some("coc-front.pdf".into()))));
-        assert_eq!(members.len(), 2, "the old passport is not listed twice");
+        assert_eq!(
+            members,
+            [("coc".into(), Some("coc-front.pdf".into())), ("pp-2019".into(), None)],
+            "the old passport stays; its newer version is not added"
+        );
+        let coc = &store.docs[store.index_of("coc").unwrap()];
+        let names: Vec<&str> = store.bundles_of(coc).map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["Joining Documents"], "the deleted bundle reads as nothing");
     }
 
-    /// The latest version is found by the name of a bundle an older version
-    /// joined; a pinned entry does not travel.
+    /// A version is found by the name of a bundle it is in, and only that
+    /// version: the bundle does not follow to a newer one.
     #[test]
-    fn search_finds_the_latest_version_by_its_bundle() {
+    fn search_finds_a_version_by_its_bundle() {
         let store = build(vec![
-            named(100, "joining", "Joining Documents", &[("kind", "bundle".into())]),
+            bundle(100, "joining", "Joining Documents", None),
             named(110, "pp-2019", "Passport", &[("bundles", serde_json::json!(["joining"]))]),
             named(120, "pp-2029", "Passport", &[("supersedes", "pp-2019".into())]),
-            named(
-                130,
-                "old",
-                "Old",
-                &[("bundles", serde_json::json!([{"bundle": "joining", "pin": true}]))],
-            ),
-            named(140, "new", "New", &[("supersedes", "old".into())]),
         ]);
-        let found = ids(&store, &store.search("joining"));
-        assert!(found.contains(&"pp-2029".to_string()), "{found:?}");
-        assert!(!found.contains(&"new".to_string()), "a pin does not follow: {found:?}");
+        assert_eq!(ids(&store, &store.search("joining")), ["pp-2019"]);
     }
 
-    /// The expiry watch covers latest documents only: never a bundle, never an
-    /// older version — though each keeps its own date.
+    /// The expiry watch covers latest versions only, though each version keeps
+    /// its own date.
     #[test]
     fn the_watch_covers_latest_documents_only() {
         let store = build(vec![
-            named(
-                100,
-                "trip",
-                "Panama",
-                &[("kind", "bundle".into()), ("expiry_date", "2026-12-01".into())],
-            ),
             named(110, "pp-2019", "Passport", &[("expiry_date", "2029-01-01".into())]),
             named(
                 120,
@@ -914,7 +869,6 @@ mod tests {
         let fields = Doc {
             id: "bare".into(),
             name: "Bare".into(),
-            kind: Kind::Document,
             tags: Vec::new(),
             bundles: Vec::new(),
             issue_date: None,
@@ -995,7 +949,7 @@ mod tests {
     }
 
     /// A count of hard copies takes in everything inside a location, old
-    /// versions included and bundles never.
+    /// versions included.
     #[test]
     fn a_location_counts_every_hard_copy_inside_it() {
         let s = build(vec![
@@ -1010,11 +964,6 @@ mod tests {
                     ("supersedes", "old".into()),
                     ("location", "desk".into()),
                 ],
-            ),
-            doc(
-                300,
-                "set",
-                &[("name", "Set".into()), ("kind", "bundle".into()), ("location", "folder".into())],
             ),
         ]);
         assert_eq!(s.held("desk"), 2);
@@ -1134,6 +1083,7 @@ mod tests {
                 &[("name", "COC Certificate".into()), ("tags", serde_json::json!(["marine"]))],
             ),
             doc(200, "eng1", &[("name", "ENG-1 Medical".into()), ("notes", "MMD Mumbai".into())]),
+            bundle(250, "bike-transfer", "bike transfer", None),
             doc(
                 300,
                 "bike",
@@ -1145,7 +1095,7 @@ mod tests {
         };
         assert_eq!(ids("marine"), ["coc"], "tags are searchable");
         assert_eq!(ids("mumbai"), ["eng1"], "notes are searchable");
-        assert_eq!(ids("bike-transfer"), ["bike"], "bundles are searchable");
+        assert_eq!(ids("transfer"), ["bike"], "bundle names are searchable");
         assert_eq!(ids("certificate"), ["coc"]);
         assert_eq!(ids("").len(), 3, "an empty query is the whole list");
     }
