@@ -161,6 +161,17 @@ pub enum View {
     },
 }
 
+impl View {
+    /// Whether what the view shows is still in `store`.
+    fn alive_in(&self, store: &Store) -> bool {
+        match self {
+            View::Details { doc, .. } | View::Versions { doc, .. } => store.index_of(doc).is_some(),
+            View::Bundles { .. } => true,
+            View::Bundle { id, .. } => store.bundle(id).is_some(),
+        }
+    }
+}
+
 /// Where the cursor should go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Motion {
@@ -241,6 +252,49 @@ enum Direction {
     Undo,
     /// Putting it back again: the mirror image.
     Redo,
+}
+
+/// An append in flight: the change it makes, which way it goes, and what the
+/// screen does once it lands.
+#[derive(Debug, Clone)]
+struct Pending {
+    change: Change,
+    direction: Direction,
+    landed: Landed,
+}
+
+/// What the screen does once a write lands.
+#[derive(Debug, Clone, Default)]
+struct Landed {
+    /// The document the list keeps its cursor on; the current one when none.
+    anchor: Option<String>,
+    /// What the status line says; "saved" when nothing more particular.
+    note: Option<String>,
+    /// A view to open in front.
+    open: Option<View>,
+    /// Whether that view takes the place of the one in front.
+    replace: bool,
+}
+
+impl Landed {
+    /// Keeps the cursor on `doc` and says `note`.
+    fn on(doc: &str, note: impl Into<String>) -> Self {
+        Self { anchor: Some(doc.to_string()), note: Some(note.into()), ..Self::default() }
+    }
+
+    /// Says `note`.
+    fn saying(note: impl Into<String>) -> Self {
+        Self { note: Some(note.into()), ..Self::default() }
+    }
+
+    /// Opens the document just created on its Details view, the only place
+    /// its other fields can be filled in.
+    fn created(doc: &str) -> Self {
+        Self {
+            open: Some(View::Details { doc: doc.to_string(), cursor: 0 }),
+            ..Self::on(doc, "created")
+        }
+    }
 }
 
 /// Whether this session can write, and what to say when it cannot.
@@ -482,29 +536,10 @@ pub struct Model {
     /// one the store never took, and offering it would put back an edit against
     /// a document that has moved on since.
     pub redo: Vec<Change>,
-    /// The change the append currently in flight represents, promoted onto the
-    /// stack the direction says when the journal confirms it and dropped when it
-    /// refuses — so a write that never landed can never be taken back.
-    pending: Option<Change>,
-    /// The document an in-flight append is about, when no edit is open to name
-    /// it. An undo can be about a document the cursor is nowhere near.
-    pending_anchor: Option<String>,
-    /// Which way the append in flight is going. This is what stops an undo from
-    /// stacking itself as something to undo, and decides which stack the
-    /// confirmed change lands on.
-    direction: Direction,
-    /// Whether the forward append in flight is a deletion — the one write that
-    /// leaves nothing to look at afterwards, and so needs its own word for it.
-    pending_delete: bool,
-    /// Whether the forward append in flight makes a new version, which opens
-    /// in place of the old one's Details view once it lands.
-    pending_version: bool,
-    /// The view to open once the append in flight lands: a bundle just
-    /// created.
-    pending_view: Option<View>,
-    /// What the status line says when the append in flight lands, instead of
-    /// "saved".
-    saved_note: Option<String>,
+    /// The append in flight. Its change is promoted onto the stack its
+    /// direction says when the journal confirms it and dropped when it
+    /// refuses, so a write that never landed can never be taken back.
+    pending: Option<Pending>,
     /// The physical location one more `d` deletes, with everything inside it.
     pub remove_armed: Option<String>,
     /// One more `d` and the record's document is tombstoned.
@@ -578,12 +613,6 @@ impl Model {
             undo: Vec::new(),
             redo: Vec::new(),
             pending: None,
-            pending_anchor: None,
-            direction: Direction::Forward,
-            pending_delete: false,
-            pending_version: false,
-            pending_view: None,
-            saved_note: None,
             remove_armed: None,
             delete_armed: false,
             count_zone: Zone::default(),
@@ -772,6 +801,14 @@ impl Model {
         Effect::Redraw
     }
 
+    /// Asks for `change` to be appended, and records what follows once it
+    /// lands.
+    fn write(&mut self, change: Change, landed: Landed) -> Effect {
+        let forward = change.forward.clone();
+        self.pending = Some(Pending { change, direction: Direction::Forward, landed });
+        Effect::Append(forward)
+    }
+
     /// Opens the checklist of bundles the current version is in.
     fn open_bundle_checklist(&mut self) -> Effect {
         if let Some(reason) = self.write.reason() {
@@ -851,11 +888,7 @@ impl Model {
         };
         forward.push(field(&now));
         back.insert(0, field(&was));
-        self.pending = Some(Change { forward: forward.clone(), back });
-        self.direction = Direction::Forward;
-        self.pending_anchor = Some(doc.to_string());
-        self.saved_note = Some(note);
-        Effect::Append(forward)
+        self.write(Change { forward, back }, Landed::on(doc, note))
     }
 
     /// Creates a bundle named `name` and opens it once it lands.
@@ -870,14 +903,9 @@ impl Model {
             journal::Draft::create("bundle", &id),
             journal::Draft::set("bundle", &id, "name", serde_json::Value::from(name)),
         ];
-        self.pending = Some(Change {
-            forward: forward.clone(),
-            back: vec![journal::Draft::delete("bundle", &id)],
-        });
-        self.direction = Direction::Forward;
-        self.pending_view = Some(View::Bundle { id, cursor: 0 });
-        self.saved_note = Some("created".into());
-        Effect::Append(forward)
+        let back = vec![journal::Draft::delete("bundle", &id)];
+        let open = Some(View::Bundle { id, cursor: 0 });
+        self.write(Change { forward, back }, Landed { open, ..Landed::saying("created") })
     }
 
     /// The bundle whose Details view is in front, and its selected row.
@@ -992,10 +1020,8 @@ impl Model {
             Some(value) => journal::Draft::set("bundle", id, name, value),
             None => journal::Draft::unset("bundle", id, name),
         };
-        let forward = vec![write(value)];
-        self.pending = Some(Change { forward: forward.clone(), back: vec![write(was)] });
-        self.direction = Direction::Forward;
-        Ok(Effect::Append(forward))
+        let change = Change { forward: vec![write(value)], back: vec![write(was)] };
+        Ok(self.write(change, Landed::default()))
     }
 
     /// Deletes the bundle in front on a second `d`. Its documents are never
@@ -1023,20 +1049,13 @@ impl Model {
         }
         let forward = vec![journal::Draft::delete("bundle", &id)];
         self.delete_armed = false;
-        self.pending = Some(Change { forward: forward.clone(), back });
-        self.direction = Direction::Forward;
-        self.pending_delete = true;
-        Effect::Append(forward)
+        self.write(Change { forward, back }, Landed::saying("deleted — u to undo"))
     }
 
     /// Drops every view whose record is gone from the store.
     fn prune_views(&mut self) {
         let store = &self.store;
-        self.views.retain(|view| match view {
-            View::Details { doc, .. } | View::Versions { doc, .. } => store.index_of(doc).is_some(),
-            View::Bundles { .. } => true,
-            View::Bundle { id, .. } => store.bundle(id).is_some(),
-        });
+        self.views.retain(|view| view.alive_in(store));
         let query = &self.query;
         for view in &mut self.views {
             let (cursor, count) = match view {
@@ -1279,14 +1298,11 @@ impl Model {
                     ),
                     None => journal::Draft::unset("doc", &id, "supersedes"),
                 };
-                let forward = vec![field(older.as_deref())];
-                self.pending = Some(Change {
-                    forward: forward.clone(),
+                let change = Change {
+                    forward: vec![field(older.as_deref())],
                     back: vec![field(doc.supersedes.as_deref())],
-                });
-                self.direction = Direction::Forward;
-                self.pending_anchor = Some(id);
-                Effect::Append(forward)
+                };
+                self.write(change, Landed::on(&id, "saved"))
             }
             (_, _) => Effect::Redraw,
         }
@@ -1332,12 +1348,9 @@ impl Model {
                 journal::Draft::set("doc", id, "bundles", crate::doc::memberships_value(list))
             }
         };
-        let forward: Vec<journal::Draft> = lists.iter().map(|(id, list)| field(id, list)).collect();
+        let forward = lists.iter().map(|(id, list)| field(id, list)).collect();
         let back = lists.iter().map(|(id, _)| field(id, &entries(id))).collect();
-        self.pending = Some(Change { forward: forward.clone(), back });
-        self.direction = Direction::Forward;
-        self.saved_note = Some(note);
-        Effect::Append(forward)
+        self.write(Change { forward, back }, Landed::saying(note))
     }
 
     /// Replaces a document's files list, recording the way back.
@@ -1351,11 +1364,9 @@ impl Model {
         };
         let before =
             self.store.index_of(doc).map(|i| self.store.docs[i].files.clone()).unwrap_or_default();
-        let forward = vec![set_or_unset(files)];
-        self.pending = Some(Change { forward: forward.clone(), back: vec![set_or_unset(&before)] });
-        self.direction = Direction::Forward;
-        self.pending_anchor = Some(doc.to_string());
-        Effect::Append(forward)
+        let change =
+            Change { forward: vec![set_or_unset(files)], back: vec![set_or_unset(&before)] };
+        self.write(change, Landed::on(doc, "saved"))
     }
 
     /// A tap on a Details row: the checkbox toggles at once, any other row is
@@ -1395,16 +1406,16 @@ impl Model {
             }
             None => journal::Draft::unset("doc", &id, "location"),
         };
-        let forward = vec![field(ticking.then_some(crate::place::DIGITAL_ONLY))];
-        self.pending = Some(Change { forward: forward.clone(), back: vec![field(was.as_deref())] });
-        self.direction = Direction::Forward;
-        self.pending_anchor = Some(id.clone());
-        self.saved_note = Some(match (ticking, place.is_empty()) {
+        let change = Change {
+            forward: vec![field(ticking.then_some(crate::place::DIGITAL_ONLY))],
+            back: vec![field(was.as_deref())],
+        };
+        let note = match (ticking, place.is_empty()) {
             (true, false) => format!("digital only — no longer filed in {place}"),
             (true, true) => "digital only".into(),
             (false, _) => "has a hard copy — unfiled".into(),
-        });
-        Effect::Append(forward)
+        };
+        self.write(change, Landed::on(&id, note))
     }
 
     /// Opens the location picker on the current document.
@@ -1472,11 +1483,7 @@ impl Model {
             },
             journal::Draft::delete("location", &id),
         ];
-        self.pending = Some(Change { forward: forward.clone(), back });
-        self.direction = Direction::Forward;
-        self.pending_anchor = Some(doc.to_string());
-        self.saved_note = Some(format!("filed in {path}"));
-        Ok(Effect::Append(forward))
+        Ok(self.write(Change { forward, back }, Landed::on(doc, format!("filed in {path}"))))
     }
 
     /// The location the open picker's cursor stands for, if any.
@@ -1514,12 +1521,8 @@ impl Model {
         let set = |value: &str| {
             journal::Draft::set("location", id, "name", serde_json::Value::from(value))
         };
-        let forward = vec![set(name)];
-        self.pending = Some(Change { forward: forward.clone(), back: vec![set(&location.name)] });
-        self.direction = Direction::Forward;
-        self.pending_anchor = self.current().map(|doc| doc.id.clone());
-        self.saved_note = Some(format!("renamed to {name}"));
-        Ok(Effect::Append(forward))
+        let change = Change { forward: vec![set(name)], back: vec![set(&location.name)] };
+        Ok(self.write(change, Landed::saying(format!("renamed to {name}"))))
     }
 
     /// Swaps the picker for the tree Move… chooses a destination in.
@@ -1554,13 +1557,10 @@ impl Model {
             }
             None => journal::Draft::unset("location", id, "parent"),
         };
-        let forward = vec![parent(into)];
-        let back = vec![parent(location.parent.as_deref())];
-        self.pending = Some(Change { forward: forward.clone(), back });
-        self.direction = Direction::Forward;
-        self.pending_anchor = self.current().map(|doc| doc.id.clone());
-        self.saved_note = Some(format!("moved {} into {place}", location.name));
-        Ok(Effect::Append(forward))
+        let change =
+            Change { forward: vec![parent(into)], back: vec![parent(location.parent.as_deref())] };
+        let note = format!("moved {} into {place}", location.name);
+        Ok(self.write(change, Landed::saying(note)))
     }
 
     /// Deletes the picked location at once when it is empty, or arms the
@@ -1627,11 +1627,7 @@ impl Model {
                 picker.root = parent;
             }
         }
-        self.pending = Some(Change { forward: forward.clone(), back });
-        self.direction = Direction::Forward;
-        self.pending_anchor = self.current().map(|doc| doc.id.clone());
-        self.saved_note = Some(format!("deleted {name}"));
-        Effect::Append(forward)
+        self.write(Change { forward, back }, Landed::saying(format!("deleted {name}")))
     }
 
     /// Files a document's hard copy in `location`, recording the way back.
@@ -1644,12 +1640,10 @@ impl Model {
             }
             None => journal::Draft::unset("doc", doc, "location"),
         };
-        let forward = vec![field(Some(location))];
-        self.pending = Some(Change { forward: forward.clone(), back: vec![field(was.as_deref())] });
-        self.direction = Direction::Forward;
-        self.pending_anchor = Some(doc.to_string());
-        self.saved_note = Some(format!("filed in {}", self.store.locations.path(location)));
-        Effect::Append(forward)
+        let change =
+            Change { forward: vec![field(Some(location))], back: vec![field(was.as_deref())] };
+        let note = format!("filed in {}", self.store.locations.path(location));
+        self.write(change, Landed::on(doc, note))
     }
 
     /// The files list with `path` attached, or why it cannot be.
@@ -2011,22 +2005,12 @@ impl Model {
             return self.open_new();
         };
         let doc = self.mint_id(&name);
-        let drafts = vec![
+        let forward = vec![
             journal::Draft::create("doc", &doc),
             journal::Draft::set("doc", &doc, "name", value),
         ];
-        self.pending = Some(Change {
-            forward: drafts.clone(),
-            back: vec![journal::Draft::delete("doc", &doc)],
-        });
-        self.direction = Direction::Forward;
-        self.edit = Some(crate::edit::Edit {
-            doc,
-            buffer: name,
-            saving: true,
-            ..crate::edit::Edit::creating()
-        });
-        Effect::Append(drafts)
+        let back = vec![journal::Draft::delete("doc", &doc)];
+        self.write(Change { forward, back }, Landed::created(&doc))
     }
 
     /// Makes a new version of the current document: its name, tags and
@@ -2049,14 +2033,10 @@ impl Model {
             forward.push(set("location", location.clone().into()));
         }
         forward.push(set("supersedes", old.id.clone().into()));
-        self.pending = Some(Change {
-            forward: forward.clone(),
-            back: vec![journal::Draft::delete("doc", &id)],
-        });
-        self.direction = Direction::Forward;
-        self.pending_anchor = Some(id);
-        self.pending_version = true;
-        Effect::Append(forward)
+        let back = vec![journal::Draft::delete("doc", &id)];
+        let landed =
+            Landed { note: Some("new version".into()), replace: true, ..Landed::created(&id) };
+        self.write(Change { forward, back }, landed)
     }
 
     /// Put the last write this session made back the way it was.
@@ -2118,13 +2098,9 @@ impl Model {
             )
             .collect();
         self.delete_armed = false;
-        self.pending =
-            Some(Change { forward: vec![journal::Draft::delete("doc", &id)], back: restore });
-        self.direction = Direction::Forward;
-        self.pending_anchor = Some(id.clone());
-        self.pending_delete = true;
         self.sheet = false;
-        Effect::Append(vec![journal::Draft::delete("doc", &id)])
+        let change = Change { forward: vec![journal::Draft::delete("doc", &id)], back: restore };
+        self.write(change, Landed::saying("deleted — u to undo"))
     }
 
     /// Put back the last write this session took back.
@@ -2155,9 +2131,12 @@ impl Model {
         // The document a step is about need not be the one under the cursor, so
         // the anchor travels with the append rather than being guessed at when
         // it lands.
-        self.pending_anchor = drafts.first().map(|draft| draft.id.clone());
-        self.pending = Some(change);
-        self.direction = direction;
+        let landed = Landed {
+            anchor: drafts.first().map(|draft| draft.id.clone()),
+            note: Some(if direction == Direction::Undo { "undone" } else { "redone" }.into()),
+            ..Landed::default()
+        };
+        self.pending = Some(Pending { change, direction, landed });
         self.sheet = false;
         Effect::Append(drafts)
     }
@@ -2201,10 +2180,8 @@ impl Model {
     /// A save can reorder the list — an expiry edit moves a row under the
     /// `expiring` filter — or push the document out of it entirely, so the row
     /// index the cursor held before the fold means nothing after it. The anchor
-    /// is therefore the **document id**, and the return value says whether it
-    /// survived: a detail pane still showing the document that just left the
-    /// list would be showing something the list no longer contains.
-    fn adopt(&mut self, store: Store, anchor: &str) -> bool {
+    /// is therefore the **document id**.
+    fn adopt(&mut self, store: Store, anchor: &str) {
         self.store = store;
         self.requery();
         let found = self.rows.iter().position(|&i| self.store.docs[i].id == anchor);
@@ -2213,7 +2190,6 @@ impl Model {
             self.cursor = position;
             self.scroll_into_view(self.visible_rows());
         }
-        found.is_some()
     }
 }
 
@@ -2306,60 +2282,37 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         Msg::Saved(store) => {
             // The edit is closed *here* and not when `Enter` was pressed: until
             // the journal has answered, the value on screen is a hope.
-            let closed = model.edit.take();
-            let created = closed.as_ref().is_some_and(|edit| edit.creating);
-            let version = std::mem::take(&mut model.pending_version);
-            let opening = model.pending_view.take();
-            let direction = std::mem::replace(&mut model.direction, Direction::Forward);
+            model.edit = None;
             model.delete_armed = false;
-            // The write landed, so the change is real and belongs on the stack
-            // that can reverse it: a write becomes something to undo, an undo
-            // becomes something to redo, and a redo something to undo again.
-            if let Some(change) = model.pending.take() {
-                match direction {
-                    Direction::Forward | Direction::Redo => model.undo.push(change),
-                    Direction::Undo => model.redo.push(change),
+            let landed = match model.pending.take() {
+                Some(Pending { change, direction, landed }) => {
+                    // The write landed, so its change belongs on the stack that
+                    // can reverse it: a write becomes something to undo, an undo
+                    // something to redo, and a redo something to undo again.
+                    match direction {
+                        Direction::Forward | Direction::Redo => model.undo.push(change),
+                        Direction::Undo => model.redo.push(change),
+                    }
+                    // **An ordinary write clears the redo stack.** Once history
+                    // has branched, the future those changes described is one
+                    // the store never took.
+                    if direction == Direction::Forward {
+                        model.redo.clear();
+                    }
+                    landed
                 }
-            }
-            // **An ordinary write clears the redo stack.** Once history has
-            // branched, the future those changes described is one the store
-            // never took, and putting one back would write an old edit against a
-            // document that has moved on since.
-            if direction == Direction::Forward {
-                model.redo.clear();
-            }
-            let anchor = closed
-                .map(|edit| edit.doc)
-                .or_else(|| model.pending_anchor.take())
-                .or_else(|| model.current().map(|doc| doc.id.clone()));
-            model.pending_anchor = None;
-            let anchor = anchor.unwrap_or_default();
-            let kept = model.adopt(*store, &anchor);
+                None => Landed::default(),
+            };
+            let anchor = landed.anchor.or_else(|| model.current().map(|doc| doc.id.clone()));
+            model.adopt(*store, anchor.as_deref().unwrap_or_default());
             model.prune_views();
-            let note = model.saved_note.take();
-            if direction != Direction::Forward {
-                model.flash =
-                    Some(if direction == Direction::Undo { "undone" } else { "redone" }.into());
-            } else if std::mem::take(&mut model.pending_delete) {
-                model.flash = Some("deleted — u to undo".into());
-            } else if let Some(view @ View::Bundle { .. }) = opening.filter(
-                |view| matches!(view, View::Bundle { id, .. } if model.store.bundle(id).is_some()),
-            ) {
-                model.views.push(view);
-                model.flash = Some(note.unwrap_or_else(|| "saved".into()));
-            } else if (created || version) && model.store.index_of(&anchor).is_some() {
-                // The Details view is the only place a new document's other
-                // fields can be filled in.
-                if version && model.detail() {
+            if let Some(view) = landed.open.filter(|view| view.alive_in(&model.store)) {
+                if landed.replace {
                     model.views.pop();
                 }
-                model.views.push(View::Details { doc: anchor, cursor: 0 });
-                model.flash = Some(if version { "new version" } else { "created" }.into());
-            } else if kept || anchor.is_empty() {
-                model.flash = Some(note.unwrap_or_else(|| "saved".into()));
-            } else {
-                model.flash = Some("saved — it no longer matches the filter".into());
+                model.views.push(view);
             }
+            model.flash = Some(landed.note.unwrap_or_else(|| "saved".into()));
             Effect::Redraw
         }
         Msg::SaveFailed { reason, permanent } => {
@@ -2371,19 +2324,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             // dropped rather than left on a stack to reverse something nobody
             // did. A refused *undo* likewise stays on the undo stack — it is
             // still the last thing this session wrote.
-            if let Some(change) = model.pending.take() {
-                match model.direction {
+            if let Some(Pending { change, direction, .. }) = model.pending.take() {
+                match direction {
                     Direction::Undo => model.undo.push(change),
                     Direction::Redo => model.redo.push(change),
                     Direction::Forward => {}
                 }
             }
-            model.pending_anchor = None;
-            model.direction = Direction::Forward;
-            model.pending_delete = false;
-            model.pending_version = false;
-            model.pending_view = None;
-            model.saved_note = None;
             model.delete_armed = false;
             model.flash = Some(reason.clone());
             // A refusal that will refuse again takes editing off the table for
@@ -2701,46 +2648,31 @@ fn save_field(model: &mut Model, edit: &mut crate::edit::Edit) -> Effect {
     });
     match validated {
         Ok(value) => {
-            // **The id is minted here, not when the edit opened**,
-            // because it is made from the name and the name is what
-            // was being typed. Writing it back into `edit.doc` is
-            // what lets the save path below — and `Msg::Saved`,
-            // which anchors on it — stay ignorant of the difference
-            // between creating and editing.
+            // The id is minted at `Enter`, not when the edit opened, because
+            // it is made from the name being typed.
             if edit.creating {
                 edit.doc = model.mint_id(edit.buffer.trim());
             }
-            // **The inverse is computed now, from the store as it
-            // stands**, because "what was there before" is knowable
-            // here and only by re-folding history afterwards. It is
-            // held aside until the journal confirms the write.
-            model.pending = None; // filled in below, once `drafts` exists
             let field = edit.field.journal_field();
             let write = match value {
                 Some(value) => journal::Draft::set("doc", &edit.doc, field, value),
-                // An empty buffer clears the field: `unset`, never a
-                // stored empty string (see
-                // [`crate::edit::Field::validate`]).
                 None => journal::Draft::unset("doc", &edit.doc, field),
             };
-            // `create` first, and in the *same* append: §3.2's fold
-            // orphans a `set` on an entity that is not alive yet, so
-            // a name that arrived before its create would be
-            // silently dropped. One batch, one writer, so the two
-            // ops cannot be separated by anything.
-            let drafts = if edit.creating {
+            // `create` first, in the same append: the fold orphans a `set` on
+            // an entity that is not alive yet.
+            let forward = if edit.creating {
                 vec![journal::Draft::create("doc", &edit.doc), write]
             } else {
                 vec![write]
             };
-            // **The change is recorded now, from the store as it
-            // stands**, because "what was there before" is knowable
-            // here and only by re-folding history afterwards. It is
-            // held aside until the journal confirms the write.
-            model.pending = Some(Change { forward: drafts.clone(), back: model.inverse_of(edit) });
-            model.direction = Direction::Forward;
+            let back = model.inverse_of(edit);
+            let landed = if edit.creating {
+                Landed::created(&edit.doc)
+            } else {
+                Landed::on(&edit.doc, "saved")
+            };
             edit.saving = true;
-            Effect::Append(drafts)
+            model.write(Change { forward, back }, landed)
         }
         Err(complaint) => {
             // The typing is never destroyed by a refusal — it is the
@@ -3729,7 +3661,7 @@ pub(crate) mod tests {
         };
         assert_eq!(update(&mut m, Msg::Char('e')), Effect::Append(vec![set("none")]));
         assert_eq!(
-            m.pending.as_ref().map(|change| change.back.clone()),
+            m.pending.as_ref().map(|pending| pending.change.back.clone()),
             Some(vec![set("cert-file")])
         );
         let mut store = m.store.clone();
@@ -3751,7 +3683,10 @@ pub(crate) mod tests {
             update(&mut m, Msg::Char('e')),
             Effect::Append(vec![journal::Draft::unset("doc", "coc", "location")])
         );
-        assert_eq!(m.pending.as_ref().map(|change| change.back.clone()), Some(vec![set("none")]));
+        assert_eq!(
+            m.pending.as_ref().map(|pending| pending.change.back.clone()),
+            Some(vec![set("none")])
+        );
     }
 
     fn with_locations(mut m: Model) -> Model {
@@ -3792,7 +3727,7 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Enter), Effect::Append(vec![set("drawer")]));
         assert!(m.locpick.is_none(), "filing closes the picker");
         assert_eq!(
-            m.pending.as_ref().map(|change| change.back.clone()),
+            m.pending.as_ref().map(|pending| pending.change.back.clone()),
             Some(vec![set("cert-file")])
         );
         let store = m.store.clone();
@@ -3834,7 +3769,7 @@ pub(crate) mod tests {
                 serde_json::Value::from(id.as_str())
             ))
         );
-        let back = m.pending.as_ref().unwrap().back.clone();
+        let back = m.pending.as_ref().unwrap().change.back.clone();
         assert_eq!(back.last(), Some(&journal::Draft::delete("location", &id)));
     }
 
@@ -3926,7 +3861,7 @@ pub(crate) mod tests {
             Effect::Append(vec![journal::Draft::unset("location", "cert-file", "parent")])
         );
         assert_eq!(
-            m.pending.as_ref().map(|change| change.back.clone()),
+            m.pending.as_ref().map(|pending| pending.change.back.clone()),
             Some(vec![journal::Draft::set(
                 "location",
                 "cert-file",
@@ -3968,7 +3903,7 @@ pub(crate) mod tests {
             update(&mut m, Msg::Char('d')),
             Effect::Append(vec![delete("cert-file"), delete("shelf")])
         );
-        let back = m.pending.as_ref().unwrap().back.clone();
+        let back = m.pending.as_ref().unwrap().change.back.clone();
         assert_eq!(back.first(), Some(&journal::Draft::create("location", "shelf")));
         assert!(back.contains(&journal::Draft::set(
             "location",
@@ -4267,12 +4202,12 @@ pub(crate) mod tests {
         assert_eq!(m.cursor, 0, "which is now the first row");
     }
 
-    /// A save that pushes the document out of the list says so, and its
-    /// Details view stays on it: the view is anchored on the document, not on
-    /// a row of the list.
+    /// A save that takes the document out of the list leaves its Details view
+    /// on it, since the view is anchored on the document, and just says saved.
     #[test]
-    fn a_save_that_leaves_the_filter_keeps_the_record_and_says_so() {
+    fn a_save_that_leaves_the_filter_keeps_the_record() {
         let mut m = writable();
+        m.warn_until = "2031-12-31".into();
         update(&mut m, Msg::ToggleExpiring);
         let edited = m.current().unwrap().id.clone();
         update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
@@ -4282,7 +4217,7 @@ pub(crate) mod tests {
         let store = restored(&m, &edited, None);
         update(&mut m, Msg::Saved(Box::new(store)));
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some(edited.as_str()));
-        assert!(m.flash.as_deref().unwrap().contains("no longer matches"));
+        assert_eq!(m.flash.as_deref(), Some("saved"));
         assert!(m.rows.iter().all(|&i| m.store.docs[i].id != edited));
     }
 
@@ -4710,7 +4645,7 @@ pub(crate) mod tests {
             Effect::Append(vec![journal::Draft::set("bundle", "joining", "date", "2026-12-01")])
         );
         assert_eq!(
-            m.pending.as_ref().map(|change| change.back.clone()),
+            m.pending.as_ref().map(|pending| pending.change.back.clone()),
             Some(vec![journal::Draft::set("bundle", "joining", "date", "2026-11-01")])
         );
         let store = m.store.clone();
@@ -4773,7 +4708,7 @@ pub(crate) mod tests {
             "Space with nothing typed toggles"
         );
         assert_eq!(
-            m.pending.as_ref().map(|change| change.back.clone()),
+            m.pending.as_ref().map(|pending| pending.change.back.clone()),
             Some(vec![journal::Draft::set(
                 "doc",
                 "coc",
@@ -4821,7 +4756,7 @@ pub(crate) mod tests {
             ])
         );
         assert_eq!(
-            m.pending.as_ref().map(|change| change.back.clone()),
+            m.pending.as_ref().map(|pending| pending.change.back.clone()),
             Some(vec![
                 journal::Draft::set(
                     "doc",
@@ -4881,7 +4816,7 @@ pub(crate) mod tests {
             "the newer version takes the old one's place"
         );
         assert_eq!(
-            m.pending.as_ref().map(|change| change.back.clone()),
+            m.pending.as_ref().map(|pending| pending.change.back.clone()),
             Some(vec![
                 set("coc", serde_json::json!([{"bundle": "joining"}])),
                 journal::Draft::unset("doc", "coc-2", "bundles"),
@@ -4999,7 +4934,7 @@ pub(crate) mod tests {
         assert_eq!(written[1]["primary"], true);
         assert_eq!(written[0]["primary"], false);
         assert!(m.picker.is_none(), "choosing closes the picker");
-        let back = &m.pending.as_ref().unwrap().back[0];
+        let back = &m.pending.as_ref().unwrap().change.back[0];
         assert_eq!(back.val.as_ref().unwrap()[0]["primary"], true, "undo restores the old primary");
     }
 
