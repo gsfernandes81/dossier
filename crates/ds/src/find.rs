@@ -636,12 +636,7 @@ fn locpick_heading(
         )
     };
     let current = match &picker.mode {
-        Mode::File(doc) => {
-            store.index_of(doc).and_then(|i| match store.hard_copy(&store.docs[i]) {
-                HardCopy::At(id) => Some(id.to_string()),
-                HardCopy::Unfiled | HardCopy::DigitalOnly => None,
-            })
-        }
+        Mode::File(doc) => store.filed_at(doc).map(str::to_string),
         Mode::Move(moving) => store.locations.parent(moving).map(str::to_string),
     };
     let (crumb, subject, kind, now) = match (&picker.mode, renaming) {

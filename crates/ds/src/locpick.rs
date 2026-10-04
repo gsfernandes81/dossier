@@ -130,10 +130,7 @@ impl LocationPicker {
     /// that location open and selected.
     #[must_use]
     pub fn file(store: &Store, doc: &str) -> Self {
-        let at = store.index_of(doc).and_then(|i| match store.hard_copy(&store.docs[i]) {
-            HardCopy::At(id) => Some(id.to_string()),
-            HardCopy::Unfiled | HardCopy::DigitalOnly => None,
-        });
+        let at = store.filed_at(doc).map(str::to_string);
         let mut picker = Self {
             mode: Mode::File(doc.to_string()),
             root: at.as_deref().and_then(|id| store.locations.parent(id)).map(str::to_string),
@@ -288,7 +285,7 @@ impl LocationPicker {
     /// Whether this location holds anything the tree can show inside it.
     #[must_use]
     pub fn holds_anything(&self, store: &Store, id: &str) -> bool {
-        !self.children(store, id).is_empty() || !self.filed(store, id).is_empty()
+        !self.children(store, Some(id)).is_empty() || !self.filed(store, id).is_empty()
     }
 
     /// Moves the cursor one selectable row up or down.
@@ -352,11 +349,11 @@ impl LocationPicker {
         }
     }
 
-    /// The locations directly inside `id` that this mode shows.
-    fn children<'a>(&self, store: &'a Store, id: &str) -> Vec<&'a str> {
+    /// The locations directly inside `parent` that this mode shows.
+    fn children<'a>(&self, store: &'a Store, parent: Option<&str>) -> Vec<&'a str> {
         store
             .locations
-            .children(Some(id))
+            .children(parent)
             .iter()
             .map(String::as_str)
             .filter(|child| !matches!(&self.mode, Mode::Move(moving) if moving == child))
@@ -385,16 +382,7 @@ impl LocationPicker {
         guide: &str,
         rows: &mut Vec<Row>,
     ) {
-        let locations: Vec<&str> = match parent {
-            Some(id) => self.children(store, id),
-            None => store
-                .locations
-                .children(None)
-                .iter()
-                .map(String::as_str)
-                .filter(|child| !matches!(&self.mode, Mode::Move(moving) if moving == child))
-                .collect(),
-        };
+        let locations = self.children(store, parent);
         let docs = parent.map(|id| self.filed(store, id)).unwrap_or_default();
         let shown = match parent {
             Some(id) if !self.expanded.contains(id) && docs.len() > SHOWN => SHOWN,

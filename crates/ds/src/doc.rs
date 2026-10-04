@@ -557,6 +557,15 @@ impl Store {
         self.locations.hard_copy(doc.location.as_deref())
     }
 
+    /// The location document `id`'s hard copy is filed in, if any.
+    #[must_use]
+    pub fn filed_at(&self, id: &str) -> Option<&str> {
+        match self.hard_copy(self.get(id)?) {
+            HardCopy::At(location) => Some(location),
+            HardCopy::Unfiled | HardCopy::DigitalOnly => None,
+        }
+    }
+
     /// The path of a document's hard copy location, or empty when it has none.
     #[must_use]
     pub fn place(&self, doc: &Doc) -> String {
