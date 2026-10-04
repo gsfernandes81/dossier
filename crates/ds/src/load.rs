@@ -95,11 +95,8 @@ pub fn load(journal: &Journal) -> Result<Loaded, journal::store::Error> {
     })
 }
 
-/// Today and the far edge of the warn window, both ISO.
-///
-/// Resolved once, at startup: every expiry comparison after this is a string
-/// comparison against these two, which is why nothing else in the crate needs a
-/// date library.
+/// Today and the far edge of the warn window, both ISO; expiry is compared
+/// against them as strings.
 #[must_use]
 pub fn window() -> (String, String) {
     let today = Zoned::now().date();

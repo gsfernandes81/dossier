@@ -37,6 +37,8 @@ pub enum Msg {
     Saved(Box<Store>),
     /// Another writer's ops arrived, and here is the store re-folded with them.
     Reloaded(Box<Store>),
+    /// The date turned while the app was open.
+    Day { today: String, warn_until: String },
     /// The platform opener could not open a file, and why.
     OpenFailed(String),
     /// The append did not land. The editor stays open with the typing intact:
@@ -1903,6 +1905,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.flash = Some(reason);
             Effect::Redraw
         }
+        Msg::Day { today, warn_until } => {
+            model.today = today;
+            model.warn_until = warn_until;
+            model.requery();
+            Effect::Redraw
+        }
         Msg::Reloaded(store) => {
             if *store == model.store {
                 return Effect::Idle;
@@ -2593,6 +2601,7 @@ fn from_worker(msg: &Msg) -> bool {
         Msg::ScansLoaded(_)
             | Msg::Saved(_)
             | Msg::Reloaded(_)
+            | Msg::Day { .. }
             | Msg::SaveFailed { .. }
             | Msg::OpenFailed(_)
     )
@@ -4205,6 +4214,17 @@ pub(crate) mod tests {
         update(&mut m, Msg::Move(Motion::Down));
         assert!(!m.esc_armed);
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw, "arms again rather than quitting");
+    }
+
+    #[test]
+    fn a_new_day_reclassifies_expiry() {
+        let mut m = model();
+        let eng1 = m.store.get("eng1").unwrap().clone();
+        assert_eq!(m.status(&eng1), Status::Ok);
+        let day = Msg::Day { today: "2026-11-01".into(), warn_until: "2027-01-30".into() };
+        assert_eq!(update(&mut m, day), Effect::Redraw);
+        assert_eq!(m.status(&eng1), Status::Soon);
+        assert!(m.due().iter().any(|&i| m.store.docs[i].id == "eng1"));
     }
 
     #[test]

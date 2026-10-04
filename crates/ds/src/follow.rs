@@ -85,6 +85,8 @@ pub struct Follower {
     stamp: journal::Stamp,
     /// The newest `ts` read from any writer.
     max_ts: i64,
+    /// Today and the warn edge as the UI last heard them.
+    window: (String, String),
 }
 
 impl Follower {
@@ -92,7 +94,7 @@ impl Follower {
     /// as `owner`.
     #[must_use]
     pub fn new(journal: Journal, owner: Option<Owner>, stamp: journal::Stamp, max_ts: i64) -> Self {
-        Self { journal, owner, writer: None, stamp, max_ts }
+        Self { journal, owner, writer: None, stamp, max_ts, window: crate::load::window() }
     }
 
     /// Appends and commits `drafts`, then reads the journal back.
@@ -123,8 +125,14 @@ impl Follower {
         }
     }
 
-    /// The journal re-read, when its files changed since the last read.
+    /// A new day's dates once the date turns, else the journal re-read when
+    /// its files changed since the last read.
     pub fn poll(&mut self) -> Option<Msg> {
+        let now = crate::load::window();
+        if now != self.window {
+            self.window = now.clone();
+            return Some(Msg::Day { today: now.0, warn_until: now.1 });
+        }
         self.catch_up().map(|store| Msg::Reloaded(Box::new(store)))
     }
 
