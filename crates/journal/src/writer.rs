@@ -219,7 +219,7 @@ pub enum Error {
     Serialize(#[from] serde_json::Error),
 }
 
-/// An open, locked, append-only handle to one writer's file.
+/// The lock on one writer id, and its clock.
 ///
 /// Dropping it releases the lock (the OS does, whether or not the process exits
 /// cleanly — which is why an advisory lock beats a PID file here).
@@ -227,7 +227,6 @@ pub enum Error {
 pub struct Writer {
     name: String,
     path: PathBuf,
-    file: File,
     clock: Hlc,
     /// Held for its lock, never read or written.
     _lock: File,
@@ -293,20 +292,8 @@ impl Writer {
             .open(&path)
             .map_err(io("open journal file for repair", &path))?;
         repair_torn_tail(repair, &path)?;
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(&path)
-            .map_err(io("open journal file", &path))?;
 
-        Ok(Self {
-            name: writer_id.to_string(),
-            path,
-            file,
-            clock: Hlc::seeded(max_ts_seen),
-            _lock: lock,
-        })
+        Ok(Self { name: writer_id.to_string(), path, clock: Hlc::seeded(max_ts_seen), _lock: lock })
     }
 
     /// The writer id this handle appends as.
@@ -321,12 +308,17 @@ impl Writer {
         &self.path
     }
 
-    /// Append several ops as one consecutive run.
+    /// Appends several ops as one consecutive run and flushes them to disk.
     ///
     /// For edits that are only correct together — an id rename is create-new +
     /// copy fields + reference fixups + delete-old. One call keeps them
     /// adjacent in one writer's file, as close to atomic as an append-only log
-    /// gets.
+    /// gets. The flush is what lets a caller say "saved": a power cut must not
+    /// disagree.
+    ///
+    /// The file is opened afresh on every call: Syncthing replaces a file by
+    /// renaming a temp over it, and a handle held from before would append to
+    /// the unlinked inode while the store reads the new one.
     ///
     /// # Errors
     /// [`Error::Io`] or [`Error::Serialize`]. After an I/O error the file may
@@ -346,22 +338,16 @@ impl Writer {
         if buffer.is_empty() {
             return Ok(written);
         }
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(io("open journal file", &self.path))?;
         // One `write_all` for the whole run: fewer partial-write windows, and
         // for a single op it is exactly the "one op = one write" rule.
-        self.file.write_all(buffer.as_bytes()).map_err(io("append to", &self.path))?;
+        file.write_all(buffer.as_bytes()).map_err(io("append to", &self.path))?;
+        file.sync_data().map_err(io("flush", &self.path))?;
         Ok(written)
-    }
-
-    /// Flush to disk.
-    ///
-    /// Call after a user-initiated save. Edits are rare and an fsync
-    /// costs nothing at this rate; the alternative is telling someone their
-    /// document is saved when a power cut would disagree.
-    ///
-    /// # Errors
-    /// [`Error::Io`].
-    pub fn commit(&mut self) -> Result<(), Error> {
-        self.file.sync_data().map_err(io("flush", &self.path))
     }
 
     /// Raises the clock's floor to `ts`; see [`Hlc::observe`].
@@ -387,20 +373,16 @@ impl Writer {
     /// rename fails with `EXDEV`. A compaction that dies half-way leaves a temp
     /// the next fold ignores.
     ///
-    /// The writer is handed back only on success: after a failure past the
-    /// rename it could be holding the replaced file, and an append there would
-    /// be lost.
-    ///
     /// # Errors
     /// [`Error::Io`] or [`Error::Serialize`]. Nothing is replaced until the new
     /// file is complete and flushed.
-    pub fn compact(mut self, now_ms: i64, when: When) -> Result<(Self, Option<Report>), Error> {
+    pub fn compact(&mut self, now_ms: i64, when: When) -> Result<Option<Report>, Error> {
         let body =
             std::fs::read_to_string(&self.path).map_err(io("read for compaction", &self.path))?;
         let (lines, _torn) = crate::op::parse_body(&body);
         let plan = crate::compact::plan(&lines, now_ms);
         if when == When::IfWorthwhile && !plan.worth_doing() {
-            return Ok((self, None));
+            return Ok(None);
         }
 
         let directory = self.path.parent().unwrap_or_else(|| Path::new("."));
@@ -426,11 +408,6 @@ impl Writer {
         replace(&self.path, &temp, rewritten.as_bytes()).inspect_err(|_| {
             let _ = std::fs::remove_file(&temp);
         })?;
-        self.file = OpenOptions::new()
-            .read(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(io("reopen after compaction", &self.path))?;
 
         let report = Report {
             lines_before: plan.total,
@@ -438,7 +415,7 @@ impl Writer {
             bytes_before: body.len() as u64,
             bytes_after: rewritten.len() as u64,
         };
-        Ok((self, Some(report)))
+        Ok(Some(report))
     }
 }
 
@@ -530,7 +507,6 @@ mod tests {
         let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::create("doc", "passport")]).expect("append");
         writer.append_all([Draft::set("doc", "passport", "name", "Passport")]).expect("append");
-        writer.commit().expect("commit");
 
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         assert!(load.anomalies.is_empty(), "{:?}", load.anomalies);
@@ -583,7 +559,6 @@ mod tests {
 
         let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::create("doc", "new")]).expect("append");
-        writer.commit().expect("commit");
 
         let body = std::fs::read_to_string(&path).expect("read");
         let (lines, torn) = parse_body(&body);
@@ -684,12 +659,11 @@ mod tests {
                 .append_all([Draft::set("doc", "passport", "name", format!("Passport v{i}"))])
                 .expect("append");
         }
-        writer.commit().expect("commit");
 
         let before = fold(&fixture.journal.load(Namespace::Meta).expect("loads").lines);
         // Far in the future, so nothing is inside the 30-day retention window.
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        let (_, report) = writer.compact(future, When::IfWorthwhile).expect("compacts");
+        let report = writer.compact(future, When::IfWorthwhile).expect("compacts");
         let report = report.expect("did work");
 
         assert_eq!(report.lines_after, 2, "a create and the newest name write");
@@ -708,7 +682,6 @@ mod tests {
         for i in 0..30 {
             writer.append_all([Draft::set("doc", "x", "name", format!("v{i}"))]).expect("append");
         }
-        writer.commit().expect("commit");
         let before = fixture.journal.load(Namespace::Meta).expect("loads").files[0].max_ts;
 
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
@@ -718,21 +691,19 @@ mod tests {
         assert_eq!(before, after);
     }
 
-    /// The writer keeps appending to the compacted file, not the inode it
-    /// replaced.
+    /// Syncthing replaces a file by renaming a temp over it; later appends must
+    /// land in the new file, not the inode it replaced.
     #[test]
-    fn appends_continue_after_a_compaction() {
+    fn appends_follow_a_file_replaced_under_the_writer() {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::create("doc", "x")]).expect("append");
-        for i in 0..20 {
-            writer.append_all([Draft::set("doc", "x", "name", format!("v{i}"))]).expect("append");
-        }
-        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        let (mut writer, _) = writer.compact(future, When::Always).expect("compacts");
+        let synced = std::fs::read(writer.path()).expect("read");
+        let temp = writer.path().with_file_name(".syncthing.desk-core.jsonl.tmp");
+        std::fs::write(&temp, synced).expect("write temp");
+        std::fs::rename(&temp, writer.path()).expect("replace");
 
-        writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("append after compaction");
-        writer.commit().expect("commit");
+        writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("append after replace");
 
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         assert!(load.anomalies.is_empty(), "{:?}", load.anomalies);
@@ -746,7 +717,7 @@ mod tests {
         writer.append_all([Draft::create("doc", "x")]).expect("append");
         writer.append_all([Draft::set("doc", "x", "name", "only")]).expect("append");
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        let (writer, report) = writer.compact(future, When::IfWorthwhile).expect("runs");
+        let report = writer.compact(future, When::IfWorthwhile).expect("runs");
         assert!(report.is_none());
 
         let directory = writer.path().parent().expect("has a parent");
@@ -775,7 +746,6 @@ mod tests {
         assert!(!temp.exists(), "the temp is removed on failure");
         assert_eq!(std::fs::read(&path).expect("read"), before);
 
-        let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("append after failure");
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         assert_eq!(fold(&load.lines).get("doc", "x").expect("alive").fields["slot"], 7);
@@ -802,7 +772,6 @@ mod tests {
                 Draft::delete("doc", "coc-2019"),
             ])
             .expect("append run");
-        writer.commit().expect("commit");
 
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         let ids: Vec<&str> =

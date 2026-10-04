@@ -97,7 +97,7 @@ impl Follower {
         Self { journal, owner, writer: None, stamp, max_ts, window: crate::load::window() }
     }
 
-    /// Appends and commits `drafts`, then reads the journal back.
+    /// Appends `drafts`, then reads the journal back.
     pub fn save(&mut self, drafts: Vec<journal::Draft>) -> Msg {
         let failed = |reason: String| Msg::SaveFailed { reason, permanent: false };
         // Ops that landed since the last poll still raise the clock first.
@@ -112,9 +112,7 @@ impl Follower {
                 Err(message) => return message,
             },
         };
-        // The fsync a user-initiated save requires: "saved" on screen must
-        // survive a power cut.
-        if let Err(error) = writer.append_all(drafts).and_then(|_| writer.commit()) {
+        if let Err(error) = writer.append_all(drafts) {
             // A partial write leaves a torn tail; reopening repairs it.
             self.writer = None;
             return failed(error.to_string());
