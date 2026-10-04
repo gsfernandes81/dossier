@@ -159,9 +159,9 @@ pub enum OpaqueReason {
 
 /// One line of a journal file, classified.
 ///
-/// Every variant keeps the original bytes, because compaction copies lines it
-/// retains rather than re-serializing them: bytes it did not understand are
-/// bytes it must not rewrite.
+/// A line this build cannot fold keeps its original bytes, because compaction
+/// copies those verbatim: bytes it did not understand are bytes it must not
+/// rewrite.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Line {
     /// A line this build folds.
@@ -192,15 +192,6 @@ impl Line {
         match self {
             Line::Op(op) => Some(op),
             _ => None,
-        }
-    }
-
-    /// The original bytes, whatever the classification.
-    #[must_use]
-    pub fn raw(&self) -> Option<&str> {
-        match self {
-            Line::Op(_) => None,
-            Line::Opaque { raw, .. } | Line::Malformed { raw, .. } => Some(raw),
         }
     }
 }
@@ -384,9 +375,10 @@ mod tests {
     #[test]
     fn broken_lines_are_malformed_and_keep_their_bytes() {
         for raw in ["{not json", "[1,2,3]", r#"{"ts":1}"#, r#"{"v":1,"ts":1,"w":"a"}"#] {
-            let line = parse_line(raw);
-            assert!(matches!(line, Line::Malformed { .. }), "{raw} should be malformed");
-            assert_eq!(line.raw(), Some(raw));
+            let Line::Malformed { raw: kept, .. } = parse_line(raw) else {
+                panic!("{raw} should be malformed")
+            };
+            assert_eq!(kept, raw);
         }
     }
 
