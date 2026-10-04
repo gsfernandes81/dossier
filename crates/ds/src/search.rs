@@ -128,55 +128,67 @@ pub fn distance(a: &str, b: &str, k: usize) -> usize {
     prev[lb].min(k + 1)
 }
 
-/// Whether `term` is within its length-budget of any token.
-///
-/// Both sides are expected to be [`fold`]ed already — the hot path folds each
-/// side once, not once per comparison.
+/// The runs of alphanumerics in already-folded text.
+fn words(folded: &str) -> impl Iterator<Item = &str> {
+    folded.split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty())
+}
+
+/// Whether `term` is within its length budget of a word of `haystack`; both
+/// already folded.
 #[must_use]
-pub fn term_matches(term: &str, tokens: &[String]) -> bool {
+pub fn term_matches(term: &str, haystack: &str) -> bool {
     let k = budget(term);
-    tokens.iter().any(|token| distance(term, token, k) <= k)
+    words(haystack).any(|word| distance(term, word, k) <= k)
 }
 
-/// Split text into search tokens: runs of alphanumerics, folded.
-#[must_use]
-pub fn tokens(text: &str) -> Vec<String> {
-    fold(text)
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .map(str::to_string)
-        .collect()
+/// A query folded and split once, to match against many haystacks.
+#[derive(Debug, Clone)]
+pub struct Query {
+    needle: String,
+    terms: Vec<String>,
 }
 
-/// Whether `haystack` matches `query`, exactly or (when allowed) fuzzily.
-///
-/// `haystack` must be pre-[`fold`]ed; `query` is folded here because it changes
-/// on every keystroke while the haystacks do not.
-#[must_use]
-pub fn matches(haystack: &str, query: &str, fuzzy: bool) -> bool {
-    let needle = fold(query);
-    if needle.is_empty() || haystack.contains(&needle) {
-        return true;
+impl Query {
+    /// Prepares `text` for matching.
+    #[must_use]
+    pub fn new(text: &str) -> Self {
+        let needle = fold(text);
+        let terms = words(&needle).map(str::to_string).collect();
+        Self { needle, terms }
     }
-    if !fuzzy {
-        return false;
+
+    /// Whether some term is long enough to forgive an edit, so a fuzzy pass
+    /// could find more than the exact one.
+    #[must_use]
+    pub fn can_fuzz(&self) -> bool {
+        self.terms.iter().any(|term| budget(term) >= 1)
     }
-    let terms = tokens(query);
-    if terms.is_empty() {
-        return false;
+
+    /// Whether folded `haystack` holds the query: as a substring, or with
+    /// `fuzzy`, every term within its budget of one of its words.
+    #[must_use]
+    pub fn matches(&self, haystack: &str, fuzzy: bool) -> bool {
+        if self.needle.is_empty() || haystack.contains(&self.needle) {
+            return true;
+        }
+        fuzzy
+            && !self.terms.is_empty()
+            && self.terms.iter().all(|term| term_matches(term, haystack))
     }
-    let haystack_tokens = tokens(haystack);
-    terms.iter().all(|term| term_matches(term, &haystack_tokens))
 }
 
-/// Whether a query is even eligible for the fuzzy pass.
-///
-/// If no term is long enough to forgive an edit, the fuzzy pass would return
-/// exactly what the exact pass did, so it is skipped — that is the check that
-/// keeps a two-character query from ever fuzzing.
-#[must_use]
-pub fn can_fuzz(query: &str) -> bool {
-    tokens(query).iter().any(|term| budget(term) >= 1)
+/// The items whose folded text matches `query`: the exact matches, or the
+/// fuzzy ones only when there are none and a term can forgive an edit.
+pub fn two_pass<'a, T>(items: impl Iterator<Item = (T, &'a str)> + Clone, query: &Query) -> Vec<T> {
+    let exact: Vec<T> = items
+        .clone()
+        .filter(|(_, text)| query.matches(text, false))
+        .map(|(item, _)| item)
+        .collect();
+    if !exact.is_empty() || !query.can_fuzz() {
+        return exact;
+    }
+    items.filter(|(_, text)| query.matches(text, true)).map(|(item, _)| item).collect()
 }
 
 #[cfg(test)]
@@ -201,8 +213,8 @@ mod tests {
         assert_eq!(budget("passp"), 1);
         assert_eq!(budget("passport"), 1);
         assert_eq!(budget("certificate"), 2);
-        assert!(!can_fuzz("coc"));
-        assert!(can_fuzz("passport"));
+        assert!(!Query::new("coc").can_fuzz());
+        assert!(Query::new("passport").can_fuzz());
     }
 
     /// A transposition costs one edit — the typo a thumb actually makes.
@@ -223,20 +235,20 @@ mod tests {
     /// Real typos land inside their budget; unrelated words do not.
     #[test]
     fn typos_match_and_different_words_do_not() {
-        let tokens = tokens("Passport (IN) — identity travel");
-        assert!(term_matches("passprot", &tokens), "transposed");
-        assert!(term_matches("pasport", &tokens), "dropped letter");
-        assert!(!term_matches("password", &tokens), "a different word entirely");
+        let hay = fold("Passport (IN) — identity travel");
+        assert!(term_matches("passprot", &hay), "transposed");
+        assert!(term_matches("pasport", &hay), "dropped letter");
+        assert!(!term_matches("password", &hay), "a different word entirely");
     }
 
     /// Exact substring matching is the fast path and needs no fuzzy pass.
     #[test]
     fn exact_substrings_match_without_fuzzing() {
         let hay = fold("COC Certificate (Master) — marine");
-        assert!(matches(&hay, "coc", false));
-        assert!(matches(&hay, "master", false));
-        assert!(matches(&hay, "MARINE", false), "case-insensitive");
-        assert!(!matches(&hay, "eng-1", false));
+        assert!(Query::new("coc").matches(&hay, false));
+        assert!(Query::new("master").matches(&hay, false));
+        assert!(Query::new("MARINE").matches(&hay, false), "case-insensitive");
+        assert!(!Query::new("eng-1").matches(&hay, false));
     }
 
     /// **Every term must match.** Adding a word narrows, never widens — the
@@ -244,15 +256,15 @@ mod tests {
     #[test]
     fn terms_are_anded() {
         let hay = fold("COC Certificate (Master) — marine");
-        assert!(matches(&hay, "certificate marine", true));
-        assert!(!matches(&hay, "certificate motorcycle", true));
+        assert!(Query::new("certificate marine").matches(&hay, true));
+        assert!(!Query::new("certificate motorcycle").matches(&hay, true));
     }
 
     /// An empty query matches everything — the unfiltered list.
     #[test]
     fn an_empty_query_matches_everything() {
-        assert!(matches(&fold("anything at all"), "", false));
-        assert!(matches("", "", false));
+        assert!(Query::new("").matches(&fold("anything at all"), false));
+        assert!(Query::new("").matches("", false));
     }
 
     /// The fuzzy pass is genuinely more forgiving than the exact one, and only
@@ -260,8 +272,8 @@ mod tests {
     #[test]
     fn the_fuzzy_pass_forgives_what_the_exact_one_does_not() {
         let hay = fold("ENG-1 Medical Certificate");
-        assert!(!matches(&hay, "medicla", false), "exact pass misses the typo");
-        assert!(matches(&hay, "medicla", true), "fuzzy pass catches it");
-        assert!(!matches(&hay, "xyzq", true), "but not nonsense");
+        assert!(!Query::new("medicla").matches(&hay, false), "exact pass misses the typo");
+        assert!(Query::new("medicla").matches(&hay, true), "fuzzy pass catches it");
+        assert!(!Query::new("xyzq").matches(&hay, true), "but not nonsense");
     }
 }

@@ -198,18 +198,8 @@ impl Tree {
     pub fn search(&self, query: &str) -> Vec<&str> {
         let paths: Vec<(&str, String)> =
             self.shelf().into_iter().map(|id| (id, crate::search::fold(&self.path(id)))).collect();
-        let pass = |fuzzy: bool| -> Vec<&str> {
-            paths
-                .iter()
-                .filter(|(_, path)| crate::search::matches(path, query, fuzzy))
-                .map(|(id, _)| *id)
-                .collect()
-        };
-        let exact = pass(false);
-        if !exact.is_empty() || !crate::search::can_fuzz(query) {
-            return exact;
-        }
-        pass(true)
+        let paths = paths.iter().map(|(id, path)| (*id, path.as_str()));
+        crate::search::two_pass(paths, &crate::search::Query::new(query))
     }
 
     /// The locations two devices moved into each other, which read as top level.

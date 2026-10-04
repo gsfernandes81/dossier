@@ -44,13 +44,12 @@ pub fn entries(store: &Store, query: &str) -> Vec<Entry> {
     if typed || store.bundles.is_empty() {
         entries.push(Entry::New);
     }
+    let query = crate::search::Query::new(query);
     entries.extend(
         store
             .bundles
             .iter()
-            .filter(|bundle| {
-                !typed || crate::search::matches(&crate::search::fold(&bundle.name), query, false)
-            })
+            .filter(|bundle| query.matches(&crate::search::fold(&bundle.name), false))
             .map(|bundle| Entry::Bundle(bundle.id.clone())),
     );
     entries

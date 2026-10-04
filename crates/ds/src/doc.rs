@@ -659,26 +659,10 @@ impl Store {
     }
 
     /// Row indices matching `query`, in list order.
-    ///
-    /// Exact pass first; the fuzzy pass runs only if the exact one came up empty
-    /// **and** some term is long enough to forgive an edit — so a precise hit is
-    /// never displaced by a forgiving one (§8, v2's contract).
     #[must_use]
     pub fn search(&self, query: &str) -> Vec<usize> {
-        let exact: Vec<usize> = self
-            .docs
-            .iter()
-            .enumerate()
-            .filter_map(|(i, doc)| crate::search::matches(&doc.haystack, query, false).then_some(i))
-            .collect();
-        if !exact.is_empty() || !crate::search::can_fuzz(query) {
-            return exact;
-        }
-        self.docs
-            .iter()
-            .enumerate()
-            .filter_map(|(i, doc)| crate::search::matches(&doc.haystack, query, true).then_some(i))
-            .collect()
+        let docs = self.docs.iter().enumerate().map(|(i, doc)| (i, doc.haystack.as_str()));
+        crate::search::two_pass(docs, &crate::search::Query::new(query))
     }
 
     /// Documents expired or due inside the warn window, soonest first: the
