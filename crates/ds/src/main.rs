@@ -233,9 +233,9 @@ fn status(
 /// never guessed.
 fn open_one(loaded: &load::Loaded, root: &Path, query: &str) -> u8 {
     let docs = &loaded.store.docs;
-    let matched: Vec<usize> = docs
-        .iter()
-        .position(|doc| doc.id == query)
+    let matched: Vec<usize> = loaded
+        .store
+        .index_of(query)
         .map_or_else(|| loaded.store.search(query), |exact| vec![exact]);
     let [only] = matched[..] else {
         if matched.is_empty() {
@@ -257,7 +257,7 @@ fn open_one(loaded: &load::Loaded, root: &Path, query: &str) -> u8 {
         eprintln!("ds: {} has no file linked", doc.name);
         return code::NO_MATCH;
     };
-    let path = open::resolve(root, &file.path);
+    let path = root.join(&file.path);
     match open::open_file(&path) {
         Ok(()) => {
             println!("{}", path.display());
@@ -461,7 +461,7 @@ fn event_loop(
             Effect::Quit => return Ok(()),
             Effect::Redraw => {}
             Effect::Open(stored) => {
-                let path = open::resolve(root, &stored);
+                let path = root.join(&stored);
                 let tx = tx.clone();
                 std::thread::spawn(move || {
                     if let Err(error) = open::open_file(&path) {

@@ -22,6 +22,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use journal::store::FileReport;
 use journal::{FoldStats, Load};
 
 use crate::syncthing::State;
@@ -38,7 +39,7 @@ pub struct Report {
     /// Whether it exists; a fresh device has none, which is not damage.
     pub present: bool,
     /// Each writer's file.
-    pub files: Vec<FileLine>,
+    pub files: Vec<FileReport>,
     /// Documents the list shows.
     pub docs: usize,
     /// Locations.
@@ -59,17 +60,6 @@ pub struct Report {
     pub missing: Vec<String>,
     /// What the local Syncthing daemon says, unless `--no-sync`.
     pub sync: Option<crate::syncthing::Status>,
-}
-
-/// One writer's file, as the report lists it.
-#[derive(Debug, Clone)]
-pub struct FileLine {
-    /// Writer id (the file stem).
-    pub writer: String,
-    /// Ops folded from it.
-    pub ops: usize,
-    /// Size on disk.
-    pub bytes: u64,
 }
 
 /// Something that needs a person, under the topic it is about.
@@ -108,15 +98,7 @@ impl Report {
         Self {
             journal,
             present: load.present,
-            files: load
-                .files
-                .iter()
-                .map(|file| FileLine {
-                    writer: file.writer.clone(),
-                    ops: file.ops,
-                    bytes: file.bytes,
-                })
-                .collect(),
+            files: load.files.clone(),
             docs: store.listed(),
             locations: store.locations.len(),
             orphaned: stats.orphaned,

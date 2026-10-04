@@ -836,6 +836,12 @@ impl Model {
         self.append(change, Landed::created(&id))
     }
 
+    /// Flashes that `key` does nothing on this view.
+    fn no_verb(&mut self, key: char) -> Effect {
+        self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
+        Effect::Redraw
+    }
+
     /// A bare letter on a bundle's Details view.
     fn bundle_verb(&mut self, key: char) -> Effect {
         let Some(View::Bundle { id, selected }) = self.views.last().cloned() else {
@@ -846,10 +852,7 @@ impl Model {
             'd' => self.delete_bundle(),
             'u' => self.step(Direction::Undo),
             'r' => self.step(Direction::Redo),
-            _ => {
-                self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
-                Effect::Redraw
-            }
+            _ => self.no_verb(key),
         }
     }
 
@@ -1639,10 +1642,7 @@ impl Model {
             ('u', _) => self.step(Direction::Undo),
             ('r', _) => self.step(Direction::Redo),
             ('d', _) => self.delete(),
-            _ => {
-                self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
-                Effect::Redraw
-            }
+            _ => self.no_verb(key),
         }
     }
 
@@ -2382,10 +2382,7 @@ fn versions_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         Msg::Char(' ') => update(model, Msg::Leader),
         Msg::Char('u') => model.step(Direction::Undo),
         Msg::Char('r') => model.step(Direction::Redo),
-        Msg::Char(c) => {
-            model.flash = Some(format!("no verb on `{c}` here — space for the menu"));
-            Effect::Redraw
-        }
+        Msg::Char(c) => model.no_verb(*c),
         Msg::Backspace | Msg::Left | Msg::Right => Effect::Idle,
         _ => return None,
     })

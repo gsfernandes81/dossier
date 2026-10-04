@@ -204,15 +204,6 @@ fn run(opener: &str, mut command: Command, path: &Path, hint: &str) -> Result<()
     Err(OpenError::Failed { opener: opener.into(), path: path.to_path_buf(), detail })
 }
 
-/// Resolve a stored document path against the Syncthing root.
-///
-/// The one place a stored path, POSIX and relative to the root, becomes a real
-/// one. Windows accepts forward slashes, so no separator is translated.
-#[must_use]
-pub fn resolve(root: &Path, stored: &str) -> PathBuf {
-    root.join(stored)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,15 +215,6 @@ mod tests {
         let error = open_file(Path::new("/definitely/not/here.pdf")).unwrap_err();
         assert!(matches!(error, OpenError::Missing(_)));
         assert!(error.to_string().contains("Syncthing"));
-    }
-
-    /// Stored paths are relative to the Syncthing root and resolved exactly
-    /// once, here.
-    #[test]
-    fn stored_paths_resolve_against_the_root() {
-        let joined = resolve(Path::new("/home/u/Sync"), "Marine/coc.pdf");
-        assert!(joined.ends_with("Marine/coc.pdf"));
-        assert!(joined.starts_with("/home/u/Sync"));
     }
 
     /// The WSL hints name the setting to change and the file it lives in —

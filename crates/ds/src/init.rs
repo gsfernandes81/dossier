@@ -418,7 +418,8 @@ fn report(
     root: &Path,
     termux: bool,
 ) -> Result<(), Error> {
-    let journal = root.join(".dossier").join("journal");
+    let store = journal::Journal::under_root(root);
+    let journal = store.path();
     prompt.say(&format!("wrote {}", path.display()))?;
     prompt.say(&format!(
         "  device         {device} — this device writes as `{}`",
