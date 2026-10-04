@@ -696,7 +696,7 @@ fn the_attach_line_has_a_live_list() {
     m.cursor = m.rows.iter().position(|&i| m.store.docs[i].files.is_empty()).expect("unfiled");
     update(&mut m, Msg::Enter);
     let rows = ds::detail::rows(m.current().unwrap());
-    m.set_record_cursor(rows.iter().position(|r| *r == ds::detail::Row::Fact("files")).unwrap());
+    m.set_record_cursor(rows.iter().position(|r| *r == ds::detail::Row::Files).unwrap());
     update(&mut m, Msg::Char('e'));
     for c in "Identity/p".chars() {
         update(&mut m, Msg::Char(c));

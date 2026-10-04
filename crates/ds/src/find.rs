@@ -1249,12 +1249,8 @@ fn hints(model: &Model) -> Vec<&'static str> {
     let mut hints = match model.views.last() {
         None if model.query.is_empty() => vec!["⏎ record"],
         None => vec!["esc clear", "⏎ record"],
-        Some(View::Details { .. }) => {
-            let verb = ready.then(|| selected_row(model)).flatten();
-            let mut hints = vec!["esc back", "⏎ open file"];
-            hints.extend(verb.and_then(crate::detail::Row::verb));
-            hints
-        }
+        Some(View::Details { .. }) if ready => vec!["esc back", "⏎ open file", "e edit"],
+        Some(View::Details { .. }) => vec!["esc back", "⏎ open file"],
         Some(View::Bundles { selected: crate::bundles::Entry::New, .. }) => {
             vec!["esc back", "⏎ create"]
         }
@@ -1279,12 +1275,6 @@ fn hints(model: &Model) -> Vec<&'static str> {
         hints.push("space menu");
     }
     hints
-}
-
-/// The record row the selector is on, if a record is open at all.
-fn selected_row(model: &Model) -> Option<crate::detail::Row> {
-    let rows = crate::detail::rows(model.current()?);
-    rows.get(model.record_cursor().min(rows.len().saturating_sub(1))).copied()
 }
 
 /// Fit as many hints as the room allows, **dropping them one at a time from the

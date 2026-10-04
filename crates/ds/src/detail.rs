@@ -35,18 +35,16 @@ use crate::Status;
 /// Label column, so values line up under each other.
 const LABEL_COLS: usize = 10;
 
-/// One row of the record — the unit the selector moves over.
-///
-/// Not every row is actionable yet, and the selector still visits all of them.
-/// On a 47-column phone a record is a wall of small text, and a highlight that
-/// moves predictably through *everything* is what makes it legible; one that
-/// skipped from `expiry` to a file three rows down would read as broken.
+/// One row of the record — the unit the selector moves over, and every one
+/// of them changes with `e`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
-    /// A field that can be edited, and the field it writes.
+    /// A field typed on the bottom line, and the field it writes.
     Editable(crate::edit::Field),
-    /// Something the record shows and this build cannot yet change.
-    Fact(&'static str),
+    /// The bundles this version is in.
+    Bundles,
+    /// The files row when there are none.
+    Files,
     /// One linked file, by index into `doc.files`.
     File(usize),
     /// Where the hard copy is filed.
@@ -55,23 +53,6 @@ pub enum Row {
     DigitalOnly,
     /// The older version this one replaces.
     Renews,
-}
-
-impl Row {
-    /// The verb that acts on this row, for the hint line — `None` when nothing
-    /// does yet, which is a thing to say rather than a thing to hide.
-    #[must_use]
-    pub fn verb(self) -> Option<&'static str> {
-        match self {
-            Row::Editable(_)
-            | Row::File(_)
-            | Row::Fact("files" | "bundles")
-            | Row::DigitalOnly
-            | Row::Location
-            | Row::Renews => Some("e edit"),
-            Row::Fact(_) => None,
-        }
-    }
 }
 
 /// Every row of the record, in the order it is drawn.
@@ -96,10 +77,10 @@ pub fn rows(doc: &crate::Doc) -> Vec<Row> {
         Row::Editable(Field::Expiry),
         Row::Editable(Field::Issued),
         Row::Editable(Field::Tags),
-        Row::Fact("bundles"),
+        Row::Bundles,
     ]);
     if doc.files.is_empty() {
-        rows.push(Row::Fact("files"));
+        rows.push(Row::Files);
     } else {
         rows.extend((0..doc.files.len()).map(Row::File));
     }
@@ -189,12 +170,12 @@ fn render_row(
                 Span::raw("digital only (no hard copy)"),
             ])]
         }
-        Row::Fact("bundles") => {
+        Row::Bundles => {
             let names: Vec<&str> =
                 model.store.bundles_of(doc).map(|bundle| bundle.name.as_str()).collect();
             vec![field("bundles", &nonempty(names.join(" · ")), inner, theme)]
         }
-        Row::Fact("files") => vec![field("files", "none", inner, theme)],
+        Row::Files => vec![field("files", "none", inner, theme)],
         // One line each, with the primary marked — the file `Enter` opens is the
         // one with the arrow, and seeing which that is matters more than any
         // other field on this screen.
@@ -220,7 +201,6 @@ fn render_row(
             let title = renews(&model.store, doc);
             vec![field("renews", &nonempty(title), inner, theme)]
         }
-        Row::Fact(other) => vec![field(other, "—", inner, theme)],
     }
 }
 
@@ -394,15 +374,5 @@ mod tests {
         for field in [Field::Name, Field::Expiry, Field::Issued, Field::Tags, Field::Notes] {
             assert!(rows.contains(&Row::Editable(field)), "{field:?} has no row: {rows:?}");
         }
-    }
-
-    /// Every row `e` can change says `e edit`, the letter's own verb; a row it
-    /// cannot change says nothing.
-    #[test]
-    fn only_changeable_rows_carry_the_verb() {
-        for row in [Row::Editable(Field::Notes), Row::File(0), Row::Fact("files"), Row::Location] {
-            assert_eq!(row.verb(), Some("e edit"), "{row:?}");
-        }
-        assert_eq!(Row::Fact("bundles").verb(), Some("e edit"));
     }
 }

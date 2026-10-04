@@ -1764,17 +1764,13 @@ impl Model {
             ('e', Some(crate::detail::Row::File(index))) => {
                 self.open_picker(crate::pick::Purpose::File(index))
             }
-            ('e', Some(crate::detail::Row::Fact("files"))) => self.open_edit(Field::Attach),
+            ('e', Some(crate::detail::Row::Files)) => self.open_edit(Field::Attach),
             ('e', Some(crate::detail::Row::DigitalOnly)) => self.toggle_digital_only(),
             ('e', Some(crate::detail::Row::Location)) => self.open_locations(),
             ('e', Some(crate::detail::Row::Renews)) => {
                 self.open_picker(crate::pick::Purpose::Renews)
             }
-            ('e', Some(crate::detail::Row::Fact("bundles"))) => self.open_bundle_checklist(),
-            ('e', Some(_)) => {
-                self.flash = Some("that row cannot be edited yet".into());
-                Effect::Redraw
-            }
+            ('e', Some(crate::detail::Row::Bundles)) => self.open_bundle_checklist(),
             // Undo is about the session, not about the row — but it is bound
             // here because this is the surface where a bare letter is a verb,
             // and it is where a write has just been made.
@@ -4797,7 +4793,7 @@ pub(crate) mod tests {
             update(&mut m, Msg::Char(c));
         }
         update(&mut m, Msg::Enter);
-        select_row(&mut m, crate::detail::Row::Fact("files"));
+        select_row(&mut m, crate::detail::Row::Files);
         update(&mut m, Msg::Char('e'));
         assert_eq!(m.edit.as_ref().map(|edit| edit.field), Some(Field::Attach));
         for c in "Identity\\passport.pdf".chars() {
@@ -4823,7 +4819,7 @@ pub(crate) mod tests {
             update(&mut m, Msg::Char(c));
         }
         update(&mut m, Msg::Enter);
-        select_row(&mut m, crate::detail::Row::Fact("files"));
+        select_row(&mut m, crate::detail::Row::Files);
         update(&mut m, Msg::Char('e'));
         m
     }
@@ -5188,8 +5184,6 @@ pub(crate) mod tests {
             .iter()
             .position(|row| matches!(row, crate::detail::Row::Editable(Field::Expiry)))
             .expect("the record has an editable row");
-        assert!(rows.iter().all(|row| row.verb().is_some()), "every row has a verb: {rows:?}");
-
         m.set_record_cursor(expiry);
         update(&mut m, Msg::Char('e'));
         assert_eq!(
