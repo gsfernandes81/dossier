@@ -130,6 +130,40 @@ pub fn scroll(owners: &[usize], cursor: usize, room: usize) -> usize {
     end.saturating_sub(room)
 }
 
+/// The `+ new` row's text: the noun, or what was typed.
+#[must_use]
+pub fn new_label(typed: &str, noun: &str) -> String {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        format!("+ new {noun}")
+    } else {
+        format!("+ new \"{typed}\"")
+    }
+}
+
+/// The `+ new` row pinned above a list's matches.
+#[must_use]
+pub fn new_row(
+    typed: &str,
+    noun: &str,
+    selected: bool,
+    cols: usize,
+    theme: crate::theme::Theme,
+) -> Line<'static> {
+    let line = Line::from(vec![
+        Span::raw(cursor_cell(selected)),
+        Span::styled(
+            fit(&new_label(typed, noun), cols.saturating_sub(2)),
+            theme.style(crate::theme::Tone::Accent),
+        ),
+    ]);
+    if selected {
+        line.style(theme.selected())
+    } else {
+        line
+    }
+}
+
 /// The two cells in front of a row that mark it as the cursor's.
 #[must_use]
 pub fn cursor_cell(selected: bool) -> &'static str {

@@ -24,7 +24,7 @@ use ratatui::Frame;
 use crate::app::{Model, RowGeometry};
 use crate::detail;
 use crate::edit::Field;
-use crate::layout::{cursor_cell, fit, scroll, short_date, spread, truncate, width};
+use crate::layout::{cursor_cell, scroll, short_date, spread, truncate, width};
 use crate::theme::{Theme, Tone};
 use crate::{Bundle, Store};
 
@@ -113,16 +113,7 @@ pub fn draw_list(
         let lead = cursor_cell(index == cursor);
         let line = match entry {
             Entry::New => {
-                let typed = model.query.trim();
-                let text = if typed.is_empty() {
-                    "+ new bundle".to_string()
-                } else {
-                    format!("+ new \"{typed}\"")
-                };
-                Line::from(vec![
-                    Span::raw(lead),
-                    Span::styled(fit(&text, cols.saturating_sub(2)), theme.style(Tone::Accent)),
-                ])
+                crate::layout::new_row(&model.query, "bundle", index == cursor, cols, theme)
             }
             Entry::Bundle(id) => {
                 let Some(bundle) = model.store.bundle(id) else { continue };

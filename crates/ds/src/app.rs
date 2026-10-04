@@ -23,6 +23,7 @@
 use crate::complete::Completion;
 use crate::edit::{Field, Target};
 use crate::layout;
+use crate::pick::{Choice, Picker, Purpose};
 use crate::{Doc, Status, Store};
 
 /// One thing the user did, or a worker reported, stripped of terminal detail.
@@ -468,8 +469,6 @@ pub struct Model {
     pub keyboard_hint: bool,
     /// The leader sheet, when it is open.
     pub sheet: bool,
-    /// The checkbox list, when one is open.
-    pub check: Option<crate::check::CheckList>,
     /// The field being edited, when one is.
     pub edit: Option<crate::edit::Edit>,
     /// This session's writes, each with the ops that put it back, computed
@@ -496,7 +495,7 @@ pub struct Model {
     pub flash: Option<String>,
     /// Where the next typed character lands in the query, in characters.
     pub query_cursor: usize,
-    /// A choice open over a record row.
+    /// The checklist or picker panel, when one is open.
     pub picker: Option<crate::pick::Picker>,
     /// The location picker, when one is open.
     pub locpick: Option<crate::locpick::LocationPicker>,
@@ -575,7 +574,6 @@ impl Model {
         !self.pane()
             && self.edit.is_none()
             && !self.sheet
-            && self.check.is_none()
             && self.picker.is_none()
             && self.locpick.is_none()
     }
@@ -761,16 +759,8 @@ impl Model {
             return effect;
         }
         let Some(doc) = self.current().map(|doc| doc.id.clone()) else { return Effect::Idle };
-        self.check = Some(crate::check::CheckList::new(crate::check::Purpose::Bundles(doc)));
+        self.picker = Some(Picker::new(Purpose::Bundles(doc)));
         Effect::Redraw
-    }
-
-    /// The document version the open bundles checklist is about.
-    fn check_doc(&self) -> String {
-        match self.check.as_ref().map(|check| &check.purpose) {
-            Some(crate::check::Purpose::Bundles(doc)) => doc.clone(),
-            _ => String::new(),
-        }
     }
 
     /// Adds version `doc` to `bundle`, or takes it out; with `None`, creates
@@ -793,7 +783,7 @@ impl Model {
             };
             (None, note)
         } else {
-            let name = self.check.as_ref().map(|check| check.filter.trim().to_string());
+            let name = self.picker.as_ref().map(|picker| picker.filter.trim().to_string());
             let Some(name) = name.filter(|name| !name.is_empty()) else {
                 self.flash = Some("type the new bundle's name".into());
                 return Effect::Redraw;
@@ -801,9 +791,9 @@ impl Model {
             let id = self.mint("bundle", &name);
             let create = Change::create("bundle", &id, vec![("name", name.as_str().into())]);
             now.push(crate::Membership { bundle: id, file: None });
-            if let Some(check) = &mut self.check {
-                check.filter.clear();
-                check.cursor = 0;
+            if let Some(picker) = &mut self.picker {
+                picker.filter.clear();
+                picker.cursor = 0;
             }
             (Some(create), format!("added to {name}"))
         };
@@ -868,11 +858,7 @@ impl Model {
             Row::Name => (Field::Name, Some(bundle.name.clone())),
             Row::Date => (Field::Expiry, bundle.date.clone()),
             Row::Notes => (Field::Notes, Some(bundle.notes.clone())),
-            Row::Member(doc) => {
-                self.picker =
-                    Some(crate::pick::Picker::new(&doc, crate::pick::Purpose::Member(id)));
-                return Effect::Redraw;
-            }
+            Row::Member(doc) => return self.open_picker(Purpose::Member { doc, bundle: id }),
         };
         self.edit = Some(crate::edit::Edit::new(Target::Bundle(id), field, current.as_deref()));
         Effect::Redraw
@@ -1108,55 +1094,67 @@ impl Model {
         self.requery();
     }
 
-    fn open_picker(&mut self, purpose: crate::pick::Purpose) -> Effect {
+    fn open_picker(&mut self, purpose: Purpose) -> Effect {
         if let Some(effect) = self.refused() {
             return effect;
         }
-        let Some(doc) = self.current() else { return Effect::Idle };
-        self.picker = Some(crate::pick::Picker::new(&doc.id, purpose));
+        self.picker = Some(Picker::new(purpose));
         self.sheet = false;
         Effect::Redraw
     }
 
-    fn choose(&mut self, picker: &crate::pick::Picker, choice: crate::pick::Choice) -> Effect {
-        use crate::pick::{Choice, Purpose};
-        self.picker = None;
+    /// Does what a panel row chose for `purpose`.
+    fn choose(&mut self, purpose: &Purpose, choice: Choice) -> Effect {
+        let (id, change) = match (purpose, choice) {
+            (_, Choice::Expiring) => return update(self, Msg::ToggleExpiring),
+            (_, Choice::Scans) => return update(self, Msg::ToggleScans),
+            (_, Choice::OldVersions) => {
+                self.filter.old_versions = !self.filter.old_versions;
+                self.reset_list();
+                return Effect::Redraw;
+            }
+            (_, Choice::ClearAll) => {
+                self.filter = Filter::ALL;
+                self.scan_search = ScanSearch::Off;
+                self.reset_list();
+                return Effect::Redraw;
+            }
+            (Purpose::Bundles(doc), Choice::Bundle(bundle)) => {
+                return self.tick_bundle(doc, Some(&bundle))
+            }
+            (Purpose::Bundles(doc), Choice::NewBundle) => return self.tick_bundle(doc, None),
+            (Purpose::Member { doc, bundle }, choice) => {
+                return self.change_member(doc, bundle, choice)
+            }
+            (Purpose::File { .. }, Choice::Attach) => return self.open_edit(Field::Attach),
+            (Purpose::File { doc, index }, choice @ (Choice::MakePrimary | Choice::Detach)) => {
+                let Some(stored) = self.store.get(doc) else { return Effect::Redraw };
+                let mut files = stored.files.clone();
+                if choice == Choice::Detach {
+                    if *index < files.len() {
+                        files.remove(*index);
+                    }
+                } else {
+                    for (i, file) in files.iter_mut().enumerate() {
+                        file.primary = i == *index;
+                    }
+                }
+                (doc, self.flip("doc", doc, "files", crate::doc::files_value(&files)))
+            }
+            (Purpose::Renews(doc), Choice::Renew(older)) => {
+                (doc, self.flip("doc", doc, "supersedes", older.map(Into::into)))
+            }
+            _ => return Effect::Redraw,
+        };
         if let Some(effect) = self.refused() {
             return effect;
         }
-        let Some(doc) = self.store.get(&picker.doc) else { return Effect::Redraw };
-        let id = picker.doc.as_str();
-        let change = match (picker.purpose.clone(), choice) {
-            (Purpose::Member(bundle), choice) => return self.change_member(id, &bundle, choice),
-            (Purpose::File(index), Choice::MakePrimary) => {
-                let files: Vec<crate::FileRef> = doc
-                    .files
-                    .iter()
-                    .enumerate()
-                    .map(|(i, file)| crate::FileRef { primary: i == index, ..file.clone() })
-                    .collect();
-                self.flip("doc", id, "files", crate::doc::files_value(&files))
-            }
-            (Purpose::File(index), Choice::Detach) => {
-                let mut files = doc.files.clone();
-                if index < files.len() {
-                    files.remove(index);
-                }
-                self.flip("doc", id, "files", crate::doc::files_value(&files))
-            }
-            (Purpose::File(_), Choice::Attach) => return self.open_edit(Field::Attach),
-            (Purpose::Renews, Choice::Renew(older)) => {
-                self.flip("doc", id, "supersedes", older.map(Into::into))
-            }
-            (_, _) => return Effect::Redraw,
-        };
         self.append(change, Landed::on(id, "saved"))
     }
 
     /// Changes how version `doc` is in `bundle`: another version in its
     /// place, one soft copy or all, or out of it altogether.
-    fn change_member(&mut self, doc: &str, bundle: &str, choice: crate::pick::Choice) -> Effect {
-        use crate::pick::Choice;
+    fn change_member(&mut self, doc: &str, bundle: &str, choice: Choice) -> Effect {
         let entries =
             |id: &str| self.store.get(id).map(|doc| doc.bundles.clone()).unwrap_or_default();
         let mut mine = entries(doc);
@@ -1183,9 +1181,7 @@ impl Model {
                 mine.remove(at);
                 format!("taken out of {name}")
             }
-            Choice::MakePrimary | Choice::Detach | Choice::Attach | Choice::Renew(_) => {
-                return Effect::Redraw;
-            }
+            _ => return Effect::Redraw,
         };
         let tick = |id: &str, list: &[crate::Membership]| {
             self.flip("doc", id, "bundles", crate::doc::memberships_value(list))
@@ -1485,12 +1481,6 @@ impl Model {
             }
             return Effect::Redraw;
         }
-        if let Some(check) = &mut self.check {
-            if peel_filter(&mut check.filter, &mut check.cursor) {
-                self.check = None;
-            }
-            return Effect::Redraw;
-        }
         if self.sheet {
             self.sheet = false;
             return Effect::Redraw;
@@ -1565,7 +1555,7 @@ impl Model {
         self.sheet = false;
         match act {
             crate::sheet::Act::Filter => {
-                self.check = Some(crate::check::CheckList::new(crate::check::Purpose::Filter));
+                self.picker = Some(Picker::new(Purpose::Filter));
                 Effect::Redraw
             }
             crate::sheet::Act::Edit => {
@@ -1622,19 +1612,18 @@ impl Model {
     /// letter is a verb, and silence would read as a dropped keypress.
     fn record_verb(&mut self, key: char) -> Effect {
         let Some(doc) = self.current() else { return Effect::Idle };
+        let id = doc.id.clone();
         let rows = crate::detail::rows(doc);
         let row = rows.get(self.record_cursor().min(rows.len().saturating_sub(1))).copied();
         match (key, row) {
             ('e', Some(crate::detail::Row::Editable(field))) => self.open_edit(field),
             ('e', Some(crate::detail::Row::File(index))) => {
-                self.open_picker(crate::pick::Purpose::File(index))
+                self.open_picker(Purpose::File { doc: id, index })
             }
             ('e', Some(crate::detail::Row::Files)) => self.open_edit(Field::Attach),
             ('e', Some(crate::detail::Row::DigitalOnly)) => self.toggle_digital_only(),
             ('e', Some(crate::detail::Row::Location)) => self.open_locations(),
-            ('e', Some(crate::detail::Row::Renews)) => {
-                self.open_picker(crate::pick::Purpose::Renews)
-            }
+            ('e', Some(crate::detail::Row::Renews)) => self.open_picker(Purpose::Renews(id)),
             ('e', Some(crate::detail::Row::Bundles)) => self.open_bundle_checklist(),
             // Undo is about the session, not about the row — but it is bound
             // here because this is the surface where a bare letter is a verb,
@@ -1856,12 +1845,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
 
     if model.picker.is_some() {
         if let Some(effect) = picker_key(model, &msg) {
-            return effect;
-        }
-    }
-
-    if model.check.is_some() {
-        if let Some(effect) = check_key(model, &msg) {
             return effect;
         }
     }
@@ -2383,86 +2366,6 @@ fn versions_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     })
 }
 
-/// Keys while a checklist is open: typing searches it, and with nothing typed
-/// `Space` toggles the selected row, as `Enter` always does.
-fn check_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
-    let mut check = model.check.clone()?;
-    let hits = check.matching(model);
-    let effect = match msg {
-        Msg::Char(' ') | Msg::Leader if check.filter.is_empty() => {
-            return Some(toggle(model, hits.get(check.cursor).map(|entry| entry.toggle.clone())));
-        }
-        Msg::Enter => {
-            return Some(toggle(model, hits.get(check.cursor).map(|entry| entry.toggle.clone())))
-        }
-        Msg::Char(c) => {
-            check.filter.push(*c);
-            check.cursor = check.first(model);
-            Effect::Redraw
-        }
-        Msg::Backspace => {
-            check.filter.pop();
-            check.cursor = check.first(model);
-            Effect::Redraw
-        }
-        Msg::Move(Motion::Up) => {
-            check.cursor = check.cursor.saturating_sub(1);
-            Effect::Redraw
-        }
-        Msg::Move(Motion::Down) => {
-            check.cursor = (check.cursor + 1).min(hits.len().saturating_sub(1));
-            Effect::Redraw
-        }
-        Msg::Tap { col, row } => {
-            let Some(index) = model.panel.at(*col, *row) else {
-                model.check = None;
-                return Some(Effect::Redraw);
-            };
-            check.cursor = index;
-            model.check = Some(check);
-            return Some(toggle(model, hits.get(index).map(|entry| entry.toggle.clone())));
-        }
-        Msg::Move(_) | Msg::Left | Msg::Right | Msg::Scroll(_) => Effect::Idle,
-        _ => return None,
-    };
-    model.check = Some(check);
-    Some(effect)
-}
-
-/// Flips one checklist row; the list stays open, and the change shows at once.
-fn toggle(model: &mut Model, which: Option<crate::check::Toggle>) -> Effect {
-    use crate::check::Toggle;
-    let effect = match which {
-        Some(Toggle::Expiring) => update(model, Msg::ToggleExpiring),
-        Some(Toggle::Scans) => update(model, Msg::ToggleScans),
-        Some(Toggle::OldVersions) => {
-            model.filter.old_versions = !model.filter.old_versions;
-            model.reset_list();
-            Effect::Redraw
-        }
-        Some(Toggle::ClearAll) => {
-            model.filter = Filter::ALL;
-            model.scan_search = ScanSearch::Off;
-            model.reset_list();
-            Effect::Redraw
-        }
-        Some(Toggle::Bundle(id)) => {
-            let doc = model.check_doc();
-            model.tick_bundle(&doc, Some(&id))
-        }
-        Some(Toggle::NewBundle) => {
-            let doc = model.check_doc();
-            model.tick_bundle(&doc, None)
-        }
-        None => Effect::Idle,
-    };
-    if effect == Effect::Idle {
-        Effect::Redraw
-    } else {
-        effect
-    }
-}
-
 /// Keys while the location picker is open. `None` falls through, so `ctrl+q`,
 /// `ctrl+z` and worker messages keep their meaning.
 fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
@@ -2603,41 +2506,50 @@ fn locpick_enter(model: &mut Model, mut picker: crate::locpick::LocationPicker) 
     }
 }
 
-/// Keys while a picker is open. `None` falls through, so `ctrl+q` and `Esc`
-/// keep their meaning.
+/// Keys while a checklist or picker is open: typing narrows it, and `Enter`
+/// or a tap on a row chooses. A checklist row toggles on its first tap and
+/// with `Space` before anything is typed; a picker row is selected first.
+/// `Backspace` with nothing typed closes it.
 fn picker_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     let mut picker = model.picker.take()?;
-    let hits = picker.matching(&model.store);
+    let hits = picker.matching(model);
     let effect = match msg {
+        Msg::Char(' ') | Msg::Leader if picker.checklist() && picker.filter.is_empty() => {
+            return Some(act(model, picker, &hits));
+        }
+        Msg::Enter => return Some(act(model, picker, &hits)),
         Msg::Char(c) => {
             picker.filter.push(*c);
-            picker.cursor = 0;
+            picker.cursor = picker.first(model);
             Effect::Redraw
         }
         Msg::Backspace => {
             if picker.filter.pop().is_none() {
+                drop(picker);
                 return Some(Effect::Redraw);
             }
+            picker.cursor = picker.first(model);
             Effect::Redraw
         }
-        Msg::Move(Motion::Up) => {
-            picker.cursor = picker.cursor.saturating_sub(1);
+        Msg::Move(motion) => {
+            picker.cursor = moved(picker.cursor, hits.len(), *motion, hits.len());
             Effect::Redraw
         }
-        Msg::Move(Motion::Down) => {
-            picker.cursor = (picker.cursor + 1).min(hits.len().saturating_sub(1));
-            Effect::Redraw
-        }
-        Msg::Enter => return Some(pick(model, picker, &hits)),
         Msg::Tap { col, row } => match model.panel.at(*col, *row) {
-            None => return Some(Effect::Redraw),
-            Some(index) if index == picker.cursor => return Some(pick(model, picker, &hits)),
+            None => {
+                drop(picker);
+                return Some(Effect::Redraw);
+            }
+            Some(index) if picker.checklist() || index == picker.cursor => {
+                picker.cursor = index;
+                return Some(act(model, picker, &hits));
+            }
             Some(index) => {
                 picker.cursor = index;
                 Effect::Redraw
             }
         },
-        Msg::Move(_) | Msg::Left | Msg::Right | Msg::Leader | Msg::Scroll(_) => Effect::Idle,
+        Msg::Left | Msg::Right | Msg::Leader | Msg::Scroll(_) => Effect::Idle,
         _ => {
             model.picker = Some(picker);
             return None;
@@ -2647,13 +2559,20 @@ fn picker_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     Some(effect)
 }
 
-/// Runs the picker's selected entry, which closes it; with none, it stays.
-fn pick(model: &mut Model, picker: crate::pick::Picker, hits: &[crate::pick::Entry]) -> Effect {
-    if let Some(entry) = hits.get(picker.cursor) {
-        model.choose(&picker, entry.choice.clone())
-    } else {
+/// Does what the selected row says. A checklist stays open to show the
+/// change; a picker closes. With no row selected, nothing happens.
+fn act(model: &mut Model, picker: Picker, hits: &[crate::pick::Entry]) -> Effect {
+    let Some(choice) = hits.get(picker.cursor).map(|entry| entry.choice.clone()) else {
         model.picker = Some(picker);
-        Effect::Idle
+        return Effect::Idle;
+    };
+    let purpose = picker.purpose.clone();
+    if picker.checklist() {
+        model.picker = Some(picker);
+    }
+    match model.choose(&purpose, choice) {
+        Effect::Idle => Effect::Redraw,
+        effect => effect,
     }
 }
 
@@ -4131,7 +4050,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
         update(&mut m, Msg::Char(' '));
         update(&mut m, Msg::Char('b'));
-        let check = m.check.clone().expect("the checklist opened");
+        let check = m.picker.clone().expect("the checklist opened");
         let ons: Vec<Option<bool>> = check.matching(&m).iter().map(|entry| entry.on).collect();
         assert_eq!(ons, [Some(true), Some(false)], "coc is in joining, not in visa");
 
@@ -4152,7 +4071,7 @@ pub(crate) mod tests {
             )])
         );
         land(&mut m);
-        assert!(m.check.is_some(), "the list stays open");
+        assert!(m.picker.is_some(), "the list stays open");
         assert_eq!(m.flash.as_deref(), Some("added to US visa"));
 
         update(&mut m, Msg::Move(Motion::Up));
@@ -4170,7 +4089,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Char(' '));
         update(&mut m, Msg::Char('b'));
         type_str(&mut m, "Panama");
-        assert_eq!(m.check.as_ref().map(|check| check.cursor), Some(0), "on + new");
+        assert_eq!(m.picker.as_ref().map(|picker| picker.cursor), Some(0), "on + new");
         let id = "panama-desk";
         assert_eq!(
             update(&mut m, Msg::Enter),
@@ -4220,7 +4139,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Char('e'));
         let picker = m.picker.clone().expect("the picker opened");
         let labels: Vec<String> =
-            picker.entries(&m.store).into_iter().map(|entry| entry.label).collect();
+            picker.matching(&m).into_iter().map(|entry| entry.label).collect();
         assert_eq!(
             labels,
             [
@@ -4260,13 +4179,12 @@ pub(crate) mod tests {
             path: "Marine/coc-back.pdf".into(),
             primary: false,
         });
-        let pick = |m: &mut Model, choice: crate::pick::Choice| {
-            let picker =
-                crate::pick::Picker::new("coc", crate::pick::Purpose::Member("joining".into()));
-            m.choose(&picker, choice)
+        let pick = |m: &mut Model, choice: Choice| {
+            let member = Purpose::Member { doc: "coc".into(), bundle: "joining".into() };
+            m.choose(&member, choice)
         };
         assert_eq!(
-            pick(&mut m, crate::pick::Choice::UseFile(Some("Marine/coc-back.pdf".into()))),
+            pick(&mut m, Choice::UseFile(Some("Marine/coc-back.pdf".into()))),
             Effect::Append(vec![journal::Draft::set(
                 "doc",
                 "coc",
@@ -4276,7 +4194,7 @@ pub(crate) mod tests {
         );
         m.pending = None;
         assert_eq!(
-            pick(&mut m, crate::pick::Choice::Leave),
+            pick(&mut m, Choice::Leave),
             Effect::Append(vec![journal::Draft::unset("doc", "coc", "bundles")])
         );
     }
@@ -4614,27 +4532,45 @@ pub(crate) mod tests {
     fn the_filter_list_toggles_with_space_and_stays_open() {
         let mut m = model();
         type_str(&mut m, " f");
-        assert!(!m.sheet && m.check.is_some(), "the sheet gave way to the checklist");
+        assert!(!m.sheet && m.picker.is_some(), "the sheet gave way to the checklist");
         update(&mut m, Msg::Char(' '));
         assert!(m.filter.expiring, "Space ticked expiring only");
         update(&mut m, Msg::Move(Motion::Down));
         update(&mut m, Msg::Enter);
         assert!(m.filter.expiring && m.filter.old_versions, "Enter ticked the next one");
-        assert!(m.check.is_some(), "and the list is still open");
+        assert!(m.picker.is_some(), "and the list is still open");
     }
 
     #[test]
     fn typing_searches_the_filter_list_and_esc_peels_it() {
         let mut m = model();
         type_str(&mut m, " fold");
-        assert_eq!(m.check.as_ref().map(|c| c.filter.as_str()), Some("old"));
+        assert_eq!(m.picker.as_ref().map(|p| p.filter.as_str()), Some("old"));
         update(&mut m, Msg::Enter);
         assert!(m.filter.old_versions);
         update(&mut m, Msg::Esc);
-        assert_eq!(m.check.as_ref().map(|c| c.filter.as_str()), Some(""), "the typing went first");
+        assert_eq!(m.picker.as_ref().map(|p| p.filter.as_str()), Some(""), "the typing went first");
         update(&mut m, Msg::Esc);
-        assert!(m.check.is_none());
+        assert!(m.picker.is_none());
         assert!(!m.esc_armed, "closing it did not arm the quit");
+    }
+
+    #[test]
+    fn backspace_with_nothing_typed_closes_the_checklist() {
+        let mut m = model();
+        type_str(&mut m, " fo");
+        update(&mut m, Msg::Backspace);
+        assert!(m.picker.is_some(), "the typing went first");
+        update(&mut m, Msg::Backspace);
+        assert!(m.picker.is_none());
+    }
+
+    #[test]
+    fn end_selects_the_last_row_of_a_panel() {
+        let mut m = model();
+        type_str(&mut m, " f");
+        update(&mut m, Msg::Move(Motion::End));
+        assert_eq!(m.picker.as_ref().map(|p| p.cursor), Some(3), "on clear all");
     }
 
     #[test]

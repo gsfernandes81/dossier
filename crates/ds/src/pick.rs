@@ -13,38 +13,52 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Choosing one thing from a list: what `e` opens on a record row whose value
-//! is a choice rather than typed text. Drawn in the Space sheet's panel.
+//! The panel that chooses from a list, searched by typing: a checklist whose
+//! rows toggle and stay open, or a picker that closes on its choice.
 
-use crate::Store;
+use crate::{Model, Store};
 
-/// A picker open over a record row.
+/// An open panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Picker {
-    /// The document whose row it was opened on.
-    pub doc: String,
-    /// What is being chosen.
+    /// What it is for.
     pub purpose: Purpose,
-    /// Typed text narrowing the entries.
+    /// Typed text narrowing the rows.
     pub filter: String,
-    /// The selected entry among those matching.
+    /// The selected row among those matching.
     pub cursor: usize,
 }
 
-/// What a picker is choosing for.
+/// What a panel is choosing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Purpose {
+    /// The Find view's filters.
+    Filter,
+    /// The bundles a document version is in, by the version's id.
+    Bundles(String),
     /// What to do with one linked file, by index into `Doc::files`.
-    File(usize),
-    /// Which older document this one replaces.
-    Renews,
-    /// How the document is in this bundle, by the bundle's id.
-    Member(String),
+    File { doc: String, index: usize },
+    /// Which older document `doc` replaces.
+    Renews(String),
+    /// How `doc` is in `bundle`.
+    Member { doc: String, bundle: String },
 }
 
-/// What choosing an entry does.
+/// What choosing a row does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Choice {
+    /// Expiring only.
+    Expiring,
+    /// Include old versions.
+    OldVersions,
+    /// Search scan text.
+    Scans,
+    /// Turn every filter off.
+    ClearAll,
+    /// Add the version to this bundle, or take it out.
+    Bundle(String),
+    /// Create the bundle the typed text names, with the version in it.
+    NewBundle,
     /// Make this file the one `Enter` opens.
     MakePrimary,
     /// Unlink this file; the file itself is untouched.
@@ -61,44 +75,52 @@ pub enum Choice {
     Leave,
 }
 
-/// One line of a picker.
+/// One row of a panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    /// What the line says, and what typing matches.
+    /// What it says, and what typing matches.
     pub label: String,
-    /// What it does.
+    /// `Some` for a checkbox row.
+    pub on: Option<bool>,
+    /// What choosing it does.
     pub choice: Choice,
 }
 
 impl Picker {
-    /// Opens a picker on `doc` for `purpose`.
+    /// Opens a panel for `purpose` with nothing typed.
     #[must_use]
-    pub fn new(doc: &str, purpose: Purpose) -> Self {
-        Self { doc: doc.to_string(), purpose, filter: String::new(), cursor: 0 }
+    pub fn new(purpose: Purpose) -> Self {
+        Self { purpose, filter: String::new(), cursor: 0 }
     }
 
-    /// The panel's heading: what is being changed.
+    /// Whether its rows toggle and leave it open, rather than choosing once.
+    #[must_use]
+    pub fn checklist(&self) -> bool {
+        matches!(self.purpose, Purpose::Filter | Purpose::Bundles(_))
+    }
+
+    /// The heading: what is being changed.
     #[must_use]
     pub fn crumb(&self, store: &Store) -> String {
-        let doc = store.get(&self.doc);
-        match self.purpose {
-            Purpose::File(index) => {
-                let path = doc.and_then(|doc| doc.files.get(index)).map_or("", |file| &file.path);
-                let name = path.rsplit('/').next().unwrap_or(path);
-                format!("file {name}")
+        match &self.purpose {
+            Purpose::Filter => "SPC f  filter".into(),
+            Purpose::Bundles(_) => "SPC b  bundles".into(),
+            Purpose::File { doc, index } => {
+                let path =
+                    store.get(doc).and_then(|doc| doc.files.get(*index)).map_or("", |f| &f.path);
+                format!("file {}", path.rsplit('/').next().unwrap_or(path))
             }
-            Purpose::Renews | Purpose::Member(_) => "e  edit".into(),
+            Purpose::Renews(_) | Purpose::Member { .. } => "e  edit".into(),
         }
     }
 
-    /// What the picker acts on, its kind, and what it is now, when the panel
+    /// What the panel acts on, its kind, and what it is now, when the panel
     /// names them under its heading.
     #[must_use]
     pub fn subject(&self, store: &Store) -> Option<(String, &'static str, String)> {
-        let doc = store.get(&self.doc)?;
         match &self.purpose {
-            Purpose::File(_) => None,
-            Purpose::Member(bundle) => {
+            Purpose::Member { doc, bundle } => {
+                let doc = store.get(doc)?;
                 let file = doc.bundles.iter().find(|entry| entry.bundle == *bundle)?.file.clone();
                 let issued = doc
                     .issue_date
@@ -108,60 +130,103 @@ impl Picker {
                     .map_or_else(|| "all soft copies".into(), |file| format!("soft copy {file}"));
                 Some((doc.name.clone(), "document", format!("{issued} · {copies}")))
             }
-            Purpose::Renews => {
+            Purpose::Renews(doc) => {
+                let doc = store.get(doc)?;
                 let now = crate::detail::renews(store, doc);
                 let now =
                     if now.is_empty() { "renews nothing".into() } else { format!("renews {now}") };
                 Some((doc.name.clone(), "document", now))
             }
+            _ => None,
         }
     }
 
-    /// Every entry, before any typed narrowing.
+    /// The rows the typed text leaves.
     #[must_use]
-    pub fn entries(&self, store: &Store) -> Vec<Entry> {
-        let Some(doc) = store.get(&self.doc) else {
-            return Vec::new();
+    pub fn matching(&self, model: &Model) -> Vec<Entry> {
+        let store = &model.store;
+        let all = match &self.purpose {
+            Purpose::Bundles(doc) => return bundle_entries(store, doc, &self.filter),
+            Purpose::Filter => vec![
+                check("expiring only", model.filter.expiring, Choice::Expiring),
+                check("include old versions", model.filter.old_versions, Choice::OldVersions),
+                check(
+                    "search scan text",
+                    model.scan_search != crate::app::ScanSearch::Off,
+                    Choice::Scans,
+                ),
+                entry("clear all", Choice::ClearAll),
+            ],
+            Purpose::File { doc, index } => file_entries(store, doc, *index),
+            Purpose::Renews(doc) => renew_entries(store, doc),
+            Purpose::Member { doc, bundle } => {
+                store.get(doc).map(|doc| member_entries(store, doc, bundle)).unwrap_or_default()
+            }
         };
-        match &self.purpose {
-            Purpose::File(index) => {
-                let index = *index;
-                let mut entries = Vec::new();
-                let is_primary = doc
-                    .primary_file()
-                    .zip(doc.files.get(index))
-                    .is_some_and(|(primary, file)| primary.path == file.path);
-                if !is_primary {
-                    entries.push(entry("make primary", Choice::MakePrimary));
-                }
-                entries.push(entry("detach", Choice::Detach));
-                entries.push(entry("attach another file", Choice::Attach));
-                entries
-            }
-            Purpose::Member(bundle) => member_entries(store, doc, bundle),
-            Purpose::Renews => {
-                let mut entries = Vec::new();
-                if doc.supersedes.is_some() {
-                    entries.push(entry("none", Choice::Renew(None)));
-                }
-                entries.extend(store.renewable(&doc.id).into_iter().map(|i| Entry {
-                    label: crate::detail::version_name(&store.docs[i]),
-                    choice: Choice::Renew(Some(store.docs[i].id.clone())),
-                }));
-                entries
-            }
-        }
-    }
-
-    /// The entries the typed text leaves.
-    #[must_use]
-    pub fn matching(&self, store: &Store) -> Vec<Entry> {
         let needle = crate::search::fold(&self.filter);
-        self.entries(store)
-            .into_iter()
+        all.into_iter()
             .filter(|entry| crate::search::fold(&entry.label).contains(&needle))
             .collect()
     }
+
+    /// Where the cursor starts once something is typed: on the first match,
+    /// or on `+ new` when nothing matches.
+    #[must_use]
+    pub fn first(&self, model: &Model) -> usize {
+        let hits = self.matching(model);
+        usize::from(hits.len() > 1 && hits[0].choice == Choice::NewBundle)
+    }
+}
+
+/// The bundles `doc` can be ticked into, behind `+ new` as the Bundles view
+/// pins it.
+fn bundle_entries(store: &Store, doc: &str, typed: &str) -> Vec<Entry> {
+    let Some(doc) = store.get(doc) else { return Vec::new() };
+    crate::bundles::entries(store, typed)
+        .into_iter()
+        .filter_map(|row| match row {
+            crate::bundles::Entry::New if typed.trim().is_empty() => {
+                Some(entry("type a name to make a bundle", Choice::NewBundle))
+            }
+            crate::bundles::Entry::New => {
+                Some(entry(&crate::layout::new_label(typed, "bundle"), Choice::NewBundle))
+            }
+            crate::bundles::Entry::Bundle(id) => store.bundle(&id).map(|bundle| {
+                let on = doc.bundles.iter().any(|entry| entry.bundle == id);
+                check(&bundle.name, on, Choice::Bundle(id.clone()))
+            }),
+        })
+        .collect()
+}
+
+fn file_entries(store: &Store, doc: &str, index: usize) -> Vec<Entry> {
+    let Some(doc) = store.get(doc) else { return Vec::new() };
+    let is_primary = doc
+        .primary_file()
+        .zip(doc.files.get(index))
+        .is_some_and(|(primary, file)| primary.path == file.path);
+    let mut entries = Vec::new();
+    if !is_primary {
+        entries.push(entry("make primary", Choice::MakePrimary));
+    }
+    entries.push(entry("detach", Choice::Detach));
+    entries.push(entry("attach another file", Choice::Attach));
+    entries
+}
+
+fn renew_entries(store: &Store, doc: &str) -> Vec<Entry> {
+    let Some(doc) = store.get(doc) else { return Vec::new() };
+    let mut entries = Vec::new();
+    if doc.supersedes.is_some() {
+        entries.push(entry("none", Choice::Renew(None)));
+    }
+    entries.extend(store.renewable(&doc.id).into_iter().map(|i| {
+        entry(
+            &crate::detail::version_name(&store.docs[i]),
+            Choice::Renew(Some(store.docs[i].id.clone())),
+        )
+    }));
+    entries
 }
 
 /// What can be done with a document version in a bundle: another version of
@@ -174,10 +239,10 @@ fn member_entries(store: &Store, doc: &crate::Doc, bundle: &str) -> Vec<Entry> {
         .map(|i| {
             let version = &store.docs[i];
             let latest = if version.superseded { "" } else { "  (latest)" };
-            Entry {
-                label: format!("use {}{latest}", crate::detail::version_name(version)),
-                choice: Choice::UseVersion(version.id.clone()),
-            }
+            entry(
+                &format!("use {}{latest}", crate::detail::version_name(version)),
+                Choice::UseVersion(version.id.clone()),
+            )
         })
         .collect();
     let file = doc.bundles.iter().find(|entry| entry.bundle == bundle).and_then(|e| e.file.clone());
@@ -186,10 +251,7 @@ fn member_entries(store: &Store, doc: &crate::Doc, bundle: &str) -> Vec<Entry> {
     }
     if doc.files.len() > 1 {
         entries.extend(doc.files.iter().filter(|f| Some(&f.path) != file.as_ref()).map(|f| {
-            Entry {
-                label: format!("use only {}", f.path),
-                choice: Choice::UseFile(Some(f.path.clone())),
-            }
+            entry(&format!("use only {}", f.path), Choice::UseFile(Some(f.path.clone())))
         }));
     }
     entries.push(entry("remove from this bundle", Choice::Leave));
@@ -197,7 +259,11 @@ fn member_entries(store: &Store, doc: &crate::Doc, bundle: &str) -> Vec<Entry> {
 }
 
 fn entry(label: &str, choice: Choice) -> Entry {
-    Entry { label: label.to_string(), choice }
+    Entry { label: label.to_string(), on: None, choice }
+}
+
+fn check(label: &str, on: bool, choice: Choice) -> Entry {
+    Entry { label: label.to_string(), on: Some(on), choice }
 }
 
 #[cfg(test)]
@@ -205,35 +271,31 @@ mod tests {
     use super::*;
     use crate::FileRef;
 
-    fn two_files() -> Store {
-        let mut store = crate::app::tests::model().store;
-        store.docs[0].files.push(FileRef {
+    fn two_files() -> Model {
+        let mut model = crate::app::tests::model();
+        model.store.docs[0].files.push(FileRef {
             label: String::new(),
             path: "Marine/coc-back.pdf".into(),
             primary: false,
         });
-        store
+        model
     }
 
-    fn labels(store: &Store, id: &str) -> Vec<Choice> {
-        Picker::new(id, Purpose::Renews)
-            .entries(store)
-            .into_iter()
-            .map(|entry| entry.choice)
-            .collect()
+    fn choices(model: &Model, purpose: Purpose) -> Vec<Choice> {
+        Picker::new(purpose).matching(model).into_iter().map(|entry| entry.choice).collect()
     }
 
     #[test]
     fn renews_offers_only_documents_that_keep_the_chain() {
-        let store = crate::app::tests::with_versions().store;
+        let model = crate::app::tests::with_versions();
         let renew = |id: &str| Choice::Renew(Some(id.into()));
         assert_eq!(
-            labels(&store, "passport"),
+            choices(&model, Purpose::Renews("passport".into())),
             [renew("coc"), renew("eng1"), renew("testimonial")],
             "not its newer versions"
         );
         assert_eq!(
-            labels(&store, "passport-desk"),
+            choices(&model, Purpose::Renews("passport-desk".into())),
             [
                 Choice::Renew(None),
                 renew("coc"),
@@ -247,26 +309,31 @@ mod tests {
 
     #[test]
     fn only_a_secondary_file_offers_make_primary() {
-        let store = two_files();
-        let choices = |index| {
-            Picker::new("coc", Purpose::File(index))
-                .entries(&store)
-                .into_iter()
-                .map(|entry| entry.choice)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(choices(0), [Choice::Detach, Choice::Attach]);
-        assert_eq!(choices(1), [Choice::MakePrimary, Choice::Detach, Choice::Attach]);
+        let model = two_files();
+        let file = |index| choices(&model, Purpose::File { doc: "coc".into(), index });
+        assert_eq!(file(0), [Choice::Detach, Choice::Attach]);
+        assert_eq!(file(1), [Choice::MakePrimary, Choice::Detach, Choice::Attach]);
     }
 
     #[test]
     fn typing_narrows_the_entries() {
-        let store = two_files();
-        let mut picker = Picker::new("coc", Purpose::File(1));
+        let model = two_files();
+        let mut picker = Picker::new(Purpose::File { doc: "coc".into(), index: 1 });
         picker.filter = "DET".into();
-        let hits = picker.matching(&store);
+        let hits = picker.matching(&model);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].choice, Choice::Detach);
-        assert_eq!(picker.crumb(&store), "file coc-back.pdf");
+        assert_eq!(picker.crumb(&model.store), "file coc-back.pdf");
+    }
+
+    #[test]
+    fn the_filter_list_shows_off_as_well_as_on() {
+        let mut model = crate::app::tests::model();
+        let ons = |model: &Model| {
+            Picker::new(Purpose::Filter).matching(model).iter().map(|e| e.on).collect::<Vec<_>>()
+        };
+        assert_eq!(ons(&model), [Some(false), Some(false), Some(false), None]);
+        model.filter.expiring = true;
+        assert_eq!(ons(&model), [Some(true), Some(false), Some(false), None]);
     }
 }

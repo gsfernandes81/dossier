@@ -550,6 +550,9 @@ fn the_renews_picker_has_three_heading_rows() {
     assert!(lines[heading + 1].trim_end().ends_with("document"), "{text}");
     assert!(lines[heading + 2].contains("now: renews nothing"), "{text}");
     assert!(text.contains("Driving Licence"), "{text}");
+    type_str(&mut m, "dri");
+    let text = screen(&mut m, 47, 24).join("\n");
+    assert!(text.contains("e  edit  dri█"), "the heading shows the typing: {text}");
 }
 
 /// A model whose store holds two bundles; the dated one holds two documents,
@@ -691,7 +694,7 @@ fn a_tap_on_a_sheet_row_runs_it() {
     let row = lines.iter().position(|line| line.contains("f filter")).expect("the filter row");
     update(&mut m, Msg::Tap { col: 5, row: u16::try_from(row).unwrap() });
     assert!(!m.sheet, "the sheet gave way");
-    assert!(m.check.is_some(), "to the filter list");
+    assert!(m.picker.is_some(), "to the filter list");
 }
 
 #[test]

@@ -209,17 +209,13 @@ fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 fn draw_list(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let mut area = area;
     if model.offers_new() && area.height > 1 {
-        let text = if model.query.trim().is_empty() {
-            "+ new document".to_string()
-        } else {
-            format!("+ new \"{}\"", model.query.trim())
-        };
-        let room = (area.width as usize).saturating_sub(2);
-        let line = Line::from(vec![
-            Span::raw(cursor_cell(model.on_new)),
-            Span::styled(fit(&text, room), theme.style(Tone::Accent)),
-        ]);
-        let line = if model.on_new { line.style(theme.selected()) } else { line };
+        let line = crate::layout::new_row(
+            &model.query,
+            "document",
+            model.on_new,
+            area.width as usize,
+            theme,
+        );
         frame.render_widget(Paragraph::new(line), Rect { height: 1, ..area });
         model.new_row = Some(area.y);
         area = Rect { y: area.y + 1, height: area.height - 1, ..area };
@@ -426,39 +422,27 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         return;
     }
     if let Some(picker) = &model.picker {
-        let hits = picker.matching(&model.store);
-        let rows = hits.iter().map(|entry| ("   ".to_string(), entry.label.clone(), "")).collect();
+        let rows = picker
+            .matching(model)
+            .into_iter()
+            .map(|entry| {
+                // A checklist reserves the box on every row, so toggling one
+                // never changes its width.
+                let lead = match (entry.on, picker.checklist()) {
+                    (Some(on), _) => format!(" [{}] ", if on { "x" } else { " " }),
+                    (None, true) => "     ".to_string(),
+                    (None, false) => "   ".to_string(),
+                };
+                (lead, entry.label, "")
+            })
+            .collect();
         let panel = Panel {
-            crumb: picker.crumb(&model.store),
+            crumb: format!("{}{}", picker.crumb(&model.store), typed(&picker.filter)),
             filter: Some(&picker.filter),
             cursor: Some(picker.cursor),
             subject: picker.subject(&model.store),
         };
         model.panel = draw_panel(frame, area, &panel, rows, theme);
-        return;
-    }
-    if let Some(check) = &model.check {
-        let hits = check.matching(model);
-        let rows = hits
-            .iter()
-            .map(|entry| {
-                // The box is reserved whether or not it is ticked, so a row never
-                // changes width when it is toggled.
-                let lead = match entry.on {
-                    Some(on) => format!(" [{}] ", if on { "x" } else { " " }),
-                    None => "     ".to_string(),
-                };
-                (lead, entry.label.clone(), "")
-            })
-            .collect();
-        let panel = Panel {
-            crumb: format!("{}{}", check.crumb(), typed(&check.filter)),
-            filter: Some(&check.filter),
-            cursor: Some(check.cursor),
-            subject: None,
-        };
-        let geometry = draw_panel(frame, area, &panel, rows, theme);
-        model.panel = geometry;
         return;
     }
     if !model.sheet {
@@ -981,13 +965,12 @@ fn mode_line(model: &Model) -> String {
         ("menu", "letters run verbs")
     } else if model.locpick.is_some() {
         ("locations", "typing searches them")
-    } else if let Some(check) = &model.check {
-        match check.purpose {
-            crate::check::Purpose::Filter => ("filters", "typing searches them"),
-            crate::check::Purpose::Bundles(_) => ("bundles", "typing searches them"),
+    } else if let Some(picker) = &model.picker {
+        match picker.purpose {
+            crate::pick::Purpose::Filter => ("filters", "typing searches them"),
+            crate::pick::Purpose::Bundles(_) => ("bundles", "typing searches them"),
+            _ => ("choices", "typing narrows them"),
         }
-    } else if model.picker.is_some() {
-        ("choices", "typing narrows them")
     } else {
         let name = match top {
             Some(View::Versions { .. }) => "versions",
@@ -1107,7 +1090,7 @@ fn hints(model: &Model) -> Vec<&'static str> {
     if model.sheet {
         return vec!["letter runs it", "esc back"];
     }
-    if model.check.is_some() {
+    if model.picker.as_ref().is_some_and(crate::pick::Picker::checklist) {
         return vec!["type to search", "⏎ toggle", "esc back"];
     }
     if let Some(picker) = &model.locpick {
