@@ -113,6 +113,8 @@ impl Follower {
         // The fsync a user-initiated save requires: "saved" on screen must
         // survive a power cut.
         if let Err(error) = writer.append_all(drafts).and_then(|_| writer.commit()) {
+            // A partial write leaves a torn tail; reopening repairs it.
+            self.writer = None;
             return failed(error.to_string());
         }
         match self.read() {

@@ -335,9 +335,8 @@ impl Writer {
     /// gets.
     ///
     /// # Errors
-    /// [`Error::Io`] or [`Error::Serialize`]. On an I/O failure part-way, the
-    /// ops already written stay written — the journal is append-only, and a
-    /// half-applied run is visible to the next fold rather than silently lost.
+    /// [`Error::Io`] or [`Error::Serialize`]. After an I/O error the file may
+    /// end in a torn line, so the writer must be dropped and reopened.
     pub fn append_all(
         &mut self,
         drafts: impl IntoIterator<Item = Draft>,
