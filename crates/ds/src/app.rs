@@ -74,8 +74,6 @@ pub enum Msg {
     Undo,
     /// `ctrl+y` — redo the last change undone.
     Redo,
-    /// The `⌨` affordance: drop mouse reporting so the next tap raises the IME.
-    RaiseKeyboard,
     /// `Space` on an empty query, or the `SPC` chip: open the leader sheet.
     Leader,
     /// A tap or click at a terminal cell.
@@ -2150,7 +2148,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.sheet = false;
             model.redo()
         }
-        Msg::RaiseKeyboard => model.raise_keyboard(),
         Msg::Resize { cols, rows } => {
             model.cols = cols;
             model.rows_on_screen = rows;
@@ -2878,7 +2875,7 @@ pub(crate) mod tests {
         store
     }
 
-    /// **`ctrl+e` opens the editor on the record, seeded with what is stored.**
+    /// **`e` opens the editor on the record, seeded with what is stored.**
     /// The record comes with it: detail is the only editing surface, so the verb
     /// shows it rather than refusing until you have opened it yourself.
     #[test]
@@ -2894,7 +2891,7 @@ pub(crate) mod tests {
     }
 
     /// **A session that cannot write never opens an editor**, and says why
-    /// instead — REWRITE.md §3.1's "read-only with a visible notice".
+    /// instead.
     #[test]
     fn a_read_only_session_explains_itself_instead_of_editing() {
         let mut m = model();
@@ -3037,7 +3034,7 @@ pub(crate) mod tests {
     }
 
     /// **Creating a document is `create` then `set name`, in one append.**
-    /// §3.2's fold orphans a `set` on an entity that is not alive yet, so a name
+    /// the fold's fold orphans a `set` on an entity that is not alive yet, so a name
     /// arriving before its create would be silently dropped — and the two ops
     /// cannot be separated by anything if they are one batch from one writer.
     #[test]
@@ -3255,7 +3252,7 @@ pub(crate) mod tests {
     }
 
     /// **Creating inverts to a tombstone**, which is the only op that can
-    /// un-create anything: §3.2 keeps a `create` forever, so the way back is to
+    /// un-create anything: the fold keeps a `create` forever, so the way back is to
     /// write the delete rather than to pretend the create never happened.
     #[test]
     fn creating_a_document_inverts_to_a_delete() {
@@ -3712,7 +3709,7 @@ pub(crate) mod tests {
     }
 
     /// **Undoing a delete restores the document whole**, not as a bare recreate
-    /// with a name: §3.2's create-after-tombstone starts from empty, so the way
+    /// with a name: the fold's create-after-tombstone starts from empty, so the way
     /// back has to re-send every field the document had.
     #[test]
     fn deleting_inverts_to_a_create_with_every_field() {
@@ -3760,7 +3757,7 @@ pub(crate) mod tests {
     }
 
     /// **An empty buffer clears the field with an `unset`**, never a stored
-    /// empty string — so one field exercises both halves of §3.2's contract.
+    /// empty string — so one field exercises both halves of the fold's contract.
     #[test]
     fn clearing_the_field_appends_an_unset_op() {
         let mut m = writable();
@@ -3785,7 +3782,7 @@ pub(crate) mod tests {
     }
 
     /// **`Esc` closes a clean edit in one press and arms before discarding a
-    /// dirty one** (REWRITE-UI.md §2), and any other key disarms — the same
+    /// dirty one**, and any other key disarms — the same
     /// rule the quit arming follows, so the two cannot behave differently.
     #[test]
     fn esc_discards_an_edit_in_one_press_when_clean_and_two_when_dirty() {
@@ -3920,7 +3917,7 @@ pub(crate) mod tests {
         assert!(!m.mouse_on, "nor did it restore mouse reporting");
     }
 
-    /// **Find-fast, invariant 1.** A bare printable is search text — the first
+    /// A bare printable is search text — the first
     /// character included. Nothing on this surface may swallow a letter.
     #[test]
     fn a_bare_letter_starts_the_search_and_keeps_it() {
@@ -4055,8 +4052,7 @@ pub(crate) mod tests {
         assert!(m.detail(), "`←` no longer closes the record; `Esc` does");
     }
 
-    /// **Esc peels exactly one layer per press** (invariant 3), in the order
-    /// REWRITE-UI.md §8 fixes: search, surface, filter, arm, quit.
+    /// Esc peels one layer per press: search, surface, filter, arm, quit.
     #[test]
     fn esc_peels_one_layer_at_a_time_and_quits_only_at_the_end() {
         let mut m = model();
@@ -4788,7 +4784,7 @@ pub(crate) mod tests {
     #[test]
     fn the_ime_affordance_restores_itself_on_the_next_key() {
         let mut m = model();
-        update(&mut m, Msg::RaiseKeyboard);
+        m.raise_keyboard();
         assert!(!m.mouse_on && m.keyboard_hint);
 
         update(&mut m, Msg::Char('c'));
@@ -4906,8 +4902,7 @@ pub(crate) mod tests {
         assert!(!m.sheet, "one Esc closes it");
     }
 
-    /// **The chrome goes inert under a pushed record.** Tapping where a filter
-    /// used to be would mutate a surface you cannot see.
+    /// The chrome is inert under a pushed record, which covers it.
     #[test]
     fn a_pushed_record_makes_the_chrome_untappable() {
         let mut m = model();
@@ -4922,9 +4917,7 @@ pub(crate) mod tests {
         assert!(m.mouse_on, "and the field did not drop reporting either");
     }
 
-    /// **The record owns `↑`/`↓` while it is open.** They used to move the list
-    /// cursor underneath it, so the record silently became a different document
-    /// while you were reading it — which at 47 columns is impossible to follow.
+    /// The record owns `↑`/`↓` while it is open; the list does not move.
     #[test]
     fn arrows_move_the_record_selector_and_not_the_list() {
         let mut m = model();
@@ -5045,7 +5038,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// **Tapping the search bar is the keyboard affordance** (REWRITE-UI.md §5).
+    /// **Tapping the search bar is the keyboard affordance**.
     /// It sits there rather than in the action bar because tapping the field you
     /// want to type into is what a thumb does anyway — and because Termux's own
     /// extra-keys row can already carry a keyboard toggle, so a second button
@@ -5143,7 +5136,7 @@ pub(crate) mod tests {
         assert_eq!(m.offset, 0);
     }
 
-    /// **Scan-text search never blocks the render loop** (invariant 7). The first press
+    /// **Scan-text search never blocks the render loop**. The first press
     /// asks for a load and shows that it is waiting; the answer arrives as a
     /// message like any other.
     #[test]

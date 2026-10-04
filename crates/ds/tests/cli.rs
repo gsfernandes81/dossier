@@ -194,7 +194,7 @@ fn init_names_the_device() {
     assert!(written.contains("syncthing_root"), "{written}");
 }
 
-/// **`ds init` never creates the journal directory** (REWRITE.md §7). It first
+/// **`ds init` never creates the journal directory**. It first
 /// exists inside the synced tree at cutover, and anything created inside a
 /// Syncthing folder syncs by default — so a journal appearing on the other
 /// device before its store was exported is the one thing the plan cannot take.

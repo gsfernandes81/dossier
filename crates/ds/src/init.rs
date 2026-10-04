@@ -546,7 +546,7 @@ mod tests {
         assert!(!path.exists(), "nothing was written");
     }
 
-    /// **`ds init` never creates the journal directory** (REWRITE.md §7): it
+    /// **`ds init` never creates the journal directory**: it
     /// first exists inside the synced tree at cutover and not one launch before,
     /// because anything inside a Syncthing folder syncs by default.
     #[test]

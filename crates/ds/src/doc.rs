@@ -702,7 +702,7 @@ mod tests {
     }
 
     /// **Every field survives a round trip through the journal**, which is what
-    /// makes a delete undoable: §3.2's `create`-after-tombstone starts from
+    /// makes a delete undoable: the fold's `create`-after-tombstone starts from
     /// empty, so restoring a document means re-sending everything it had.
     ///
     /// The fixture is written as an **exhaustive struct literal on purpose** —
@@ -1135,7 +1135,7 @@ mod tests {
     }
 
     /// **Enter never dies.** With no file linked there is nothing to open, and
-    /// the caller falls through to the record (invariant 2).
+    /// the caller falls through to the record.
     #[test]
     fn the_primary_file_is_the_one_enter_opens() {
         let s = build(vec![doc(

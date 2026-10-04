@@ -64,7 +64,7 @@ fn journal_with(ops: &[Op]) -> (TempDir, Journal) {
 
 /// Where the writer's advisory lock goes — a directory of this test's own, and
 /// never the journal: a lock inside the synced tree would replicate to the other
-/// device and lock it out of its own file (REWRITE.md §3.1).
+/// device and lock it out of its own file.
 fn lock_dir(dir: &std::path::Path) -> PathBuf {
     let locks = dir.join("state");
     std::fs::create_dir_all(&locks).expect("mkdir");
@@ -126,7 +126,7 @@ fn an_edit_becomes_an_op_and_survives_a_reload() {
 }
 
 /// **Clearing the field writes an `unset`, and the document leaves the expiry
-/// watch.** The `set` half of §3.2's contract is the obvious one; this is the
+/// watch.** The `set` half of the fold's contract is the obvious one; this is the
 /// half that a stored empty string would have quietly broken instead.
 #[test]
 fn clearing_the_field_removes_it_from_the_folded_store() {
@@ -149,7 +149,7 @@ fn clearing_the_field_removes_it_from_the_folded_store() {
 }
 
 /// **A journal another process is writing degrades this one to read-only, and
-/// says so** (REWRITE.md §3.1) — it is never an error to exit on, because
+/// says so** — it is never an error to exit on, because
 /// browsing, opening and `ds status` all still work.
 #[test]
 fn a_held_lock_is_a_notice_and_not_a_failure() {
@@ -229,7 +229,7 @@ fn a_created_document_survives_a_reload() {
 }
 
 /// **Undo puts the field back, and does it by appending rather than rewriting.**
-/// §3.3 makes the journal the history: nothing is ever removed from it, so
+/// The design makes the journal the history: nothing is ever removed from it, so
 /// taking an edit back is writing the op that says so — and the file has to
 /// still hold both the edit and its inverse afterwards.
 #[test]
@@ -348,7 +348,7 @@ fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
     );
 }
 
-/// **Undo and redo of a create work on a tombstoned document.** §3.2 keeps a
+/// **Undo and redo of a create work on a tombstoned document.** the fold keeps a
 /// `create` forever and makes a later one a legitimate recreate that starts from
 /// empty, so putting a new document back has to re-send its name as well — which
 /// it does, because redo appends the ops that were written the first time.
@@ -386,7 +386,7 @@ fn a_created_document_can_be_taken_back_and_put_again() {
 }
 
 /// **A deleted document comes back whole.** This is the test the whole delete
-/// slice exists for: §3.2's tombstone is retained forever and a later `create`
+/// slice exists for: the fold's tombstone is retained forever and a later `create`
 /// starts from *empty*, so an undo that only re-created the entity would give
 /// back a document with a name and nothing else — every tag, date, file and note
 /// silently gone, on the one keystroke a user presses precisely because they

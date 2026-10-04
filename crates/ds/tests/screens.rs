@@ -18,7 +18,7 @@
 //! These render into a `TestBackend` and read the cells back, so they check the
 //! finished frame rather than the intent behind it — the same thing the approved
 //! mockups in `docs/dev/mockups/` show, at the same column counts (45×28 phone,
-//! 100×26 desktop). REWRITE-UI.md §8 requires every surface to be *fully
+//! 100×26 desktop). the plan requires every surface to be *fully
 //! operable* at both, and a column that runs off the edge of a phone is exactly
 //! the failure a unit test cannot see.
 
@@ -301,7 +301,7 @@ fn tags_give_way_before_the_location() {
     assert!(lines[1].contains("  blue folder › slot 1"), "location whole: {:?}", lines[1]);
 }
 
-/// **Detail splits beside the list only when there is room** (U3): a right pane
+/// **Detail splits beside the list only when there is room**: a right pane
 /// at 100 columns, a full-screen push at 45.
 #[test]
 fn detail_splits_wide_and_pushes_narrow() {
@@ -846,7 +846,7 @@ fn a_long_note_hangs_under_its_column() {
 }
 
 /// **An edit takes the entry line over rather than adding a row.** Three rows of
-/// chrome is the budget on both layouts (REWRITE-UI.md §5a), and the last row is
+/// chrome is the budget on both layouts, and the last row is
 /// exactly what a field you are typing into is for — so the field's own prompt
 /// replaces `>` and the count and the `SPC` chip stand down.
 #[test]
@@ -891,7 +891,7 @@ fn the_record_marks_the_field_being_edited() {
     assert!(lit.iter().all(|&x| x <= 11), "and only the label, not the value: {lit:?}");
 }
 
-/// **A session that cannot write is not told how to.** The `^e` hint appears
+/// **A session that cannot write is not told how to.** The `e edit` hint appears
 /// when the verb works and not before — the rule that killed the action bar.
 #[test]
 fn the_edit_hint_appears_only_when_this_session_can_write() {
@@ -953,9 +953,6 @@ fn the_location_picker_is_a_tree_on_the_phone() {
     update(&mut m, Msg::Leader);
     update(&mut m, Msg::Char('l'));
     let lines = screen(&mut m, 47, 24);
-    for line in &lines {
-        println!("|{line}|");
-    }
     assert!(lines[2].starts_with(" SPC l  location"), "{lines:?}");
     assert!(
         lines[3].starts_with(" Motorcycle Insurance") && lines[3].ends_with("document "),
@@ -978,9 +975,6 @@ fn the_location_picker_searches_by_path() {
     update(&mut m, Msg::Char('l'));
     type_str(&mut m, "slot 2");
     let lines = screen(&mut m, 47, 24);
-    for line in &lines {
-        println!("|{line}|");
-    }
     assert!(
         lines[2].starts_with(" SPC l  location  slot 2█") && lines[2].ends_with("2 matches "),
         "{lines:?}"
@@ -1003,9 +997,6 @@ fn the_location_sheet_and_its_caution_fit_the_phone() {
     update(&mut m, Msg::Move(ds::app::Motion::Up));
     update(&mut m, Msg::Char(' '));
     let lines = screen(&mut m, 47, 24);
-    for line in &lines {
-        println!("|{line}|");
-    }
     assert!(
         lines.iter().any(|l| l.starts_with(" blue folder") && l.ends_with("physical location ")),
         "{lines:?}"
