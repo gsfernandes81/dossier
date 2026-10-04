@@ -36,6 +36,13 @@ pub fn type_str(model: &mut Model, text: &str) {
     }
 }
 
+/// Opens the location picker on the selected document.
+pub fn picking(model: &mut Model) {
+    update(model, Msg::Enter);
+    update(model, Msg::Leader);
+    update(model, Msg::Char('l'));
+}
+
 /// Backspaces until the open edit's buffer is empty.
 pub fn clear_buffer(model: &mut Model) {
     let typed = model.edit.as_ref().map_or(0, |edit| edit.buffer.chars().count());

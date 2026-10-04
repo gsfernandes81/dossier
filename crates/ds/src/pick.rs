@@ -269,15 +269,10 @@ fn check(label: &str, on: bool, choice: Choice) -> Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FileRef;
 
     fn two_files() -> Model {
         let mut model = crate::app::tests::model();
-        model.store.docs[0].files.push(FileRef {
-            label: String::new(),
-            path: "Marine/coc-back.pdf".into(),
-            primary: false,
-        });
+        crate::app::tests::with_second_file(&mut model.store);
         model
     }
 

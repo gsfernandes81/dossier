@@ -23,7 +23,7 @@
 
 mod common;
 
-use common::{clear_buffer, render, type_str, writable};
+use common::{clear_buffer, picking, render, type_str, writable};
 use ds::app::{update, Filter, Model, Msg};
 use ds::theme::Theme;
 use ds::{Doc, FileRef, Status, Store};
@@ -124,6 +124,11 @@ fn model(cols: u16, rows: u16) -> Model {
 
 fn model_of(store: Store, cols: u16, rows: u16) -> Model {
     Model::new(store, "2026-10-20".into(), "2027-01-18".into(), cols, rows)
+}
+
+fn select_row(m: &mut Model, wanted: ds::detail::Row) {
+    let rows = ds::detail::rows(m.current().unwrap());
+    m.set_record_cursor(rows.iter().position(|row| *row == wanted).expect("the row exists"));
 }
 
 /// Which cells of one screen row carry a modifier — the way to check that a
@@ -481,8 +486,7 @@ fn a_file_row_picker_draws_in_the_panel() {
     let doc = m.store.docs.iter().position(|d| !d.files.is_empty()).expect("a doc with a file");
     m.cursor = m.rows.iter().position(|&i| i == doc).expect("listed");
     update(&mut m, Msg::Enter);
-    let rows = ds::detail::rows(m.current().unwrap());
-    m.set_record_cursor(rows.iter().position(|r| matches!(r, ds::detail::Row::File(0))).unwrap());
+    select_row(&mut m, ds::detail::Row::File(0));
     update(&mut m, Msg::Char('e'));
     let text = screen(&mut m, 45, 28).join("\n");
     assert!(text.contains("file "), "the heading names the file: {text}");
@@ -551,8 +555,7 @@ fn the_renews_picker_has_three_heading_rows() {
     let mut m = writable(model(47, 24));
     m.cursor = m.rows.iter().position(|&i| m.store.docs[i].id == "eng1").unwrap();
     update(&mut m, Msg::Enter);
-    let rows = ds::detail::rows(m.current().unwrap());
-    m.set_record_cursor(rows.iter().position(|r| *r == ds::detail::Row::Renews).unwrap());
+    select_row(&mut m, ds::detail::Row::Renews);
     update(&mut m, Msg::Char('e'));
     let lines = screen(&mut m, 47, 24);
     let text = lines.join("\n");
@@ -624,8 +627,7 @@ fn a_bundle_lists_its_documents() {
 
 #[test]
 fn the_bundle_record_marks_the_field_being_edited() {
-    let mut m = with_bundles(47, 24);
-    m.write = ds::app::WriteState::Ready { device: "desk".into() };
+    let mut m = writable(with_bundles(47, 24));
     update(&mut m, Msg::Char(' '));
     update(&mut m, Msg::Char('b'));
     update(&mut m, Msg::Enter);
@@ -646,8 +648,7 @@ fn the_attach_line_has_a_live_list() {
     m.root = Some(root);
     m.cursor = m.rows.iter().position(|&i| m.store.docs[i].files.is_empty()).expect("unfiled");
     update(&mut m, Msg::Enter);
-    let rows = ds::detail::rows(m.current().unwrap());
-    m.set_record_cursor(rows.iter().position(|r| *r == ds::detail::Row::Files).unwrap());
+    select_row(&mut m, ds::detail::Row::Files);
     update(&mut m, Msg::Char('e'));
     type_str(&mut m, "Identity/p");
     let lines = screen(&mut m, 47, 24);
@@ -886,9 +887,7 @@ fn the_details_view_shows_the_hard_copy_location() {
 #[test]
 fn the_location_picker_is_a_tree_on_the_phone() {
     let mut m = writable(model(47, 24));
-    update(&mut m, Msg::Enter);
-    update(&mut m, Msg::Leader);
-    update(&mut m, Msg::Char('l'));
+    picking(&mut m);
     let lines = screen(&mut m, 47, 24);
     assert!(lines[2].starts_with(" SPC l  location"), "{lines:?}");
     assert!(
@@ -905,9 +904,7 @@ fn the_location_picker_is_a_tree_on_the_phone() {
 #[test]
 fn the_location_picker_searches_by_path() {
     let mut m = writable(model(47, 24));
-    update(&mut m, Msg::Enter);
-    update(&mut m, Msg::Leader);
-    update(&mut m, Msg::Char('l'));
+    picking(&mut m);
     type_str(&mut m, "slot 2");
     let lines = screen(&mut m, 47, 24);
     assert!(
@@ -924,9 +921,7 @@ fn the_location_picker_searches_by_path() {
 #[test]
 fn the_location_sheet_and_its_caution_fit_the_phone() {
     let mut m = writable(model(47, 24));
-    update(&mut m, Msg::Enter);
-    update(&mut m, Msg::Leader);
-    update(&mut m, Msg::Char('l'));
+    picking(&mut m);
     update(&mut m, Msg::Move(ds::app::Motion::Up));
     update(&mut m, Msg::Char(' '));
     let lines = screen(&mut m, 47, 24);
@@ -947,9 +942,7 @@ fn the_location_sheet_and_its_caution_fit_the_phone() {
 #[test]
 fn the_tree_answers_taps() {
     let mut m = writable(model(47, 24));
-    update(&mut m, Msg::Enter);
-    update(&mut m, Msg::Leader);
-    update(&mut m, Msg::Char('l'));
+    picking(&mut m);
     let lines = screen(&mut m, 47, 24);
     let row = |lines: &[String], text: &str| {
         u16::try_from(lines.iter().position(|l| l.contains(text)).expect(text)).unwrap()

@@ -3099,10 +3099,7 @@ pub(crate) mod tests {
     fn digital_only_is_one_write_with_its_way_back() {
         let mut m = writable();
         update(&mut m, Msg::Enter);
-        let rows = crate::detail::rows(m.current().unwrap());
-        m.set_record_cursor(
-            rows.iter().position(|row| *row == crate::detail::Row::DigitalOnly).unwrap(),
-        );
+        select_row(&mut m, crate::detail::Row::DigitalOnly);
 
         let set = |value: &str| {
             journal::Draft::set("doc", "coc", "location", serde_json::Value::from(value))
@@ -3121,12 +3118,7 @@ pub(crate) mod tests {
             "no hard copy location row once there is no hard copy"
         );
 
-        m.set_record_cursor(
-            crate::detail::rows(m.current().unwrap())
-                .iter()
-                .position(|row| *row == crate::detail::Row::DigitalOnly)
-                .unwrap(),
-        );
+        select_row(&mut m, crate::detail::Row::DigitalOnly);
         assert_eq!(
             update(&mut m, Msg::Char('e')),
             Effect::Append(vec![journal::Draft::unset("doc", "coc", "location")])
@@ -3154,9 +3146,7 @@ pub(crate) mod tests {
     #[test]
     fn the_location_picker_files_the_hard_copy() {
         let mut m = with_locations(writable());
-        update(&mut m, Msg::Enter);
-        update(&mut m, Msg::Leader);
-        update(&mut m, Msg::Char('l'));
+        picking(&mut m);
         let picker = m.locpick.as_ref().expect("the picker is open");
         assert_eq!(picker.root.as_deref(), Some("shelf"));
         assert_eq!(picker.cursor, crate::locpick::Target::Location("cert-file".into()));
@@ -3184,9 +3174,7 @@ pub(crate) mod tests {
     #[test]
     fn new_creates_a_location_and_files_into_it() {
         let mut m = with_locations(writable());
-        update(&mut m, Msg::Enter);
-        update(&mut m, Msg::Leader);
-        update(&mut m, Msg::Char('l'));
+        picking(&mut m);
         type_str(&mut m, "box");
         assert_eq!(m.locpick.as_ref().unwrap().cursor, crate::locpick::Target::New);
         let Effect::Append(drafts) = update(&mut m, Msg::Enter) else { panic!("an append") };
@@ -3218,9 +3206,7 @@ pub(crate) mod tests {
     #[test]
     fn new_refuses_a_name_a_sibling_has() {
         let mut m = with_locations(writable());
-        update(&mut m, Msg::Enter);
-        update(&mut m, Msg::Leader);
-        update(&mut m, Msg::Char('l'));
+        picking(&mut m);
         update(&mut m, Msg::Move(Motion::Up));
         type_str(&mut m, "Cert-File");
         update(&mut m, Msg::Move(Motion::Up));
@@ -3375,9 +3361,7 @@ pub(crate) mod tests {
     fn the_top_of_the_tree_is_not_a_place() {
         let mut m = with_locations(writable());
         m.store.docs[0].location = None;
-        update(&mut m, Msg::Enter);
-        update(&mut m, Msg::Leader);
-        update(&mut m, Msg::Char('l'));
+        picking(&mut m);
         update(&mut m, Msg::Move(Motion::Up));
         assert_eq!(m.locpick.as_ref().unwrap().cursor, crate::locpick::Target::Root);
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
@@ -3703,16 +3687,9 @@ pub(crate) mod tests {
     #[test]
     fn enter_opens_the_file_row_it_is_on() {
         let mut m = model();
-        m.store.docs[0].files.push(FileRef {
-            label: "back".into(),
-            path: "Marine/coc-back.pdf".into(),
-            primary: false,
-        });
+        with_second_file(&mut m.store);
         update(&mut m, Msg::Enter);
-        let rows = crate::detail::rows(m.current().unwrap());
-        m.set_record_cursor(
-            rows.iter().position(|row| *row == crate::detail::Row::File(1)).expect("a file row"),
-        );
+        select_row(&mut m, crate::detail::Row::File(1));
         assert_eq!(update(&mut m, Msg::Enter), Effect::Open("Marine/coc-back.pdf".into()));
         m.set_record_cursor(0);
         assert_eq!(update(&mut m, Msg::Enter), Effect::Open("Marine/coc.pdf".into()));
@@ -3869,8 +3846,7 @@ pub(crate) mod tests {
     fn renews_links_a_document_to_an_older_one() {
         let mut m = writable();
         update(&mut m, Msg::Enter);
-        let rows = crate::detail::rows(m.current().unwrap());
-        m.set_record_cursor(rows.iter().position(|r| *r == crate::detail::Row::Renews).unwrap());
+        select_row(&mut m, crate::detail::Row::Renews);
         update(&mut m, Msg::Char('e'));
         type_str(&mut m, "testim");
         assert_eq!(
@@ -4129,11 +4105,7 @@ pub(crate) mod tests {
         newer.id = "coc-2".into();
         newer.supersedes = Some("coc".into());
         newer.bundles.clear();
-        m.store.docs[0].files.push(crate::FileRef {
-            label: String::new(),
-            path: "Marine/coc-back.pdf".into(),
-            primary: false,
-        });
+        with_second_file(&mut m.store);
         m.store.docs.push(newer);
         m.store.derive();
         m.run(crate::sheet::Act::Bundles);
@@ -4178,11 +4150,7 @@ pub(crate) mod tests {
     #[test]
     fn a_bundled_document_can_use_one_soft_copy_or_leave() {
         let mut m = with_bundles();
-        m.store.docs[0].files.push(crate::FileRef {
-            label: String::new(),
-            path: "Marine/coc-back.pdf".into(),
-            primary: false,
-        });
+        with_second_file(&mut m.store);
         let pick = |m: &mut Model, choice: Choice| {
             let member = Purpose::Member { doc: "coc".into(), bundle: "joining".into() };
             m.choose(&member, choice)
@@ -4266,14 +4234,20 @@ pub(crate) mod tests {
         assert!(!m.filter.expiring && m.filter.old_versions);
     }
 
-    /// A writable model on COC's record, with a second file linked.
-    fn on_coc_with_two_files() -> Model {
-        let mut m = writable();
-        m.store.docs[0].files.push(FileRef {
+    /// Links a second file, `Marine/coc-back.pdf`, to COC.
+    pub(crate) fn with_second_file(store: &mut Store) {
+        let i = store.index_of("coc").unwrap();
+        store.docs[i].files.push(FileRef {
             label: String::new(),
             path: "Marine/coc-back.pdf".into(),
             primary: false,
         });
+    }
+
+    /// A writable model on COC's record, with a second file linked.
+    fn on_coc_with_two_files() -> Model {
+        let mut m = writable();
+        with_second_file(&mut m.store);
         update(&mut m, Msg::Enter);
         m
     }
@@ -4662,15 +4636,9 @@ pub(crate) mod tests {
 
     #[test]
     fn e_edits_the_selected_row() {
-        let mut m = model();
-        m.write = WriteState::Ready { device: "desk".into() };
+        let mut m = writable();
         update(&mut m, Msg::Enter);
-        let rows = crate::detail::rows(m.current().unwrap());
-        let expiry = rows
-            .iter()
-            .position(|row| matches!(row, crate::detail::Row::Editable(Field::Expiry)))
-            .expect("the record has an editable row");
-        m.set_record_cursor(expiry);
+        select_row(&mut m, crate::detail::Row::Editable(Field::Expiry));
         update(&mut m, Msg::Char('e'));
         assert_eq!(
             m.edit.as_ref().map(|edit| edit.field),
@@ -4683,15 +4651,9 @@ pub(crate) mod tests {
     /// and never a second implementation of it.
     #[test]
     fn the_sheet_offers_the_record_verb_too() {
-        let mut m = model();
-        m.write = WriteState::Ready { device: "desk".into() };
+        let mut m = writable();
         update(&mut m, Msg::Enter);
-        m.set_record_cursor(
-            crate::detail::rows(m.current().unwrap())
-                .iter()
-                .position(|row| matches!(row, crate::detail::Row::Editable(Field::Expiry)))
-                .unwrap(),
-        );
+        select_row(&mut m, crate::detail::Row::Editable(Field::Expiry));
 
         update(&mut m, Msg::Char(' '));
         assert!(m.sheet, "space still opens the sheet on the record");

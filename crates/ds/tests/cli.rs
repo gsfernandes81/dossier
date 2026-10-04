@@ -178,17 +178,7 @@ fn init_names_the_device() {
     let written = std::fs::read_to_string(config_path(&root)).expect("config");
     assert!(written.contains("device = \"phone\""), "{written}");
     assert!(written.contains("syncthing_root"), "{written}");
-}
-
-/// `ds init` must not create `.dossier/journal/`: the writer creates it on first
-/// append, and anything in a Syncthing folder syncs.
-#[test]
-fn init_does_not_create_the_journal() {
-    let (_dir, root) = fresh();
-    let out = ds(&root, &["init", "--device", "phone"]);
-    assert!(out.status.success());
-    assert!(!root.join(".dossier").exists(), "the journal must not exist yet");
-    assert!(String::from_utf8_lossy(&out.stdout).contains("not there yet"));
+    assert!(!root.join(".dossier").exists(), "the writer makes the journal, not init");
 }
 
 #[test]

@@ -473,6 +473,11 @@ mod tests {
         (dir, path)
     }
 
+    /// Answers naming the device `phone`, with its Syncthing folder at `dir/Sync`.
+    fn phone(dir: &Path) -> Answers {
+        Answers { device: Some("phone".into()), root: Some(dir.join("Sync")), ..Answers::default() }
+    }
+
     fn talk(
         path: &Path,
         answers: &Answers,
@@ -553,11 +558,7 @@ mod tests {
         let path = dir.join("config.toml");
         let root = dir.join("Sync");
         std::fs::create_dir_all(&root).expect("mkdir");
-        let answers = Answers {
-            device: Some("phone".into()),
-            root: Some(root.clone()),
-            ..Answers::default()
-        };
+        let answers = phone(&dir);
         let (result, transcript) = talk(&path, &answers, "", false);
         result.expect("init");
         assert!(!root.join(".dossier").exists(), "the journal must not exist yet");
@@ -596,11 +597,7 @@ mod tests {
     fn a_rename_is_confirmed_or_forced() {
         let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
-        let answers = Answers {
-            device: Some("phone".into()),
-            root: Some(dir.join("Sync")),
-            ..Answers::default()
-        };
+        let answers = phone(&dir);
         talk(&path, &answers, "", false).0.expect("first init");
 
         let desk = Answers { device: Some("desk".into()), ..answers.clone() };
@@ -646,11 +643,7 @@ mod tests {
     fn the_api_key_is_asked_for_and_skippable() {
         let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
-        let answers = Answers {
-            device: Some("phone".into()),
-            root: Some(dir.join("Sync")),
-            ..Answers::default()
-        };
+        let answers = phone(&dir);
         let (result, transcript) = talk(&path, &answers, "\n", true);
         assert_eq!(result.expect("init").syncthing.apikey, None);
         assert!(transcript.contains("Syncthing API key"), "{transcript}");
@@ -666,11 +659,7 @@ mod tests {
     fn a_kept_api_key_can_be_cleared() {
         let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
-        let answers = Answers {
-            device: Some("phone".into()),
-            root: Some(dir.join("Sync")),
-            ..Answers::default()
-        };
+        let answers = phone(&dir);
         talk(&path, &answers, "secretkey123\n\n", true).0.expect("first init");
         let (result, transcript) = talk(&path, &answers, "n\n\n", true);
         assert!(transcript.contains("Keep the Syncthing API key secr…y123?"), "{transcript}");
@@ -681,11 +670,7 @@ mod tests {
     fn a_malformed_address_is_asked_again() {
         let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
-        let answers = Answers {
-            device: Some("phone".into()),
-            root: Some(dir.join("Sync")),
-            ..Answers::default()
-        };
+        let answers = phone(&dir);
         let (result, transcript) =
             talk(&path, &answers, "k3y\n127.0.0.1:8384127.0.0.1:9999\n127.0.0.1:9999\n", true);
         assert!(transcript.contains("is not an address like"), "{transcript}");
