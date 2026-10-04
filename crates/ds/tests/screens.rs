@@ -29,10 +29,6 @@ use ds::app::{update, Filter, Model, Msg};
 use ds::theme::Theme;
 use ds::{Doc, FileRef, Status, Store};
 
-/// The store the mockups are drawn from: marine certificates, motorcycle
-/// papers, identity documents — declared in the shelf order [`Store::build`]
-/// would put them in (that sort has its own test in `doc.rs`; these tests are
-/// about what the screen does with the list, not how it was ordered).
 /// One fixture row: id, name, location, slot, tag, expiry, file.
 type Row = (
     &'static str,
@@ -44,6 +40,10 @@ type Row = (
     &'static str,
 );
 
+/// The store the mockups are drawn from: marine certificates, motorcycle
+/// papers, identity documents — declared in the shelf order [`Store::build`]
+/// would put them in (that sort has its own test in `doc.rs`; these tests are
+/// about what the screen does with the list, not how it was ordered).
 fn sample_store() -> Store {
     let rows: &[Row] = &[
         (

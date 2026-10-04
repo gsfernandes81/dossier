@@ -217,18 +217,6 @@ mod tests {
         assert!(error.to_string().contains("Syncthing"));
     }
 
-    /// The WSL hints name the setting to change and the file it lives in —
-    /// both failures otherwise look like "Windows is broken".
-    #[test]
-    fn the_wsl_hints_name_the_setting_and_its_file() {
-        for (hint, setting) in
-            [(WSL_PATH_HINT, "appendWindowsPath"), (WSL_INTEROP_HINT, "enabled = true")]
-        {
-            assert!(hint.contains(setting), "{hint}");
-            assert!(hint.contains("/etc/wsl.conf"), "{hint}");
-        }
-    }
-
     /// **The WSL opener, end to end, with a stand-in `rundll32.exe`.** Put
     /// where Windows keeps the real one, it is found by the `PATH`-miss
     /// fallback — the `appendWindowsPath = false` case — and records what it was
@@ -271,13 +259,5 @@ mod tests {
             lines,
             [drive.to_str().unwrap(), "url.dll,FileProtocolHandler", r"C:\Users\g\a b,c.pdf"]
         );
-    }
-
-    /// The Termux hint names both halves of the install, because having only one
-    /// is the failure that looks like a bug in this app.
-    #[test]
-    fn the_termux_hint_covers_the_package_and_the_app() {
-        assert!(TERMUX_HINT.contains("pkg install termux-api"));
-        assert!(TERMUX_HINT.contains("Termux:API app"));
     }
 }

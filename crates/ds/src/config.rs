@@ -242,7 +242,7 @@ mod tests {
     }
 
     /// The whole file is three keys and a table — anything more belongs in the
-    /// journal, and this test is where that rule is visible.
+    /// journal.
     #[test]
     fn a_full_config_reads_back() {
         let dir = tempfile::tempdir().expect("tempdir");

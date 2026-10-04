@@ -258,8 +258,7 @@ fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
 }
 
 /// **The stack is a stack**: two edits then two undos walk back both, rather
-/// than the second undo toggling the first one forward again. Redo is a
-/// different verb and is not built.
+/// than the second undo toggling the first one forward again.
 #[test]
 fn undo_walks_back_more_than_one_write() {
     let (dir, journal) = journal_with(&desk(coc()));
