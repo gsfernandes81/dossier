@@ -28,8 +28,12 @@
 use std::io::Write as _;
 use std::path::PathBuf;
 
-use ds::app::{update, Effect, Model, Msg, WriteState};
+mod common;
+
+use common::{clear_buffer, render, type_str, writable};
+use ds::app::{update, Effect, Model, Msg};
 use ds::edit::Field;
+use ds::theme::Theme;
 use journal::{Draft, Journal, Namespace, Op, Writer};
 use serde_json::json;
 use tempfile::TempDir;
@@ -74,24 +78,7 @@ fn lock_dir(dir: &std::path::Path) -> PathBuf {
 /// Build the model the TUI would have, from a journal on disk.
 fn load_model(journal: &Journal) -> Model {
     let loaded = ds::load::load(journal).expect("load");
-    let mut model = Model::new(loaded.store, loaded.today, loaded.warn_until, 47, 24);
-    model.write = WriteState::Ready { device: "desk".into() };
-    model
-}
-
-/// Types `text` a character at a time.
-fn type_str(model: &mut Model, text: &str) {
-    for c in text.chars() {
-        update(model, Msg::Char(c));
-    }
-}
-
-/// Backspaces until the open edit's buffer is empty.
-fn clear_buffer(model: &mut Model) {
-    let typed = model.edit.as_ref().map_or(0, |edit| edit.buffer.chars().count());
-    for _ in 0..typed {
-        update(model, Msg::Backspace);
-    }
+    writable(Model::new(loaded.store, loaded.today, loaded.warn_until, 47, 24))
 }
 
 /// **An edit made in the model reaches the journal, and reading the journal back
@@ -109,6 +96,9 @@ fn an_edit_becomes_an_op_and_survives_a_reload() {
         panic!("a valid date must ask for an append");
     };
     write_and_reload(&mut follower(dir.path(), &journal, "phone"), drafts, &mut model);
+    let screen = render(&mut model, 47, 24, Theme { color: true });
+    let text: String = screen.content().iter().map(ratatui::buffer::Cell::symbol).collect();
+    assert!(text.contains("2031-05-31"), "the screen shows the edit: {text}");
     let load = journal.load(Namespace::Meta).expect("load");
     let phone = load.files.iter().find(|file| file.writer == "phone-core");
     assert_eq!(phone.map(|file| file.ops), Some(1), "this device wrote it, under its own id");

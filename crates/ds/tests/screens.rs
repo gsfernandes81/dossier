@@ -22,12 +22,12 @@
 //! operable* at both, and a column that runs off the edge of a phone is exactly
 //! the failure a unit test cannot see.
 
-use ratatui::backend::TestBackend;
-use ratatui::Terminal;
+mod common;
 
+use common::{clear_buffer, render, type_str, writable};
 use ds::app::{update, Filter, Model, Msg};
 use ds::theme::Theme;
-use ds::{find, Doc, FileRef, Status, Store};
+use ds::{Doc, FileRef, Status, Store};
 
 /// The store the mockups are drawn from: marine certificates, motorcycle
 /// papers, identity documents — declared in the shelf order [`Store::build`]
@@ -124,21 +124,6 @@ fn model(cols: u16, rows: u16) -> Model {
     Model::new(sample_store(), "2026-10-20".into(), "2027-01-18".into(), cols, rows)
 }
 
-/// A model allowed to write, which is not the default: a `Model` nobody has told
-/// about a device has no writer id and must not offer an edit.
-fn writable(cols: u16, rows: u16) -> Model {
-    let mut model = model(cols, rows);
-    model.write = ds::app::WriteState::Ready { device: "desk".into() };
-    model
-}
-
-/// Types `text` a character at a time.
-fn type_str(model: &mut Model, text: &str) {
-    for c in text.chars() {
-        update(model, Msg::Char(c));
-    }
-}
-
 /// Which cells of one screen row carry a modifier — the way to check that a
 /// *texture* landed where it was meant to, since text alone cannot show it.
 fn modifier_columns(
@@ -148,26 +133,20 @@ fn modifier_columns(
     row: u16,
     modifier: ratatui::style::Modifier,
 ) -> Vec<u16> {
-    let mut terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
-    terminal.draw(|frame| find::draw(frame, model, Theme { color: true })).expect("draw");
-    let buffer = terminal.backend().buffer().clone();
+    let buffer = render(model, cols, rows, Theme { color: true });
     (0..cols).filter(|x| buffer[(*x, row)].style().add_modifier.contains(modifier)).collect()
 }
 
 /// The columns of one row drawn as the selection.
 fn selected_columns(model: &mut Model, cols: u16, rows: u16, row: u16) -> Vec<u16> {
-    let mut terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
-    terminal.draw(|frame| find::draw(frame, model, Theme { color: true })).expect("draw");
-    let buffer = terminal.backend().buffer().clone();
+    let buffer = render(model, cols, rows, Theme { color: true });
     let selected = Theme { color: true }.selected().bg;
     (0..cols).filter(|x| buffer[(*x, row)].style().bg == selected).collect()
 }
 
 /// The columns of one row whose background is not the terminal's own.
 fn banded_columns(model: &mut Model, cols: u16, rows: u16, row: u16, theme: Theme) -> Vec<u16> {
-    let mut terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
-    terminal.draw(|frame| find::draw(frame, model, theme)).expect("draw");
-    let buffer = terminal.backend().buffer().clone();
+    let buffer = render(model, cols, rows, theme);
     (0..cols)
         .filter(|x| {
             !matches!(buffer[(*x, row)].style().bg, None | Some(ratatui::style::Color::Reset))
@@ -182,9 +161,7 @@ fn screen(model: &mut Model, cols: u16, rows: u16) -> Vec<String> {
 
 /// Render, returning both the text and whether any cell carried a colour.
 fn render_with(model: &mut Model, cols: u16, rows: u16, theme: Theme) -> (Vec<String>, bool) {
-    let mut terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
-    terminal.draw(|frame| find::draw(frame, model, theme)).expect("draw");
-    let buffer = terminal.backend().buffer().clone();
+    let buffer = render(model, cols, rows, theme);
     let mut colored = false;
     let lines = (0..rows)
         .map(|y| {
@@ -536,7 +513,7 @@ fn a_mid_query_cursor_leaves_the_text_in_place() {
 /// about, then the choices, the first one selected.
 #[test]
 fn a_file_row_picker_draws_in_the_panel() {
-    let mut m = writable(45, 28);
+    let mut m = writable(model(45, 28));
     let doc = m.store.docs.iter().position(|d| !d.files.is_empty()).expect("a doc with a file");
     m.cursor = m.rows.iter().position(|&i| i == doc).expect("listed");
     update(&mut m, Msg::Enter);
@@ -605,7 +582,7 @@ fn the_versions_view_draws_two_lines_a_version() {
 /// heading, then the documents it may renew.
 #[test]
 fn the_renews_picker_has_three_heading_rows() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     m.cursor = m.rows.iter().position(|&i| m.store.docs[i].id == "eng1").unwrap();
     update(&mut m, Msg::Enter);
     let rows = ds::detail::rows(m.current().unwrap());
@@ -700,7 +677,7 @@ fn the_attach_line_has_a_live_list() {
     std::fs::create_dir_all(root.join("Identity")).expect("mkdir");
     std::fs::write(root.join("Identity/passport.pdf"), "").expect("write");
     std::fs::write(root.join("Identity/pan.pdf"), "").expect("write");
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     m.root = Some(root);
     m.cursor = m.rows.iter().position(|&i| m.store.docs[i].files.is_empty()).expect("unfiled");
     update(&mut m, Msg::Enter);
@@ -722,7 +699,7 @@ fn the_attach_line_has_a_live_list() {
 /// one deletes.
 #[test]
 fn a_pane_names_its_mode_on_the_last_row() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     update(&mut m, Msg::Enter);
     let lines = screen(&mut m, 47, 24);
     assert!(lines[23].starts_with(" details · letters run verbs"), "{:?}", lines[23]);
@@ -776,7 +753,7 @@ fn a_tap_on_a_sheet_row_runs_it() {
 /// is cut off, and a tap on the second column runs the verb drawn there.
 #[test]
 fn the_sheet_fits_the_floor_in_two_columns() {
-    let mut m = writable(38, 12);
+    let mut m = writable(model(38, 12));
     update(&mut m, Msg::Enter);
     update(&mut m, Msg::Char(' '));
     let lines = screen(&mut m, 38, 12);
@@ -865,7 +842,7 @@ fn a_long_note_hangs_under_its_column() {
 /// replaces `>` and the count and the `SPC` chip stand down.
 #[test]
 fn an_edit_takes_over_the_entry_line() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     m.open_edit(ds::edit::Field::Expiry);
     let before = screen(&mut m, 47, 24).len();
 
@@ -887,7 +864,7 @@ fn an_edit_takes_over_the_entry_line() {
 /// the two rows are talking about each other with nothing to connect them.
 #[test]
 fn the_record_marks_the_field_being_edited() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     m.open_edit(ds::edit::Field::Expiry);
     let rows = screen(&mut m, 47, 24);
     let expiry_row = rows
@@ -914,7 +891,7 @@ fn the_edit_hint_appears_only_when_this_session_can_write() {
     let hints = screen(&mut readonly, 100, 26).join("\n");
     assert!(!hints.contains("e edit"), "a read-only session is not offered an edit");
 
-    let mut writing = writable(100, 26);
+    let mut writing = writable(model(100, 26));
     update(&mut writing, Msg::Enter);
     let hints = screen(&mut writing, 100, 26).join("\n");
     assert!(hints.contains("e edit"), "and a writing one is: {hints}");
@@ -924,9 +901,9 @@ fn the_edit_hint_appears_only_when_this_session_can_write() {
 /// already uses — one texture for "the next press acts".
 #[test]
 fn a_dirty_edit_warns_before_it_discards() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     m.open_edit(ds::edit::Field::Expiry);
-    update(&mut m, Msg::Char('9'));
+    clear_buffer(&mut m);
     update(&mut m, Msg::Esc);
     let rows = screen(&mut m, 47, 24);
     assert!(rows[rows.len() - 2].contains("esc again to discard"), "{rows:?}");
@@ -936,7 +913,7 @@ fn a_dirty_edit_warns_before_it_discards() {
 /// prompt, the value and the cursor are all text.
 #[test]
 fn the_editor_survives_no_color() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     m.open_edit(ds::edit::Field::Expiry);
     let (rows, coloured) = render_with(&mut m, 47, 24, Theme { color: false });
     assert!(!coloured, "no colour was emitted");
@@ -962,7 +939,7 @@ fn the_details_view_shows_the_hard_copy_location() {
 /// the tree rooted one level above the hard copy, with it open and selected.
 #[test]
 fn the_location_picker_is_a_tree_on_the_phone() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     update(&mut m, Msg::Enter);
     update(&mut m, Msg::Leader);
     update(&mut m, Msg::Char('l'));
@@ -983,7 +960,7 @@ fn the_location_picker_is_a_tree_on_the_phone() {
 /// and every matching location as one row with its full path.
 #[test]
 fn the_location_picker_searches_by_path() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     update(&mut m, Msg::Enter);
     update(&mut m, Msg::Leader);
     update(&mut m, Msg::Char('l'));
@@ -1004,7 +981,7 @@ fn the_location_picker_searches_by_path() {
 /// acts on; deleting a full location grows the status line to fit its caution.
 #[test]
 fn the_location_sheet_and_its_caution_fit_the_phone() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     update(&mut m, Msg::Enter);
     update(&mut m, Msg::Leader);
     update(&mut m, Msg::Char('l'));
@@ -1029,7 +1006,7 @@ fn the_location_sheet_and_its_caution_fit_the_phone() {
 /// tap on the selected row files the hard copy, as Enter does.
 #[test]
 fn the_tree_answers_taps() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     update(&mut m, Msg::Enter);
     update(&mut m, Msg::Leader);
     update(&mut m, Msg::Char('l'));
@@ -1059,7 +1036,7 @@ fn the_tree_answers_taps() {
 /// tap selects it.
 #[test]
 fn the_details_rows_answer_taps() {
-    let mut m = writable(47, 24);
+    let mut m = writable(model(47, 24));
     update(&mut m, Msg::Enter);
     let lines = screen(&mut m, 47, 24);
     let at = |text: &str| {

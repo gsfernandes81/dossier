@@ -215,23 +215,6 @@ mod tests {
         store
     }
 
-    /// A chain of three passports beside two unrelated documents.
-    fn chain() -> Store {
-        let mut store = crate::app::tests::model().store;
-        let mut add = |id: &str, supersedes: &str| {
-            let mut version = store.docs[2].clone();
-            version.id = id.into();
-            version.supersedes = Some(supersedes.into());
-            store.docs.push(version);
-        };
-        add("passport-2", "passport");
-        add("passport-3", "passport-2");
-        store.docs[2].superseded = true;
-        let middle = store.index_of("passport-2").unwrap();
-        store.docs[middle].superseded = true;
-        store
-    }
-
     fn labels(store: &Store, id: &str) -> Vec<Choice> {
         Picker::new(id, Purpose::Renews)
             .entries(store)
@@ -245,7 +228,7 @@ mod tests {
     /// one something else already replaces.
     #[test]
     fn renews_offers_only_documents_that_keep_the_chain() {
-        let store = chain();
+        let store = crate::app::tests::with_versions().store;
         let renew = |id: &str| Choice::Renew(Some(id.into()));
         assert_eq!(
             labels(&store, "passport"),
@@ -253,8 +236,14 @@ mod tests {
             "not its newer versions"
         );
         assert_eq!(
-            labels(&store, "passport-2"),
-            [Choice::Renew(None), renew("coc"), renew("eng1"), renew("testimonial")],
+            labels(&store, "passport-desk"),
+            [
+                Choice::Renew(None),
+                renew("coc"),
+                renew("eng1"),
+                renew("testimonial"),
+                renew("passport-phone")
+            ],
             "none first, and not the version it already replaces"
         );
     }

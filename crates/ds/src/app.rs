@@ -4003,7 +4003,7 @@ pub(crate) mod tests {
     }
 
     /// A model whose passport has an older version and two latest ones.
-    fn with_versions() -> Model {
+    pub(crate) fn with_versions() -> Model {
         let mut m = writable();
         let mut add = |id: &str, issued: &str, supersedes: &str| {
             let mut version = m.store.docs[2].clone();
