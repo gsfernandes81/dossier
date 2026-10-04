@@ -27,12 +27,12 @@ use crate::theme::{Theme, Tone};
 use crate::{Bundle, Store};
 
 /// One row of the Bundles view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Entry {
     /// `+ new`, pinned above the matches.
     New,
-    /// A bundle, by index into [`Store::bundles`].
-    Bundle(usize),
+    /// A bundle, by id.
+    Bundle(String),
 }
 
 /// The Bundles view's rows for `query`: `+ new` once something is typed, or
@@ -48,24 +48,24 @@ pub fn entries(store: &Store, query: &str) -> Vec<Entry> {
         store
             .bundles
             .iter()
-            .enumerate()
-            .filter(|(_, bundle)| {
+            .filter(|bundle| {
                 !typed || crate::search::matches(&crate::search::fold(&bundle.name), query, false)
             })
-            .map(|(i, _)| Entry::Bundle(i)),
+            .map(|bundle| Entry::Bundle(bundle.id.clone())),
     );
     entries
 }
 
-/// Where the cursor starts: on the first match, or on `+ new` when nothing
+/// Where the selection starts: on the first match, or on `+ new` when nothing
 /// matches.
 #[must_use]
-pub fn first(entries: &[Entry]) -> usize {
-    usize::from(entries.len() > 1 && entries[0] == Entry::New)
+pub fn first(entries: &[Entry]) -> Entry {
+    let at = usize::from(entries.len() > 1 && entries[0] == Entry::New);
+    entries.get(at).cloned().unwrap_or(Entry::New)
 }
 
 /// One row of a bundle's Details view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     /// What the bundle is called.
     Name,
@@ -73,15 +73,17 @@ pub enum Row {
     Date,
     /// Free text.
     Notes,
-    /// A document version in it, by index into [`Store::members`].
-    Member(usize),
+    /// A document version in it, by the version's id.
+    Member(String),
 }
 
 /// Every row of bundle `id`, in the order it is drawn.
 #[must_use]
 pub fn rows(store: &Store, id: &str) -> Vec<Row> {
     let mut rows = vec![Row::Name, Row::Date, Row::Notes];
-    rows.extend((0..store.members(id).len()).map(Row::Member));
+    rows.extend(
+        store.members(id).into_iter().map(|member| Row::Member(store.docs[member.doc].id.clone())),
+    );
     rows
 }
 
@@ -96,12 +98,13 @@ pub fn draw_list(
     frame: &mut Frame,
     area: Rect,
     model: &Model,
-    cursor: usize,
+    selected: &Entry,
     theme: Theme,
 ) -> RowGeometry {
     let cols = area.width as usize;
     let gutter = crate::layout::GUTTER as usize;
     let entries = entries(&model.store, &model.query);
+    let cursor = crate::app::position(&entries, selected);
     let height = area.height as usize;
     let skip = (cursor + 1).saturating_sub(height);
     let mut lines = Vec::new();
@@ -120,8 +123,8 @@ pub fn draw_list(
                     Span::styled(fit(&text, cols.saturating_sub(2)), theme.style(Tone::Accent)),
                 ])
             }
-            Entry::Bundle(i) => {
-                let bundle = &model.store.bundles[*i];
+            Entry::Bundle(id) => {
+                let Some(bundle) = model.store.bundle(id) else { continue };
                 let right = format!(
                     "{}  {}",
                     holds(&model.store, bundle),
@@ -153,14 +156,14 @@ pub fn draw_list(
     }
 }
 
-/// Draws bundle `id`'s Details view with row `cursor` selected, and returns
+/// Draws bundle `id`'s Details view with row `selected` selected, and returns
 /// where each row landed.
 pub fn draw_bundle(
     frame: &mut Frame,
     area: Rect,
     model: &Model,
     id: &str,
-    cursor: usize,
+    selected: &Row,
     theme: Theme,
 ) -> RowGeometry {
     let cols = area.width as usize;
@@ -174,9 +177,11 @@ pub fn draw_bundle(
         let style = if lit { theme.band() } else { theme.style(Tone::Muted) };
         Span::styled(format!(" {text:<9}"), style)
     };
+    let rows = rows(&model.store, id);
+    let cursor = crate::app::position(&rows, selected);
     let mut lines = Vec::new();
     let mut owners = Vec::new();
-    for (index, row) in rows(&model.store, id).into_iter().enumerate() {
+    for (index, row) in rows.iter().enumerate() {
         let drawn = match row {
             Row::Name => {
                 let mut style = theme.style(Tone::Title);
@@ -202,15 +207,17 @@ pub fn draw_bundle(
                     Span::raw(truncate(notes, cols.saturating_sub(11 + gutter))),
                 ])]
             }
-            Row::Member(k) => {
-                let doc = &model.store.docs[members[k].doc];
+            Row::Member(doc) => {
+                let Some(doc) = model.store.index_of(doc).map(|i| &model.store.docs[i]) else {
+                    continue;
+                };
                 let right = if doc.superseded { "newer exists" } else { "" };
                 let name = crate::detail::version_name(doc);
                 let room = cols.saturating_sub(3 + width(right) + 1 + gutter);
                 let name = truncate(&name, room);
                 let gap = cols.saturating_sub(3 + width(&name) + width(right) + gutter);
                 let mut drawn = Vec::new();
-                if k == 0 {
+                if rows[index - 1] == Row::Notes {
                     drawn.push(Line::raw(""));
                     drawn.push(Line::styled(" documents", theme.style(Tone::Muted)));
                 }

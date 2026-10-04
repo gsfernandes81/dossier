@@ -101,18 +101,12 @@ fn version_lines(
     }
 }
 
-/// Draws the Versions view of `id` with `cursor` selected, and returns where
-/// each version landed so a tap can find it.
-pub fn draw(
-    frame: &mut Frame,
-    area: Rect,
-    model: &Model,
-    id: &str,
-    cursor: usize,
-    theme: Theme,
-) -> RowGeometry {
+/// Draws the versions of the document version `id` belongs to, `id`
+/// selected, and returns where each version landed so a tap can find it.
+pub fn draw(frame: &mut Frame, area: Rect, model: &Model, id: &str, theme: Theme) -> RowGeometry {
     let cols = area.width as usize;
     let rows = rows(&model.store, id);
+    let cursor = rows.iter().position(|&i| model.store.docs[i].id == id).unwrap_or(0);
     let name = model.store.index_of(id).map_or("", |i| model.store.docs[i].name.as_str());
     let mut heading = vec![
         Line::styled(

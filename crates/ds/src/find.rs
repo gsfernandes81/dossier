@@ -215,14 +215,15 @@ fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     };
 
     let bundles = model.views.iter().find_map(|view| match view {
-        View::Bundles { cursor, .. } => Some(*cursor),
+        View::Bundles { selected, .. } => Some(selected.clone()),
         _ => None,
     });
     match (list_area, bundles) {
-        (Some(list_area), Some(cursor)) => {
+        (Some(list_area), Some(selected)) => {
             model.list = ListGeometry::default();
             model.new_row = None;
-            model.bundle_list = crate::bundles::draw_list(frame, list_area, model, cursor, theme);
+            model.bundle_list =
+                crate::bundles::draw_list(frame, list_area, model, &selected, theme);
         }
         (Some(list_area), None) => draw_list(frame, list_area, model, theme),
         (None, _) => {
@@ -232,11 +233,11 @@ fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     }
     if let Some(detail_area) = detail_area {
         model.record = match model.views.last() {
-            Some(View::Versions { doc, cursor }) => {
-                crate::versions::draw(frame, detail_area, model, doc, *cursor, theme)
+            Some(View::Versions { doc }) => {
+                crate::versions::draw(frame, detail_area, model, doc, theme)
             }
-            Some(View::Bundle { id, cursor }) => {
-                crate::bundles::draw_bundle(frame, detail_area, model, id, *cursor, theme)
+            Some(View::Bundle { id, selected }) => {
+                crate::bundles::draw_bundle(frame, detail_area, model, id, selected, theme)
             }
             _ => crate::detail::draw(frame, detail_area, model, theme),
         };
@@ -1260,20 +1261,14 @@ fn hints(model: &Model) -> Vec<&'static str> {
             hints.extend(verb.and_then(crate::detail::Row::verb));
             hints
         }
-        Some(View::Versions { .. }) => vec!["esc back", "⏎ open"],
-        Some(View::Bundles { cursor, .. }) => {
-            let entries = crate::bundles::entries(&model.store, &model.query);
-            match entries.get(*cursor) {
-                Some(crate::bundles::Entry::New) => vec!["esc back", "⏎ create"],
-                _ => vec!["esc back", "⏎ open"],
-            }
+        Some(View::Bundles { selected: crate::bundles::Entry::New, .. }) => {
+            vec!["esc back", "⏎ create"]
         }
-        Some(View::Bundle { id, cursor }) => {
-            match crate::bundles::rows(&model.store, id).get(*cursor) {
-                Some(crate::bundles::Row::Member(_)) => vec!["esc back", "⏎ open", "e edit"],
-                _ => vec!["esc back", "e edit"],
-            }
+        Some(View::Versions { .. } | View::Bundles { .. }) => vec!["esc back", "⏎ open"],
+        Some(View::Bundle { selected: crate::bundles::Row::Member(_), .. }) => {
+            vec!["esc back", "⏎ open", "e edit"]
         }
+        Some(View::Bundle { .. }) => vec!["esc back", "e edit"],
     };
     // Offered only once there is something to take back, and likewise for the
     // way forward: a hint on a session that has written nothing teaches a key

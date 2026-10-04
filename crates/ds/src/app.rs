@@ -139,16 +139,14 @@ pub enum View {
     },
     /// Every version of the document `doc` belongs to.
     Versions {
-        /// The id of the version it was opened from.
+        /// The selected version's id.
         doc: String,
-        /// The selected version ([`crate::versions::rows`]).
-        cursor: usize,
     },
     /// The bundles, listed in the Find list's place; the search bar searches
     /// them while it is open.
     Bundles {
-        /// The selected entry ([`crate::bundles::entries`]).
-        cursor: usize,
+        /// The selected entry.
+        selected: crate::bundles::Entry,
         /// The Find view's search, put back when this view closes.
         query: String,
     },
@@ -156,8 +154,8 @@ pub enum View {
     Bundle {
         /// The bundle's id.
         id: String,
-        /// The selected row ([`crate::bundles::rows`]).
-        cursor: usize,
+        /// The selected row.
+        selected: crate::bundles::Row,
     },
 }
 
@@ -640,9 +638,7 @@ impl Model {
             Some(View::Details { doc, .. }) => {
                 self.store.index_of(doc).map(|i| &self.store.docs[i])
             }
-            Some(View::Versions { doc, cursor }) => {
-                crate::versions::rows(&self.store, doc).get(*cursor).map(|&i| &self.store.docs[i])
-            }
+            Some(View::Versions { doc }) => self.store.index_of(doc).map(|i| &self.store.docs[i]),
             Some(View::Bundles { .. } | View::Bundle { .. }) => None,
             None if self.on_new => None,
             None => self.rows.get(self.cursor).map(|&i| &self.store.docs[i]),
@@ -707,22 +703,22 @@ impl Model {
     /// selected.
     fn open_versions(&mut self) -> Effect {
         let Some(doc) = self.current().map(|doc| doc.id.clone()) else { return Effect::Idle };
-        let cursor = crate::versions::rows(&self.store, &doc)
-            .iter()
-            .position(|&i| self.store.docs[i].id == doc);
-        self.views.push(View::Versions { doc, cursor: cursor.unwrap_or(0) });
+        self.views.push(View::Versions { doc });
         Effect::Redraw
     }
 
     /// Selects a version, or opens it when it is already selected.
     fn versions_tap(&mut self, index: usize) -> Effect {
-        let Some(View::Versions { cursor, .. }) = self.views.last_mut() else {
+        let Some(View::Versions { doc }) = self.views.last() else { return Effect::Idle };
+        let rows = crate::versions::rows(&self.store, doc);
+        let Some(tapped) = rows.get(index).map(|&i| self.store.docs[i].id.clone()) else {
             return Effect::Idle;
         };
-        if *cursor == index {
+        if tapped == *doc {
             return self.open_version();
         }
-        *cursor = index;
+        self.views.pop();
+        self.views.push(View::Versions { doc: tapped });
         Effect::Redraw
     }
 
@@ -736,32 +732,31 @@ impl Model {
     /// Opens the Bundles view, keeping the Find view's search to put back.
     fn open_bundles(&mut self) -> Effect {
         let query = std::mem::take(&mut self.query);
-        self.views.push(View::Bundles { cursor: 0, query });
+        self.views.push(View::Bundles { selected: crate::bundles::Entry::New, query });
         self.query_cursor = 0;
         self.requery();
         self.reset_bundles();
         Effect::Redraw
     }
 
-    /// Puts the Bundles view's cursor on its first match, or on `+ new`.
+    /// Selects the Bundles view's first match, or `+ new`.
     fn reset_bundles(&mut self) {
         let first = crate::bundles::first(&crate::bundles::entries(&self.store, &self.query));
-        if let Some(View::Bundles { cursor, .. }) = self.views.last_mut() {
-            *cursor = first;
+        if let Some(View::Bundles { selected, .. }) = self.views.last_mut() {
+            *selected = first;
         }
     }
 
     /// `Enter` on the Bundles view: opens the selected bundle, or creates
     /// the one the search names.
     fn enter_bundles(&mut self) -> Effect {
-        let Some(View::Bundles { cursor, .. }) = self.views.last() else { return Effect::Idle };
-        match crate::bundles::entries(&self.store, &self.query).get(*cursor) {
-            Some(crate::bundles::Entry::Bundle(i)) => {
-                let id = self.store.bundles[*i].id.clone();
-                self.views.push(View::Bundle { id, cursor: 0 });
+        let Some(View::Bundles { selected, .. }) = self.views.last() else { return Effect::Idle };
+        match selected.clone() {
+            crate::bundles::Entry::Bundle(id) => {
+                self.views.push(View::Bundle { id, selected: crate::bundles::Row::Name });
                 Effect::Redraw
             }
-            Some(crate::bundles::Entry::New) => {
+            crate::bundles::Entry::New => {
                 if let Some(reason) = self.write.reason() {
                     self.flash = Some(reason.to_string());
                     return Effect::Redraw;
@@ -774,7 +769,6 @@ impl Model {
                 }
                 self.create_bundle(&name)
             }
-            None => Effect::Idle,
         }
     }
 
@@ -786,17 +780,18 @@ impl Model {
             return Effect::Idle;
         };
         let entries = crate::bundles::entries(&self.store, &self.query);
-        let Some(entry) = entries.get(index).copied() else { return Effect::Idle };
+        let Some(entry) = entries.get(index).cloned() else { return Effect::Idle };
         let front = at + 1 == self.views.len();
         self.views.truncate(at + 1);
-        let Some(View::Bundles { cursor, .. }) = self.views.last_mut() else { return Effect::Idle };
-        if front && *cursor == index {
+        let Some(View::Bundles { selected, .. }) = self.views.last_mut() else {
+            return Effect::Idle;
+        };
+        if front && *selected == entry {
             return self.enter_bundles();
         }
-        *cursor = index;
-        if let (false, crate::bundles::Entry::Bundle(i)) = (front, entry) {
-            let id = self.store.bundles[i].id.clone();
-            self.views.push(View::Bundle { id, cursor: 0 });
+        *selected = entry.clone();
+        if let (false, crate::bundles::Entry::Bundle(id)) = (front, entry) {
+            self.views.push(View::Bundle { id, selected: crate::bundles::Row::Name });
         }
         Effect::Redraw
     }
@@ -904,57 +899,20 @@ impl Model {
             journal::Draft::set("bundle", &id, "name", serde_json::Value::from(name)),
         ];
         let back = vec![journal::Draft::delete("bundle", &id)];
-        let open = Some(View::Bundle { id, cursor: 0 });
+        let open = Some(View::Bundle { id, selected: crate::bundles::Row::Name });
         self.write(Change { forward, back }, Landed { open, ..Landed::saying("created") })
-    }
-
-    /// The bundle whose Details view is in front, and its selected row.
-    fn shown_bundle(&self) -> Option<(String, Option<crate::bundles::Row>)> {
-        let Some(View::Bundle { id, cursor }) = self.views.last() else { return None };
-        Some((id.clone(), crate::bundles::rows(&self.store, id).get(*cursor).copied()))
     }
 
     /// A bare letter on a bundle's Details view.
     fn bundle_verb(&mut self, key: char) -> Effect {
-        let Some((id, row)) = self.shown_bundle() else { return Effect::Idle };
-        let field = match row {
-            Some(crate::bundles::Row::Name) => Some(crate::edit::Field::BundleName),
-            Some(crate::bundles::Row::Date) => Some(crate::edit::Field::BundleDate),
-            Some(crate::bundles::Row::Notes) => Some(crate::edit::Field::BundleNotes),
-            Some(crate::bundles::Row::Member(_)) | None => None,
+        let Some(View::Bundle { id, selected }) = self.views.last().cloned() else {
+            return Effect::Idle;
         };
-        match (key, field) {
-            ('e', Some(field)) => {
-                if let Some(reason) = self.write.reason() {
-                    self.flash = Some(reason.to_string());
-                    return Effect::Redraw;
-                }
-                let Some(bundle) = self.store.bundle(&id) else { return Effect::Idle };
-                let current = match field {
-                    crate::edit::Field::BundleName => Some(bundle.name.clone()),
-                    crate::edit::Field::BundleDate => bundle.date.clone(),
-                    _ => Some(bundle.notes.clone()),
-                };
-                self.edit = Some(crate::edit::Edit::new(id, field, current.as_deref()));
-                Effect::Redraw
-            }
-            ('e', None) => {
-                if let Some(reason) = self.write.reason() {
-                    self.flash = Some(reason.to_string());
-                    return Effect::Redraw;
-                }
-                let Some(crate::bundles::Row::Member(k)) = row else { return Effect::Idle };
-                let Some(member) = self.store.members(&id).get(k).cloned() else {
-                    return Effect::Idle;
-                };
-                let doc = self.store.docs[member.doc].id.clone();
-                self.picker =
-                    Some(crate::pick::Picker::new(&doc, crate::pick::Purpose::Member(id)));
-                Effect::Redraw
-            }
-            ('d', _) => self.delete_bundle(),
-            ('u', _) => self.undo(),
-            ('r', _) => self.redo(),
+        match key {
+            'e' => self.edit_bundle_row(id, selected),
+            'd' => self.delete_bundle(),
+            'u' => self.undo(),
+            'r' => self.redo(),
             _ => {
                 self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
                 Effect::Redraw
@@ -962,35 +920,56 @@ impl Model {
         }
     }
 
+    /// `e` on a row of bundle `id`: its own fields edit on the bottom line, and
+    /// a document in it opens the picker for how it is held.
+    fn edit_bundle_row(&mut self, id: String, row: crate::bundles::Row) -> Effect {
+        use crate::bundles::Row;
+        use crate::edit::Field;
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some(bundle) = self.store.bundle(&id) else { return Effect::Idle };
+        let (field, current) = match row {
+            Row::Name => (Field::BundleName, Some(bundle.name.clone())),
+            Row::Date => (Field::BundleDate, bundle.date.clone()),
+            Row::Notes => (Field::BundleNotes, Some(bundle.notes.clone())),
+            Row::Member(doc) => {
+                self.picker =
+                    Some(crate::pick::Picker::new(&doc, crate::pick::Purpose::Member(id)));
+                return Effect::Redraw;
+            }
+        };
+        self.edit = Some(crate::edit::Edit::new(id, field, current.as_deref()));
+        Effect::Redraw
+    }
+
     /// `Enter` on a bundle's Details view: opens a document in it, or edits
     /// the bundle's own row.
     fn enter_bundle(&mut self) -> Effect {
-        let Some((id, row)) = self.shown_bundle() else { return Effect::Idle };
-        match row {
-            Some(crate::bundles::Row::Member(k)) => {
-                let Some(member) = self.store.members(&id).get(k).cloned() else {
-                    return Effect::Idle;
-                };
-                let doc = self.store.docs[member.doc].id.clone();
+        match self.views.last().cloned() {
+            Some(View::Bundle { selected: crate::bundles::Row::Member(doc), .. }) => {
                 self.views.push(View::Details { doc, cursor: 0 });
                 Effect::Redraw
             }
-            Some(_) => self.bundle_verb('e'),
-            None => Effect::Idle,
+            Some(View::Bundle { .. }) => self.bundle_verb('e'),
+            _ => Effect::Idle,
         }
     }
 
     /// Selects a row of a bundle's Details view, or acts on it when it is
     /// already selected.
     fn bundle_tap(&mut self, index: usize) -> Effect {
-        let Some(View::Bundle { id, cursor }) = self.views.last_mut() else { return Effect::Idle };
-        if index >= crate::bundles::rows(&self.store, id).len() {
+        let Some(View::Bundle { id, selected }) = self.views.last_mut() else {
             return Effect::Idle;
-        }
-        if *cursor == index {
+        };
+        let Some(row) = crate::bundles::rows(&self.store, id).get(index).cloned() else {
+            return Effect::Idle;
+        };
+        if *selected == row {
             return self.enter_bundle();
         }
-        *cursor = index;
+        *selected = row;
         Effect::Redraw
     }
 
@@ -1031,7 +1010,7 @@ impl Model {
             self.flash = Some(reason.to_string());
             return Effect::Redraw;
         }
-        let Some((id, _)) = self.shown_bundle() else { return Effect::Idle };
+        let Some(View::Bundle { id, .. }) = self.views.last().cloned() else { return Effect::Idle };
         let Some(bundle) = self.store.bundle(&id) else { return Effect::Idle };
         if !self.delete_armed {
             self.delete_armed = true;
@@ -1056,17 +1035,21 @@ impl Model {
     fn prune_views(&mut self) {
         let store = &self.store;
         self.views.retain(|view| view.alive_in(store));
-        let query = &self.query;
+        // A selection is held by identity, so a reorder cannot move it; only
+        // one whose row has gone needs a new one.
+        let entries = crate::bundles::entries(store, &self.query);
         for view in &mut self.views {
-            let (cursor, count) = match view {
-                View::Versions { doc, cursor } => (cursor, crate::versions::rows(store, doc).len()),
-                View::Bundles { cursor, .. } => {
-                    (cursor, crate::bundles::entries(store, query).len())
+            match view {
+                View::Bundles { selected, .. } if !entries.contains(selected) => {
+                    *selected = crate::bundles::first(&entries);
                 }
-                View::Bundle { id, cursor } => (cursor, crate::bundles::rows(store, id).len()),
-                View::Details { .. } => continue,
-            };
-            *cursor = (*cursor).min(count.saturating_sub(1));
+                View::Bundle { id, selected }
+                    if !crate::bundles::rows(store, id).contains(selected) =>
+                {
+                    *selected = crate::bundles::Row::Name;
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1159,8 +1142,7 @@ impl Model {
         self.on_new = self.offers_new() && (self.on_new || self.rows.is_empty());
     }
 
-    /// Move the cursor, clamped. Never wraps: a wrapping list on a phone is a
-    /// way to lose your place with a fat thumb.
+    /// Moves the list cursor, `+ new` sitting one up from the first row.
     fn move_cursor(&mut self, motion: Motion) {
         if self.rows.is_empty() {
             return;
@@ -1174,16 +1156,7 @@ impl Model {
         if std::mem::take(&mut self.on_new) && !up {
             return;
         }
-        let last = self.rows.len() - 1;
-        let page = self.visible_rows().max(1);
-        self.cursor = match motion {
-            Motion::Up => self.cursor.saturating_sub(1),
-            Motion::Down => (self.cursor + 1).min(last),
-            Motion::PageUp => self.cursor.saturating_sub(page),
-            Motion::PageDown => (self.cursor + page).min(last),
-            Motion::Home => 0,
-            Motion::End => last,
-        };
+        self.cursor = moved(self.cursor, self.rows.len(), motion, self.visible_rows().max(1));
     }
 
     /// The `Enter` verb: open the file.
@@ -1827,14 +1800,8 @@ impl Model {
     /// a much shorter list, so paging is clamped rather than wrapped.
     fn move_record(&mut self, motion: Motion) {
         let Some(doc) = self.current() else { return };
-        let last = crate::detail::rows(doc).len().saturating_sub(1);
-        let at = self.record_cursor();
-        self.set_record_cursor(match motion {
-            Motion::Up => at.saturating_sub(1),
-            Motion::Down => (at + 1).min(last),
-            Motion::PageUp | Motion::Home => 0,
-            Motion::PageDown | Motion::End => last,
-        });
+        let len = crate::detail::rows(doc).len();
+        self.set_record_cursor(moved(self.record_cursor(), len, motion, len));
     }
 
     /// A bare letter on the record surface.
@@ -2762,12 +2729,38 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
 /// A view's own key handler: `None` passes the key on to the shared ones.
 type ViewKeys = fn(&mut Model, &Msg) -> Option<Effect>;
 
+/// The index of `selected` in `items`, or the first when it is not there.
+#[must_use]
+pub fn position<T: PartialEq>(items: &[T], selected: &T) -> usize {
+    items.iter().position(|item| item == selected).unwrap_or(0)
+}
+
+/// Where `motion` lands from `at` in a list of `len`, `page` rows to a page:
+/// clamped, never wrapping, since a wrapping list on a phone is a way to lose
+/// your place with a fat thumb.
+fn moved(at: usize, len: usize, motion: Motion, page: usize) -> usize {
+    let last = len.saturating_sub(1);
+    match motion {
+        Motion::Up => at.saturating_sub(1),
+        Motion::Down => (at + 1).min(last),
+        Motion::PageUp => at.saturating_sub(page),
+        Motion::PageDown => (at + page).min(last),
+        Motion::Home => 0,
+        Motion::End => last,
+    }
+}
+
+/// The item `motion` selects in `items` from `selected`; a page is the whole
+/// list, as these lists are short.
+fn step<T: Clone + PartialEq>(items: &[T], selected: &T, motion: Motion) -> Option<T> {
+    items.get(moved(position(items, selected), items.len(), motion, items.len())).cloned()
+}
+
 /// Keys on the Bundles view: typing searches it, the arrows walk it, and
 /// `Enter` opens a bundle or creates the one the search names.
 fn bundles_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
-    let Some(View::Bundles { cursor, .. }) = model.views.last() else { return None };
-    let at = *cursor;
-    let last = crate::bundles::entries(&model.store, &model.query).len().saturating_sub(1);
+    let Some(View::Bundles { selected, .. }) = model.views.last() else { return None };
+    let entries = crate::bundles::entries(&model.store, &model.query);
     let effect = match msg {
         Msg::Char(' ') if model.query.is_empty() => update(model, Msg::Leader),
         Msg::Char(c) => {
@@ -2782,14 +2775,11 @@ fn bundles_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         }
         Msg::Move(Motion::Home | Motion::End) if !model.query.is_empty() => return None,
         Msg::Move(motion) => {
-            let to = match motion {
-                Motion::Up => at.saturating_sub(1),
-                Motion::Down => (at + 1).min(last),
-                Motion::PageUp | Motion::Home => 0,
-                Motion::PageDown | Motion::End => last,
-            };
-            if let Some(View::Bundles { cursor, .. }) = model.views.last_mut() {
-                *cursor = to;
+            let next = step(&entries, selected, *motion);
+            if let (Some(View::Bundles { selected, .. }), Some(next)) =
+                (model.views.last_mut(), next)
+            {
+                *selected = next;
             }
             Effect::Redraw
         }
@@ -2802,19 +2792,15 @@ fn bundles_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
 /// Keys on a bundle's Details view: the arrows walk its rows, `Enter` opens
 /// a document in it, and letters are its verbs.
 fn bundle_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
-    let Some(View::Bundle { id, cursor }) = model.views.last() else { return None };
-    let at = *cursor;
-    let last = crate::bundles::rows(&model.store, id).len().saturating_sub(1);
+    let Some(View::Bundle { id, selected }) = model.views.last() else { return None };
+    let rows = crate::bundles::rows(&model.store, id);
     Some(match msg {
         Msg::Move(motion) => {
-            let to = match motion {
-                Motion::Up => at.saturating_sub(1),
-                Motion::Down => (at + 1).min(last),
-                Motion::PageUp | Motion::Home => 0,
-                Motion::PageDown | Motion::End => last,
-            };
-            if let Some(View::Bundle { cursor, .. }) = model.views.last_mut() {
-                *cursor = to;
+            let next = step(&rows, selected, *motion);
+            if let (Some(View::Bundle { selected, .. }), Some(next)) =
+                (model.views.last_mut(), next)
+            {
+                *selected = next;
             }
             Effect::Redraw
         }
@@ -2829,20 +2815,17 @@ fn bundle_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
 /// Keys on the Versions view: the arrows walk the versions, `Enter` opens one,
 /// and the only letters are undo and redo.
 fn versions_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
-    let count = match model.views.last() {
-        Some(View::Versions { doc, .. }) => crate::versions::rows(&model.store, doc).len(),
-        _ => return None,
-    };
-    let Some(View::Versions { cursor, .. }) = model.views.last_mut() else { return None };
-    let last = count.saturating_sub(1);
+    let Some(View::Versions { doc }) = model.views.last() else { return None };
     Some(match msg {
         Msg::Move(motion) => {
-            *cursor = match motion {
-                Motion::Up => cursor.saturating_sub(1),
-                Motion::Down => (*cursor + 1).min(last),
-                Motion::PageUp | Motion::Home => 0,
-                Motion::PageDown | Motion::End => last,
-            };
+            let ids: Vec<String> = crate::versions::rows(&model.store, doc)
+                .into_iter()
+                .map(|i| model.store.docs[i].id.clone())
+                .collect();
+            let next = step(&ids, doc, *motion);
+            if let (Some(View::Versions { doc }), Some(next)) = (model.views.last_mut(), next) {
+                *doc = next;
+            }
             Effect::Redraw
         }
         Msg::Enter => model.open_version(),
@@ -4483,7 +4466,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
         update(&mut m, Msg::Char(' '));
         update(&mut m, Msg::Char('v'));
-        assert!(matches!(m.views.last(), Some(View::Versions { cursor: 0, .. })));
+        assert!(matches!(m.views.last(), Some(View::Versions { doc }) if doc == "passport-desk"));
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("passport-desk"));
 
         update(&mut m, Msg::Move(Motion::End));
@@ -4492,7 +4475,7 @@ pub(crate) mod tests {
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("passport"));
 
         update(&mut m, Msg::Esc);
-        assert!(matches!(m.views.last(), Some(View::Versions { cursor: 2, .. })));
+        assert!(matches!(m.views.last(), Some(View::Versions { doc }) if doc == "passport"));
         update(&mut m, Msg::Esc);
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("passport-desk"));
         update(&mut m, Msg::Esc);
@@ -4527,7 +4510,7 @@ pub(crate) mod tests {
     #[test]
     fn the_versions_view_has_no_other_letters() {
         let mut m = with_versions();
-        m.views.push(View::Versions { doc: "passport".into(), cursor: 0 });
+        m.views.push(View::Versions { doc: "passport".into() });
         update(&mut m, Msg::Char('e'));
         assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("no verb on `e`")));
         assert!(m.edit.is_none());
@@ -4561,21 +4544,45 @@ pub(crate) mod tests {
             update(&mut m, Msg::Char(c));
         }
         m.run(crate::sheet::Act::Bundles);
-        assert!(matches!(m.views.last(), Some(View::Bundles { cursor: 0, .. })));
+        assert!(matches!(
+            m.views.last(),
+            Some(View::Bundles { selected: crate::bundles::Entry::Bundle(_), .. })
+        ));
         assert!(m.query.is_empty(), "the Bundles view starts with nothing typed");
 
         for c in "visa".chars() {
             update(&mut m, Msg::Char(c));
         }
         let entries = crate::bundles::entries(&m.store, &m.query);
-        assert_eq!(entries, [crate::bundles::Entry::New, crate::bundles::Entry::Bundle(1)]);
-        assert!(matches!(m.views.last(), Some(View::Bundles { cursor: 1, .. })), "on the match");
+        let visa = crate::bundles::Entry::Bundle("visa".into());
+        assert_eq!(entries, [crate::bundles::Entry::New, visa.clone()]);
+        assert!(
+            matches!(m.views.last(), Some(View::Bundles { selected, .. }) if *selected == visa),
+            "on the match"
+        );
 
         update(&mut m, Msg::Esc);
         assert!(m.query.is_empty(), "the first Esc clears the search");
         update(&mut m, Msg::Esc);
         assert!(m.views.is_empty(), "{:?}", m.views);
         assert_eq!(m.query, "eng", "and the second puts the Find view's back");
+    }
+
+    /// A save that re-sorts the bundles leaves the selection on the bundle it
+    /// was on, since it is held by id.
+    #[test]
+    fn a_resort_keeps_the_selected_bundle() {
+        let mut m = with_bundles();
+        m.run(crate::sheet::Act::Bundles);
+        update(&mut m, Msg::Move(Motion::Down));
+        update(&mut m, Msg::Enter);
+        assert!(matches!(m.views.last(), Some(View::Bundle { id, .. }) if id == "visa"));
+
+        let mut store = m.store.clone();
+        store.bundles.reverse();
+        update(&mut m, Msg::Saved(Box::new(store)));
+        let visa = crate::bundles::Entry::Bundle("visa".into());
+        assert!(matches!(&m.views[0], View::Bundles { selected, .. } if *selected == visa));
     }
 
     /// `+ new` creates the bundle the search names and opens it once it lands.

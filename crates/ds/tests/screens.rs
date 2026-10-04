@@ -592,7 +592,7 @@ fn the_versions_view_draws_two_lines_a_version() {
     m.store.docs[old].issue_date = Some("2024-01-14".into());
     m.store.docs[old].expiry_date = Some("2026-01-13".into());
     m.store.docs.push(new);
-    m.views.push(ds::View::Versions { doc: "eng1".into(), cursor: 0 });
+    m.views.push(ds::View::Versions { doc: "eng1-2".into() });
     let lines = screen(&mut m, 47, 24);
     let text = lines.join("\n");
     assert!(lines[1].contains("ENG-1 Medical"), "{text}");
