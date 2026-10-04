@@ -574,3 +574,25 @@ fn a_new_version_replaces_the_old_one_in_the_fold() {
     assert_eq!(new.name, "COC Certificate");
     assert_eq!(new.expiry_date, None, "dates start empty");
 }
+
+/// A bundle created from the Bundles view folds back as a bundle, never as a
+/// document.
+#[test]
+fn a_created_bundle_folds_as_its_own_record() {
+    let (dir, journal) = journal_with_a_document("bundle");
+    let (mut model, loaded) = load_model(&journal);
+    let ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+
+    update(&mut model, Msg::Char(' '));
+    update(&mut model, Msg::Char('b'));
+    for c in "Joining".chars() {
+        update(&mut model, Msg::Char(c));
+    }
+    let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
+    write_and_reload(&journal, &dir, drafts, ts, &mut model);
+
+    let store = ds::load::load(&journal).expect("reload").store;
+    assert_eq!(store.bundle("joining-desk").map(|b| b.name.as_str()), Some("Joining"));
+    assert_eq!(store.docs.len(), 1, "no document was made");
+    assert!(matches!(model.views.last(), Some(ds::View::Bundle { .. })), "it opened");
+}

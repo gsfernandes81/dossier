@@ -196,32 +196,51 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     );
 }
 
-/// The list, and the detail pane beside or instead of it (U3).
+/// The list — the Find view's, or the Bundles view's in its place — and the
+/// view in front beside it or instead of it.
 fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
+    use crate::app::View;
     model.record = crate::app::RowGeometry::default();
-    let (list_area, detail_area) =
-        match (!model.views.is_empty(), crate::layout::splits(area.width)) {
-            (true, true) => {
-                let split = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-                    .split(area);
-                (Some(split[0]), Some(split[1]))
-            }
-            // Narrow: the record is a full-screen push, and `Esc` pops back with the
-            // cursor where it was.
-            (true, false) => (None, Some(area)),
-            (false, _) => (Some(area), None),
-        };
+    model.bundle_list = crate::app::RowGeometry::default();
+    let pane = matches!(
+        model.views.last(),
+        Some(View::Details { .. } | View::Versions { .. } | View::Bundle { .. })
+    );
+    let (list_area, detail_area) = match (pane, crate::layout::splits(area.width)) {
+        (true, true) => {
+            let split = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .split(area);
+            (Some(split[0]), Some(split[1]))
+        }
+        (true, false) => (None, Some(area)),
+        (false, _) => (Some(area), None),
+    };
 
-    match list_area {
-        Some(list_area) => draw_list(frame, list_area, model, theme),
-        None => model.list = ListGeometry::default(),
+    let bundles = model.views.iter().find_map(|view| match view {
+        View::Bundles { cursor, .. } => Some(*cursor),
+        _ => None,
+    });
+    match (list_area, bundles) {
+        (Some(list_area), Some(cursor)) => {
+            model.list = ListGeometry::default();
+            model.new_row = None;
+            model.bundle_list = crate::bundles::draw_list(frame, list_area, model, cursor, theme);
+        }
+        (Some(list_area), None) => draw_list(frame, list_area, model, theme),
+        (None, _) => {
+            model.list = ListGeometry::default();
+            model.new_row = None;
+        }
     }
     if let Some(detail_area) = detail_area {
         model.record = match model.views.last() {
-            Some(crate::app::View::Versions { doc, cursor }) => {
+            Some(View::Versions { doc, cursor }) => {
                 crate::versions::draw(frame, detail_area, model, doc, *cursor, theme)
+            }
+            Some(View::Bundle { id, cursor }) => {
+                crate::bundles::draw_bundle(frame, detail_area, model, id, *cursor, theme)
             }
             _ => crate::detail::draw(frame, detail_area, model, theme),
         };
@@ -856,6 +875,15 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         Some(crate::app::View::Versions { doc, .. }) => {
             format!("{} versions", crate::versions::rows(&model.store, doc).len())
         }
+        Some(crate::app::View::Bundles { .. }) => {
+            let entries = crate::bundles::entries(&model.store, &model.query);
+            let shown = entries.iter().filter(|e| **e != crate::bundles::Entry::New).count();
+            format!("{shown}/{} bundles", model.store.bundles.len())
+        }
+        Some(crate::app::View::Bundle { id, .. }) => {
+            let n = model.store.members(id).len();
+            format!("{n} document{}", if n == 1 { "" } else { "s" })
+        }
         _ => format!("{}/{}", model.rows.len(), model.store.listed()),
     };
     let cols = area.width as usize;
@@ -1122,8 +1150,8 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
         locpick_hints(picker)
     } else if model.picker.is_some() {
         vec!["⏎ choose", "esc back"]
-    } else if matches!(model.views.last(), Some(crate::app::View::Versions { .. })) {
-        vec!["⏎ open", "esc back"]
+    } else if let Some(hints) = view_hints(model) {
+        hints
     } else if model.detail() {
         // The record's hints **follow the selector**: the verb is shown when the
         // row under it has one and this session can actually write. A hint for a
@@ -1151,6 +1179,34 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
         hints
     } else {
         vec!["⏎ record", "space menu"]
+    }
+}
+
+/// The hints of the views other than the Details view, which follow what is
+/// selected.
+fn view_hints(model: &Model) -> Option<Vec<&'static str>> {
+    use crate::app::View;
+    if model.delete_armed {
+        return Some(vec!["d again to delete", "any key cancels"]);
+    }
+    match model.views.last()? {
+        View::Versions { .. } => Some(vec!["⏎ open", "esc back"]),
+        View::Bundles { cursor, .. } => {
+            let entries = crate::bundles::entries(&model.store, &model.query);
+            let enter = match entries.get(*cursor) {
+                Some(crate::bundles::Entry::New) => "⏎ create",
+                _ => "⏎ open",
+            };
+            Some(vec![enter, "esc back"])
+        }
+        View::Bundle { id, cursor } => {
+            let row = crate::bundles::rows(&model.store, id).get(*cursor).copied();
+            Some(match row {
+                Some(crate::bundles::Row::Member(_)) => vec!["⏎ open", "esc back"],
+                _ => vec!["e edit", "esc back"],
+            })
+        }
+        View::Details { .. } => None,
     }
 }
 
@@ -1205,6 +1261,11 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     }
     if let Some(picker) = &model.locpick {
         return (locpick_hints(picker).join("  "), Tone::Muted);
+    }
+    if let Some(hints) =
+        view_hints(model).filter(|_| model.edit.is_none() && model.picker.is_none())
+    {
+        return (format!("{}  space menu  ^q quit", hints.join("  ")), Tone::Muted);
     }
     let hints = if model.edit.is_some() {
         "⏎ save  esc discard"

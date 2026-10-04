@@ -611,6 +611,63 @@ fn the_renews_picker_has_three_heading_rows() {
     assert!(text.contains("Driving Licence"), "{text}");
 }
 
+/// A model whose store holds two bundles; the dated one holds two documents,
+/// one of them an old version.
+fn with_bundles(cols: u16, rows: u16) -> Model {
+    let mut m = model(cols, rows);
+    let bundle = |id: &str, name: &str, date: Option<&str>| ds::Bundle {
+        id: id.into(),
+        name: name.into(),
+        date: date.map(Into::into),
+        notes: String::new(),
+    };
+    m.store.bundles = vec![
+        bundle("visa", "US visa application", Some("2027-03-27")),
+        bundle("ideas", "Ideas", None),
+    ];
+    for id in ["eng1", "dl"] {
+        let i = m.store.index_of(id).unwrap();
+        m.store.docs[i].bundles.push(ds::Membership { bundle: "visa".into(), file: None });
+    }
+    let eng1 = m.store.index_of("eng1").unwrap();
+    m.store.docs[eng1].superseded = true;
+    m
+}
+
+/// The Bundles view lists each bundle with how many documents it holds and
+/// its date, in the list's place.
+#[test]
+fn the_bundles_view_lists_bundles_in_the_lists_place() {
+    let mut m = with_bundles(47, 24);
+    update(&mut m, Msg::Char(' '));
+    update(&mut m, Msg::Char('b'));
+    let lines = screen(&mut m, 47, 24);
+    let text = lines.join("\n");
+    assert!(lines[1].starts_with("▸ US visa application"), "{text}");
+    assert!(lines[1].trim_end().ends_with("2 docs  03-27"), "{text}");
+    assert!(lines[2].starts_with("  Ideas"), "{text}");
+    assert!(lines[2].contains("0 docs"), "{text}");
+    assert!(text.contains("2/2 bundles"), "{text}");
+}
+
+/// A bundle's Details view: its own rows, then its documents, an old version
+/// marked as having a newer one.
+#[test]
+fn a_bundle_lists_its_documents() {
+    let mut m = with_bundles(47, 24);
+    update(&mut m, Msg::Char(' '));
+    update(&mut m, Msg::Char('b'));
+    update(&mut m, Msg::Enter);
+    let lines = screen(&mut m, 47, 24);
+    let text = lines.join("\n");
+    assert!(lines[1].contains("US visa application"), "{text}");
+    assert!(text.contains("date     2027-03-27"), "{text}");
+    let eng = lines.iter().find(|line| line.contains("ENG-1 Medical")).expect(&text);
+    assert!(eng.trim_end().ends_with("newer exists"), "{text}");
+    assert!(text.contains("Driving Licence"), "{text}");
+    assert!(text.contains("2 documents"), "{text}");
+}
+
 /// An empty store offers its first document, with nothing typed.
 #[test]
 fn an_empty_store_explains_itself() {

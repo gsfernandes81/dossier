@@ -70,6 +70,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod bundles;
 pub mod check;
 pub mod config;
 pub mod detail;

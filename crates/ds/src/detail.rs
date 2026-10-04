@@ -254,7 +254,11 @@ fn render_editable(
     let lit = model.edit.as_ref().is_some_and(|edit| edit.doc == doc.id && edit.field == what);
     match what {
         // Typed from a picker; never a row of its own.
-        Field::Attach | Field::Rename => Vec::new(),
+        Field::Attach
+        | Field::Rename
+        | Field::BundleName
+        | Field::BundleDate
+        | Field::BundleNotes => Vec::new(),
         // The title, and the blank line under it. It carries no label, so being
         // edited is marked on the name itself.
         Field::Name => {

@@ -142,6 +142,21 @@ pub enum View {
         /// The selected version ([`crate::versions::rows`]).
         cursor: usize,
     },
+    /// The bundles, listed in the Find list's place; the search bar searches
+    /// them while it is open.
+    Bundles {
+        /// The selected entry ([`crate::bundles::entries`]).
+        cursor: usize,
+        /// The Find view's search, put back when this view closes.
+        query: String,
+    },
+    /// One bundle's Details view.
+    Bundle {
+        /// The bundle's id.
+        id: String,
+        /// The selected row ([`crate::bundles::rows`]).
+        cursor: usize,
+    },
 }
 
 /// Where the cursor should go.
@@ -416,6 +431,8 @@ pub struct Model {
     pub offset: usize,
     /// The cursor is on the `+ new` row pinned above the list.
     pub on_new: bool,
+    /// Where the Bundles view's entries were last drawn.
+    pub bundle_list: RowGeometry,
     /// The screen row the `+ new` row was last drawn on.
     pub new_row: Option<u16>,
     /// The views pushed over the Find view, innermost last.
@@ -470,6 +487,9 @@ pub struct Model {
     /// Whether the forward append in flight makes a new version, which opens
     /// in place of the old one's Details view once it lands.
     pending_version: bool,
+    /// The view to open once the append in flight lands: a bundle just
+    /// created.
+    pending_view: Option<View>,
     /// What the status line says when the append in flight lands, instead of
     /// "saved".
     saved_note: Option<String>,
@@ -531,6 +551,7 @@ impl Model {
             cursor: 0,
             offset: 0,
             on_new: false,
+            bundle_list: RowGeometry::default(),
             new_row: None,
             views: Vec::new(),
             esc_armed: false,
@@ -547,6 +568,7 @@ impl Model {
             direction: Direction::Forward,
             pending_delete: false,
             pending_version: false,
+            pending_view: None,
             saved_note: None,
             remove_armed: None,
             delete_armed: false,
@@ -578,6 +600,7 @@ impl Model {
             Some(View::Versions { doc, cursor }) => {
                 crate::versions::rows(&self.store, doc).get(*cursor).map(|&i| &self.store.docs[i])
             }
+            Some(View::Bundles { .. } | View::Bundle { .. }) => None,
             None if self.on_new => None,
             None => self.rows.get(self.cursor).map(|&i| &self.store.docs[i]),
         }
@@ -594,7 +617,7 @@ impl Model {
     pub fn record_cursor(&self) -> usize {
         match self.views.last() {
             Some(View::Details { cursor, .. }) => *cursor,
-            Some(View::Versions { .. }) | None => 0,
+            _ => 0,
         }
     }
 
@@ -645,14 +668,256 @@ impl Model {
         Effect::Redraw
     }
 
+    /// Opens the Bundles view, keeping the Find view's search to put back.
+    fn open_bundles(&mut self) -> Effect {
+        let query = std::mem::take(&mut self.query);
+        self.views.push(View::Bundles { cursor: 0, query });
+        self.query_cursor = 0;
+        self.requery();
+        self.reset_bundles();
+        Effect::Redraw
+    }
+
+    /// Puts the Bundles view's cursor on its first match, or on `+ new`.
+    fn reset_bundles(&mut self) {
+        let first = crate::bundles::first(&crate::bundles::entries(&self.store, &self.query));
+        if let Some(View::Bundles { cursor, .. }) = self.views.last_mut() {
+            *cursor = first;
+        }
+    }
+
+    /// `Enter` on the Bundles view: opens the selected bundle, or creates
+    /// the one the search names.
+    fn enter_bundles(&mut self) -> Effect {
+        let Some(View::Bundles { cursor, .. }) = self.views.last() else { return Effect::Idle };
+        match crate::bundles::entries(&self.store, &self.query).get(*cursor) {
+            Some(crate::bundles::Entry::Bundle(i)) => {
+                let id = self.store.bundles[*i].id.clone();
+                self.views.push(View::Bundle { id, cursor: 0 });
+                Effect::Redraw
+            }
+            Some(crate::bundles::Entry::New) => {
+                if let Some(reason) = self.write.reason() {
+                    self.flash = Some(reason.to_string());
+                    return Effect::Redraw;
+                }
+                let name = self.query.trim().to_string();
+                if name.is_empty() {
+                    self.edit =
+                        Some(crate::edit::Edit::new("", crate::edit::Field::BundleName, None));
+                    return Effect::Redraw;
+                }
+                self.create_bundle(&name)
+            }
+            None => Effect::Idle,
+        }
+    }
+
+    /// Selects an entry of the Bundles view, or acts on it when it is
+    /// already selected. Beside an open view, a bundle opens at once.
+    fn bundles_tap(&mut self, index: usize) -> Effect {
+        let Some(at) = self.views.iter().position(|view| matches!(view, View::Bundles { .. }))
+        else {
+            return Effect::Idle;
+        };
+        let entries = crate::bundles::entries(&self.store, &self.query);
+        let Some(entry) = entries.get(index).copied() else { return Effect::Idle };
+        let front = at + 1 == self.views.len();
+        self.views.truncate(at + 1);
+        let Some(View::Bundles { cursor, .. }) = self.views.last_mut() else { return Effect::Idle };
+        if front && *cursor == index {
+            return self.enter_bundles();
+        }
+        *cursor = index;
+        if let (false, crate::bundles::Entry::Bundle(i)) = (front, entry) {
+            let id = self.store.bundles[i].id.clone();
+            self.views.push(View::Bundle { id, cursor: 0 });
+        }
+        Effect::Redraw
+    }
+
+    /// Creates a bundle named `name` and opens it once it lands.
+    fn create_bundle(&mut self, name: &str) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let taken = self.store.bundles.iter().map(|bundle| bundle.id.as_str()).collect();
+        let id = crate::id::mint(name, self.write.device().unwrap_or_default(), &taken);
+        let forward = vec![
+            journal::Draft::create("bundle", &id),
+            journal::Draft::set("bundle", &id, "name", serde_json::Value::from(name)),
+        ];
+        self.pending = Some(Change {
+            forward: forward.clone(),
+            back: vec![journal::Draft::delete("bundle", &id)],
+        });
+        self.direction = Direction::Forward;
+        self.pending_view = Some(View::Bundle { id, cursor: 0 });
+        self.saved_note = Some("created".into());
+        Effect::Append(forward)
+    }
+
+    /// The bundle whose Details view is in front, and its selected row.
+    fn shown_bundle(&self) -> Option<(String, Option<crate::bundles::Row>)> {
+        let Some(View::Bundle { id, cursor }) = self.views.last() else { return None };
+        Some((id.clone(), crate::bundles::rows(&self.store, id).get(*cursor).copied()))
+    }
+
+    /// A bare letter on a bundle's Details view.
+    fn bundle_verb(&mut self, key: char) -> Effect {
+        let Some((id, row)) = self.shown_bundle() else { return Effect::Idle };
+        let field = match row {
+            Some(crate::bundles::Row::Name) => Some(crate::edit::Field::BundleName),
+            Some(crate::bundles::Row::Date) => Some(crate::edit::Field::BundleDate),
+            Some(crate::bundles::Row::Notes) => Some(crate::edit::Field::BundleNotes),
+            Some(crate::bundles::Row::Member(_)) | None => None,
+        };
+        match (key, field) {
+            ('e', Some(field)) => {
+                if let Some(reason) = self.write.reason() {
+                    self.flash = Some(reason.to_string());
+                    return Effect::Redraw;
+                }
+                let Some(bundle) = self.store.bundle(&id) else { return Effect::Idle };
+                let current = match field {
+                    crate::edit::Field::BundleName => Some(bundle.name.clone()),
+                    crate::edit::Field::BundleDate => bundle.date.clone(),
+                    _ => Some(bundle.notes.clone()),
+                };
+                self.edit = Some(crate::edit::Edit::new(id, field, current.as_deref()));
+                Effect::Redraw
+            }
+            ('e', None) => {
+                self.flash = Some("that row cannot be edited yet".into());
+                Effect::Redraw
+            }
+            ('d', _) => self.delete_bundle(),
+            ('u', _) => self.undo(),
+            ('r', _) => self.redo(),
+            _ => {
+                self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
+                Effect::Redraw
+            }
+        }
+    }
+
+    /// `Enter` on a bundle's Details view: opens a document in it, or edits
+    /// the bundle's own row.
+    fn enter_bundle(&mut self) -> Effect {
+        let Some((id, row)) = self.shown_bundle() else { return Effect::Idle };
+        match row {
+            Some(crate::bundles::Row::Member(k)) => {
+                let Some(member) = self.store.members(&id).get(k).cloned() else {
+                    return Effect::Idle;
+                };
+                let doc = self.store.docs[member.doc].id.clone();
+                self.views.push(View::Details { doc, cursor: 0 });
+                Effect::Redraw
+            }
+            Some(_) => self.bundle_verb('e'),
+            None => Effect::Idle,
+        }
+    }
+
+    /// Selects a row of a bundle's Details view, or acts on it when it is
+    /// already selected.
+    fn bundle_tap(&mut self, index: usize) -> Effect {
+        let Some(View::Bundle { id, cursor }) = self.views.last_mut() else { return Effect::Idle };
+        if index >= crate::bundles::rows(&self.store, id).len() {
+            return Effect::Idle;
+        }
+        if *cursor == index {
+            return self.enter_bundle();
+        }
+        *cursor = index;
+        Effect::Redraw
+    }
+
+    /// Writes one of a bundle's own fields, or creates the bundle when `id` is
+    /// empty, or says why it cannot be written.
+    fn edit_bundle(
+        &mut self,
+        id: &str,
+        field: crate::edit::Field,
+        typed: &str,
+    ) -> Result<Effect, String> {
+        let value = field.validate(typed)?;
+        if id.is_empty() {
+            return Ok(self.create_bundle(typed.trim()));
+        }
+        let Some(bundle) = self.store.bundle(id) else { return Ok(Effect::Redraw) };
+        let was: Option<serde_json::Value> = match field {
+            crate::edit::Field::BundleName => Some(bundle.name.clone().into()),
+            crate::edit::Field::BundleDate => bundle.date.clone().map(Into::into),
+            _ => (!bundle.notes.is_empty()).then(|| bundle.notes.clone().into()),
+        };
+        if value == was {
+            return Ok(Effect::Redraw);
+        }
+        let name = field.journal_field();
+        let write = |value: Option<serde_json::Value>| match value {
+            Some(value) => journal::Draft::set("bundle", id, name, value),
+            None => journal::Draft::unset("bundle", id, name),
+        };
+        let forward = vec![write(value)];
+        self.pending = Some(Change { forward: forward.clone(), back: vec![write(was)] });
+        self.direction = Direction::Forward;
+        Ok(Effect::Append(forward))
+    }
+
+    /// Deletes the bundle in front on a second `d`. Its documents are never
+    /// touched: their entries for it read as nothing until undo restores it.
+    fn delete_bundle(&mut self) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some((id, _)) = self.shown_bundle() else { return Effect::Idle };
+        let Some(bundle) = self.store.bundle(&id) else { return Effect::Idle };
+        if !self.delete_armed {
+            self.delete_armed = true;
+            self.flash =
+                Some(format!("delete {:?}? press d again — its documents stay", bundle.name));
+            return Effect::Redraw;
+        }
+        let set = |field: &str, value: &str| {
+            journal::Draft::set("bundle", &id, field, serde_json::Value::from(value))
+        };
+        let mut back = vec![journal::Draft::create("bundle", &id), set("name", &bundle.name)];
+        if let Some(date) = &bundle.date {
+            back.push(set("date", date));
+        }
+        if !bundle.notes.is_empty() {
+            back.push(set("notes", &bundle.notes));
+        }
+        let forward = vec![journal::Draft::delete("bundle", &id)];
+        self.delete_armed = false;
+        self.pending = Some(Change { forward: forward.clone(), back });
+        self.direction = Direction::Forward;
+        self.pending_delete = true;
+        Effect::Append(forward)
+    }
+
     /// Drops every view whose record is gone from the store.
     fn prune_views(&mut self) {
         let store = &self.store;
         self.views.retain(|view| match view {
             View::Details { doc, .. } | View::Versions { doc, .. } => store.index_of(doc).is_some(),
+            View::Bundles { .. } => true,
+            View::Bundle { id, .. } => store.bundle(id).is_some(),
         });
-        if let Some(View::Versions { doc, cursor }) = self.views.last_mut() {
-            *cursor = (*cursor).min(crate::versions::rows(store, doc).len().saturating_sub(1));
+        let query = &self.query;
+        for view in &mut self.views {
+            let (cursor, count) = match view {
+                View::Versions { doc, cursor } => (cursor, crate::versions::rows(store, doc).len()),
+                View::Bundles { cursor, .. } => {
+                    (cursor, crate::bundles::entries(store, query).len())
+                }
+                View::Bundle { id, cursor } => (cursor, crate::bundles::rows(store, id).len()),
+                View::Details { .. } => continue,
+            };
+            *cursor = (*cursor).min(count.saturating_sub(1));
         }
     }
 
@@ -1246,7 +1511,17 @@ impl Model {
             self.sheet = false;
             return Effect::Redraw;
         }
-        if !self.views.is_empty() {
+        if matches!(self.views.last(), Some(View::Bundles { .. })) && !self.query.is_empty() {
+            self.query.clear();
+            self.query_cursor = 0;
+            self.requery();
+            self.reset_bundles();
+        } else if let Some(View::Bundles { query, .. }) = self.views.last().cloned() {
+            self.views.pop();
+            self.query_cursor = query.chars().count();
+            self.query = query;
+            self.requery();
+        } else if !self.views.is_empty() {
             self.views.pop();
         } else if !self.query.is_empty() {
             self.query.clear();
@@ -1311,7 +1586,15 @@ impl Model {
             }
             crate::sheet::Act::Edit => {
                 self.sheet = false;
-                self.record_verb('e')
+                if matches!(self.views.last(), Some(View::Bundle { .. })) {
+                    self.bundle_verb('e')
+                } else {
+                    self.record_verb('e')
+                }
+            }
+            crate::sheet::Act::Bundles => {
+                self.sheet = false;
+                self.open_bundles()
             }
             crate::sheet::Act::Undo => {
                 self.sheet = false;
@@ -1339,7 +1622,11 @@ impl Model {
             }
             crate::sheet::Act::Delete => {
                 self.sheet = false;
-                self.delete()
+                if matches!(self.views.last(), Some(View::Bundle { .. })) {
+                    self.delete_bundle()
+                } else {
+                    self.delete()
+                }
             }
             crate::sheet::Act::NewVersion => {
                 self.sheet = false;
@@ -1460,7 +1747,11 @@ impl Model {
             crate::edit::Field::Issued => doc.issue_date.clone(),
             crate::edit::Field::Tags => Some(doc.tags.join(" ")),
             crate::edit::Field::Notes => Some(doc.notes.clone()),
-            crate::edit::Field::Attach | crate::edit::Field::Rename => None,
+            crate::edit::Field::Attach
+            | crate::edit::Field::Rename
+            | crate::edit::Field::BundleName
+            | crate::edit::Field::BundleDate
+            | crate::edit::Field::BundleNotes => None,
         };
         self.edit = Some(crate::edit::Edit::new(doc.id.clone(), field, current.as_deref()));
         self.sheet = false;
@@ -1784,10 +2075,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         }
     }
 
-    if matches!(model.views.last(), Some(View::Versions { .. })) {
-        if let Some(effect) = versions_key(model, &msg) {
-            return effect;
-        }
+    let hook: Option<ViewKeys> = match model.views.last() {
+        Some(View::Versions { .. }) => Some(versions_key),
+        Some(View::Bundles { .. }) => Some(bundles_key),
+        Some(View::Bundle { .. }) => Some(bundle_key),
+        Some(View::Details { .. }) | None => None,
+    };
+    if let Some(effect) = hook.and_then(|hook| hook(model, &msg)) {
+        return effect;
     }
 
     match msg {
@@ -1800,6 +2095,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             let closed = model.edit.take();
             let created = closed.as_ref().is_some_and(|edit| edit.creating);
             let version = std::mem::take(&mut model.pending_version);
+            let opening = model.pending_view.take();
             let direction = std::mem::replace(&mut model.direction, Direction::Forward);
             model.delete_armed = false;
             // The write landed, so the change is real and belongs on the stack
@@ -1832,6 +2128,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                     Some(if direction == Direction::Undo { "undone" } else { "redone" }.into());
             } else if std::mem::take(&mut model.pending_delete) {
                 model.flash = Some("deleted — u to undo".into());
+            } else if let Some(view @ View::Bundle { .. }) = opening.filter(
+                |view| matches!(view, View::Bundle { id, .. } if model.store.bundle(id).is_some()),
+            ) {
+                model.views.push(view);
+                model.flash = Some(note.unwrap_or_else(|| "saved".into()));
             } else if (created || version) && model.store.index_of(&anchor).is_some() {
                 // The Details view is the only place a new document's other
                 // fields can be filled in.
@@ -1840,7 +2141,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 }
                 model.views.push(View::Details { doc: anchor, cursor: 0 });
                 model.flash = Some(if version { "new version" } else { "created" }.into());
-            } else if kept {
+            } else if kept || anchor.is_empty() {
                 model.flash = Some(note.unwrap_or_else(|| "saved".into()));
             } else {
                 model.flash = Some("saved — it no longer matches the filter".into());
@@ -1867,6 +2168,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.direction = Direction::Forward;
             model.pending_delete = false;
             model.pending_version = false;
+            model.pending_view = None;
             model.saved_note = None;
             model.delete_armed = false;
             model.flash = Some(reason.clone());
@@ -1990,7 +2292,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             // A pushed record covers the list, so the chrome under it belongs to
             // a surface you cannot see. Tapping it would mutate that surface
             // blind — the stack metaphor has to hold for touch too.
-            let pushed = !model.views.is_empty() && !crate::layout::splits(model.cols);
+            let covering = matches!(
+                model.views.last(),
+                Some(View::Details { .. } | View::Versions { .. } | View::Bundle { .. })
+            );
+            let pushed = covering && !crate::layout::splits(model.cols);
+            let bundles = model.views.iter().any(|view| matches!(view, View::Bundles { .. }));
             let (top, bottom) = search_zone(model);
             if model.sheet && !model.leader_zone.hit(col, row) {
                 // Anywhere else dismisses it, the way a menu should.
@@ -2003,7 +2310,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 } else {
                     update(model, Msg::Leader)
                 }
-            } else if model.count_zone.hit(col, row) && !pushed {
+            } else if model.count_zone.hit(col, row) && !pushed && !bundles {
                 // You tap the number that told you there were three; a second
                 // tap turns the filter off again.
                 update(model, Msg::ToggleExpiring)
@@ -2019,8 +2326,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 match model.views.last() {
                     Some(View::Details { .. }) => model.record_tap(index),
                     Some(View::Versions { .. }) => model.versions_tap(index),
-                    None => Effect::Idle,
+                    Some(View::Bundle { .. }) => model.bundle_tap(index),
+                    Some(View::Bundles { .. }) | None => Effect::Idle,
                 }
+            } else if let Some(index) = model.bundle_list.at(col, row) {
+                model.bundles_tap(index)
             } else if model.new_row == Some(row) && !pushed {
                 if model.on_new {
                     model.drill()
@@ -2101,7 +2411,18 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             // the same op twice. The journal would survive it — LWW on identical
             // values is a no-op — but the history would carry a lie about what
             // the user did.
-            if edit.field == crate::edit::Field::Rename {
+            if edit.field.of_bundle() {
+                match model.edit_bundle(&edit.doc, edit.field, &edit.buffer) {
+                    Ok(effect) => {
+                        model.edit = None;
+                        return Some(effect);
+                    }
+                    Err(complaint) => {
+                        model.flash = Some(complaint);
+                        Effect::Redraw
+                    }
+                }
+            } else if edit.field == crate::edit::Field::Rename {
                 match model.rename(&edit.doc, &edit.buffer) {
                     Ok(effect) => {
                         model.edit = None;
@@ -2220,6 +2541,73 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         Msg::Backspace | Msg::Enter | Msg::Move(_) | Msg::Left | Msg::Right => Some(Effect::Idle),
         _ => None,
     }
+}
+
+/// A view's own key handler: `None` passes the key on to the shared ones.
+type ViewKeys = fn(&mut Model, &Msg) -> Option<Effect>;
+
+/// Keys on the Bundles view: typing searches it, the arrows walk it, and
+/// `Enter` opens a bundle or creates the one the search names.
+fn bundles_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    let Some(View::Bundles { cursor, .. }) = model.views.last() else { return None };
+    let at = *cursor;
+    let last = crate::bundles::entries(&model.store, &model.query).len().saturating_sub(1);
+    let effect = match msg {
+        Msg::Char(' ') if model.query.is_empty() => update(model, Msg::Leader),
+        Msg::Char(c) => {
+            model.type_char(*c);
+            model.reset_bundles();
+            Effect::Redraw
+        }
+        Msg::Backspace => {
+            model.rub_out();
+            model.reset_bundles();
+            Effect::Redraw
+        }
+        Msg::Move(Motion::Home | Motion::End) if !model.query.is_empty() => return None,
+        Msg::Move(motion) => {
+            let to = match motion {
+                Motion::Up => at.saturating_sub(1),
+                Motion::Down => (at + 1).min(last),
+                Motion::PageUp | Motion::Home => 0,
+                Motion::PageDown | Motion::End => last,
+            };
+            if let Some(View::Bundles { cursor, .. }) = model.views.last_mut() {
+                *cursor = to;
+            }
+            Effect::Redraw
+        }
+        Msg::Enter => model.enter_bundles(),
+        _ => return None,
+    };
+    Some(effect)
+}
+
+/// Keys on a bundle's Details view: the arrows walk its rows, `Enter` opens
+/// a document in it, and letters are its verbs.
+fn bundle_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    let Some(View::Bundle { id, cursor }) = model.views.last() else { return None };
+    let at = *cursor;
+    let last = crate::bundles::rows(&model.store, id).len().saturating_sub(1);
+    Some(match msg {
+        Msg::Move(motion) => {
+            let to = match motion {
+                Motion::Up => at.saturating_sub(1),
+                Motion::Down => (at + 1).min(last),
+                Motion::PageUp | Motion::Home => 0,
+                Motion::PageDown | Motion::End => last,
+            };
+            if let Some(View::Bundle { cursor, .. }) = model.views.last_mut() {
+                *cursor = to;
+            }
+            Effect::Redraw
+        }
+        Msg::Enter => model.enter_bundle(),
+        Msg::Char(' ') => update(model, Msg::Leader),
+        Msg::Char(c) => model.bundle_verb(*c),
+        Msg::Backspace | Msg::Left | Msg::Right => Effect::Idle,
+        _ => return None,
+    })
 }
 
 /// Keys on the Versions view: the arrows walk the versions, `Enter` opens one,
@@ -3916,6 +4304,161 @@ pub(crate) mod tests {
         update(&mut m, Msg::Char('e'));
         assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("no verb on `e`")));
         assert!(m.edit.is_none());
+    }
+
+    /// A model with two bundles, the newer one holding `coc` and `eng1`.
+    fn with_bundles() -> Model {
+        let mut m = writable();
+        let bundle = |id: &str, name: &str, date: Option<&str>| crate::Bundle {
+            id: id.into(),
+            name: name.into(),
+            date: date.map(Into::into),
+            notes: String::new(),
+        };
+        m.store.bundles = vec![
+            bundle("joining", "Joining", Some("2026-11-01")),
+            bundle("visa", "US visa", Some("2026-03-27")),
+        ];
+        for doc in &mut m.store.docs[..2] {
+            doc.bundles.push(crate::Membership { bundle: "joining".into(), file: None });
+        }
+        m
+    }
+
+    /// `b` opens the Bundles view with its own search; `Esc` clears that
+    /// search, then puts the Find view's back.
+    #[test]
+    fn the_bundles_view_has_its_own_search() {
+        let mut m = with_bundles();
+        for c in "eng".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        m.run(crate::sheet::Act::Bundles);
+        assert!(matches!(m.views.last(), Some(View::Bundles { cursor: 0, .. })));
+        assert!(m.query.is_empty(), "the Bundles view starts with nothing typed");
+
+        for c in "visa".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        let entries = crate::bundles::entries(&m.store, &m.query);
+        assert_eq!(entries, [crate::bundles::Entry::New, crate::bundles::Entry::Bundle(1)]);
+        assert!(matches!(m.views.last(), Some(View::Bundles { cursor: 1, .. })), "on the match");
+
+        update(&mut m, Msg::Esc);
+        assert!(m.query.is_empty(), "the first Esc clears the search");
+        update(&mut m, Msg::Esc);
+        assert!(m.views.is_empty(), "{:?}", m.views);
+        assert_eq!(m.query, "eng", "and the second puts the Find view's back");
+    }
+
+    /// `+ new` creates the bundle the search names and opens it once it lands.
+    #[test]
+    fn a_bundle_is_created_from_the_search() {
+        let mut m = with_bundles();
+        m.run(crate::sheet::Act::Bundles);
+        for c in "Panama".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        let id = "panama-desk";
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![
+                journal::Draft::create("bundle", id),
+                journal::Draft::set("bundle", id, "name", "Panama"),
+            ])
+        );
+        let mut store = m.store.clone();
+        store.bundles.push(crate::Bundle {
+            id: id.into(),
+            name: "Panama".into(),
+            date: None,
+            notes: String::new(),
+        });
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert!(matches!(m.views.last(), Some(View::Bundle { id, .. }) if id == "panama-desk"));
+        assert_eq!(m.flash.as_deref(), Some("created"));
+        assert_eq!(m.query, "Panama", "the search is still there");
+    }
+
+    /// With no bundles at all, `+ new bundle` shows with nothing typed and
+    /// asks for the name.
+    #[test]
+    fn the_first_bundle_asks_for_its_name() {
+        let mut m = writable();
+        m.run(crate::sheet::Act::Bundles);
+        update(&mut m, Msg::Enter);
+        assert!(m.edit.as_ref().is_some_and(|edit| edit.field == crate::edit::Field::BundleName));
+        for c in "Joining".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        let Effect::Append(drafts) = update(&mut m, Msg::Enter) else { panic!("no append") };
+        assert_eq!(drafts[0], journal::Draft::create("bundle", "joining-desk"));
+        assert!(m.edit.is_none());
+    }
+
+    /// A bundle's own rows edit on the bottom line, as one undoable change;
+    /// `Enter` on a document in it opens that document.
+    #[test]
+    fn a_bundle_edits_its_rows_and_opens_its_documents() {
+        let mut m = with_bundles();
+        m.run(crate::sheet::Act::Bundles);
+        update(&mut m, Msg::Enter);
+        assert!(matches!(m.views.last(), Some(View::Bundle { id, .. }) if id == "joining"));
+
+        update(&mut m, Msg::Move(Motion::Down));
+        update(&mut m, Msg::Char('e'));
+        for _ in 0..10 {
+            update(&mut m, Msg::Backspace);
+        }
+        for c in "2026-12-01".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![journal::Draft::set("bundle", "joining", "date", "2026-12-01")])
+        );
+        assert_eq!(
+            m.pending.as_ref().map(|change| change.back.clone()),
+            Some(vec![journal::Draft::set("bundle", "joining", "date", "2026-11-01")])
+        );
+        let store = m.store.clone();
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert_eq!(m.flash.as_deref(), Some("saved"));
+
+        update(&mut m, Msg::Move(Motion::End));
+        update(&mut m, Msg::Enter);
+        assert!(m.detail());
+        assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("eng1"));
+    }
+
+    /// Deleting a bundle takes a second `d`, leaves its documents alone, and
+    /// undo brings it back whole.
+    #[test]
+    fn a_bundle_is_deleted_on_a_second_d() {
+        let mut m = with_bundles();
+        m.store.bundles[0].notes = "for the ship".into();
+        m.run(crate::sheet::Act::Bundles);
+        update(&mut m, Msg::Enter);
+        assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw);
+        assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("its documents stay")));
+        assert_eq!(
+            update(&mut m, Msg::Char('d')),
+            Effect::Append(vec![journal::Draft::delete("bundle", "joining")])
+        );
+        let mut store = m.store.clone();
+        store.bundles.remove(0);
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert!(matches!(m.views.last(), Some(View::Bundles { .. })), "back on the list");
+        assert_eq!(m.flash.as_deref(), Some("deleted — u to undo"));
+        assert_eq!(
+            m.undo.last().map(|change| change.back.clone()),
+            Some(vec![
+                journal::Draft::create("bundle", "joining"),
+                journal::Draft::set("bundle", "joining", "name", "Joining"),
+                journal::Draft::set("bundle", "joining", "date", "2026-11-01"),
+                journal::Draft::set("bundle", "joining", "notes", "for the ship"),
+            ])
+        );
     }
 
     /// **An IME dismissal must never quit the app.** Termux sends `Esc` to close

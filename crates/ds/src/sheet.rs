@@ -40,6 +40,8 @@ pub enum Act {
     NewVersion,
     /// List every version of the record's document.
     Versions,
+    /// Open the Bundles view.
+    Bundles,
     /// Rename the selected physical location.
     Rename,
     /// Move the selected physical location into another.
@@ -74,7 +76,18 @@ const fn item(key: char, label: &'static str, act: Act) -> Item {
 /// The sheet's verbs for what is on screen.
 #[must_use]
 pub fn items(model: &Model) -> Vec<Item> {
-    if matches!(model.views.last(), Some(crate::app::View::Versions { .. })) {
+    if matches!(model.views.last(), Some(crate::app::View::Bundle { .. })) {
+        vec![
+            Item { accel: "e", ..item('e', "edit this row", Act::Edit) },
+            Item { accel: "u ^z", ..item('u', "undo last change", Act::Undo) },
+            Item { accel: "r ^y", ..item('r', "redo", Act::Redo) },
+            Item { accel: "d d", ..item('d', "delete this bundle", Act::Delete) },
+            item('q', "quit", Act::Quit),
+        ]
+    } else if matches!(
+        model.views.last(),
+        Some(crate::app::View::Versions { .. } | crate::app::View::Bundles { .. })
+    ) {
         vec![
             Item { accel: "u ^z", ..item('u', "undo last change", Act::Undo) },
             Item { accel: "r ^y", ..item('r', "redo", Act::Redo) },
@@ -103,6 +116,7 @@ pub fn items(model: &Model) -> Vec<Item> {
     } else {
         vec![
             item('f', "filter", Act::Filter),
+            item('b', "bundles", Act::Bundles),
             Item { accel: "^z", ..item('u', "undo last change", Act::Undo) },
             Item { accel: "^y", ..item('r', "redo", Act::Redo) },
             item('q', "quit", Act::Quit),
@@ -120,7 +134,7 @@ mod tests {
     fn the_verbs_follow_the_view() {
         let mut model = crate::app::tests::model();
         let keys = |model: &Model| items(model).iter().map(|item| item.key).collect::<String>();
-        assert_eq!(keys(&model), "furq");
+        assert_eq!(keys(&model), "fburq");
         model.views.push(crate::app::View::Details { doc: "coc".into(), cursor: 0 });
         assert_eq!(keys(&model), "elnvurdq");
     }

@@ -62,6 +62,12 @@ pub enum Field {
     Attach,
     /// A physical location's name; the edit's id is the location's.
     Rename,
+    /// A bundle's name; the edit's id is the bundle's, or empty for a new one.
+    BundleName,
+    /// The date a bundle is for, same form as the document dates.
+    BundleDate,
+    /// A bundle's free text.
+    BundleNotes,
 }
 
 impl Field {
@@ -69,13 +75,20 @@ impl Field {
     #[must_use]
     pub fn journal_field(self) -> &'static str {
         match self {
-            Field::Name | Field::Rename => "name",
+            Field::Name | Field::Rename | Field::BundleName => "name",
             Field::Expiry => "expiry_date",
             Field::Issued => "issue_date",
             Field::Tags => "tags",
-            Field::Notes => "notes",
+            Field::Notes | Field::BundleNotes => "notes",
             Field::Attach => "files",
+            Field::BundleDate => "date",
         }
+    }
+
+    /// Whether this is one of a bundle's own fields.
+    #[must_use]
+    pub fn of_bundle(self) -> bool {
+        matches!(self, Field::BundleName | Field::BundleDate | Field::BundleNotes)
     }
 
     /// What the store holds for this field right now, as the journal sees it.
@@ -98,7 +111,7 @@ impl Field {
             Field::Tags => (!doc.tags.is_empty()).then(|| doc.tags.clone().into()),
             Field::Notes => (!doc.notes.is_empty()).then(|| doc.notes.clone().into()),
             Field::Attach => (!doc.files.is_empty()).then(|| crate::doc::files_value(&doc.files)),
-            Field::Rename => None,
+            Field::Rename | Field::BundleName | Field::BundleDate | Field::BundleNotes => None,
         }
     }
 
@@ -110,13 +123,14 @@ impl Field {
     #[must_use]
     pub fn prompt(self) -> &'static str {
         match self {
-            Field::Name => "name",
+            Field::Name | Field::BundleName => "name",
             Field::Expiry => "expiry",
             Field::Issued => "issued",
             Field::Tags => "tags",
-            Field::Notes => "notes",
+            Field::Notes | Field::BundleNotes => "notes",
             Field::Attach => "attach",
             Field::Rename => "rename",
+            Field::BundleDate => "date",
         }
     }
 
@@ -138,11 +152,12 @@ impl Field {
             return match self {
                 Field::Name => Err("a document needs a name".into()),
                 Field::Rename => Err("a location needs a name".into()),
+                Field::BundleName => Err("a bundle needs a name".into()),
                 _ => Ok(None),
             };
         }
         match self {
-            Field::Expiry | Field::Issued => {
+            Field::Expiry | Field::Issued | Field::BundleDate => {
                 if is_iso_date(value) {
                     Ok(Some(value.into()))
                 } else {
@@ -155,7 +170,9 @@ impl Field {
             Field::Tags => {
                 Ok(Some(value.split_whitespace().map(str::to_string).collect::<Vec<_>>().into()))
             }
-            Field::Name | Field::Notes | Field::Rename => Ok(Some(value.into())),
+            Field::Name | Field::Notes | Field::Rename | Field::BundleName | Field::BundleNotes => {
+                Ok(Some(value.into()))
+            }
             Field::Attach => relative_path(value).map(|path| Some(path.into())),
         }
     }
