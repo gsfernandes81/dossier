@@ -32,9 +32,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::prompt::{Kind, Prompt, Question};
-
-/// Where the Syncthing API listens unless it says otherwise.
-const DEFAULT_ADDRESS: &str = "127.0.0.1:8384";
+use crate::syncthing::DEFAULT_ADDRESS;
 
 /// Why an init could not finish.
 #[derive(Debug, thiserror::Error)]

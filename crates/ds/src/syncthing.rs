@@ -53,7 +53,7 @@ use crate::wsl::Wsl;
 const TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Syncthing's default GUI/REST bind.
-pub const DEFAULT_ADDRESS: &str = "https://127.0.0.1:8384";
+pub const DEFAULT_ADDRESS: &str = "127.0.0.1:8384";
 
 /// How the sync is going, as one value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,8 +217,8 @@ pub fn discover(paths: &[PathBuf]) -> Option<Found> {
 pub struct Settings {
     /// Base URL, normalized to include a scheme.
     pub base_url: String,
-    /// The REST API key, if configured.
-    pub api_key: Option<String>,
+    /// The REST API key.
+    pub api_key: String,
     /// Whether to verify TLS.
     pub verify_tls: bool,
 }
@@ -233,7 +233,7 @@ impl Settings {
     pub fn from_config(config: &crate::config::Syncthing) -> Option<Self> {
         let api_key = config.apikey.clone()?;
         let base_url = normalize(config.address.as_deref().unwrap_or(DEFAULT_ADDRESS));
-        Some(Self { base_url, api_key: Some(api_key), verify_tls: config.verify_tls })
+        Some(Self { base_url, api_key, verify_tls: config.verify_tls })
     }
 }
 
@@ -387,11 +387,7 @@ fn agent(verify_tls: bool) -> ureq::Agent {
 
 fn get(agent: &ureq::Agent, settings: &Settings, path: &str) -> Result<Value, Failure> {
     let url = format!("{}{path}", settings.base_url);
-    let mut request = agent.get(&url);
-    if let Some(key) = &settings.api_key {
-        request = request.header("X-API-Key", key);
-    }
-    match request.call() {
+    match agent.get(&url).header("X-API-Key", &settings.api_key).call() {
         Ok(response) => response
             .into_body()
             .read_json::<Value>()
@@ -549,7 +545,7 @@ mod tests {
     }
 
     fn settings(base_url: String) -> Settings {
-        Settings { base_url, api_key: Some("k".into()), verify_tls: true }
+        Settings { base_url, api_key: "k".into(), verify_tls: true }
     }
 
     /// **A daemon that is not running is a state, not an error** — `ds status`
@@ -580,7 +576,7 @@ mod tests {
     fn skipping_verification_off_loopback_is_refused() {
         let settings = Settings {
             base_url: "https://sync.example.com:8384".into(),
-            api_key: Some("k".into()),
+            api_key: "k".into(),
             verify_tls: false,
         };
         let status = query(&settings, Path::new("/tmp"), None);
@@ -702,7 +698,7 @@ mod tests {
         let wsl = Wsl { mount_root: "/mnt/".into(), distro: None };
         let settings = Settings {
             base_url: "https://172.20.160.1:8384".into(),
-            api_key: Some("k".into()),
+            api_key: "k".into(),
             verify_tls: false,
         };
         let status = query(&settings, Path::new("/tmp"), Some(&wsl));
