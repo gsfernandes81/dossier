@@ -256,23 +256,16 @@ impl Writer {
         }
 
         let lock_path = lock_dir.join(format!("{writer_id}.{}.lock", namespace.dir()));
-        create_dir_all(lock_dir, "create lock directory")?;
+        std::fs::create_dir_all(lock_dir).map_err(io("create lock directory", lock_dir))?;
         let lock = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .truncate(false)
             .open(&lock_path)
-            .map_err(|source| Error::Io {
-                action: "open lock file",
-                path: lock_path.clone(),
-                source,
-            })?;
-        // rust: `try_lock` is std's advisory file lock (flock on unix,
-        // LockFileEx on Windows), stable since 1.89 — so the "one process per
-        // writer" rule costs no dependency. `Err(WouldBlock)` means someone
-        // else has it; a real I/O failure is a different error entirely, and
-        // conflating the two would turn a busy lock into a crash.
+            .map_err(io("open lock file", &lock_path))?;
+        // A busy lock must stay distinct from an I/O failure, or a second
+        // process would crash instead of running read-only.
         match lock.try_lock() {
             Ok(()) => {}
             Err(std::fs::TryLockError::WouldBlock) => {
@@ -285,32 +278,25 @@ impl Writer {
 
         let path = journal.file_path(namespace, writer_id);
         if let Some(parent) = path.parent() {
-            create_dir_all(parent, "create journal directory")?;
+            std::fs::create_dir_all(parent).map_err(io("create journal directory", parent))?;
         }
-        // The repair needs its own read+write handle, and the ordering matters:
-        // truncate first, *then* open for appending. On Windows a handle opened
-        // in append mode is granted `FILE_APPEND_DATA` without `FILE_WRITE_DATA`
-        // — deliberately, so an append cannot overwrite — and `set_len` needs
-        // the latter, so truncating through the append handle fails with
-        // "Access is denied". It works on Linux, which is exactly why the CI
-        // matrix has a Windows leg.
-        {
-            let mut repair = OpenOptions::new()
-                .create(true)
-                .read(true)
-                .write(true)
-                .truncate(false)
-                .open(&path)
-                .map_err(|source| Error::Io {
-                    action: "open journal file for repair",
-                    path: path.clone(),
-                    source,
-                })?;
-            repair_torn_tail(&mut repair, &path)?;
-        }
-        let file = OpenOptions::new().create(true).read(true).append(true).open(&path).map_err(
-            |source| Error::Io { action: "open journal file", path: path.clone(), source },
-        )?;
+        // The repair gets its own write handle: on Windows an append handle
+        // lacks `FILE_WRITE_DATA`, so `set_len` through it fails with "Access is
+        // denied" while working on Linux.
+        let repair = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(io("open journal file for repair", &path))?;
+        repair_torn_tail(repair, &path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .append(true)
+            .open(&path)
+            .map_err(io("open journal file", &path))?;
 
         Ok(Self {
             writer_id: writer_id.to_string(),
@@ -389,11 +375,7 @@ impl Writer {
         }
         // One `write_all` for the whole run: fewer partial-write windows, and
         // for a single op it is exactly the "one op = one write" rule.
-        self.file.write_all(buffer.as_bytes()).map_err(|source| Error::Io {
-            action: "append to",
-            path: self.path.clone(),
-            source,
-        })?;
+        self.file.write_all(buffer.as_bytes()).map_err(io("append to", &self.path))?;
         Ok(written)
     }
 
@@ -406,11 +388,7 @@ impl Writer {
     /// # Errors
     /// [`Error::Io`].
     pub fn commit(&mut self) -> Result<(), Error> {
-        self.file.sync_data().map_err(|source| Error::Io {
-            action: "flush",
-            path: self.path.clone(),
-            source,
-        })
+        self.file.sync_data().map_err(io("flush", &self.path))
     }
 
     /// Raises the clock's floor to `ts`; see [`Hlc::observe`].
@@ -442,11 +420,6 @@ impl Writer {
     /// [`Error::Io`] or [`Error::Serialize`]. On failure the original file is
     /// untouched: nothing is replaced until the new one is complete and flushed.
     pub fn compact(&mut self, now_ms: i64, when: When) -> Result<Option<Report>, Error> {
-        let io = |action: &'static str, path: &Path| {
-            let path = path.to_path_buf();
-            move |source: std::io::Error| Error::Io { action, path: path.clone(), source }
-        };
-
         let body =
             std::fs::read_to_string(&self.path).map_err(io("read for compaction", &self.path))?;
         let (lines, _torn) = crate::op::parse_body(&body);
@@ -518,10 +491,6 @@ pub struct Report {
 /// fail once the old file is replaced; the handle follows the file across the
 /// rename on every platform (std opens with `FILE_SHARE_DELETE` on Windows).
 fn replace(path: &Path, temp: &Path, body: &[u8]) -> Result<File, Error> {
-    let io = |action: &'static str, path: &Path| {
-        let path = path.to_path_buf();
-        move |source: std::io::Error| Error::Io { action, path: path.clone(), source }
-    };
     let mut file = OpenOptions::new()
         .create_new(true)
         .read(true)
@@ -536,31 +505,22 @@ fn replace(path: &Path, temp: &Path, body: &[u8]) -> Result<File, Error> {
     Ok(file)
 }
 
-fn create_dir_all(path: &Path, action: &'static str) -> Result<(), Error> {
-    std::fs::create_dir_all(path).map_err(|source| Error::Io {
-        action,
-        path: path.to_path_buf(),
-        source,
-    })
+/// Maps an I/O error on `path` to [`Error::Io`].
+fn io<'a>(action: &'static str, path: &'a Path) -> impl FnOnce(std::io::Error) -> Error + 'a {
+    move |source| Error::Io { action, path: path.to_path_buf(), source }
 }
 
-/// Truncate a torn final line, so the next append cannot be glued onto it.
+/// Truncates a torn final line, so the next append cannot be glued onto it.
 ///
-/// This is the repair REWRITE.md §3.3 calls critical, and the reason is worth
-/// stating plainly: without it, an append after a torn line produces
-/// `{"v":1,"ts":10,"w":"desk-co{"v":1,"ts":11,…}` — one unparseable line. The
-/// torn op was already lost (it was never durable); gluing destroys the **new**
-/// op too, and the user would have no idea.
-fn repair_torn_tail(file: &mut File, path: &Path) -> Result<(), Error> {
-    let io = |action: &'static str| {
-        move |source: std::io::Error| Error::Io { action, path: path.to_path_buf(), source }
-    };
+/// Gluing would turn the torn op and the user's new one into a single
+/// unparseable line; the torn op was never durable, the new one must survive.
+fn repair_torn_tail(mut file: File, path: &Path) -> Result<(), Error> {
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(io("read"))?;
+    file.read_to_end(&mut bytes).map_err(io("read", path))?;
     if bytes.last().is_some_and(|byte| *byte != b'\n') {
         let keep =
             bytes.iter().rposition(|byte| *byte == b'\n').map_or(0, |index| index as u64 + 1);
-        file.set_len(keep).map_err(io("truncate torn tail of"))?;
+        file.set_len(keep).map_err(io("truncate torn tail of", path))?;
     }
     Ok(())
 }
