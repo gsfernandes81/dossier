@@ -1,10 +1,9 @@
 # Remote dev environment for dossier. Bring up + log in to everything in one command:
 #   make dev            (= make dev-up  +  make dev-login)
-# then reach it over its own sshd: `ssh ds-dev` lands on the claude-sessions menu, which
-# starts, attaches and resumes sessions, each in its own abduco slot. `ssh ds-dev 'cmd'`,
-# scp and Zed work on the same alias, and `ssh -t ds-dev bash` is a plain shell. From the
-# host, `docker exec -it ds-dev fish` still works. There is no remote-control daemon in this
-# container as of 2026-08-25 — ssh is the way in.
+# then reach it over its own sshd: `ssh ds-dev` lands on the claude-sessions menu
+# (github.com/gsfernandes81/claude-sessions). From the host, `docker exec -it ds-dev fish`
+# still works. There is no remote-control daemon in this container as of 2026-08-25 — ssh
+# is the way in.
 #
 # dossier is a local, file-backed TUI: there is no database, no Railway deploy, and
 # no data store mounted here on purpose (tests use tmp_path; real documents stay off
@@ -48,13 +47,9 @@ services:
 
       # DEV_REMOTE_CONTROL IS GONE, 2026-08-25, along with the supervisor this image used
       # to bake and the hook in the base that started it. The way in is ssh, which lands
-      # on the claude-sessions menu, on every dev container on this host. What the base
-      # runs instead is the idle offloader: a claude that has been detached, silent and
-      # not working for 90 minutes is stopped and left resumable. Next to it,
-      # `claude-sessions offload --dry-run` runs every 3 minutes and only logs what its
-      # stricter rules would stop. DEV_IDLE_OFFLOAD: "0" here would turn off both and keep
-      # idle sessions resident. Their state (~/.local/share/claude-sessions/ and
-      # claude-sessions-dry-run.log) is in ds-local-share below, so it survives a recreate.
+      # on the claude-sessions menu, on every dev container on this host. Idle sessions
+      # are offloaded and left resumable; DEV_IDLE_OFFLOAD: "0" here would keep them
+      # resident. How either works is claude-sessions' and the base's to describe.
 
       # DEV_TUNNEL_HOSTNAME is deliberately unset. The base can run cloudflared itself,
       # but this container is reached through the tunnel on the HOST pointed at the
@@ -69,7 +64,7 @@ services:
       - ${DEV_SSH_AUTHORIZED_KEYS}:/home/dev/.host-ssh:ro   # host user's .ssh dir (from .env); sshd reads authorized_keys here
       - ds-ssh-host:/home/dev/.ssh-host        # persist sshd host key -> stable known_hosts
       - ds-zed-server:/home/dev/.zed_server    # persist Zed's remote server binary (no re-download per rebuild)
-      - ds-local-share:/home/dev/.local/share  # persist fish + bash history (HISTFILE points here), offloader logs, the claude-sessions registry
+      - ds-local-share:/home/dev/.local/share  # persist fish + bash history (HISTFILE points here) and claude-sessions' state
     ports:
       - "${DEV_SSH_PORT:-2222}:2222"   # host ${DEV_SSH_PORT} (default 2222) -> container sshd; point a Cloudflare tunnel here for remote access
     # Do NOT mount over /home/dev/venv or all of /home/dev — it would erase the

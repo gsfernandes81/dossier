@@ -53,7 +53,7 @@ dev-check-uid:
 # Claude) interactively. Every login step is idempotent — already-signed-in services
 # are skipped — so this is safe to re-run. Once Claude is logged in, work in the
 # container the way you work in the others: `ssh ds-dev` lands on the claude-sessions
-# menu, and each session it starts holds across a dropped link in its own abduco slot.
+# menu.
 dev: dev-up
 	@echo "Waiting for ds-dev to come up (up to 120s)..."
 	@for i in $$(seq 1 120); do \

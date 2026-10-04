@@ -20,12 +20,11 @@
 # there is no cross-repo build order — the FROM pulls, and nothing here needs the infra
 # repo on disk.
 #
-# 2026.10.04.3 IS THE FIRST BASE HERE WITH claude-sessions (v0.3.8, infra#8) — the menu
-# every `ssh ds-dev` now lands on, because the base's sshd runs `claude-sessions-door` as
-# its ForceCommand. It is also the jump across the base's move from bookworm to trixie
-# (glibc 2.41, OpenSSH 10.x, fish 4.x); infra `dev/README.md` § *Debian trixie, for glibc
-# 2.41* has what moved. Not 2026.10.04 (v0.3.6 dumps core into /workspace when the link
-# drops) nor anything earlier: the issue that asked for this bump is dossier#74.
+# 2026.10.04.3 IS THE FIRST BASE HERE WITH claude-sessions (v0.3.8, infra#8), whose menu
+# every `ssh ds-dev` now lands on. It is also the jump across the base's move from
+# bookworm to trixie (glibc 2.41, OpenSSH 10.x, fish 4.x); infra `dev/README.md` § *Debian
+# trixie, for glibc 2.41* has what moved. Not 2026.10.04 (v0.3.6 dumps core into
+# /workspace when the link drops) nor anything earlier: see dossier#74.
 #
 # THE OFFLINE FALLBACK is `make base` in infra's `dev/`. It builds the identical image
 # locally UNDER THE SAME NAME, and docker prefers a local image over a pull — so a GitHub
@@ -47,10 +46,7 @@ USER root
 # build-essential is the only apt package the base does not carry: it covers the source
 # builds Claude Code or the TUI driver need on arm64, where a wheel may not exist. git,
 # make, fish, the ssh client and server, curl, gnupg, ca-certificates and tzdata all come
-# from the base — and so does abduco, which holds a session across a dropped link with no
-# key handling of its own (more important for a full-screen TUI than screen's is). Nobody
-# runs it by hand any more: the claude-sessions menu gives each session its own abduco
-# slot.
+# from the base — and so does abduco, which claude-sessions holds its sessions in.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -130,9 +126,8 @@ COPY --chown=dev:dev ssh_config.dev /home/dev/ssh_config
 # not parse costs the drop-ins and not the container.
 #
 # NEITHER SETS ForceCommand, and none must. The base's sshd forces every session through
-# `claude-sessions-door` (the menu at a terminal, a forwarded command as given, else a
-# shell), and for the same first-value reason a ForceCommand here would replace it — the
-# menu, and with it the scp/Zed/`ssh ds-dev cmd` handling the door does.
+# claude-sessions' door, and for the same first-value reason a ForceCommand here would
+# replace it.
 COPY --chown=dev:dev sshd_config.dev.d/ /home/dev/sshd_config.d/
 
 # The login walkthrough — git SSH, GitHub, Claude. Repo-specific by nature and unchanged.
@@ -140,12 +135,8 @@ COPY --chown=dev:dev docker-login.dev.sh /home/dev/login.sh
 
 # NO REMOTE-CONTROL SUPERVISOR, as of 2026-08-25, and the file is deleted rather than left
 # unreferenced. This container is reached the way the other three are: `ssh ds-dev` lands on
-# the claude-sessions menu, where Enter attaches or resumes a session, `n` starts one in
-# /workspace and each lives in its own abduco slot, so it survives a dropped link. The base
-# also runs the opposite job to a supervisor. Its 90-minute offloader stops a claude nobody
-# has spoken to and leaves the conversation for `claude --resume`, and `claude-sessions
-# offload` runs beside it as a dry run (Stage A) that logs what its stricter rules would
-# stop. Both live in the base; infra `dev/README.md` § *claude-sessions* is the reference.
+# the claude-sessions menu, and idle sessions are offloaded and left resumable. Both are
+# claude-sessions' to describe (github.com/gsfernandes81/claude-sessions), not this file's.
 
 # The fifth seam: what this image does at start that the base cannot know about.
 COPY --chown=dev:dev docker-child-init.dev.sh /home/dev/child-init.sh
