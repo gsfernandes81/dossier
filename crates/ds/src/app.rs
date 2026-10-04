@@ -31,9 +31,6 @@ pub enum Msg {
     /// A worker finished reading the `enrich` namespace for scan-text search;
     /// an `Arc` so the transcripts are not copied across the thread.
     ScansLoaded(std::sync::Arc<crate::scans::Scans>),
-    /// Opens an edit on the current document's field; `e` on the record
-    /// reaches it, and tests send it directly.
-    EditField(Field),
     /// An append landed, and here is the store re-folded around it; boxed so
     /// every message is not the size of a store.
     Saved(Box<Store>),
@@ -200,6 +197,21 @@ pub struct Change {
 }
 
 impl Change {
+    /// Creates `ent` `id` with `fields`; the way back deletes it.
+    fn create(ent: &str, id: &str, fields: Vec<(&str, serde_json::Value)>) -> Change {
+        let sets =
+            fields.into_iter().map(|(field, value)| journal::Draft::set(ent, id, field, value));
+        Change {
+            forward: std::iter::once(journal::Draft::create(ent, id)).chain(sets).collect(),
+            back: vec![journal::Draft::delete(ent, id)],
+        }
+    }
+
+    /// The change that undoes this one.
+    fn reversed(self) -> Change {
+        Change { forward: self.back, back: self.forward }
+    }
+
     /// This change and then `next`, put back in the opposite order.
     fn then(mut self, next: Change) -> Change {
         self.forward.extend(next.forward);
@@ -207,13 +219,6 @@ impl Change {
         back.extend(self.back);
         Change { forward: self.forward, back }
     }
-}
-
-/// A `create` of `ent` `id`, then a `set` of each field.
-fn create_ops(ent: &str, id: &str, fields: Vec<(&str, serde_json::Value)>) -> Vec<journal::Draft> {
-    std::iter::once(journal::Draft::create(ent, id))
-        .chain(fields.into_iter().map(|(field, value)| journal::Draft::set(ent, id, field, value)))
-        .collect()
 }
 
 /// Which way an append in flight is going.
@@ -435,6 +440,7 @@ impl RowGeometry {
 /// into an enum would have to encode combinations that do not exist and would
 /// lose the ones that do (detail open *while* armed *while* reporting is
 /// dropped is a real state a phone reaches).
+#[derive(Default)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Model {
     /// The store, folded once at startup.
@@ -541,50 +547,17 @@ pub struct Model {
 }
 
 impl Model {
-    /// Build the initial state: whole store, no query, cursor at the top.
+    /// The initial state: the whole store listed, mouse reporting on.
     #[must_use]
     pub fn new(store: Store, today: String, warn_until: String, cols: u16, rows: u16) -> Self {
         let mut model = Self {
             store,
             today,
             warn_until,
-            query: String::new(),
-            scan_search: ScanSearch::Off,
-            scans: None,
-            filter: Filter::ALL,
-            rows: Vec::new(),
-            cursor: 0,
-            offset: 0,
-            on_new: false,
-            bundle_list: RowGeometry::default(),
-            root: None,
-            new_row: None,
-            views: Vec::new(),
-            esc_armed: false,
-            mouse_on: true,
-            keyboard_hint: false,
-            sheet: false,
-            check: None,
-            edit: None,
-            write: WriteState::default(),
-            undo: Vec::new(),
-            redo: Vec::new(),
-            pending: None,
-            remove_armed: None,
-            delete_armed: false,
-            count_zone: Zone::default(),
-            leader_zone: Zone::default(),
-            flash: None,
-            query_cursor: 0,
-            picker: None,
-            locpick: None,
-            missing_journal: None,
             cols,
             rows_on_screen: rows,
-            list: ListGeometry::default(),
-            tree: RowGeometry::default(),
-            record: RowGeometry::default(),
-            panel: RowGeometry::default(),
+            mouse_on: true,
+            ..Self::default()
         };
         model.requery();
         model
@@ -758,7 +731,7 @@ impl Model {
 
     /// Asks for `change` to be appended, and records what follows once it
     /// lands.
-    fn write(&mut self, change: Change, landed: Landed) -> Effect {
+    fn append(&mut self, change: Change, landed: Landed) -> Effect {
         let forward = change.forward.clone();
         self.pending = Some(Pending { change, direction: Direction::Forward, landed });
         Effect::Append(forward)
@@ -796,17 +769,6 @@ impl Model {
             forward: vec![journal::Draft::put(ent, id, field, new)],
             back: vec![journal::Draft::put(ent, id, field, was)],
         }
-    }
-
-    /// Creates a bundle named `name`: its new id, and the change.
-    fn bundle_create(&self, name: &str) -> (String, Change) {
-        let taken = self.store.bundles.iter().map(|bundle| bundle.id.as_str()).collect();
-        let id = crate::id::mint(name, self.write.device().unwrap_or_default(), &taken);
-        let change = Change {
-            forward: create_ops("bundle", &id, vec![("name", name.into())]),
-            back: vec![journal::Draft::delete("bundle", &id)],
-        };
-        (id, change)
     }
 
     /// Opens the checklist of bundles the current version is in.
@@ -852,7 +814,8 @@ impl Model {
                 self.flash = Some("type the new bundle's name".into());
                 return Effect::Redraw;
             };
-            let (id, create) = self.bundle_create(&name);
+            let id = self.mint("bundle", &name);
+            let create = Change::create("bundle", &id, vec![("name", name.as_str().into())]);
             now.push(crate::Membership { bundle: id, file: None });
             if let Some(check) = &mut self.check {
                 check.filter.clear();
@@ -865,7 +828,7 @@ impl Model {
             Some(create) => create.then(tick),
             None => tick,
         };
-        self.write(change, Landed::on(doc, note))
+        self.append(change, Landed::on(doc, note))
     }
 
     /// Creates a bundle named `name` and opens it once it lands.
@@ -873,9 +836,20 @@ impl Model {
         if let Some(effect) = self.refused() {
             return effect;
         }
-        let (id, change) = self.bundle_create(name);
+        let id = self.mint("bundle", name);
+        let change = Change::create("bundle", &id, vec![("name", name.into())]);
         let open = Some(View::Bundle { id, selected: crate::bundles::Row::Name });
-        self.write(change, Landed { open, ..Landed::saying("created") })
+        self.append(change, Landed { open, ..Landed::saying("created") })
+    }
+
+    /// Creates a document named `name` and opens it once it lands.
+    fn create_doc(&mut self, name: &str) -> Effect {
+        if let Some(effect) = self.refused() {
+            return effect;
+        }
+        let id = self.mint("doc", name);
+        let change = Change::create("doc", &id, vec![("name", name.into())]);
+        self.append(change, Landed::created(&id))
     }
 
     /// A bare letter on a bundle's Details view.
@@ -886,8 +860,8 @@ impl Model {
         match key {
             'e' => self.edit_bundle_row(id, selected),
             'd' => self.delete_bundle(),
-            'u' => self.undo(),
-            'r' => self.redo(),
+            'u' => self.step(Direction::Undo),
+            'r' => self.step(Direction::Redo),
             _ => {
                 self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
                 Effect::Redraw
@@ -957,12 +931,9 @@ impl Model {
             self.delete_armed = true;
             return Effect::Redraw;
         }
-        let change = Change {
-            forward: vec![journal::Draft::delete("bundle", &id)],
-            back: create_ops("bundle", &id, bundle.as_fields()),
-        };
+        let change = Change::create("bundle", &id, bundle.as_fields()).reversed();
         self.delete_armed = false;
-        self.write(change, Landed::saying("deleted — u to undo"))
+        self.append(change, Landed::saying("deleted — u to undo"))
     }
 
     /// Drops every view whose record is gone from the store.
@@ -1192,7 +1163,7 @@ impl Model {
             }
             (_, _) => return Effect::Redraw,
         };
-        self.write(change, Landed::on(id, "saved"))
+        self.append(change, Landed::on(id, "saved"))
     }
 
     /// Changes how version `doc` is in `bundle`: another version in its
@@ -1236,7 +1207,7 @@ impl Model {
         if let Some((other, list)) = theirs {
             change = change.then(tick(&other, &list));
         }
-        self.write(change, Landed::saying(note))
+        self.append(change, Landed::saying(note))
     }
 
     /// A tap on a Details row: the checkbox toggles at once, any other row is
@@ -1275,7 +1246,7 @@ impl Model {
             (true, true) => "digital only".into(),
             (false, _) => "has a hard copy — unfiled".into(),
         };
-        self.write(change, Landed::on(&id, note))
+        self.append(change, Landed::on(&id, note))
     }
 
     /// Opens the location picker on the current document.
@@ -1313,8 +1284,7 @@ impl Model {
         if self.store.get(doc).is_none() {
             return Ok(Effect::Redraw);
         }
-        let taken = tree.iter().map(|location| location.id.as_str()).collect();
-        let id = crate::id::mint(name, self.write.device().unwrap_or_default(), &taken);
+        let id = self.mint("location", name);
         let path =
             parent.map_or_else(|| name.to_string(), |p| format!("{} › {name}", tree.path(p)));
         let location = crate::Location {
@@ -1322,12 +1292,9 @@ impl Model {
             name: name.to_string(),
             parent: parent.map(Into::into),
         };
-        let create = Change {
-            forward: create_ops("location", &id, location.as_fields()),
-            back: vec![journal::Draft::delete("location", &id)],
-        };
+        let create = Change::create("location", &id, location.as_fields());
         let change = create.then(self.flip("doc", doc, "location", Some(id.into())));
-        Ok(self.write(change, Landed::on(doc, format!("filed in {path}"))))
+        Ok(self.append(change, Landed::on(doc, format!("filed in {path}"))))
     }
 
     /// The location the open picker's cursor stands for, if any.
@@ -1390,7 +1357,7 @@ impl Model {
         }
         let note = format!("moved {} into {place}", location.name);
         let change = self.flip("location", id, "parent", into.map(Into::into));
-        Ok(self.write(change, Landed::saying(note)))
+        Ok(self.append(change, Landed::saying(note)))
     }
 
     /// Deletes the picked location at once when it is empty, or arms the
@@ -1434,16 +1401,13 @@ impl Model {
         let doomed: Vec<&crate::Location> =
             tree.subtree(id).into_iter().filter_map(|at| tree.get(at)).collect();
         let Some(name) = doomed.first().map(|l| l.name.clone()) else { return Effect::Redraw };
-        let change = Change {
-            forward: doomed
-                .iter()
-                .rev()
-                .map(|l| journal::Draft::delete("location", &l.id))
-                .collect(),
-            back: doomed
-                .iter()
-                .flat_map(|l| create_ops("location", &l.id, l.as_fields()))
-                .collect(),
+        let Some(change) = doomed
+            .iter()
+            .rev()
+            .map(|l| Change::create("location", &l.id, l.as_fields()).reversed())
+            .reduce(Change::then)
+        else {
+            return Effect::Redraw;
         };
         let parent = tree.parent(id).map(str::to_string);
         let root_goes = self
@@ -1459,7 +1423,7 @@ impl Model {
                 picker.root = parent;
             }
         }
-        self.write(change, Landed::saying(format!("deleted {name}")))
+        self.append(change, Landed::saying(format!("deleted {name}")))
     }
 
     /// Files a document's hard copy in `location`, recording the way back.
@@ -1469,7 +1433,7 @@ impl Model {
         }
         let change = self.flip("doc", doc, "location", Some(location.into()));
         let note = format!("filed in {}", self.store.locations.path(location));
-        Ok(self.write(change, Landed::on(doc, note)))
+        Ok(self.append(change, Landed::on(doc, note)))
     }
 
     /// Links the typed path as one more soft copy of `doc`, the first being
@@ -1513,27 +1477,22 @@ impl Model {
                 edit.value()?;
                 self.rename(&id, edit.buffer.trim())?
             }
-            (Target::NewDoc, _) => {
-                let name = edit.value()?.unwrap_or_default();
-                let id = self.mint_id(edit.buffer.trim());
-                let change = Change {
-                    forward: create_ops("doc", &id, vec![("name", name)]),
-                    back: vec![journal::Draft::delete("doc", &id)],
-                };
-                (change, Landed::created(&id))
-            }
-            (Target::NewBundle, _) => {
+            (Target::NewDoc | Target::NewBundle, _) => {
                 edit.value()?;
-                let (id, change) = self.bundle_create(edit.buffer.trim());
-                let open = Some(View::Bundle { id, selected: crate::bundles::Row::Name });
-                (change, Landed { open, ..Landed::saying("created") })
+                edit.saving = true;
+                let name = edit.buffer.trim().to_string();
+                return Ok(if edit.target == Target::NewDoc {
+                    self.create_doc(&name)
+                } else {
+                    self.create_bundle(&name)
+                });
             }
         };
         if change.forward == change.back {
             return Ok(Effect::Redraw);
         }
         edit.saving = true;
-        Ok(self.write(change, landed))
+        Ok(self.append(change, landed))
     }
 
     /// `Esc` peels exactly one layer per press: panels, then search, then the
@@ -1646,8 +1605,8 @@ impl Model {
                     self.open_bundles()
                 }
             }
-            crate::sheet::Act::Undo => self.undo(),
-            crate::sheet::Act::Redo => self.redo(),
+            crate::sheet::Act::Undo => self.step(Direction::Undo),
+            crate::sheet::Act::Redo => self.step(Direction::Redo),
             crate::sheet::Act::Rename => self.open_rename(),
             crate::sheet::Act::Move => self.open_move(),
             crate::sheet::Act::Remove => self.remove_location(),
@@ -1709,8 +1668,8 @@ impl Model {
             // Undo is about the session, not about the row — but it is bound
             // here because this is the surface where a bare letter is a verb,
             // and it is where a write has just been made.
-            ('u', _) => self.undo(),
-            ('r', _) => self.redo(),
+            ('u', _) => self.step(Direction::Undo),
+            ('r', _) => self.step(Direction::Redo),
             ('d', _) => self.delete(),
             _ => {
                 self.flash = Some(format!("no verb on `{key}` here — space for the menu"));
@@ -1730,7 +1689,7 @@ impl Model {
 
     /// Opens an edit on the current document's field, on its Details view,
     /// seeded with what is stored so an edit starts as a correction.
-    fn open_edit(&mut self, field: Field) -> Effect {
+    pub fn open_edit(&mut self, field: Field) -> Effect {
         if let Some(effect) = self.refused() {
             return effect;
         }
@@ -1771,17 +1730,11 @@ impl Model {
     /// Creates the document the query names and opens it, or asks for a name
     /// when nothing is typed.
     fn create_from_query(&mut self) -> Effect {
-        let mut edit = crate::edit::Edit::new(Target::NewDoc, Field::Name, None);
-        edit.buffer = self.query.trim().to_string();
-        if edit.buffer.is_empty() {
-            return self.open_new();
-        }
-        match self.save(&mut edit) {
-            Ok(effect) => effect,
-            Err(reason) => {
-                self.flash = Some(reason);
-                Effect::Redraw
-            }
+        let name = self.query.trim().to_string();
+        if name.is_empty() {
+            self.open_new()
+        } else {
+            self.create_doc(&name)
         }
     }
 
@@ -1792,29 +1745,17 @@ impl Model {
             return effect;
         }
         let Some(old) = self.current() else { return Effect::Idle };
-        let id = self.mint_id(&old.name);
+        let id = self.mint("doc", &old.name);
         let carried = old
             .as_fields()
             .into_iter()
             .filter(|(field, _)| matches!(*field, "name" | "tags" | "location"))
             .chain([("supersedes", old.id.clone().into())])
             .collect();
-        let change = Change {
-            forward: create_ops("doc", &id, carried),
-            back: vec![journal::Draft::delete("doc", &id)],
-        };
+        let change = Change::create("doc", &id, carried);
         let landed =
             Landed { note: Some("new version".into()), replace: true, ..Landed::created(&id) };
-        self.write(change, landed)
-    }
-
-    /// Puts the last write this session made back, as an ordinary append. An
-    /// undo is not itself undoable; `redo` puts it back.
-    fn undo(&mut self) -> Effect {
-        // Named for what it is rather than "nothing to undo": the stack is this
-        // session's, and a user who edited yesterday is owed the reason it is
-        // empty rather than the impression the key is broken.
-        self.step(Direction::Undo, "nothing to undo — this session has not written yet")
+        self.append(change, landed)
     }
 
     /// Tombstones the record's document on the second `d`.
@@ -1834,35 +1775,29 @@ impl Model {
             return Effect::Redraw;
         }
         let id = doc.id.clone();
-        let change = Change {
-            forward: vec![journal::Draft::delete("doc", &id)],
-            back: create_ops("doc", &id, doc.as_fields()),
-        };
+        let change = Change::create("doc", &id, doc.as_fields()).reversed();
         self.delete_armed = false;
         self.sheet = false;
-        self.write(change, Landed::saying("deleted — u to undo"))
+        self.append(change, Landed::saying("deleted — u to undo"))
     }
 
-    /// Put back the last write this session took back.
-    ///
-    /// **A separate verb on a separate key**, which is the whole reason
-    /// [`Model::undo`] does not stack its own inverse: `u u u` has to walk back
-    /// three writes, so putting one forward again needs somewhere else to live.
-    /// It appends the ops that were written the first time — no re-derivation,
-    /// so a redo cannot drift from the thing it is putting back.
-    fn redo(&mut self) -> Effect {
-        self.step(Direction::Redo, "nothing to redo — nothing has been undone")
-    }
-
-    /// The shared body of undo and redo: pop from one stack, append, and let
-    /// [`Msg::Saved`] move the change to the other once the journal agrees.
-    fn step(&mut self, direction: Direction, empty: &str) -> Effect {
+    /// Undoes the last write, or redoes the last undo: pops from one stack,
+    /// appends, and lets [`Msg::Saved`] move the change to the other. Redo
+    /// has its own stack because `u u u` walks back three writes.
+    fn step(&mut self, direction: Direction) -> Effect {
         if let Some(effect) = self.refused() {
             return effect;
         }
         let stack = if direction == Direction::Undo { &mut self.undo } else { &mut self.redo };
         let Some(change) = stack.pop() else {
-            self.flash = Some(empty.to_string());
+            self.flash = Some(
+                if direction == Direction::Undo {
+                    "nothing to undo — this session has not written yet"
+                } else {
+                    "nothing to redo — nothing has been undone"
+                }
+                .into(),
+            );
             return Effect::Redraw;
         };
         let drafts =
@@ -1878,15 +1813,13 @@ impl Model {
         Effect::Append(drafts)
     }
 
-    /// The id for a document being created here and now.
-    ///
-    /// Every id in the store is a candidate collision, not merely the ones this
-    /// device made: a name that would land on a document synced from the other
-    /// device must still count up. [`crate::id::mint`] is what makes that a
-    /// *local* question again — the device is already in the id, so the only
-    /// ids that can be in the way are ones this device can see.
-    fn mint_id(&self, name: &str) -> String {
-        let taken = self.store.docs.iter().map(|doc| doc.id.as_str()).collect();
+    /// A new id for a record of `ent` named `name`, unused by any of its kind.
+    fn mint(&self, ent: &str, name: &str) -> String {
+        let taken = match ent {
+            "doc" => self.store.docs.iter().map(|doc| doc.id.as_str()).collect(),
+            "bundle" => self.store.bundles.iter().map(|bundle| bundle.id.as_str()).collect(),
+            _ => self.store.locations.iter().map(|location| location.id.as_str()).collect(),
+        };
         crate::id::mint(name, self.write.device().unwrap_or_default(), &taken)
     }
 
@@ -1990,7 +1923,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         Msg::Quit => Effect::Quit,
         Msg::Tab => Effect::Idle,
         Msg::Esc => model.peel(was_armed),
-        Msg::EditField(field) => model.open_edit(field),
         Msg::Saved(store) => {
             // The edit whose save this is closes now, not at `Enter`: until the
             // journal answers, the value on screen is a hope.
@@ -2142,11 +2074,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         }
         Msg::Undo => {
             model.sheet = false;
-            model.undo()
+            model.step(Direction::Undo)
         }
         Msg::Redo => {
             model.sheet = false;
-            model.redo()
+            model.step(Direction::Redo)
         }
         Msg::Resize { cols, rows } => {
             model.cols = cols;
@@ -2296,8 +2228,7 @@ fn edit_step(model: &mut Model, edit: &mut crate::edit::Edit, msg: &Msg) -> (Opt
         Msg::Esc => return (Some(Effect::Redraw), false),
         // Swallowed: they would act on the surface under the editor, and the
         // verb pressed again must not reseed the buffer.
-        Msg::EditField(_)
-        | Msg::Undo
+        Msg::Undo
         | Msg::Redo
         | Msg::Move(_)
         | Msg::Left
@@ -2404,7 +2335,7 @@ fn moved(at: usize, len: usize, motion: Motion, page: usize) -> usize {
 
 /// Moves `selected` within `items` by `motion`; a page is the whole list, as
 /// these lists are short.
-fn step<T: Clone + PartialEq>(items: &[T], selected: &mut T, motion: Motion) {
+fn select<T: Clone + PartialEq>(items: &[T], selected: &mut T, motion: Motion) {
     let at = moved(position(items, selected), items.len(), motion, items.len());
     if let Some(next) = items.get(at) {
         *selected = next.clone();
@@ -2441,7 +2372,7 @@ fn bundles_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         Msg::Move(Motion::Home | Motion::End) if !model.query.is_empty() => return None,
         Msg::Move(motion) => {
             if let Some(View::Bundles { selected, .. }) = model.views.last_mut() {
-                step(&entries, selected, *motion);
+                select(&entries, selected, *motion);
             }
             Effect::Redraw
         }
@@ -2459,7 +2390,7 @@ fn bundle_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     Some(match msg {
         Msg::Move(motion) => {
             if let Some(View::Bundle { selected, .. }) = model.views.last_mut() {
-                step(&rows, selected, *motion);
+                select(&rows, selected, *motion);
             }
             Effect::Redraw
         }
@@ -2482,14 +2413,14 @@ fn versions_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
                 .map(|i| model.store.docs[i].id.clone())
                 .collect();
             if let Some(View::Versions { doc }) = model.views.last_mut() {
-                step(&ids, doc, *motion);
+                select(&ids, doc, *motion);
             }
             Effect::Redraw
         }
         Msg::Enter => model.open_version(),
         Msg::Char(' ') => update(model, Msg::Leader),
-        Msg::Char('u') => model.undo(),
-        Msg::Char('r') => model.redo(),
+        Msg::Char('u') => model.step(Direction::Undo),
+        Msg::Char('r') => model.step(Direction::Redo),
         Msg::Char(c) => {
             model.flash = Some(format!("no verb on `{c}` here — space for the menu"));
             Effect::Redraw
@@ -2672,7 +2603,7 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             }
             Effect::Redraw
         }
-        Msg::Scroll(_) | Msg::Move(_) | Msg::EditField(_) => Effect::Idle,
+        Msg::Scroll(_) | Msg::Move(_) => Effect::Idle,
         _ => return None,
     };
     model.locpick = Some(picker);
@@ -2882,7 +2813,7 @@ pub(crate) mod tests {
     fn the_edit_verb_opens_the_record_and_seeds_the_field() {
         let mut m = writable();
         assert!(!m.detail());
-        assert_eq!(update(&mut m, Msg::EditField(Field::Expiry)), Effect::Redraw);
+        assert_eq!(m.open_edit(Field::Expiry), Effect::Redraw);
         assert!(m.detail(), "the record came with it");
         let edit = m.edit.as_ref().expect("an edit is open");
         assert_eq!(edit.target, Target::Doc("coc".into()));
@@ -2896,7 +2827,7 @@ pub(crate) mod tests {
     fn a_read_only_session_explains_itself_instead_of_editing() {
         let mut m = model();
         assert_eq!(m.write, WriteState::default(), "no device, no writing");
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         assert!(m.edit.is_none());
         assert!(m.flash.unwrap().contains("ds init"), "and it names the fix");
     }
@@ -2906,7 +2837,7 @@ pub(crate) mod tests {
     #[test]
     fn typing_in_an_edit_never_reaches_the_query() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         clear_buffer(&mut m);
         type_str(&mut m, "2027-04-01");
         assert_eq!(m.edit.as_ref().unwrap().buffer, "2027-04-01");
@@ -2918,7 +2849,7 @@ pub(crate) mod tests {
     #[test]
     fn saving_a_date_appends_a_set_op_and_waits_for_it() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         clear_buffer(&mut m);
         type_str(&mut m, "2027-04-01");
         let effect = update(&mut m, Msg::Enter);
@@ -2942,7 +2873,7 @@ pub(crate) mod tests {
     fn another_devices_edit_arrives_in_place() {
         let mut m = writable();
         update(&mut m, Msg::Move(Motion::Down));
-        update(&mut m, Msg::EditField(Field::Notes));
+        m.open_edit(Field::Notes);
         let store = restored(&m, "eng1", Some("2028-01-01"));
         assert_eq!(update(&mut m, Msg::Reloaded(Box::new(store))), Effect::Redraw);
         assert_eq!(m.current().unwrap().id, "eng1");
@@ -2986,7 +2917,7 @@ pub(crate) mod tests {
             (Field::Notes, ""),
         ] {
             let mut m = writable();
-            update(&mut m, Msg::EditField(field));
+            m.open_edit(field);
             let edit = m.edit.as_ref().expect("the editor opened");
             assert_eq!(edit.buffer, expected, "{field:?} seeds from the store");
             assert!(!edit.dirty(), "and opening is not itself an edit");
@@ -2999,7 +2930,7 @@ pub(crate) mod tests {
     #[test]
     fn tags_are_typed_with_spaces_and_stored_as_a_list() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Tags));
+        m.open_edit(Field::Tags);
         type_str(&mut m, "marine  ticket");
         assert_eq!(
             update(&mut m, Msg::Enter),
@@ -3018,14 +2949,14 @@ pub(crate) mod tests {
     #[test]
     fn a_name_cannot_be_cleared_but_the_others_can() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Name));
+        m.open_edit(Field::Name);
         clear_buffer(&mut m);
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "nothing was appended");
         assert!(m.flash.is_some(), "and it said why");
         assert!(m.edit.is_some(), "with the editor still open on the empty buffer");
 
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         clear_buffer(&mut m);
         assert_eq!(
             update(&mut m, Msg::Enter),
@@ -3218,7 +3149,7 @@ pub(crate) mod tests {
     #[test]
     fn a_refused_save_leaves_nothing_to_undo() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         type_str(&mut m, "-x");
         update(&mut m, Msg::Backspace);
         update(&mut m, Msg::Backspace);
@@ -3235,7 +3166,7 @@ pub(crate) mod tests {
     fn the_inverse_of_a_tag_edit_restores_the_list() {
         let mut m = writable();
         m.store.docs[0].tags = vec!["marine".into(), "ticket".into()];
-        update(&mut m, Msg::EditField(Field::Tags));
+        m.open_edit(Field::Tags);
         type_str(&mut m, " extra");
         update(&mut m, Msg::Enter);
         land(&mut m);
@@ -3272,7 +3203,7 @@ pub(crate) mod tests {
     #[test]
     fn an_undo_does_not_become_something_to_undo() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         update(&mut m, Msg::Backspace);
         update(&mut m, Msg::Char('2'));
         update(&mut m, Msg::Enter);
@@ -3621,7 +3552,7 @@ pub(crate) mod tests {
         let mut m = saved_edit("2027-04-01");
         let forward = m.undo.last().expect("something to undo").forward.clone();
 
-        update(&mut m, Msg::EditField(Field::Notes));
+        m.open_edit(Field::Notes);
         assert_eq!(update(&mut m, Msg::Undo), Effect::Idle, "the field keeps the keyboard");
         assert_eq!(m.undo.len(), 1, "and nothing was undone");
         for _ in 0..2 {
@@ -3648,7 +3579,7 @@ pub(crate) mod tests {
         land(&mut m);
         assert_eq!(m.redo.len(), 1);
 
-        update(&mut m, Msg::EditField(Field::Notes));
+        m.open_edit(Field::Notes);
         type_str(&mut m, "elsewhere");
         update(&mut m, Msg::Enter);
         land(&mut m);
@@ -3668,7 +3599,7 @@ pub(crate) mod tests {
     /// A model with one confirmed edit behind it, on the record.
     fn saved_edit(value: &str) -> Model {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         clear_buffer(&mut m);
         type_str(&mut m, value);
         update(&mut m, Msg::Enter);
@@ -3761,7 +3692,7 @@ pub(crate) mod tests {
     #[test]
     fn clearing_the_field_appends_an_unset_op() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         clear_buffer(&mut m);
         assert_eq!(
             update(&mut m, Msg::Enter),
@@ -3774,7 +3705,7 @@ pub(crate) mod tests {
     #[test]
     fn an_unparseable_date_is_refused_and_the_typing_survives() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         type_str(&mut m, "-ish");
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "no append");
         assert_eq!(m.edit.as_ref().unwrap().buffer, "2026-01-01-ish");
@@ -3787,18 +3718,18 @@ pub(crate) mod tests {
     #[test]
     fn esc_discards_an_edit_in_one_press_when_clean_and_two_when_dirty() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         update(&mut m, Msg::Esc);
         assert!(m.edit.is_none(), "nothing was typed, so nothing needed confirming");
 
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         update(&mut m, Msg::Char('9'));
         update(&mut m, Msg::Esc);
         assert!(m.edit.as_ref().unwrap().armed_discard, "armed, not discarded");
         update(&mut m, Msg::Esc);
         assert!(m.edit.is_none(), "the second press threw it away");
 
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         update(&mut m, Msg::Char('9'));
         update(&mut m, Msg::Esc);
         update(&mut m, Msg::Char('9'));
@@ -3810,7 +3741,7 @@ pub(crate) mod tests {
     #[test]
     fn the_list_does_not_move_under_an_open_edit() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         let before = m.cursor;
         for motion in [Motion::Down, Motion::PageDown, Motion::End, Motion::Up] {
             assert_eq!(update(&mut m, Msg::Move(motion)), Effect::Idle);
@@ -3829,7 +3760,7 @@ pub(crate) mod tests {
     #[test]
     fn quitting_works_from_inside_an_edit() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         assert_eq!(update(&mut m, Msg::Quit), Effect::Quit);
     }
 
@@ -3845,7 +3776,7 @@ pub(crate) mod tests {
         let edited = m.current().unwrap().id.clone();
         assert_eq!(edited, "eng1", "second-soonest under the filter");
 
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         update(&mut m, Msg::Enter);
         // Now the soonest of all — earlier than `coc`'s 2026-01-01 — so the row
         // moves to the top of the filter, which is the whole point of the test.
@@ -3863,7 +3794,7 @@ pub(crate) mod tests {
         m.warn_until = "2031-12-31".into();
         update(&mut m, Msg::ToggleExpiring);
         let edited = m.current().unwrap().id.clone();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         assert!(m.detail());
 
         // Cleared: no expiry means it is not in the watch at all.
@@ -3879,7 +3810,7 @@ pub(crate) mod tests {
     #[test]
     fn a_failed_save_keeps_the_typing_and_a_permanent_one_stops_offering() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         update(&mut m, Msg::Char('9'));
         update(&mut m, Msg::Enter);
 
@@ -3894,7 +3825,7 @@ pub(crate) mod tests {
         assert_eq!(m.write.reason(), Some(locked));
         update(&mut m, Msg::Esc);
         update(&mut m, Msg::Esc);
-        update(&mut m, Msg::EditField(Field::Expiry));
+        m.open_edit(Field::Expiry);
         assert!(m.edit.is_none(), "it does not offer again");
     }
 
@@ -4693,7 +4624,7 @@ pub(crate) mod tests {
     #[test]
     fn quitting_an_unsaved_edit_asks_first() {
         let mut m = writable();
-        update(&mut m, Msg::EditField(Field::Name));
+        m.open_edit(Field::Name);
         update(&mut m, Msg::Char('!'));
         assert_eq!(update(&mut m, Msg::Quit), Effect::Redraw, "the first press asks");
         assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("unsaved edit")));

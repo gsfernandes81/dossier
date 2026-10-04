@@ -102,7 +102,7 @@ fn an_edit_becomes_an_op_and_survives_a_reload() {
     let (dir, journal) = journal_with(&desk(coc()));
     let mut model = load_model(&journal);
 
-    update(&mut model, Msg::EditField(Field::Expiry));
+    model.open_edit(Field::Expiry);
     clear_buffer(&mut model);
     type_str(&mut model, "2031-05-31");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
@@ -133,7 +133,7 @@ fn clearing_the_field_removes_it_from_the_folded_store() {
     let (dir, journal) = journal_with(&desk(coc()));
     let mut model = load_model(&journal);
 
-    update(&mut model, Msg::EditField(Field::Expiry));
+    model.open_edit(Field::Expiry);
     clear_buffer(&mut model);
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
         panic!("an empty buffer must still ask for an append");
@@ -167,7 +167,7 @@ fn a_held_lock_is_a_notice_and_not_a_failure() {
     // What the model does with that news: the reason is shown, editing stops
     // being offered, and nothing else about the session changes.
     let mut model = load_model(&journal);
-    update(&mut model, Msg::EditField(Field::Expiry));
+    model.open_edit(Field::Expiry);
     update(&mut model, Msg::Char('9'));
     update(&mut model, Msg::Enter);
     update(&mut model, Msg::SaveFailed { reason: error.to_string(), permanent: true });
@@ -238,7 +238,7 @@ fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
     let mut model = load_model(&journal);
     let mut follower = follower(dir.path(), &journal, "desk");
 
-    update(&mut model, Msg::EditField(Field::Expiry));
+    model.open_edit(Field::Expiry);
     clear_buffer(&mut model);
     type_str(&mut model, "2031-05-31");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
@@ -277,7 +277,7 @@ fn undo_walks_back_more_than_one_write() {
     let mut follower = follower(dir.path(), &journal, "desk");
 
     for value in ["2031-05-31", "2032-06-30"] {
-        update(&mut model, Msg::EditField(Field::Expiry));
+        model.open_edit(Field::Expiry);
         clear_buffer(&mut model);
         type_str(&mut model, value);
         let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
@@ -321,7 +321,7 @@ fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
     let mut model = load_model(&journal);
     let mut follower = follower(dir.path(), &journal, "desk");
 
-    update(&mut model, Msg::EditField(Field::Expiry));
+    model.open_edit(Field::Expiry);
     clear_buffer(&mut model);
     type_str(&mut model, "2031-05-31");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };

@@ -469,13 +469,10 @@ fn event_loop(
                 }
             }
             Effect::Append(drafts) => {
-                // Handed to the journal thread; the result comes back as
-                // `Msg::Saved` or `Msg::SaveFailed` on the same queue. A thread
-                // that has died must not drop the edit silently.
-                let sent = session.commands.send(drafts).is_ok();
-                if !sent {
-                    model.flash = Some("the writer is gone — this edit was not saved".into());
-                    model.write = ds::app::WriteState::Off("the writer is gone".into());
+                // The result comes back as `Msg::Saved` or `Msg::SaveFailed`.
+                if session.commands.send(drafts).is_err() {
+                    let reason = "the writer is gone — this edit was not saved".into();
+                    update(model, Msg::SaveFailed { reason, permanent: true });
                 }
             }
             Effect::LoadScans => {

@@ -852,7 +852,7 @@ fn a_long_note_hangs_under_its_column() {
 #[test]
 fn an_edit_takes_over_the_entry_line() {
     let mut m = writable(47, 24);
-    update(&mut m, Msg::EditField(ds::edit::Field::Expiry));
+    m.open_edit(ds::edit::Field::Expiry);
     let before = screen(&mut m, 47, 24).len();
 
     let rows = screen(&mut m, 47, 24);
@@ -874,7 +874,7 @@ fn an_edit_takes_over_the_entry_line() {
 #[test]
 fn the_record_marks_the_field_being_edited() {
     let mut m = writable(47, 24);
-    update(&mut m, Msg::EditField(ds::edit::Field::Expiry));
+    m.open_edit(ds::edit::Field::Expiry);
     let rows = screen(&mut m, 47, 24);
     let expiry_row = rows
         .iter()
@@ -911,7 +911,7 @@ fn the_edit_hint_appears_only_when_this_session_can_write() {
 #[test]
 fn a_dirty_edit_warns_before_it_discards() {
     let mut m = writable(47, 24);
-    update(&mut m, Msg::EditField(ds::edit::Field::Expiry));
+    m.open_edit(ds::edit::Field::Expiry);
     update(&mut m, Msg::Char('9'));
     update(&mut m, Msg::Esc);
     let rows = screen(&mut m, 47, 24);
@@ -923,7 +923,7 @@ fn a_dirty_edit_warns_before_it_discards() {
 #[test]
 fn the_editor_survives_no_color() {
     let mut m = writable(47, 24);
-    update(&mut m, Msg::EditField(ds::edit::Field::Expiry));
+    m.open_edit(ds::edit::Field::Expiry);
     let (rows, coloured) = render_with(&mut m, 47, 24, Theme { color: false });
     assert!(!coloured, "no colour was emitted");
     let entry = rows.last().expect("an entry line");
