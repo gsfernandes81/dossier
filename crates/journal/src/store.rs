@@ -293,16 +293,18 @@ impl Journal {
 
         for name in names {
             let path = dir.join(&name);
-            let body = match std::fs::read_to_string(&path) {
-                Ok(body) => body,
+            let raw = match std::fs::read(&path) {
+                Ok(raw) => raw,
                 Err(source) => {
                     load.anomalies
                         .push(Anomaly::Unreadable { file: name, reason: source.to_string() });
                     continue;
                 }
             };
-            let bytes = body.len() as u64;
-            let (lines, torn) = parse_body(&body);
+            // Lossy, so an invalid byte costs the line it sits in rather than
+            // every op in the file.
+            let (lines, torn) = parse_body(&String::from_utf8_lossy(&raw));
+            let bytes = raw.len() as u64;
             if torn.is_some() {
                 load.anomalies.push(Anomaly::TornTail { file: name.clone() });
             }
@@ -441,6 +443,25 @@ mod tests {
             assert!(state.get("doc", id).is_some(), "{id} should have survived");
         }
         assert!(state.get("doc", "torn").is_none(), "the torn op was never durable");
+    }
+
+    /// An invalid UTF-8 byte costs the line it sits in, not the whole file.
+    #[test]
+    fn an_invalid_byte_costs_one_line() {
+        let (_dir, journal) = journal_with(Namespace::Meta, &[]);
+        let mut body = format!("{}\n", op(10, "desk-core", "create", "a")).into_bytes();
+        body.extend_from_slice(b"{\xff}\n");
+        body.extend_from_slice(format!("{}\n", op(11, "desk-core", "create", "b")).as_bytes());
+        std::fs::write(journal.file_path(Namespace::Meta, "desk-core"), &body).expect("write");
+
+        let load = journal.load(Namespace::Meta).expect("loads");
+        assert_eq!(
+            load.anomalies,
+            [Anomaly::Malformed { file: "desk-core.jsonl".into(), count: 1 }]
+        );
+        assert_eq!(load.files[0].bytes, body.len() as u64);
+        let state = fold(&load.lines);
+        assert!(state.get("doc", "a").is_some() && state.get("doc", "b").is_some());
     }
 
     /// Per-file accounting is what the truncation defense compares between
