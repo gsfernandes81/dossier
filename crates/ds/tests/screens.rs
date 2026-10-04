@@ -670,11 +670,25 @@ fn a_bundle_lists_its_documents() {
     let lines = screen(&mut m, 47, 24);
     let text = lines.join("\n");
     assert!(lines[1].contains("US visa application"), "{text}");
-    assert!(text.contains("date     2027-03-27"), "{text}");
+    assert!(text.contains(" date      2027-03-27"), "{text}");
     let eng = lines.iter().find(|line| line.contains("ENG-1 Medical")).expect(&text);
     assert!(eng.trim_end().ends_with("newer exists"), "{text}");
     assert!(text.contains("Driving Licence"), "{text}");
     assert!(text.contains("2 documents"), "{text}");
+}
+
+/// The bundle record marks the field being edited the way a document's does.
+#[test]
+fn the_bundle_record_marks_the_field_being_edited() {
+    let mut m = with_bundles(47, 24);
+    m.write = ds::app::WriteState::Ready { device: "desk".into() };
+    update(&mut m, Msg::Char(' '));
+    update(&mut m, Msg::Char('b'));
+    update(&mut m, Msg::Enter);
+    update(&mut m, Msg::Move(ds::app::Motion::Down));
+    update(&mut m, Msg::Char('e'));
+    let lit = modifier_columns(&mut m, 47, 24, 3, ratatui::style::Modifier::REVERSED);
+    assert_eq!(lit, (0..11).collect::<Vec<u16>>(), "the date label, and only it");
 }
 
 /// Attaching a file lists the folder being typed in over the bottom of the

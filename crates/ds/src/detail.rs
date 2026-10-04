@@ -242,15 +242,7 @@ fn render_editable(
     match what {
         // Typed from a picker; never a row of its own.
         Field::Attach => Vec::new(),
-        // The title, and the blank line under it. It carries no label, so being
-        // edited is marked on the name itself.
-        Field::Name => {
-            let mut style = theme.style(Tone::Title);
-            if lit {
-                style = style.add_modifier(ratatui::style::Modifier::REVERSED);
-            }
-            vec![Line::styled(format!(" {}", truncate(&doc.name, inner)), style), Line::raw("")]
-        }
+        Field::Name => vec![title(&doc.name, lit, inner, theme), Line::raw("")],
         // Expiry carries its standing in words next to the date: `2026-09-28`
         // alone makes the reader do the arithmetic, and the whole point of this
         // app is that nobody should have to.
@@ -290,7 +282,7 @@ fn render_editable(
 
 /// An em dash beats a blank: an empty value and a missing field look identical
 /// on screen otherwise, and only one of them is worth fixing.
-fn nonempty(value: String) -> String {
+pub(crate) fn nonempty(value: String) -> String {
     if value.is_empty() {
         "—".into()
     } else {
@@ -315,8 +307,17 @@ fn marked_label(text: &str, theme: Theme) -> Span<'static> {
     )
 }
 
+/// A record's title. It carries no label, so being edited is marked on the name.
+pub(crate) fn title(name: &str, lit: bool, inner: usize, theme: Theme) -> Line<'static> {
+    let mut style = theme.style(Tone::Title);
+    if lit {
+        style = style.add_modifier(ratatui::style::Modifier::REVERSED);
+    }
+    Line::styled(format!(" {}", truncate(name, inner)), style)
+}
+
 /// A field's label, lit when that field is the one being edited.
-fn head(name: &str, lit: bool, theme: Theme) -> Span<'static> {
+pub(crate) fn head(name: &str, lit: bool, theme: Theme) -> Span<'static> {
     if lit {
         marked_label(name, theme)
     } else {
@@ -330,7 +331,13 @@ fn field(name: &str, value: &str, inner: usize, theme: Theme) -> Line<'static> {
 }
 
 /// [`field`], for a row that can be the one under edit.
-fn labelled(name: &str, value: &str, inner: usize, theme: Theme, lit: bool) -> Line<'static> {
+pub(crate) fn labelled(
+    name: &str,
+    value: &str,
+    inner: usize,
+    theme: Theme,
+    lit: bool,
+) -> Line<'static> {
     let value_cols = inner.saturating_sub(LABEL_COLS).max(8);
     Line::from(vec![head(name, lit, theme), Span::raw(truncate(value, value_cols))])
 }

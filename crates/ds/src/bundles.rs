@@ -22,6 +22,8 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::{Model, RowGeometry};
+use crate::detail;
+use crate::edit::Field;
 use crate::layout::{fit, short_date, truncate, width};
 use crate::theme::{Theme, Tone};
 use crate::{Bundle, Store};
@@ -169,14 +171,11 @@ pub fn draw_bundle(
     let gutter = crate::layout::GUTTER as usize;
     let Some(bundle) = model.store.bundle(id) else { return RowGeometry::default() };
     let members = model.store.members(id);
-    let editing = |field: crate::edit::Field| {
+    let inner = cols.saturating_sub(2);
+    let editing = |field: Field| {
         model.edit.as_ref().is_some_and(|edit| {
             edit.target == crate::edit::Target::Bundle(id.to_string()) && edit.field == field
         })
-    };
-    let label = |text: &str, lit: bool| {
-        let style = if lit { theme.band() } else { theme.style(Tone::Muted) };
-        Span::styled(format!(" {text:<9}"), style)
     };
     let rows = rows(&model.store, id);
     let cursor = crate::app::position(&rows, selected);
@@ -184,30 +183,24 @@ pub fn draw_bundle(
     let mut owners = Vec::new();
     for (index, row) in rows.iter().enumerate() {
         let drawn = match row {
-            Row::Name => {
-                let mut style = theme.style(Tone::Title);
-                if editing(crate::edit::Field::Name) {
-                    style = style.add_modifier(ratatui::style::Modifier::REVERSED);
-                }
-                vec![
-                    Line::styled(
-                        format!(" {}", truncate(&bundle.name, cols.saturating_sub(2))),
-                        style,
-                    ),
-                    Line::styled(" bundle", theme.style(Tone::Muted)),
-                ]
-            }
-            Row::Date => vec![Line::from(vec![
-                label("date", editing(crate::edit::Field::Expiry)),
-                Span::raw(bundle.date.clone().unwrap_or_else(|| "—".into())),
-            ])],
-            Row::Notes => {
-                let notes = if bundle.notes.is_empty() { "—" } else { bundle.notes.as_str() };
-                vec![Line::from(vec![
-                    label("notes", editing(crate::edit::Field::Notes)),
-                    Span::raw(truncate(notes, cols.saturating_sub(11 + gutter))),
-                ])]
-            }
+            Row::Name => vec![
+                detail::title(&bundle.name, editing(Field::Name), inner, theme),
+                Line::styled(" bundle", theme.style(Tone::Muted)),
+            ],
+            Row::Date => vec![detail::labelled(
+                "date",
+                &detail::nonempty(bundle.date.clone().unwrap_or_default()),
+                inner,
+                theme,
+                editing(Field::Expiry),
+            )],
+            Row::Notes => vec![detail::labelled(
+                "notes",
+                &detail::nonempty(bundle.notes.clone()),
+                inner,
+                theme,
+                editing(Field::Notes),
+            )],
             Row::Member(doc) => {
                 let Some(doc) = model.store.get(doc) else {
                     continue;
