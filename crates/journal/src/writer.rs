@@ -327,23 +327,6 @@ impl Writer {
         &self.path
     }
 
-    /// Append one op, returning it as it was written.
-    ///
-    /// Does **not** fsync — see [`Self::commit`]. One op is one `write_all` of a
-    /// complete line ending in `\n`, so a crash mid-write can only ever produce
-    /// a torn tail, which the next open repairs.
-    ///
-    /// # Errors
-    /// [`Error::Io`] or [`Error::Serialize`].
-    ///
-    /// # Panics
-    /// Never: it forwards one draft to [`Self::append_all`] and takes the one
-    /// op back out. The `expect` is that arithmetic, not a fallible operation.
-    pub fn append(&mut self, draft: Draft) -> Result<Op, Error> {
-        self.append_all(std::iter::once(draft))
-            .map(|mut ops| ops.pop().expect("one op in, one out"))
-    }
-
     /// Append several ops as one consecutive run.
     ///
     /// For edits that are only correct together — an id rename is create-new +
@@ -555,8 +538,8 @@ mod tests {
     fn appended_ops_round_trip_through_the_fold() {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "passport")).expect("append");
-        writer.append(Draft::set("doc", "passport", "name", "Passport")).expect("append");
+        writer.append_all([Draft::create("doc", "passport")]).expect("append");
+        writer.append_all([Draft::set("doc", "passport", "name", "Passport")]).expect("append");
         writer.commit().expect("commit");
 
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
@@ -620,7 +603,7 @@ mod tests {
         .expect("write");
 
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "new")).expect("append");
+        writer.append_all([Draft::create("doc", "new")]).expect("append");
         writer.commit().expect("commit");
 
         let body = std::fs::read_to_string(&path).expect("read");
@@ -643,7 +626,7 @@ mod tests {
         std::fs::write(&path, "{\"v\":1,\"ts\":11,\"w\":\"desk-co").expect("write");
 
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "new")).expect("append");
+        writer.append_all([Draft::create("doc", "new")]).expect("append");
         let (lines, torn) = parse_body(&std::fs::read_to_string(&path).expect("read"));
         assert!(torn.is_none() && lines.len() == 1);
     }
@@ -670,7 +653,7 @@ mod tests {
         .expect("write");
 
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "new")).expect("append");
+        writer.append_all([Draft::create("doc", "new")]).expect("append");
 
         let (lines, torn) = parse_body(&std::fs::read_to_string(&path).expect("read"));
         assert!(torn.is_none(), "the file ends cleanly");
@@ -726,10 +709,10 @@ mod tests {
     fn compacting_shrinks_the_file_without_changing_the_fold() {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "passport")).expect("append");
+        writer.append_all([Draft::create("doc", "passport")]).expect("append");
         for i in 0..40 {
             writer
-                .append(Draft::set("doc", "passport", "name", format!("Passport v{i}")))
+                .append_all([Draft::set("doc", "passport", "name", format!("Passport v{i}"))])
                 .expect("append");
         }
         writer.commit().expect("commit");
@@ -754,9 +737,9 @@ mod tests {
     fn compaction_never_lowers_the_high_water_mark() {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "x")).expect("append");
+        writer.append_all([Draft::create("doc", "x")]).expect("append");
         for i in 0..30 {
-            writer.append(Draft::set("doc", "x", "name", format!("v{i}"))).expect("append");
+            writer.append_all([Draft::set("doc", "x", "name", format!("v{i}"))]).expect("append");
         }
         writer.commit().expect("commit");
         let before = fixture.journal.load(Namespace::Meta).expect("loads").files[0].max_ts;
@@ -774,14 +757,14 @@ mod tests {
     fn appends_continue_after_a_compaction() {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "x")).expect("append");
+        writer.append_all([Draft::create("doc", "x")]).expect("append");
         for i in 0..20 {
-            writer.append(Draft::set("doc", "x", "name", format!("v{i}"))).expect("append");
+            writer.append_all([Draft::set("doc", "x", "name", format!("v{i}"))]).expect("append");
         }
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
         let (mut writer, _) = writer.compact(future, When::Always).expect("compacts");
 
-        writer.append(Draft::set("doc", "x", "slot", 7)).expect("append after compaction");
+        writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("append after compaction");
         writer.commit().expect("commit");
 
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
@@ -795,8 +778,8 @@ mod tests {
     fn a_healthy_file_is_left_alone_and_no_temp_survives() {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "x")).expect("append");
-        writer.append(Draft::set("doc", "x", "name", "only")).expect("append");
+        writer.append_all([Draft::create("doc", "x")]).expect("append");
+        writer.append_all([Draft::set("doc", "x", "name", "only")]).expect("append");
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
         let (writer, report) = writer.compact(future, When::IfWorthwhile).expect("runs");
         assert!(report.is_none());
@@ -816,7 +799,7 @@ mod tests {
     fn a_failed_compaction_cleans_up_after_itself() {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "x")).expect("append");
+        writer.append_all([Draft::create("doc", "x")]).expect("append");
         let before = std::fs::read(writer.path()).expect("read");
         let temp = writer
             .path()
@@ -830,7 +813,7 @@ mod tests {
         assert_eq!(std::fs::read(&path).expect("read"), before);
 
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::set("doc", "x", "slot", 7)).expect("append after failure");
+        writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("append after failure");
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         assert_eq!(fold(&load.lines).get("doc", "x").expect("alive").fields["slot"], 7);
     }
@@ -850,7 +833,7 @@ mod tests {
     fn a_run_of_ops_is_written_consecutively() {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
-        writer.append(Draft::create("doc", "coc-2019")).expect("append");
+        writer.append_all([Draft::create("doc", "coc-2019")]).expect("append");
         writer
             .append_all([
                 Draft::create("doc", "coc-2019-in"),

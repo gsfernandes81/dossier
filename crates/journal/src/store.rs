@@ -43,9 +43,6 @@ use crate::names;
 use crate::op::{parse_body, Line};
 
 /// Which half of the store a file belongs to.
-///
-/// rust: a `Copy` enum used as a parameter instead of a `bool`. `load(Meta)`
-/// says what it does at the call site; `load(true)` would not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Namespace {
     /// Documents, locations, bundles, settings, review state — the startup fold.
@@ -197,10 +194,6 @@ pub enum Error {
 }
 
 /// A journal directory on disk.
-///
-/// rust: holds an owned `PathBuf` rather than a borrowed `&Path`. A store
-/// outlives the string literal that named it, and one allocation at startup is
-/// not worth a lifetime parameter on every type that touches it.
 #[derive(Debug, Clone)]
 pub struct Journal {
     root: PathBuf,

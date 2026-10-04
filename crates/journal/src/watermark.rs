@@ -95,11 +95,6 @@ impl fmt::Display for Damage {
 }
 
 /// Per-file high-water marks, persisted in the device's local data directory.
-///
-/// rust: `Serialize`/`Deserialize` are derived, but this type deliberately does
-/// no file I/O — the caller owns where local state lives (a platform data dir,
-/// which is a `ds` concern, not the journal's). Keeping I/O out is also what
-/// makes every rule below testable without a filesystem.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HighWater {
     /// Writer id → mark.

@@ -19,8 +19,8 @@
 //! journal file* is load-bearing safety, not cosmetics. Fold the wrong file and
 //! the store gains ops that were deliberately set aside; fold a Syncthing
 //! conflict copy and the "conflicts are structurally impossible" guarantee dies
-//! quietly. Hand-written rather than a regex: the grammar is six characters
-//! wide and not worth a dependency.
+//! quietly. Hand-written rather than a regex: the grammar is too small to be
+//! worth a dependency.
 
 /// Extension every journal file ends with.
 pub const EXTENSION: &str = ".jsonl";
@@ -43,13 +43,9 @@ pub fn is_sync_conflict(name: &str) -> bool {
 /// Returns the writer id of a journal file this build may fold, or `None`.
 ///
 /// Grammar: `^[a-z0-9][a-z0-9-]*\.jsonl$`. Conflict copies and compaction
-/// temps already fail it on their extra dots; the conflict case is checked
-/// explicitly anyway, because folding one would be a correctness bug.
+/// temps fail it on their extra dots.
 #[must_use]
 pub fn writer_of(name: &str) -> Option<&str> {
-    if is_sync_conflict(name) {
-        return None;
-    }
     name.strip_suffix(EXTENSION).filter(|stem| is_valid_writer_id(stem))
 }
 

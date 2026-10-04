@@ -141,18 +141,8 @@ impl Fold {
     ///
     /// Health counters are **not** included: they describe the files, not the
     /// state, and the two implementations legitimately see different files.
-    ///
-    /// # Panics
-    /// Never in practice: the only fallible step is serializing a `Value` that
-    /// this function just built out of other `Value`s, which `serde_json` can
-    /// always represent — the format bans the one thing that could fail
-    /// (floats, hence NaN) at parse time.
     #[must_use]
     pub fn canonical_json(&self) -> String {
-        // rust: group into typed nested maps *first*, then convert to `Value`
-        // once. Building `Value::Object`s incrementally would mean an
-        // `as_object_mut().expect(…)` on every insert — an unreachable panic
-        // path in a function that has no business being able to panic.
         let group = |source: &BTreeMap<EntityKey, Value>| -> Value {
             let mut out: BTreeMap<&str, Map<String, Value>> = BTreeMap::new();
             for ((ent, id), value) in source {
@@ -183,7 +173,7 @@ impl Fold {
         ]));
         // serde_json's `Map` is a BTreeMap, so this is already key-sorted at
         // every level, including inside values that came from `val`.
-        serde_json::to_string(&doc).expect("a Value always serializes")
+        doc.to_string()
     }
 }
 
