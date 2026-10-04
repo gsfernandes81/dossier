@@ -1,8 +1,8 @@
 # A demo journal
 
 A synthetic v3 journal — 24 documents filed in a tree of physical locations, a
-superseded pair, notes, bundles, and three scan readings in `enrich/` so `ctrl+t`
-has something to find.
+superseded pair, notes, bundles, and three scan readings in `enrich/` so
+"search scan text" in the filter list (`Space` `f`) has something to find.
 Entirely made up; **no personal data is here and none ever goes here** (real
 documents and `.dossier/` contents are gitignored and stay that way).
 
@@ -21,7 +21,8 @@ Note the shape: `--journal` points at the directory that **contains**
 `meta/` and `enrich/`, not at either of them. Pointing `--root` at a Syncthing
 root instead would look for `<root>/.dossier/journal/`.
 
-`Enter` on a row will report that the file is not on this device — the demo
-lists file paths that nothing backs, and that message is exactly the one a
-half-synced store gives. Everything else (search, `→` detail, `ctrl+t`,
-`ctrl+x`, taps) works against it for real.
+Opening a file reports that it is not on this device — the demo lists file
+paths that nothing backs, and that message is exactly the one a half-synced
+store gives. Everything else works against it for real: search, `Enter` for a
+document's Details view, the filter list's "expiring only" and "search scan
+text" (`Space` `f`), bundles, and taps.

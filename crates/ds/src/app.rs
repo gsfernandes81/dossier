@@ -1161,14 +1161,9 @@ impl Model {
         self.cursor = moved(self.cursor, self.rows.len(), motion, self.visible_rows().max(1));
     }
 
-    /// The `Enter` verb: open the file.
-    ///
-    /// **It never mutates and never dies** (invariant 2). With no file linked
-    /// there is nothing to open, so it falls through to the record — which is
-    /// the useful thing to do next, and is why this verb can be pressed blind
-    /// after typing three characters.
     /// Goes one layer deeper: from the list into the record, from the record
     /// into the selected file row's file, or the primary file on any other row.
+    /// It never mutates, so it can be pressed blind after typing.
     fn drill(&mut self) -> Effect {
         if self.on_new {
             return self.create_from_query();
