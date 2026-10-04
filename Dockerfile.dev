@@ -2,11 +2,12 @@
 
 # ds-dev — a THIN CHILD of gsrpi-dev-base since 2026-08-24. Everything this container
 # shares with its three siblings on the same Pi (infra-dev, or3-dev, dd-dev) lives in
-# infra's `dev/Dockerfile.base` and is pulled, not rebuilt: python:3.13-slim-bookworm,
-# Node + Claude Code, `gh`, abduco, screen, fish, openssh client and server, cloudflared,
-# the `dev` user, every dotfile, and the entrypoint that starts the lot. What is left here
-# is only what makes this image not one of the others — a compiler for source builds, and
-# this project's venv with its extras and the `driver` group.
+# infra's `dev/Dockerfile.base` and is pulled, not rebuilt: python:3.13-slim-trixie
+# (bookworm until the 2026.09.21.1 base), Node + a self-updating Claude Code, `gh`,
+# abduco, claude-sessions and its door, screen, fish, openssh client and server,
+# cloudflared, the `dev` user, every dotfile, and the entrypoint that starts the lot.
+# What is left here is only what makes this image not one of the others — a compiler for
+# source builds, and this project's venv with its extras and the `driver` group.
 #
 # This file used to be destiny-director's Dockerfile.dev minus the DB/Railway parts,
 # copied by hand. That is what the base image ends: the shared layers are now the same
@@ -15,14 +16,22 @@
 #
 # PINNED TAG, never `latest`: a base rebuild must not change this container until this
 # line moves. The base is PUBLIC on ghcr, built by infra's
-# `.github/workflows/dev-base.yml` on manual dispatch, so there is no cross-repo build
-# order — the FROM pulls, and nothing here needs the infra repo on disk.
+# `.github/workflows/dev-base.yml` on every push to infra's main that bumps its tag, so
+# there is no cross-repo build order — the FROM pulls, and nothing here needs the infra
+# repo on disk.
+#
+# 2026.10.04.3 IS THE FIRST BASE HERE WITH claude-sessions (v0.3.8, infra#8) — the menu
+# every `ssh ds-dev` now lands on, because the base's sshd runs `claude-sessions-door` as
+# its ForceCommand. It is also the jump across the base's move from bookworm to trixie
+# (glibc 2.41, OpenSSH 10.x, fish 4.x); infra `dev/README.md` § *Debian trixie, for glibc
+# 2.41* has what moved. Not 2026.10.04 (v0.3.6 dumps core into /workspace when the link
+# drops) nor anything earlier: the issue that asked for this bump is dossier#74.
 #
 # THE OFFLINE FALLBACK is `make base` in infra's `dev/`. It builds the identical image
 # locally UNDER THE SAME NAME, and docker prefers a local image over a pull — so a GitHub
 # outage, a metered month, or a host whose clone owner is not the uid the CI image bakes
 # means building it there, and this file is none the wiser.
-ARG BASE_TAG=2026.08.25
+ARG BASE_TAG=2026.10.04.3
 FROM ghcr.io/gsfernandes81/gsrpi-dev-base:${BASE_TAG}
 
 # Re-declared, because an ARG stated before FROM is out of scope after it. Recorded as a
@@ -38,9 +47,10 @@ USER root
 # build-essential is the only apt package the base does not carry: it covers the source
 # builds Claude Code or the TUI driver need on arm64, where a wheel may not exist. git,
 # make, fish, the ssh client and server, curl, gnupg, ca-certificates and tzdata all come
-# from the base — and so does abduco, which is new here: `abduco -A work fish` holds a
-# session across a dropped link with no key handling of its own, which matters more for a
-# full-screen TUI than screen's does.
+# from the base — and so does abduco, which holds a session across a dropped link with no
+# key handling of its own (more important for a full-screen TUI than screen's is). Nobody
+# runs it by hand any more: the claude-sessions menu gives each session its own abduco
+# slot.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -118,17 +128,24 @@ COPY --chown=dev:dev ssh_config.dev /home/dev/ssh_config
 # first value it obtains for a keyword and the base's Include is at the top of its file,
 # so both win, and entrypoint.sh runs `sshd -t` before exec'ing, so a drop-in that does
 # not parse costs the drop-ins and not the container.
+#
+# NEITHER SETS ForceCommand, and none must. The base's sshd forces every session through
+# `claude-sessions-door` (the menu at a terminal, a forwarded command as given, else a
+# shell), and for the same first-value reason a ForceCommand here would replace it — the
+# menu, and with it the scp/Zed/`ssh ds-dev cmd` handling the door does.
 COPY --chown=dev:dev sshd_config.dev.d/ /home/dev/sshd_config.d/
 
 # The login walkthrough — git SSH, GitHub, Claude. Repo-specific by nature and unchanged.
 COPY --chown=dev:dev docker-login.dev.sh /home/dev/login.sh
 
 # NO REMOTE-CONTROL SUPERVISOR, as of 2026-08-25, and the file is deleted rather than left
-# unreferenced. This container is reached the way the other three are — ssh in, and hold
-# the work in an abduco session: `ssh -p <port> dev@<host>` then `abduco -A claude claude`,
-# which survives a dropped link on its own. The base carries no hook to start a daemon with
-# any more, and runs the opposite job instead: it stops a claude nobody has spoken to in 90
-# minutes and leaves the conversation for `claude --resume`.
+# unreferenced. This container is reached the way the other three are: `ssh ds-dev` lands on
+# the claude-sessions menu, where Enter attaches or resumes a session, `n` starts one in
+# /workspace and each lives in its own abduco slot, so it survives a dropped link. The base
+# also runs the opposite job to a supervisor. Its 90-minute offloader stops a claude nobody
+# has spoken to and leaves the conversation for `claude --resume`, and `claude-sessions
+# offload` runs beside it as a dry run (Stage A) that logs what its stricter rules would
+# stop. Both live in the base; infra `dev/README.md` § *claude-sessions* is the reference.
 
 # The fifth seam: what this image does at start that the base cannot know about.
 COPY --chown=dev:dev docker-child-init.dev.sh /home/dev/child-init.sh
