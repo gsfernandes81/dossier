@@ -343,8 +343,6 @@ mod tests {
         Wsl { mount_root: DEFAULT_MOUNT_ROOT.into(), distro: Some("Ubuntu".into()) }
     }
 
-    /// A WSL kernel is recognised, and an ordinary Linux kernel — or Termux's
-    /// Android one — is not mistaken for one.
     #[test]
     fn a_wsl_kernel_is_recognised_and_nothing_else_is() {
         assert!(is_wsl_kernel("5.15.153.1-microsoft-standard-WSL2\n"));
@@ -352,9 +350,8 @@ mod tests {
         assert!(!is_wsl_kernel("5.10.198-android12-9-g5a1b"));
     }
 
-    /// **A Docker Desktop container is not WSL**, though it runs on WSL's
-    /// kernel: without WSL's environment or its interop there is no Windows to
-    /// hand anything to. Either one is enough, because cron has only the second.
+    /// Docker Desktop runs on WSL's kernel without its environment or interop, so
+    /// there is no Windows to hand anything to.
     #[test]
     fn the_kernel_alone_is_not_wsl() {
         let release = "5.15.153.1-microsoft-standard-WSL2";
@@ -364,8 +361,6 @@ mod tests {
         assert!(!detect("6.8.0-45-generic", true, true), "stray variables on real Linux");
     }
 
-    /// A drive path in either slash style lands on its drvfs mount, with the
-    /// letter lowercased the way WSL mounts it.
     #[test]
     fn a_drive_path_lands_on_its_mount() {
         let wsl = wsl();
@@ -382,8 +377,6 @@ mod tests {
         assert_eq!(wsl.to_linux("E:"), Some(PathBuf::from("/mnt/e")));
     }
 
-    /// Windows' view of *this* distribution comes home; another distribution's,
-    /// or a network share, has no Linux name here and says so.
     #[test]
     fn a_unc_path_comes_home_only_from_this_distribution() {
         let wsl = wsl();
@@ -393,15 +386,12 @@ mod tests {
         assert_eq!(wsl.to_linux(r"\\nas\share\Sync"), None);
     }
 
-    /// Linux text is not a Windows path, so it is left for the caller as it is.
     #[test]
     fn a_linux_path_is_not_translated() {
         assert_eq!(wsl().to_linux("/home/g/Sync"), None);
         assert_eq!(wsl().to_linux("Sync"), None);
     }
 
-    /// A file on a drive mount opens as its drive path; one inside the
-    /// distribution opens through `\\wsl$`.
     #[test]
     fn a_linux_path_is_named_for_windows() {
         let wsl = wsl();
@@ -427,8 +417,6 @@ mod tests {
         );
     }
 
-    /// With no distribution name, a path inside the distribution cannot be
-    /// named for Windows — and saying so beats guessing one.
     #[test]
     fn an_unknown_distribution_cannot_name_its_own_files() {
         let wsl = Wsl { distro: None, ..wsl() };
@@ -436,7 +424,6 @@ mod tests {
         assert_eq!(wsl.to_windows(Path::new("/mnt/c/a.pdf")).as_deref(), Some(r"C:\a.pdf"));
     }
 
-    /// A moved mount root is honoured in both directions.
     #[test]
     fn a_custom_mount_root_is_honoured() {
         let conf = "[boot]\nsystemd=true\n\n[automount]\nenabled = true\nroot = /win   # moved\n";
@@ -447,8 +434,6 @@ mod tests {
         assert_eq!(wsl.to_windows(Path::new("/mnt/c/x")), None, "/mnt is not a drive any more");
     }
 
-    /// `root` only counts under `[automount]`, quoted or not; anything else is
-    /// the default.
     #[test]
     fn the_mount_root_is_read_only_from_automount() {
         assert_eq!(mount_root_from(""), "/mnt/");
@@ -457,8 +442,6 @@ mod tests {
         assert_eq!(mount_root_from("[automount]\nroot = relative\n"), "/mnt/");
     }
 
-    /// A root typed the way Explorer shows it is stored the way Linux needs it;
-    /// off WSL, or for a Linux path, the typing is kept.
     #[test]
     fn a_typed_windows_root_becomes_native() {
         let wsl = wsl();
@@ -468,8 +451,8 @@ mod tests {
         assert_eq!(native_root(Some(&wsl), "/home/g/Sync".into()), PathBuf::from("/home/g/Sync"));
     }
 
-    /// On a drive, case does not distinguish places — Windows would not let
-    /// `Sync` and `sync` both exist. Inside the distribution it does.
+    /// Windows would not let `Sync` and `sync` both exist on a drive; inside the
+    /// distribution they can.
     #[test]
     fn case_matters_only_off_the_windows_drive() {
         let wsl = wsl();
@@ -479,7 +462,6 @@ mod tests {
         assert!(!same("/mnt/c/Users/g/Sync", "/mnt/c/Users/g/Sync2"));
     }
 
-    /// A store root reached through a symlink is the place it points at.
     #[cfg(unix)]
     #[test]
     fn a_symlinked_root_is_the_place_it_names() {
@@ -491,13 +473,8 @@ mod tests {
         assert!(same_place(&wsl(), &link, &real));
     }
 
-    /// **On a real WSL, this module agrees with WSL's own `wslpath`.**
-    ///
-    /// Only the CI `wsl` leg sets `DS_EXPECT_WSL`, with the checkout on a
-    /// Windows drive: there, detection must find WSL, and translating the
-    /// working directory each way must give
-    /// what `wslpath` gives. Everywhere else this is a no-op, which is honest —
-    /// the pure tests above are what run there.
+    /// Only the CI `wsl` leg sets `DS_EXPECT_WSL`, with the checkout on a Windows
+    /// drive; everywhere else this is a no-op.
     #[test]
     fn a_real_wsl_agrees_with_wslpath() {
         if std::env::var_os("DS_EXPECT_WSL").is_none() {
@@ -526,9 +503,7 @@ mod tests {
         }
     }
 
-    /// **The twin rule.** Same name and same store is the collision; a
-    /// different name, or the same name on a different store, is not — two
-    /// journals can each have a `desk-core` without ever meeting.
+    /// Two journals can each have a `desk-core` without ever meeting.
     #[test]
     fn a_twin_is_the_same_name_on_the_same_store() {
         let wsl = wsl();
@@ -539,8 +514,6 @@ mod tests {
         assert!(!twin("desk", Some(r"D:\Other")), "different store");
     }
 
-    /// When either side's store is unknown, the names alone decide — a false
-    /// refusal costs a rename, a missed one costs the journal.
     #[test]
     fn an_unknown_store_counts_as_the_same_one() {
         let wsl = wsl();
@@ -548,8 +521,6 @@ mod tests {
         assert!(twin_of(&wsl, "desk", None, &windows_config("desk", Some(r"C:\S"))));
     }
 
-    /// The scan reads real files: a Windows profile tree under a fake mount
-    /// root, with one config that collides and one that does not.
     #[test]
     fn the_scan_finds_a_twin_in_any_windows_profile() {
         let dir = tempfile::tempdir().expect("tempdir");

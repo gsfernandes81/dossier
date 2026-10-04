@@ -214,9 +214,7 @@ fn the_phone_screen_matches_the_mockup() {
     assert!(lines[27].contains("For more, hit"), "and what the chip is for");
 }
 
-/// **Every line is exactly the terminal's width, and the status column lands on
-/// the same column in every row.** A ragged status column is the thing that
-/// makes a list of dates unreadable at a glance.
+/// A ragged status column makes a list of dates unreadable at a glance.
 #[test]
 fn the_status_column_is_straight() {
     for (cols, rows) in [(45u16, 28u16), (80, 24), (100, 26)] {
@@ -245,8 +243,6 @@ fn the_status_column_is_straight() {
     }
 }
 
-/// The desktop layout is single-line rows with a tags column — and the same
-/// list, in the same order.
 #[test]
 fn the_desktop_screen_is_single_line_rows() {
     let mut m = model(100, 26);
@@ -258,8 +254,6 @@ fn the_desktop_screen_is_single_line_rows() {
     assert!(!lines[23].contains("⏎ Open"), "no touch buttons on the desktop");
 }
 
-/// Where a row does not fit, tags give way before the location, and a gap
-/// always parts the two.
 #[test]
 fn tags_give_way_before_the_location() {
     let mut m = model(92, 26);
@@ -271,8 +265,6 @@ fn tags_give_way_before_the_location() {
     assert!(lines[1].contains("  blue folder › slot 1"), "location whole: {:?}", lines[1]);
 }
 
-/// **Detail splits beside the list only when there is room**: a right pane
-/// at 100 columns, a full-screen push at 45.
 #[test]
 fn detail_splits_wide_and_pushes_narrow() {
     let mut wide = model(100, 26);
@@ -298,7 +290,6 @@ fn detail_splits_wide_and_pushes_narrow() {
     assert!(lines[26].contains("esc back"), "the hints changed with the surface: {:?}", lines[26]);
 }
 
-/// Below the floor the app says so instead of drawing something broken.
 #[test]
 fn a_tiny_terminal_gets_a_notice() {
     let mut m = model(30, 10);
@@ -308,8 +299,6 @@ fn a_tiny_terminal_gets_a_notice() {
     assert_eq!(m.list.height, 0, "no rows drawn means a tap cannot hit one");
 }
 
-/// **`NO_COLOR` is a supported way to run.** With colour off the screen still
-/// carries every signal — the markers are text, and the layout is unchanged.
 #[test]
 fn no_color_loses_nothing_but_colour() {
     let mut colored = model(45, 28);
@@ -323,10 +312,8 @@ fn no_color_loses_nothing_but_colour() {
     assert!(without_color.iter().any(|l| l.contains('!')), "the expired marker is text");
 }
 
-/// **The header count is the touch layout's one filter button** — reverse
-/// video, because in this design reverse means "you can press this". It is
-/// checked against the columns the renderer actually filled, which is the same
-/// place the hit test reads.
+/// Reverse video means pressable, checked against the columns the renderer
+/// filled, which are the ones the hit test reads.
 #[test]
 fn the_header_count_is_a_filled_cell_on_a_touch_layout() {
     let mut m = model(45, 28);
@@ -344,8 +331,6 @@ fn the_header_count_is_a_filled_cell_on_a_touch_layout() {
     assert!(none.is_empty(), "no touch affordance where there is a keyboard");
 }
 
-/// **The Space sheet covers the list rather than shrinking it**, and `f` opens
-/// the filter checklist, whose boxes draw their off state as well as on.
 #[test]
 fn the_leader_sheet_opens_over_the_list() {
     let mut m = model(45, 28);
@@ -402,11 +387,8 @@ fn the_status_line_is_a_band_and_the_entry_line_is_not() {
     assert_eq!(reversed, [39, 40, 41, 42, 43], "SPC is reverse, with a gutter after it");
 }
 
-/// **`NO_COLOR` has no band**, and that is the honest cost of this texture:
-/// it is the first thing on the surface that a monochrome run loses.
-///
-/// What survives is the prompt and the words in the field, which is why the
-/// marking may never be the only thing saying what the row is for.
+/// The band is the one texture a monochrome run loses, so it may never be the
+/// only thing saying what the row is for.
 #[test]
 fn a_monochrome_run_loses_the_band_but_not_the_row() {
     let mut m = model(45, 28);
@@ -490,8 +472,6 @@ fn a_mid_query_cursor_leaves_the_text_in_place() {
     assert!(!lines[27].contains('█'), "and no block is drawn inside it: {:?}", lines[27]);
 }
 
-/// `e` on a file row draws its picker in the sheet's panel: the file it is
-/// about, then the choices, the first one selected.
 #[test]
 fn a_file_row_picker_draws_in_the_panel() {
     let mut m = writable(model(45, 28));
@@ -519,8 +499,6 @@ fn the_expiring_filter_is_visible_in_the_bar() {
     assert!(lines[1].contains("Motorcycle Insurance"), "soonest first: {:?}", lines[1]);
 }
 
-/// A conflicting latest version is counted in the header beside the
-/// expiring count.
 #[test]
 fn a_conflict_is_counted_in_the_header() {
     let mut m = model(45, 28);
@@ -530,8 +508,6 @@ fn a_conflict_is_counted_in_the_header() {
     assert!(lines[0].contains(" exp "), "the expiring count stays: {:?}", lines[0]);
 }
 
-/// The Versions view lists each version on two lines — dates and standing,
-/// then where its paper is — newest first.
 #[test]
 fn the_versions_view_draws_two_lines_a_version() {
     let mut m = model(47, 24);
@@ -559,8 +535,6 @@ fn the_versions_view_draws_two_lines_a_version() {
     assert!(text.contains("⏎ open"), "{text}");
 }
 
-/// The renews picker names the document and what it renews now under its
-/// heading, then the documents it may renew.
 #[test]
 fn the_renews_picker_has_three_heading_rows() {
     let mut m = writable(model(47, 24));
@@ -601,8 +575,6 @@ fn with_bundles(cols: u16, rows: u16) -> Model {
     m
 }
 
-/// The Bundles view lists each bundle with how many documents it holds and
-/// its date, in the list's place.
 #[test]
 fn the_bundles_view_lists_bundles_in_the_lists_place() {
     let mut m = with_bundles(47, 24);
@@ -617,8 +589,6 @@ fn the_bundles_view_lists_bundles_in_the_lists_place() {
     assert!(text.contains("2/2 bundles"), "{text}");
 }
 
-/// A bundle's Details view: its own rows, then its documents, an old version
-/// marked as having a newer one.
 #[test]
 fn a_bundle_lists_its_documents() {
     let mut m = with_bundles(47, 24);
@@ -635,7 +605,6 @@ fn a_bundle_lists_its_documents() {
     assert!(text.contains("2 documents"), "{text}");
 }
 
-/// The bundle record marks the field being edited the way a document's does.
 #[test]
 fn the_bundle_record_marks_the_field_being_edited() {
     let mut m = with_bundles(47, 24);
@@ -649,8 +618,6 @@ fn the_bundle_record_marks_the_field_being_edited() {
     assert_eq!(lit, (0..11).collect::<Vec<u16>>(), "the date label, and only it");
 }
 
-/// Attaching a file lists the folder being typed in over the bottom of the
-/// view, folders first, with the line still at the bottom.
 #[test]
 fn the_attach_line_has_a_live_list() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -675,9 +642,8 @@ fn the_attach_line_has_a_live_list() {
     assert!(lines[23].contains("attach: Identity/p"), "{text}");
 }
 
-/// While a pane is in front, letters are verbs, so the last row offers no
-/// field: it names the pane, Vim-style, and after one `d` says what a second
-/// one deletes.
+/// While a pane is in front letters are verbs, so the last row names the pane
+/// instead of offering a field.
 #[test]
 fn a_pane_names_its_mode_on_the_last_row() {
     let mut m = writable(model(47, 24));
@@ -694,7 +660,6 @@ fn a_pane_names_its_mode_on_the_last_row() {
     assert!(lines[23].contains(&name[..10]), "it names the document: {:?}", lines[23]);
 }
 
-/// The `SPC` chip opens the sheet where it is drawn, on the last row.
 #[test]
 fn the_spc_chip_opens_the_sheet_where_it_is_drawn() {
     let mut m = model(47, 24);
@@ -718,7 +683,6 @@ fn the_menu_hint_goes_once_something_is_typed() {
     assert!(lines[22].contains("esc clear"), "{:?}", lines[22]);
 }
 
-/// A tap on a row of the Space sheet runs its verb, as its letter does.
 #[test]
 fn a_tap_on_a_sheet_row_runs_it() {
     let mut m = model(47, 45);
@@ -730,8 +694,6 @@ fn a_tap_on_a_sheet_row_runs_it() {
     assert!(m.check.is_some(), "to the filter list");
 }
 
-/// At the smallest size the Details sheet flows into two columns, so no verb
-/// is cut off, and a tap on the second column runs the verb drawn there.
 #[test]
 fn the_sheet_fits_the_floor_in_two_columns() {
     let mut m = writable(model(38, 12));
@@ -751,7 +713,6 @@ fn the_sheet_fits_the_floor_in_two_columns() {
     );
 }
 
-/// An empty store offers its first document, with nothing typed.
 #[test]
 fn an_empty_store_explains_itself() {
     let mut m = Model::new(Store::default(), "2026-10-20".into(), "2027-01-18".into(), 45, 28);
@@ -761,9 +722,8 @@ fn an_empty_store_explains_itself() {
     assert!(lines[26].trim_start().starts_with("0/0"));
 }
 
-/// **A fresh store says where the first save will create the journal**, so a
-/// wrong root is caught before anything is written there. Never a command that
-/// would not help.
+/// Saying where the first save creates the journal catches a wrong root
+/// before anything is written there.
 #[test]
 fn a_fresh_store_says_how_to_start_and_where() {
     let mut m = Model::new(Store::default(), "2026-10-20".into(), "2027-01-18".into(), 45, 28);
@@ -794,9 +754,6 @@ fn wide_glyphs_do_not_break_the_columns() {
     assert!(row.contains('!'), "and its marker survived the cut: {:?}", row);
 }
 
-/// **A wrapped value stays in its own column.** A continuation line that starts
-/// at the left margin reads as a new field, which is why the renderer wraps free
-/// text itself instead of handing it to a widget.
 #[test]
 fn a_long_note_hangs_under_its_column() {
     let mut store = sample_store();
@@ -817,10 +774,8 @@ fn a_long_note_hangs_under_its_column() {
     );
 }
 
-/// **An edit takes the entry line over rather than adding a row.** Three rows of
-/// chrome is the budget on both layouts, and the last row is
-/// exactly what a field you are typing into is for — so the field's own prompt
-/// replaces `>` and the count and the `SPC` chip stand down.
+/// Three rows of chrome is the budget on both layouts, so the field's prompt
+/// replaces `>` rather than adding a row.
 #[test]
 fn an_edit_takes_over_the_entry_line() {
     let mut m = writable(model(47, 24));
@@ -840,9 +795,8 @@ fn an_edit_takes_over_the_entry_line() {
     assert!(band.contains("discard"), "{band:?}");
 }
 
-/// **The record marks the field being edited.** The value on the record is the
-/// stored one and the value being typed is on the entry line; without the mark
-/// the two rows are talking about each other with nothing to connect them.
+/// The record shows the stored value and the entry line the typed one; the mark
+/// is what connects the two rows.
 #[test]
 fn the_record_marks_the_field_being_edited() {
     let mut m = writable(model(47, 24));
@@ -863,7 +817,6 @@ fn the_record_marks_the_field_being_edited() {
     assert!(lit.iter().all(|&x| x <= 11), "and only the label, not the value: {lit:?}");
 }
 
-/// The `e edit` hint appears when the verb works and not before.
 #[test]
 fn the_edit_hint_appears_only_when_this_session_can_write() {
     let mut readonly = model(100, 26);
@@ -877,8 +830,6 @@ fn the_edit_hint_appears_only_when_this_session_can_write() {
     assert!(hints.contains("e edit"), "and a writing one is: {hints}");
 }
 
-/// A dirty edit says what the second `Esc` will do, in the armed tone the quit
-/// already uses — one texture for "the next press acts".
 #[test]
 fn a_dirty_edit_warns_before_it_discards() {
     let mut m = writable(model(47, 24));
@@ -889,8 +840,6 @@ fn a_dirty_edit_warns_before_it_discards() {
     assert!(rows[rows.len() - 2].contains("esc again to discard"), "{rows:?}");
 }
 
-/// **`NO_COLOR` loses the band and nothing else**, the editor included: the
-/// prompt, the value and the cursor are all text.
 #[test]
 fn the_editor_survives_no_color() {
     let mut m = writable(model(47, 24));
@@ -901,8 +850,8 @@ fn the_editor_survives_no_color() {
     assert!(entry.contains("expiry:") && entry.contains("2026-07-31"), "{entry:?}");
 }
 
-/// The Details view says where the hard copy is, cut from the left so the
-/// innermost location survives the phone's width, and offers digital only.
+/// The location is cut from the left so the innermost place survives the
+/// phone's width.
 #[test]
 fn the_details_view_shows_the_hard_copy_location() {
     let mut m = model(47, 24);
@@ -915,8 +864,6 @@ fn the_details_view_shows_the_hard_copy_location() {
     assert!(lines.iter().any(|l| l.contains("[ ] digital only (no hard copy)")), "{lines:?}");
 }
 
-/// The location picker opens full screen on the phone: three heading rows, then
-/// the tree rooted one level above the hard copy, with it open and selected.
 #[test]
 fn the_location_picker_is_a_tree_on_the_phone() {
     let mut m = writable(model(47, 24));
@@ -936,8 +883,6 @@ fn the_location_picker_is_a_tree_on_the_phone() {
     assert!(lines[9].starts_with(" ├ ▸ slot 2") && lines[9].ends_with("1 document "), "{lines:?}");
 }
 
-/// Typing in the picker shows the text in its heading, a pinned `+ new` row,
-/// and every matching location as one row with its full path.
 #[test]
 fn the_location_picker_searches_by_path() {
     let mut m = writable(model(47, 24));
@@ -957,8 +902,6 @@ fn the_location_picker_searches_by_path() {
     );
 }
 
-/// Space over the picker opens the same Space sheet, headed by the location it
-/// acts on; deleting a full location grows the status line to fit its caution.
 #[test]
 fn the_location_sheet_and_its_caution_fit_the_phone() {
     let mut m = writable(model(47, 24));
@@ -982,8 +925,6 @@ fn the_location_sheet_and_its_caution_fit_the_phone() {
     assert!(lines[23].starts_with(" locations · "), "the last row stays last: {lines:?}");
 }
 
-/// Taps on the tree: the chevron opens and closes, a first tap selects, and a
-/// tap on the selected row files the hard copy, as Enter does.
 #[test]
 fn the_tree_answers_taps() {
     let mut m = writable(model(47, 24));
@@ -1012,8 +953,6 @@ fn the_tree_answers_taps() {
     assert_eq!(drafts.len(), 1, "{drafts:?}");
 }
 
-/// A tap on the digital-only row ticks it at once; on any other row a first
-/// tap selects it.
 #[test]
 fn the_details_rows_answer_taps() {
     let mut m = writable(model(47, 24));
@@ -1037,12 +976,8 @@ fn the_details_rows_answer_taps() {
     );
 }
 
-/// **The selector is visible, and it is the row the verbs act on.**
-///
-/// The same texture the list's cursor uses — the record is a wall of small
-/// text at 47 columns, and a highlight that moves predictably is what makes it
-/// followable. It is drawn from the same `detail::rows` the selector walks, so
-/// a highlight can never land on a row the reader is not on.
+/// The highlight is drawn from the same `detail::rows` the selector walks, so
+/// it can never land on a row the reader is not on.
 #[test]
 fn the_record_selector_is_drawn_where_it_is() {
     let mut m = model(47, 24);

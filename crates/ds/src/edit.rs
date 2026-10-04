@@ -227,25 +227,20 @@ impl Edit {
 mod tests {
     use super::*;
 
-    /// **An empty buffer clears the field rather than storing a blank.** A
-    /// stored `""` folds to an expiry no comparison can classify; an `unset` op
-    /// folds to a document that is simply not in the watch.
+    /// A stored `""` would fold to an expiry no comparison can classify.
     #[test]
     fn an_empty_buffer_clears_the_field() {
         assert_eq!(Field::Expiry.validate(""), Ok(None));
         assert_eq!(Field::Expiry.validate("   "), Ok(None));
     }
 
-    /// A date that parses is written exactly as typed, trimmed.
     #[test]
     fn a_valid_date_is_stored_verbatim() {
         assert_eq!(Field::Expiry.validate(" 2026-09-28 "), Ok(Some("2026-09-28".into())));
     }
 
-    /// **The stored format is the sort order.** Everything above `doc.rs`
-    /// compares expiry dates as strings, so a shape that would not sort — a
-    /// one-digit month, a slash, a two-digit year — has to be refused at the
-    /// door rather than normalized behind the user's back.
+    /// Expiry dates compare as strings, so a shape that would not sort is refused
+    /// rather than normalized behind the user's back.
     #[test]
     fn a_date_that_would_not_sort_is_refused() {
         for bad in [
@@ -262,8 +257,7 @@ mod tests {
         }
     }
 
-    /// A day that does not exist is not a date, leap years included — an expiry
-    /// of `2026-02-30` is one that never arrives.
+    /// An expiry of `2026-02-30` is one that never arrives.
     #[test]
     fn a_day_the_month_does_not_have_is_refused() {
         assert!(is_iso_date("2024-02-29"), "2024 is a leap year");
@@ -275,9 +269,7 @@ mod tests {
         assert!(!is_iso_date("1900-02-29"), "one divisible by 100 and not 400 is not");
     }
 
-    /// Dirtiness is derived from the buffer, never tracked separately — typing a
-    /// character and rubbing it out again leaves a clean edit, which is what
-    /// decides whether `Esc` needs one press or two.
+    /// Dirtiness decides whether `Esc` needs one press or two.
     #[test]
     fn dirtiness_is_derived_and_so_it_can_go_back_to_clean() {
         let mut edit = Edit::new(Target::Doc("coc".into()), Field::Expiry, Some("2026-09-28"));
@@ -288,7 +280,6 @@ mod tests {
         assert!(!edit.dirty(), "back to what it was is not an edit");
     }
 
-    /// A name cannot be cleared, and the refusal names what needs one.
     #[test]
     fn a_name_cannot_be_cleared() {
         let edit = Edit::new(Target::Bundle("trip".into()), Field::Name, Some("Trip"));
@@ -297,7 +288,6 @@ mod tests {
         assert_eq!(cleared.journal_field(), "name");
     }
 
-    /// A typed path is stored POSIX and relative, or refused with the reason.
     #[test]
     fn a_typed_path_must_stay_inside_the_root() {
         assert_eq!(relative_path(r"Marine\coc.pdf").as_deref(), Ok("Marine/coc.pdf"));

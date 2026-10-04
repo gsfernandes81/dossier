@@ -223,9 +223,6 @@ mod tests {
             .collect()
     }
 
-    /// The renews picker offers only documents that keep the chain a chain:
-    /// never the document itself, never one of its newer versions, and never
-    /// one something else already replaces.
     #[test]
     fn renews_offers_only_documents_that_keep_the_chain() {
         let store = crate::app::tests::with_versions().store;
@@ -248,7 +245,6 @@ mod tests {
         );
     }
 
-    /// The primary file is not offered "make primary"; the other one is.
     #[test]
     fn only_a_secondary_file_offers_make_primary() {
         let store = two_files();
@@ -263,7 +259,6 @@ mod tests {
         assert_eq!(choices(1), [Choice::MakePrimary, Choice::Detach, Choice::Attach]);
     }
 
-    /// Typing narrows on the label, folded like the document search.
     #[test]
     fn typing_narrows_the_entries() {
         let store = two_files();

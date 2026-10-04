@@ -154,8 +154,7 @@ mod tests {
         draft.stamp(1_700_000_000_000, "desk-lab").into()
     }
 
-    /// Every field a person might remember is searchable, and folding happens
-    /// once at load — not once per keystroke.
+    /// Folding happens once at load, not once per keystroke.
     #[test]
     fn a_reading_becomes_one_folded_haystack() {
         let lines = vec![enrich(
@@ -177,7 +176,6 @@ mod tests {
         assert!(!text.contains("920"), "a confidence is not searchable text");
     }
 
-    /// A path with both a reading and a proposal keeps the words from both.
     #[test]
     fn a_reading_and_a_proposal_for_one_path_are_joined() {
         let lines = vec![
@@ -189,7 +187,6 @@ mod tests {
         assert!(text.contains("alpha") && text.contains("bravo"), "{text}");
     }
 
-    /// Matching is by file path, which is how a document reaches its scans.
     #[test]
     fn matching_is_by_the_documents_own_file_paths() {
         let lines = vec![enrich(
@@ -206,8 +203,6 @@ mod tests {
         );
     }
 
-    /// Entries that are not readings — dedup clusters, anything a later phase
-    /// adds — are ignored rather than searched as JSON.
     #[test]
     fn only_text_bearing_kinds_are_indexed() {
         let lines = vec![enrich(

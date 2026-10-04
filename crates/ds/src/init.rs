@@ -497,8 +497,8 @@ mod tests {
         (result, String::from_utf8(output).expect("utf-8"))
     }
 
-    /// **Init asks only for what the flags did not supply.** The conversation is
-    /// the fallback, never the requirement — which is what lets CI drive it.
+    /// The conversation is the fallback, never the requirement, which is what lets
+    /// CI drive it.
     #[test]
     fn it_asks_only_for_what_the_flags_left_out() {
         let (_tmp, dir) = sandbox();
@@ -511,9 +511,8 @@ mod tests {
         assert!(transcript.contains("writes as `phone-core`"), "{transcript}");
     }
 
-    /// **A blank answer is re-asked, not accepted.** An empty device name would
-    /// form the writer id `-core`, which the grammar rejects anyway — better to
-    /// ask again than to fail at the end of the conversation.
+    /// An empty device name would form the writer id `-core`; asking again beats
+    /// failing at the end of the conversation.
     #[test]
     fn a_blank_reply_is_asked_again() {
         let (_tmp, dir) = sandbox();
@@ -525,9 +524,8 @@ mod tests {
         assert_eq!(Config::read(&path).expect("read").device.as_deref(), Some("desk"));
     }
 
-    /// **The device name is checked against the frozen writer grammar**, by the
-    /// same function the writer itself calls — so init and `Writer::open` can
-    /// never disagree about what a legal id is.
+    /// The check is the one `Writer::open` calls, so the two never disagree about
+    /// a legal id.
     #[test]
     fn a_device_name_outside_the_grammar_is_refused() {
         let (_tmp, dir) = sandbox();
@@ -566,9 +564,8 @@ mod tests {
         assert!(transcript.contains("not there yet"), "and it says so: {transcript}");
     }
 
-    /// **Re-running init keeps every answer the flags and replies leave
-    /// alone**, the Syncthing settings among them, so it is how a device is
-    /// finished off later.
+    /// Re-running is how a device is finished off later, so it keeps the Syncthing
+    /// settings it is not asked about.
     #[test]
     fn re_running_keeps_what_is_not_changed() {
         let (_tmp, dir) = sandbox();
@@ -595,8 +592,6 @@ mod tests {
         assert_eq!(config.syncthing.address.as_deref(), Some("https://127.0.0.1:8384"));
     }
 
-    /// **A rename is confirmed**, because it strands every edit made under the
-    /// old name; with nobody to confirm it, it takes `--force`.
     #[test]
     fn a_rename_is_confirmed_or_forced() {
         let (_tmp, dir) = sandbox();
@@ -623,7 +618,6 @@ mod tests {
         );
     }
 
-    /// Syncthing's own config supplies the API key when the person agrees.
     #[test]
     fn the_api_key_comes_from_syncthings_own_config() {
         let (_tmp, dir) = sandbox();
@@ -648,8 +642,6 @@ mod tests {
         assert_eq!(config.syncthing.address.as_deref(), Some("https://127.0.0.1:8384"));
     }
 
-    /// With nothing found, the key is asked for and can be skipped; given, the
-    /// address defaults to Syncthing's usual one.
     #[test]
     fn the_api_key_is_asked_for_and_skippable() {
         let (_tmp, dir) = sandbox();
@@ -670,7 +662,6 @@ mod tests {
         assert_eq!(config.syncthing.address.as_deref(), Some(DEFAULT_ADDRESS));
     }
 
-    /// A kept key can still be cleared: no to keeping it, then Enter.
     #[test]
     fn a_kept_api_key_can_be_cleared() {
         let (_tmp, dir) = sandbox();
@@ -686,7 +677,6 @@ mod tests {
         assert_eq!(result.expect("init").syncthing.apikey, None);
     }
 
-    /// An address that is not `host:port` is asked again.
     #[test]
     fn a_malformed_address_is_asked_again() {
         let (_tmp, dir) = sandbox();
@@ -702,8 +692,6 @@ mod tests {
         assert_eq!(result.expect("init").syncthing.address.as_deref(), Some("127.0.0.1:9999"));
     }
 
-    /// A file is not a root: typed, it is asked again; given as a flag, init
-    /// fails without writing.
     #[test]
     fn a_file_is_not_a_root() {
         let (_tmp, dir) = sandbox();
@@ -723,7 +711,6 @@ mod tests {
         assert!(!path.exists(), "nothing was written");
     }
 
-    /// Termux needs `termux-open` on the path and `~/storage` set up.
     #[test]
     fn termux_problems_name_their_fix() {
         let (_tmp, dir) = sandbox();
@@ -741,8 +728,7 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
     }
 
-    /// A relative root is stored absolute, so it does not depend on where
-    /// `ds` is started.
+    /// A relative root would depend on where `ds` is started.
     #[test]
     fn a_relative_root_is_stored_absolute() {
         let stored = absolute(PathBuf::from("Sync/Documents"));
@@ -770,8 +756,6 @@ mod tests {
         }
     }
 
-    /// **Under WSL, a root typed as Explorer shows it is stored as its mount** —
-    /// the config holds a path Linux can open, not backslashes.
     #[test]
     fn under_wsl_a_windows_root_is_stored_as_its_mount() {
         let (_tmp, dir) = sandbox();
@@ -784,9 +768,6 @@ mod tests {
         assert_eq!(root, PathBuf::from(format!("{}c/Users/g/Sync", wsl.mount_root)));
     }
 
-    /// **Under WSL, a device name `ds.exe` already uses for this store is
-    /// refused** before anything is written, and the refusal offers a name that
-    /// would work. The same name on a different store is fine.
     #[test]
     fn under_wsl_a_windows_twin_is_refused() {
         let (_tmp, dir) = sandbox();
@@ -823,9 +804,6 @@ mod tests {
         answer("desk-wsl", r"C:\Users\g\Sync").expect("a name of its own");
     }
 
-    /// **With no terminal, a missing answer is an error and not a wait.** `ds
-    /// init` in a pipe or a CI job must fail fast, naming the flag that would
-    /// have answered it.
     #[test]
     fn without_a_terminal_a_missing_answer_names_its_flag() {
         let (_tmp, dir) = sandbox();

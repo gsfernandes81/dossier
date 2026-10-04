@@ -348,7 +348,6 @@ mod tests {
         ])
     }
 
-    /// Siblings sort by name with numbers compared as numbers.
     #[test]
     fn siblings_read_in_natural_order() {
         let tree = desk();
@@ -359,7 +358,6 @@ mod tests {
         assert_eq!(natural_cmp("slot 02", "slot 2"), Ordering::Equal);
     }
 
-    /// The path names every location from the top level down.
     #[test]
     fn a_path_reads_from_the_top() {
         let tree = desk();
@@ -369,7 +367,6 @@ mod tests {
         assert!(!tree.is_within("desk", "s10"));
     }
 
-    /// A parent that names a deleted location reads as the top level.
     #[test]
     fn an_orphan_reads_as_top_level() {
         let tree = Tree::new([at("pouch", "pouch", Some("gone"))]);
@@ -377,8 +374,6 @@ mod tests {
         assert_eq!(tree.children(None), ["pouch"]);
     }
 
-    /// Only the locations in a loop read as top level; one hanging off the loop
-    /// stays where it was put.
     #[test]
     fn a_loop_breaks_at_its_members_only() {
         let tree =
@@ -395,8 +390,6 @@ mod tests {
         assert_eq!(desk().loop_message(), None);
     }
 
-    /// Sibling names clash as search compares them, and a location never
-    /// clashes with itself when renamed.
     #[test]
     fn sibling_names_clash_folded() {
         let tree = desk();
@@ -405,7 +398,6 @@ mod tests {
         assert_eq!(tree.sibling_named(None, "slot 2", None), None);
     }
 
-    /// Search matches the full path, so a slot is found by its folder's name.
     #[test]
     fn search_matches_the_whole_path() {
         let tree = desk();
@@ -415,7 +407,6 @@ mod tests {
         assert_eq!(tree.search("pasport"), ["pouch"], "the typo falls back to fuzzy");
     }
 
-    /// A raw `location` reads as a hard copy only when it names a live location.
     #[test]
     fn a_dangling_location_reads_as_unfiled() {
         let tree = desk();

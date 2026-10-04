@@ -264,7 +264,6 @@ mod tests {
         assert!(!config.syncthing.verify_tls, "loopback + self-signed is the Termux reality");
     }
 
-    /// A device with no config is a normal state, not a failure.
     #[test]
     fn an_empty_config_is_valid() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -274,8 +273,7 @@ mod tests {
         assert!(config.syncthing.address.is_none());
     }
 
-    /// A broken file is reported with its path and the parser's complaint —
-    /// never silently treated as absent, which would look like a lost store.
+    /// Treated as absent, a broken file would look like a lost store.
     #[test]
     fn a_broken_config_names_itself() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -285,7 +283,7 @@ mod tests {
         assert!(error.to_string().contains("config.toml"));
     }
 
-    /// `~` is expanded, because config files get hand-written.
+    /// Config files get hand-written.
     #[test]
     fn a_tilde_root_expands() {
         let dir = tempfile::tempdir().expect("tempdir");

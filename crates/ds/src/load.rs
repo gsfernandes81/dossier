@@ -115,8 +115,6 @@ fn implied_root(journal: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    /// An explicit journal is read as given, and an explicit root still
-    /// decides where its files are.
     #[test]
     fn an_explicit_journal_beats_every_default() {
         let (journal, root) = locate(
@@ -129,7 +127,6 @@ mod tests {
         assert_eq!(root, Path::new("/home/u/Sync"));
     }
 
-    /// Otherwise the root decides, and the journal is the fixed place inside it.
     #[test]
     fn a_root_implies_the_journal_directory() {
         let (journal, root) =
@@ -148,8 +145,7 @@ mod tests {
         assert!(journal.path().starts_with("/config/root"));
     }
 
-    /// **A copied journal still knows where its documents are**: two levels up
-    /// from `<root>/.dossier/journal` is the root.
+    /// A copied journal still knows where its documents are.
     #[test]
     fn a_journal_path_implies_its_root() {
         let (_, root) =
@@ -157,13 +153,11 @@ mod tests {
         assert_eq!(root, Path::new("/mnt/copy"));
     }
 
-    /// Nothing naming a store is a device that is not set up.
     #[test]
     fn nothing_named_is_not_set_up() {
         assert!(locate(None, None, None).is_none());
     }
 
-    /// The window runs from today to [`crate::doc::WARN_DAYS`] ahead.
     #[test]
     fn the_warn_window_is_today_plus_the_constant() {
         let (today, warn_until) = window();

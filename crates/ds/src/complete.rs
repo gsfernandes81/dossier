@@ -281,7 +281,6 @@ mod tests {
         folder.matching(typed).into_iter().map(Entry::label).collect()
     }
 
-    /// Folders come first, then files; hidden ones only once a `.` is typed.
     #[test]
     fn a_folder_lists_folders_first_and_hides_dotfiles() {
         let base = sandbox();
@@ -290,8 +289,6 @@ mod tests {
         assert_eq!(labels(&folder, "."), [".hidden/", ".dotfile"]);
     }
 
-    /// The part after the last separator narrows the list, ignoring case, and
-    /// a folder can be kept to folders.
     #[test]
     fn typing_narrows_the_folder_the_head_names() {
         let base = sandbox();
@@ -303,7 +300,6 @@ mod tests {
         assert_eq!(labels(&dirs, "Scans/"), ["2024/", "2025/"]);
     }
 
-    /// Filling a folder ends in its separator, a backslash where one is typed.
     #[test]
     fn filling_a_folder_ends_in_its_separator() {
         let base = sandbox();
@@ -314,14 +310,12 @@ mod tests {
         assert_eq!(windows.fill(&Entry::new("g".into(), true)), "C:\\Users\\g\\");
     }
 
-    /// A folder that is not there lists nothing rather than failing.
     #[test]
     fn a_missing_folder_lists_nothing() {
         let folder = read(Path::new("/no/such/place"), "x/", false, None);
         assert!(folder.entries.is_empty(), "{:?}", folder.entries);
     }
 
-    /// The selection starts on nothing and `↑` from the top returns to it.
     #[test]
     fn the_selection_steps_back_to_the_line() {
         assert_eq!(step(None, 3, true), Some(0));

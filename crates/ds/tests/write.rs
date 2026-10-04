@@ -81,9 +81,6 @@ fn load_model(journal: &Journal) -> Model {
     writable(Model::new(loaded.store, loaded.today, loaded.warn_until, 47, 24))
 }
 
-/// **An edit made in the model reaches the journal, and reading the journal back
-/// shows it.** This is the whole slice in one test: keystrokes in, an op on
-/// disk, and a store folded from that disk that agrees with the screen.
 #[test]
 fn an_edit_becomes_an_op_and_survives_a_reload() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -115,9 +112,6 @@ fn an_edit_becomes_an_op_and_survives_a_reload() {
     assert_eq!(doc.expiry_date.as_deref(), Some("2031-05-31"), "the edit is in the store");
 }
 
-/// **Clearing the field writes an `unset`, and the document leaves the expiry
-/// watch.** The `set` half of the fold's contract is the obvious one; this is the
-/// half that a stored empty string would have quietly broken instead.
 #[test]
 fn clearing_the_field_removes_it_from_the_folded_store() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -138,9 +132,7 @@ fn clearing_the_field_removes_it_from_the_folded_store() {
     assert!(due.is_empty(), "{due:?}");
 }
 
-/// **A journal another process is writing degrades this one to read-only, and
-/// says so** — it is never an error to exit on, because
-/// browsing, opening and `ds status` all still work.
+/// Never an error to exit on: browsing, opening and `ds status` all still work.
 #[test]
 fn a_held_lock_is_a_notice_and_not_a_failure() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -167,9 +159,7 @@ fn a_held_lock_is_a_notice_and_not_a_failure() {
     assert!(!model.rows.is_empty(), "and the store is still browsable");
 }
 
-/// **A different device appends to a different file, and the fold is the union.**
-/// Two writers, two files, one store — the property the whole format exists for,
-/// checked here through the app's own loader rather than the crate's tests.
+/// The journal crate tests this too; here it goes through the app's own loader.
 #[test]
 fn two_devices_write_two_files_and_fold_to_one_store() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -189,10 +179,8 @@ fn two_devices_write_two_files_and_fold_to_one_store() {
     assert!(dir.path().join("meta").join("desk-core.jsonl").is_file());
 }
 
-/// **A document created in the TUI exists after a reload.** The model tests
-/// prove the two ops are asked for in the right order; only a real journal
-/// proves the fold accepts them — a `set` that reached the file before its
-/// `create` would be orphaned, and the new document would simply not be there.
+/// A `set` that reached the file before its `create` would be orphaned, and the
+/// document would not be there.
 #[test]
 fn a_created_document_survives_a_reload() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -218,10 +206,8 @@ fn a_created_document_survives_a_reload() {
     assert_eq!(doc.expiry_date, None, "and nothing it was not given");
 }
 
-/// **Undo puts the field back, and does it by appending rather than rewriting.**
-/// The design makes the journal the history: nothing is ever removed from it, so
-/// taking an edit back is writing the op that says so — and the file has to
-/// still hold both the edit and its inverse afterwards.
+/// The journal is the history, so the file still holds both the edit and its
+/// inverse.
 #[test]
 fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -257,8 +243,8 @@ fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
     );
 }
 
-/// **The stack is a stack**: two edits then two undos walk back both, rather
-/// than the second undo toggling the first one forward again.
+/// Two undos walk back both edits rather than the second toggling the first
+/// forward again.
 #[test]
 fn undo_walks_back_more_than_one_write() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -301,9 +287,6 @@ fn write_and_reload(follower: &mut ds::follow::Follower, drafts: Vec<Draft>, mod
     update(model, msg);
 }
 
-/// **Redo puts the write back, and the journal ends up holding all three ops.**
-/// Undo and redo are both ordinary appends, so a value that was set, taken back
-/// and put again leaves three lines behind — not one line edited twice.
 #[test]
 fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -337,10 +320,8 @@ fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
     );
 }
 
-/// **Undo and redo of a create work on a tombstoned document.** the fold keeps a
-/// `create` forever and makes a later one a legitimate recreate that starts from
-/// empty, so putting a new document back has to re-send its name as well — which
-/// it does, because redo appends the ops that were written the first time.
+/// Putting a created document back is a recreate after its tombstone, so redo
+/// has to re-send the name as well.
 #[test]
 fn a_created_document_can_be_taken_back_and_put_again() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -374,12 +355,9 @@ fn a_created_document_can_be_taken_back_and_put_again() {
     assert_eq!(doc.name, "Seaman Book", "with its name, which a bare recreate would not have");
 }
 
-/// **A deleted document comes back whole.** This is the test the whole delete
-/// slice exists for: the fold's tombstone is retained forever and a later `create`
-/// starts from *empty*, so an undo that only re-created the entity would give
-/// back a document with a name and nothing else — every tag, date, file and note
-/// silently gone, on the one keystroke a user presses precisely because they
-/// want their data back.
+/// The fold's tombstone is kept forever and a later `create` starts from empty,
+/// so an undo that only re-created the entity would give back a name and nothing
+/// else.
 #[test]
 fn undoing_a_delete_restores_every_field() {
     let mut drafts = coc();
@@ -420,9 +398,6 @@ fn undoing_a_delete_restores_every_field() {
     assert_eq!(after, &before, "and it is the same document, field for field");
 }
 
-/// **Creating a location from the picker is one change.** Filed into a new
-/// location, reloaded, then undone: the location is tombstoned and the document
-/// is unfiled again, with nothing left half-done in between.
 #[test]
 fn a_location_created_while_filing_is_taken_back_whole() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -450,9 +425,8 @@ fn a_location_created_while_filing_is_taken_back_whole() {
     assert!(model.store.locations.is_empty(), "and the location is gone");
 }
 
-/// **Deleting a location takes everything inside it, and undo puts all of it
-/// back.** The documents filed there are never rewritten: they read as unfiled
-/// while the locations are gone, and as filed again once undo recreates them.
+/// The documents filed there are never rewritten: they read as unfiled while the
+/// locations are gone, and as filed again once undo recreates them.
 #[test]
 fn a_deleted_location_comes_back_with_everything_inside() {
     let mut drafts = coc();
@@ -494,8 +468,6 @@ fn a_deleted_location_comes_back_with_everything_inside() {
     assert_eq!(place(&model), "desk › leather folder", "filed again, where it was");
 }
 
-/// A new version folds as the latest one and leaves the old version in place,
-/// replaced and keeping its own expiry date.
 #[test]
 fn a_new_version_replaces_the_old_one_in_the_fold() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -518,8 +490,6 @@ fn a_new_version_replaces_the_old_one_in_the_fold() {
     assert_eq!(new.expiry_date, None, "dates start empty");
 }
 
-/// A bundle created from the Bundles view folds back as a bundle, never as a
-/// document.
 #[test]
 fn a_created_bundle_folds_as_its_own_record() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -555,8 +525,6 @@ fn name_in(msg: &Msg) -> String {
     store.docs.iter().find(|doc| doc.id == "coc").expect("coc").name.clone()
 }
 
-/// **Another device's op reaches a running session**: a poll finds nothing
-/// until a file changes, then hands over the store re-read with it.
 #[test]
 fn a_poll_brings_in_another_writers_op() {
     let (dir, journal) = journal_with(&desk(coc()));
@@ -572,9 +540,8 @@ fn a_poll_brings_in_another_writers_op() {
     assert!(follower.poll().is_none(), "and read once");
 }
 
-/// **An edit made after reading another device's op wins over it**, even when
-/// that device's clock runs a day ahead: the writer's clock is raised past
-/// everything it has read.
+/// The writer's clock is raised past everything it has read, so a device whose
+/// clock runs a day ahead still loses.
 #[test]
 fn a_save_sorts_after_what_it_read() {
     let (dir, journal) = journal_with(&desk(coc()));

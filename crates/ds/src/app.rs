@@ -2728,9 +2728,7 @@ pub(crate) mod tests {
         Model::new(store, "2026-08-16".into(), "2026-11-14".into(), 45, 28)
     }
 
-    /// A model that is allowed to write, which is not the default — the default
-    /// is the safe state, because a `Model` nobody has told about a device has
-    /// no writer id to append under.
+    /// A model that is allowed to write, which the default is not.
     fn writable() -> Model {
         let mut model = model();
         model.write = WriteState::Ready { device: "desk".into() };
@@ -2774,9 +2772,8 @@ pub(crate) mod tests {
         store
     }
 
-    /// **`e` opens the editor on the record, seeded with what is stored.**
-    /// The record comes with it: detail is the only editing surface, so the verb
-    /// shows it rather than refusing until you have opened it yourself.
+    /// Detail is the only editing surface, so the verb opens the record rather
+    /// than refusing until it is open.
     #[test]
     fn the_edit_verb_opens_the_record_and_seeds_the_field() {
         let mut m = writable();
@@ -2789,8 +2786,6 @@ pub(crate) mod tests {
         assert!(!edit.dirty());
     }
 
-    /// **A session that cannot write never opens an editor**, and says why
-    /// instead.
     #[test]
     fn a_read_only_session_explains_itself_instead_of_editing() {
         let mut m = model();
@@ -2800,8 +2795,6 @@ pub(crate) mod tests {
         assert!(m.flash.unwrap().contains("ds init"), "and it names the fix");
     }
 
-    /// **Typing goes into the field, not into the query.** An edit is the one
-    /// place on these surfaces where a printable is not search text.
     #[test]
     fn typing_in_an_edit_never_reaches_the_query() {
         let mut m = writable();
@@ -2812,8 +2805,6 @@ pub(crate) mod tests {
         assert!(m.query.is_empty(), "the query was never touched");
     }
 
-    /// **A valid date becomes a `set` op** — and nothing changes on screen until
-    /// the journal has answered, because until then the new value is a hope.
     #[test]
     fn saving_a_date_appends_a_set_op_and_waits_for_it() {
         let mut m = writable();
@@ -2835,8 +2826,6 @@ pub(crate) mod tests {
         assert_eq!(m.flash.as_deref(), Some("saved"));
     }
 
-    /// Another device's edit is adopted where the person is, said on the
-    /// band, and leaves an open edit and the undo history alone.
     #[test]
     fn another_devices_edit_arrives_in_place() {
         let mut m = writable();
@@ -2851,7 +2840,6 @@ pub(crate) mod tests {
         assert!(m.undo.is_empty(), "nothing this session did");
     }
 
-    /// A read that changed nothing on screen is not news.
     #[test]
     fn an_unchanged_read_is_silent() {
         let mut m = model();
@@ -2860,7 +2848,6 @@ pub(crate) mod tests {
         assert_eq!(m.flash, None);
     }
 
-    /// A document another device deleted closes the views that showed it.
     #[test]
     fn a_document_deleted_elsewhere_closes_its_views() {
         let mut m = model();
@@ -2873,8 +2860,6 @@ pub(crate) mod tests {
         assert_eq!(m.current().unwrap().id, "eng1");
     }
 
-    /// **Every simple field goes through the one verb**, seeded with what is
-    /// stored — an edit starts as a correction, not a re-typing.
     #[test]
     fn each_editable_field_opens_on_its_stored_value() {
         for (field, expected) in [
@@ -2892,9 +2877,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// **Tags are typed as words and stored as a list.** The space-separated
-    /// spelling is the only form a text buffer can offer; a stored `"a b"` would
-    /// be one tag with a space in it, which nothing would ever match.
     #[test]
     fn tags_are_typed_with_spaces_and_stored_as_a_list() {
         let mut m = writable();
@@ -2911,9 +2893,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// **A name may not be emptied.** Every other field clears to an `unset`;
-    /// a document called nothing cannot be found, listed or talked about, so the
-    /// refusal is the only one `validate` makes on content rather than form.
+    /// A document called nothing cannot be found, listed or talked about.
     #[test]
     fn a_name_cannot_be_cleared_but_the_others_can() {
         let mut m = writable();
@@ -2956,8 +2936,8 @@ pub(crate) mod tests {
         update(m, Msg::Enter)
     }
 
-    /// `+ new` appears once something is typed, and the cursor starts on it
-    /// only when nothing matches: what already exists is seen first.
+    /// The cursor starts on `+ new` only when nothing matches, so what already
+    /// exists is seen first.
     #[test]
     fn new_is_offered_above_the_matches_once_something_is_typed() {
         let mut m = writable();
@@ -2975,8 +2955,7 @@ pub(crate) mod tests {
         assert!(m.on_new, "nothing matches, so + new is selected");
     }
 
-    /// The created document opens with the search still typed, so coming back
-    /// from it lands where the user left.
+    /// Coming back from the created document lands where the user left.
     #[test]
     fn the_search_survives_creating_from_it() {
         let mut m = writable();
@@ -2994,8 +2973,6 @@ pub(crate) mod tests {
         assert_eq!(m.query, "Seaman Book", "and the search is still there");
     }
 
-    /// On a store with no documents `+ new document` shows with nothing typed
-    /// and asks for the name, so the first launch is never a dead end.
     #[test]
     fn an_empty_store_offers_a_new_document_and_asks_for_its_name() {
         let mut m = writable();
@@ -3009,9 +2986,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// **The id is minted from the store the user can see** — a name that would
-    /// land on a document synced from the other device still has to count up,
-    /// even though the device half means it could only be one of this device's.
     #[test]
     fn a_new_id_avoids_every_id_already_in_the_store() {
         let mut m = writable();
@@ -3020,9 +2994,7 @@ pub(crate) mod tests {
         assert_eq!(drafts[0], journal::Draft::create("doc", "passport-desk-2"));
     }
 
-    /// **A new document lands on its record**, which is the only place the rest
-    /// of its fields can be filled in. Being dropped back on the list would make
-    /// the next step invisible.
+    /// The record is the only place the rest of its fields can be filled in.
     #[test]
     fn a_created_document_opens_on_its_record() {
         let mut m = writable();
@@ -3046,8 +3018,6 @@ pub(crate) mod tests {
         assert_eq!(m.flash.as_deref(), Some("created"));
     }
 
-    /// A new version carries the name, tags and hard copy location over and
-    /// replaces the old one; dates, soft copies and notes start empty.
     #[test]
     fn a_new_version_copies_the_name_tags_and_location() {
         let mut m = writable();
@@ -3068,8 +3038,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The new version opens on its name, in place of the old version's
-    /// Details view, and undo takes it back.
     #[test]
     fn a_new_version_opens_in_place_of_the_old_one() {
         let mut m = writable();
@@ -3098,8 +3066,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A session that cannot write cannot create either, and says the same thing
-    /// it says about editing rather than doing nothing.
     #[test]
     fn creating_is_refused_with_a_reason_when_the_session_cannot_write() {
         let mut m = model();
@@ -3108,10 +3074,9 @@ pub(crate) mod tests {
         assert!(m.flash.is_some());
     }
 
-    /// **A write that never landed cannot be undone.** The inverse is computed
-    /// when the append is asked for, but it only becomes undoable when the
-    /// journal confirms it — otherwise a refused save would leave a stack entry
-    /// that puts back something nobody ever changed.
+    /// The inverse is computed when the append is asked for but becomes undoable
+    /// only when the journal confirms it; otherwise a refused save would leave a
+    /// stack entry that puts back something nobody ever changed.
     #[test]
     fn a_refused_save_leaves_nothing_to_undo() {
         let mut m = writable();
@@ -3125,9 +3090,8 @@ pub(crate) mod tests {
         assert!(m.undo.is_empty(), "nothing was written, so there is nothing to take back");
     }
 
-    /// **The inverse of an edit is the value the store holds, not the buffer.**
-    /// Tags are typed as words and stored as a list; an inverse built from the
-    /// typing would restore a string where a list had been.
+    /// The inverse is the value the store holds, not the buffer: built from the
+    /// typing, it would restore a string where a list had been.
     #[test]
     fn the_inverse_of_a_tag_edit_restores_the_list() {
         let mut m = writable();
@@ -3148,9 +3112,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// **Creating inverts to a tombstone**, which is the only op that can
-    /// un-create anything: the fold keeps a `create` forever, so the way back is to
-    /// write the delete rather than to pretend the create never happened.
+    /// The fold keeps a `create` forever, so the way back is a tombstone.
     #[test]
     fn creating_a_document_inverts_to_a_delete() {
         let mut m = writable();
@@ -3162,10 +3124,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// An undo does not stack its own inverse — `u u u` walks back three writes
-    /// rather than toggling the last one. Putting one forward again is `r`, a
-    /// separate verb on a separate key, which is what lets this one mean what it
-    /// means everywhere.
+    /// `u u u` walks back three writes rather than toggling the last one.
     #[test]
     fn an_undo_does_not_become_something_to_undo() {
         let mut m = writable();
@@ -3183,8 +3142,6 @@ pub(crate) mod tests {
         assert_eq!(m.flash.as_deref(), Some("undone"));
     }
 
-    /// **Redo puts back the very ops that were written**, rather than deriving
-    /// them again — so it cannot drift from the thing it is putting back.
     #[test]
     fn redo_appends_the_original_ops() {
         let mut m = saved_edit("2027-04-01");
@@ -3202,8 +3159,6 @@ pub(crate) mod tests {
         assert_eq!(m.undo.len(), 1, "so it can be undone again");
     }
 
-    /// A write while another is in flight is refused, so each landing is
-    /// credited to its own change and both reach the undo stack.
     #[test]
     fn a_write_waits_for_the_one_in_flight() {
         let mut m = writable();
@@ -3216,8 +3171,6 @@ pub(crate) mod tests {
         assert!(matches!(m.toggle_digital_only(), Effect::Append(_)), "free again");
     }
 
-    /// Ticking digital only takes the hard copy out of its location in the same
-    /// write, and the way back puts the location it had back.
     #[test]
     fn digital_only_is_one_write_with_its_way_back() {
         let mut m = writable();
@@ -3274,9 +3227,6 @@ pub(crate) mod tests {
         m
     }
 
-    /// Space l opens the picker on the record's document; Enter on another
-    /// location files the hard copy there in one write whose way back is the
-    /// location it had.
     #[test]
     fn the_location_picker_files_the_hard_copy() {
         let mut m = with_locations(writable());
@@ -3305,8 +3255,8 @@ pub(crate) mod tests {
         assert_eq!(m.flash.as_deref(), Some("filed in drawer"));
     }
 
-    /// `+ new` creates the typed name inside the location selected when typing
-    /// began and files the hard copy there, as one change one undo takes back.
+    /// The new location goes inside the one selected when typing began, and one
+    /// undo takes back both it and the filing.
     #[test]
     fn new_creates_a_location_and_files_into_it() {
         let mut m = with_locations(writable());
@@ -3341,7 +3291,6 @@ pub(crate) mod tests {
         assert_eq!(back.last(), Some(&journal::Draft::delete("location", &id)));
     }
 
-    /// A name a sibling already has is refused, and the typing stays.
     #[test]
     fn new_refuses_a_name_a_sibling_has() {
         let mut m = with_locations(writable());
@@ -3367,8 +3316,6 @@ pub(crate) mod tests {
         update(m, Msg::Char('l'));
     }
 
-    /// Space over the picker opens the Space sheet for the selected location;
-    /// rename types on the bottom line and refuses a sibling's name.
     #[test]
     fn a_location_is_renamed_on_the_bottom_line() {
         let mut m = with_locations(writable());
@@ -3405,8 +3352,6 @@ pub(crate) mod tests {
         assert_eq!(m.flash.as_deref(), Some("the top level already has a Drawer"));
     }
 
-    /// Move… swaps in the whole tree; choosing the top writes the parent away,
-    /// and the picker it came from comes back.
     #[test]
     fn a_location_moves_and_the_picker_comes_back() {
         let mut m = with_locations(writable());
@@ -3435,7 +3380,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A tap between the two `d`s disarms, so the second deletes nothing.
     #[test]
     fn a_tap_disarms_a_location_delete() {
         let mut m = with_locations(writable());
@@ -3449,9 +3393,6 @@ pub(crate) mod tests {
         assert!(!matches!(update(&mut m, Msg::Char('d')), Effect::Append(_)));
     }
 
-    /// Deleting a location that holds anything warns with what it holds, and
-    /// only a second `d` deletes it and everything inside; any other key
-    /// cancels.
     #[test]
     fn a_full_location_needs_a_second_d() {
         let mut m = with_locations(writable());
@@ -3487,7 +3428,6 @@ pub(crate) mod tests {
         )));
     }
 
-    /// An empty location goes at the first `d`.
     #[test]
     fn an_empty_location_goes_at_once() {
         let mut m = with_locations(writable());
@@ -3507,8 +3447,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The top of the tree is not a place, so Enter on it is refused; Esc
-    /// closes the picker and writes nothing.
     #[test]
     fn the_top_of_the_tree_is_not_a_place() {
         let mut m = with_locations(writable());
@@ -3525,8 +3463,6 @@ pub(crate) mod tests {
         assert!(m.detail(), "Esc closed the picker, not the Details view");
     }
 
-    /// `ctrl+z` and `ctrl+y` undo and redo from the Find view too, and do
-    /// nothing while a field is open.
     #[test]
     fn ctrl_z_and_ctrl_y_work_everywhere_but_an_open_field() {
         let mut m = saved_edit("2027-04-01");
@@ -3549,9 +3485,7 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Redo), Effect::Append(forward));
     }
 
-    /// **An ordinary write clears the redo stack.** Once history has branched,
-    /// the future those changes described is one the store never took, and
-    /// putting one back would write an old edit over a document that moved on.
+    /// Redoing past a branch would write an old edit over a document that moved on.
     #[test]
     fn writing_something_new_drops_what_could_have_been_redone() {
         let mut m = saved_edit("2027-04-01");
@@ -3567,7 +3501,6 @@ pub(crate) mod tests {
         assert_eq!(m.undo.len(), 1, "and the new write is the thing to take back");
     }
 
-    /// Redo says why it has nothing to do, rather than doing nothing.
     #[test]
     fn redo_with_nothing_undone_says_so() {
         let mut m = writable();
@@ -3587,8 +3520,6 @@ pub(crate) mod tests {
         m
     }
 
-    /// **The first `d` asks, the second does it.** The same arming idiom `Esc`
-    /// and quit already use; the bottom row names what would go.
     #[test]
     fn delete_takes_two_presses() {
         let mut m = writable();
@@ -3605,8 +3536,6 @@ pub(crate) mod tests {
         assert!(!m.delete_armed);
     }
 
-    /// Any other key disarms it, so a `d` left hanging from a moment ago cannot
-    /// be completed by a keystroke meant for something else.
     #[test]
     fn any_other_key_disarms_a_pending_delete() {
         let mut m = writable();
@@ -3619,9 +3548,6 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw, "so this asks again");
     }
 
-    /// **Undoing a delete restores the document whole**, not as a bare recreate
-    /// with a name: the fold's create-after-tombstone starts from empty, so the way
-    /// back has to re-send every field the document had.
     #[test]
     fn deleting_inverts_to_a_create_with_every_field() {
         let mut m = writable();
@@ -3647,7 +3573,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A session that cannot write cannot delete either, and never arms.
     #[test]
     fn delete_is_refused_with_a_reason_when_the_session_cannot_write() {
         let mut m = model();
@@ -3657,8 +3582,6 @@ pub(crate) mod tests {
         assert!(m.flash.is_some());
     }
 
-    /// A session that cannot write says so rather than doing nothing, the same
-    /// way editing and creating do.
     #[test]
     fn undo_is_refused_with_a_reason_when_the_session_cannot_write() {
         let mut m = model();
@@ -3667,8 +3590,6 @@ pub(crate) mod tests {
         assert!(m.flash.is_some());
     }
 
-    /// **An empty buffer clears the field with an `unset`**, never a stored
-    /// empty string — so one field exercises both halves of the fold's contract.
     #[test]
     fn clearing_the_field_appends_an_unset_op() {
         let mut m = writable();
@@ -3680,8 +3601,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// **A refusal never destroys the typing.** The buffer is the thing that
-    /// needs correcting, so it stays exactly as it was.
     #[test]
     fn an_unparseable_date_is_refused_and_the_typing_survives() {
         let mut m = writable();
@@ -3692,9 +3611,6 @@ pub(crate) mod tests {
         assert!(m.flash.as_deref().unwrap().contains("YYYY-MM-DD"));
     }
 
-    /// **`Esc` closes a clean edit in one press and arms before discarding a
-    /// dirty one**, and any other key disarms — the same
-    /// rule the quit arming follows, so the two cannot behave differently.
     #[test]
     fn esc_discards_an_edit_in_one_press_when_clean_and_two_when_dirty() {
         let mut m = writable();
@@ -3716,8 +3632,7 @@ pub(crate) mod tests {
         assert!(!m.edit.as_ref().unwrap().armed_discard, "any other key disarms");
     }
 
-    /// **Arrows inside an edit never move the list underneath.** The record you
-    /// are editing has to stay the record you are looking at.
+    /// The record being edited has to stay the record on screen.
     #[test]
     fn the_list_does_not_move_under_an_open_edit() {
         let mut m = writable();
@@ -3735,8 +3650,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// **`ctrl+q` still quits from inside an edit.** Nothing may trap the user
-    /// on a surface, however modal it is.
     #[test]
     fn quitting_works_from_inside_an_edit() {
         let mut m = writable();
@@ -3744,9 +3657,8 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Quit), Effect::Quit);
     }
 
-    /// **The cursor is re-anchored by document id, not by row.** A save re-folds
-    /// the store, and under the expiring filter a changed date moves the row —
-    /// so a remembered index would be pointing at somebody else.
+    /// Under the expiring filter a changed date moves the row, so a remembered
+    /// index would point at another document.
     #[test]
     fn a_save_keeps_the_cursor_on_the_document_it_edited() {
         let mut m = writable();
@@ -3758,16 +3670,13 @@ pub(crate) mod tests {
 
         m.open_edit(Field::Expiry);
         update(&mut m, Msg::Enter);
-        // Now the soonest of all — earlier than `coc`'s 2026-01-01 — so the row
-        // moves to the top of the filter, which is the whole point of the test.
+        // Earlier than `coc`'s 2026-01-01, so the row moves to the top.
         let store = restored(&m, &edited, Some("2025-12-01"));
         land_as(&mut m, store);
         assert_eq!(m.current().unwrap().id, edited, "the cursor followed the document");
         assert_eq!(m.cursor, 0, "which is now the first row");
     }
 
-    /// A save that takes the document out of the list leaves its Details view
-    /// on it, since the view is anchored on the document, and just says saved.
     #[test]
     fn a_save_that_leaves_the_filter_keeps_the_record() {
         let mut m = writable();
@@ -3785,8 +3694,6 @@ pub(crate) mod tests {
         assert!(m.rows.iter().all(|&i| m.store.docs[i].id != edited));
     }
 
-    /// **A failed save keeps the editor and the typing**, and a failure that
-    /// will recur takes editing off the table rather than inviting it again.
     #[test]
     fn a_failed_save_keeps_the_typing_and_a_permanent_one_stops_offering() {
         let mut m = writable();
@@ -3809,9 +3716,6 @@ pub(crate) mod tests {
         assert!(m.edit.is_none(), "it does not offer again");
     }
 
-    /// **A save landing is not a keystroke.** Like a finished scan load, it must
-    /// not disarm a pending quit or undo the IME affordance's dropped mouse
-    /// reporting — the user did not touch the keyboard.
     #[test]
     fn a_save_result_is_not_a_keypress() {
         let mut m = writable();
@@ -3828,8 +3732,7 @@ pub(crate) mod tests {
         assert!(!m.mouse_on, "nor did it restore mouse reporting");
     }
 
-    /// A bare printable is search text — the first
-    /// character included. Nothing on this surface may swallow a letter.
+    /// Nothing on this surface may swallow a letter, the first included.
     #[test]
     fn a_bare_letter_starts_the_search_and_keeps_it() {
         let mut m = model();
@@ -3841,8 +3744,6 @@ pub(crate) mod tests {
         assert_eq!(m.current().unwrap().id, "coc");
     }
 
-    /// Cold start to an open file is five keystrokes for a three-letter query:
-    /// type, `Enter` into the record, `Enter` into its file.
     #[test]
     fn five_keystrokes_open_a_file_from_a_cold_start() {
         let mut m = model();
@@ -3854,7 +3755,6 @@ pub(crate) mod tests {
         assert_eq!(opened.as_deref(), Some("Marine/eng1.pdf"));
     }
 
-    /// `Enter` and `Esc` are inverses: each drills or peels exactly one layer.
     #[test]
     fn enter_drills_one_layer_and_esc_peels_it() {
         let mut m = model();
@@ -3866,7 +3766,6 @@ pub(crate) mod tests {
         assert_eq!(m.cursor, 1, "and the list is where it was");
     }
 
-    /// With no file, `Enter` on the record says so and stays put.
     #[test]
     fn enter_on_a_record_without_a_file_says_so() {
         let mut m = model();
@@ -3877,7 +3776,6 @@ pub(crate) mod tests {
         assert!(m.flash.unwrap().contains("no file linked"));
     }
 
-    /// On a file row `Enter` opens that file; on any other row, the primary.
     #[test]
     fn enter_opens_the_file_row_it_is_on() {
         let mut m = model();
@@ -3896,7 +3794,6 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Enter), Effect::Open("Marine/coc.pdf".into()));
     }
 
-    /// `←` and `→` move through the query, and typing lands at the cursor.
     #[test]
     fn arrows_move_the_query_cursor_and_typing_lands_there() {
         let mut m = model();
@@ -3913,7 +3810,6 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Right), Effect::Idle, "the end is the end");
     }
 
-    /// Multibyte characters are one cursor step each.
     #[test]
     fn the_query_cursor_counts_characters_not_bytes() {
         let mut m = model();
@@ -3926,7 +3822,6 @@ pub(crate) mod tests {
         assert_eq!(m.query, "nx");
     }
 
-    /// `Home`/`End` jump within a query, and jump the list when there is none.
     #[test]
     fn home_and_end_follow_the_query() {
         let mut m = model();
@@ -3942,7 +3837,6 @@ pub(crate) mod tests {
         assert_eq!(m.cursor, cursor, "the list did not move");
     }
 
-    /// Clearing the query with `Esc` puts the cursor back at the start.
     #[test]
     fn peeling_the_query_resets_its_cursor() {
         let mut m = model();
@@ -3963,7 +3857,6 @@ pub(crate) mod tests {
         assert!(m.detail(), "`←` leaves the record open; `Esc` closes it");
     }
 
-    /// Esc peels one layer per press: search, surface, filter, arm, quit.
     #[test]
     fn esc_peels_one_layer_at_a_time_and_quits_only_at_the_end() {
         let mut m = model();
@@ -3984,7 +3877,6 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Esc), Effect::Quit);
     }
 
-    /// Beside the list, tapping another row moves the Details view to it.
     #[test]
     fn a_tap_beside_the_details_view_moves_it_to_that_row() {
         let mut m = model();
@@ -4018,8 +3910,6 @@ pub(crate) mod tests {
         m
     }
 
-    /// The latest version comes first, then a conflicting latest one, then
-    /// the older ones.
     #[test]
     fn versions_run_latest_then_conflicting_then_older() {
         let m = with_versions();
@@ -4030,9 +3920,6 @@ pub(crate) mod tests {
         assert_eq!(ids, ["passport-desk", "passport-phone", "passport"]);
     }
 
-    /// `v` opens the Versions view on the version it came from; `Enter` opens
-    /// an older version's Details view though the list does not hold it, and
-    /// `Esc` walks back one view at a time.
     #[test]
     fn the_versions_view_opens_any_version() {
         let mut m = with_versions();
@@ -4056,8 +3943,6 @@ pub(crate) mod tests {
         assert!(m.views.is_empty(), "{:?}", m.views);
     }
 
-    /// `e` on the `renews` row links the document to an older one, as one
-    /// change undo takes back.
     #[test]
     fn renews_links_a_document_to_an_older_one() {
         let mut m = writable();
@@ -4077,7 +3962,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The Versions view's letters are undo and redo; any other says so.
     #[test]
     fn the_versions_view_has_no_other_letters() {
         let mut m = with_versions();
@@ -4106,8 +3990,6 @@ pub(crate) mod tests {
         m
     }
 
-    /// `b` opens the Bundles view with its own search; `Esc` clears that
-    /// search, then puts the Find view's back.
     #[test]
     fn the_bundles_view_has_its_own_search() {
         let mut m = with_bundles();
@@ -4135,8 +4017,6 @@ pub(crate) mod tests {
         assert_eq!(m.query, "eng", "and the second puts the Find view's back");
     }
 
-    /// A save that re-sorts the bundles leaves the selection on the bundle it
-    /// was on, since it is held by id.
     #[test]
     fn a_resort_keeps_the_selected_bundle() {
         let mut m = with_bundles();
@@ -4152,7 +4032,6 @@ pub(crate) mod tests {
         assert!(matches!(&m.views[0], View::Bundles { selected, .. } if *selected == visa));
     }
 
-    /// `+ new` creates the bundle the search names and opens it once it lands.
     #[test]
     fn a_bundle_is_created_from_the_search() {
         let mut m = with_bundles();
@@ -4178,8 +4057,6 @@ pub(crate) mod tests {
         assert_eq!(m.query, "Panama", "the search is still there");
     }
 
-    /// With no bundles at all, `+ new bundle` shows with nothing typed and
-    /// asks for the name.
     #[test]
     fn the_first_bundle_asks_for_its_name() {
         let mut m = writable();
@@ -4192,8 +4069,6 @@ pub(crate) mod tests {
         assert!(m.edit.as_ref().is_some_and(|edit| edit.saving));
     }
 
-    /// A bundle's own rows edit on the bottom line, as one undoable change;
-    /// `Enter` on a document in it opens that document.
     #[test]
     fn a_bundle_edits_its_rows_and_opens_its_documents() {
         let mut m = with_bundles();
@@ -4222,8 +4097,6 @@ pub(crate) mod tests {
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("eng1"));
     }
 
-    /// Deleting a bundle takes a second `d`, leaves its documents alone, and
-    /// undo brings it back whole.
     #[test]
     fn a_bundle_is_deleted_on_a_second_d() {
         let mut m = with_bundles();
@@ -4252,8 +4125,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// `b` on the Details view lists every bundle with a box; ticking one
-    /// adds this exact version to it, and ticking it again takes it out.
     #[test]
     fn the_bundles_checklist_adds_and_removes_this_version() {
         let mut m = with_bundles();
@@ -4292,8 +4163,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// `+ new` in the checklist creates the bundle and puts this version in
-    /// it, as one change.
     #[test]
     fn a_new_bundle_from_the_checklist_holds_this_version() {
         let mut m = with_bundles();
@@ -4330,8 +4199,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// `e` on a document in a bundle offers its other versions (the latest
-    /// first), its soft copies when it has several, and taking it out.
     #[test]
     fn e_on_a_bundled_document_offers_versions_copies_and_removal() {
         let mut m = with_bundles();
@@ -4385,8 +4252,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// Choosing one soft copy records it on the entry; removing the document
-    /// leaves the bundle without it.
     #[test]
     fn a_bundled_document_can_use_one_soft_copy_or_leave() {
         let mut m = with_bundles();
@@ -4416,9 +4281,8 @@ pub(crate) mod tests {
         );
     }
 
-    /// **An IME dismissal must never quit the app.** Termux sends `Esc` to close
-    /// the soft keyboard; any other key in between disarms, so a stray press
-    /// cannot compound into an exit.
+    /// Termux sends `Esc` to close the soft keyboard, so a stray press must not
+    /// compound into an exit.
     #[test]
     fn any_other_key_disarms_the_quit() {
         let mut m = model();
@@ -4429,8 +4293,6 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw, "arms again rather than quitting");
     }
 
-    /// The default list is the latest version of each document: an older
-    /// version stays out until its toggle brings it in.
     #[test]
     fn the_list_shows_latest_documents_unless_a_toggle_widens_it() {
         let mut m = model();
@@ -4449,7 +4311,6 @@ pub(crate) mod tests {
         assert!(!shown(&m).contains(&"passport".to_string()));
     }
 
-    /// The expiring toggle composes with the others instead of replacing them.
     #[test]
     fn toggles_compose() {
         let mut m = model();
@@ -4482,8 +4343,6 @@ pub(crate) mod tests {
         drafts.iter().find(|d| d.f.as_deref() == Some("files")).and_then(|d| d.val.clone())
     }
 
-    /// `e` on a file row opens its picker; "make primary" rewrites the list
-    /// with that file primary, and the way back is the list as it was.
     #[test]
     fn a_file_row_can_be_made_primary_and_undone() {
         let mut m = on_coc_with_two_files();
@@ -4499,7 +4358,6 @@ pub(crate) mod tests {
         assert_eq!(back.val.as_ref().unwrap()[0]["primary"], true, "undo restores the old primary");
     }
 
-    /// Detaching the only file clears the field rather than storing `[]`.
     #[test]
     fn detaching_the_last_file_unsets_the_list() {
         let mut m = writable();
@@ -4511,8 +4369,6 @@ pub(crate) mod tests {
         assert_eq!(drafts, [journal::Draft::unset("doc", "coc", "files")]);
     }
 
-    /// With no file linked, `e` on the files row asks for a path straight
-    /// away, and the first file attached is the primary.
     #[test]
     fn attaching_a_first_file_makes_it_primary() {
         let mut m = writable();
@@ -4552,8 +4408,6 @@ pub(crate) mod tests {
             .unwrap_or_default()
     }
 
-    /// The live list shows the folder being typed in; a chosen folder opens,
-    /// `Tab` fills the top match, and `Enter` with nothing chosen saves the line.
     #[test]
     fn the_attach_list_opens_folders_and_tab_fills() {
         let (_dir, mut m) = attaching_under();
@@ -4571,8 +4425,6 @@ pub(crate) mod tests {
         assert_eq!(written[0]["path"], "Identity/passport.pdf");
     }
 
-    /// An empty line attaches nothing and says what to do; a folder typed
-    /// whole opens rather than becoming a soft copy.
     #[test]
     fn an_empty_line_or_a_folder_is_never_attached() {
         let (_dir, mut m) = attaching_under();
@@ -4586,8 +4438,6 @@ pub(crate) mod tests {
         assert_eq!(listed(&m), ["pan.pdf", "passport.pdf"]);
     }
 
-    /// A tap off the live list leaves the typing alone; a tap on a file row
-    /// picks it and saves it.
     #[test]
     fn only_a_tap_on_a_row_does_anything_while_attaching() {
         let (_dir, mut m) = attaching_under();
@@ -4599,8 +4449,6 @@ pub(crate) mod tests {
         assert_eq!(written.expect("a files write")[0]["path"], "Identity/passport.pdf");
     }
 
-    /// Quitting with an unsaved edit asks first, as Esc does; a second press
-    /// quits.
     #[test]
     fn quitting_an_unsaved_edit_asks_first() {
         let mut m = writable();
@@ -4611,7 +4459,6 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Quit), Effect::Quit);
     }
 
-    /// `Enter` on a chosen file fills the line and saves it at once.
     #[test]
     fn enter_on_a_chosen_file_attaches_it() {
         let (_dir, mut m) = attaching_under();
@@ -4626,7 +4473,6 @@ pub(crate) mod tests {
         assert_eq!(written[0]["path"], "Identity/passport.pdf");
     }
 
-    /// A path already linked is refused, and the typing survives.
     #[test]
     fn attaching_a_file_twice_is_refused() {
         let mut m = on_coc_with_two_files();
@@ -4640,8 +4486,6 @@ pub(crate) mod tests {
         assert_eq!(m.edit.as_ref().unwrap().buffer, "Marine/coc.pdf");
     }
 
-    /// `Esc` peels the picker one layer at a time: the typed text, then the
-    /// picker, then the record as usual.
     #[test]
     fn esc_peels_the_picker() {
         let mut m = on_coc_with_two_files();
@@ -4655,7 +4499,6 @@ pub(crate) mod tests {
         assert!(m.detail());
     }
 
-    /// A session that cannot write is told so instead of being shown choices.
     #[test]
     fn a_read_only_session_gets_no_picker() {
         let mut m = model();
@@ -4666,7 +4509,6 @@ pub(crate) mod tests {
         assert!(m.flash.is_some());
     }
 
-    /// A tap selects, and a tap on the selected row drills, as `Enter` would.
     #[test]
     fn tap_then_tap_drills() {
         let mut m = model();
@@ -4679,8 +4521,6 @@ pub(crate) mod tests {
         assert!(m.detail());
     }
 
-    /// A tap on empty space below the last row changes nothing at all — and
-    /// costs no repaint.
     #[test]
     fn a_tap_on_nothing_is_idle() {
         let mut m = model();
@@ -4689,9 +4529,7 @@ pub(crate) mod tests {
         assert_eq!(m.cursor, 0);
     }
 
-    /// **The keyboard drop is one tap, not a mode.** The shell reconciles the
-    /// terminal against `mouse_on`; the next key press puts it back, so there is
-    /// no way to end up with mouse reporting off and no way to notice.
+    /// Mouse reporting must never stay off unnoticed.
     #[test]
     fn the_ime_affordance_restores_itself_on_the_next_key() {
         let mut m = model();
@@ -4703,10 +4541,8 @@ pub(crate) mod tests {
         assert_eq!(m.query, "c", "and the keystroke still counted");
     }
 
-    /// **The hit test reads the geometry the renderer drew.** The header count
-    /// is the one verb a thumb cannot otherwise produce while browsing, so it
-    /// is checked at both ends: a rounding mistake shows up at a boundary
-    /// first, and this boundary is next to nothing else pressable.
+    /// Checked at both ends of the drawn zone: a rounding mistake shows up at a
+    /// boundary first.
     #[test]
     fn tapping_the_header_count_filters_to_what_is_expiring() {
         let mut m = model();
@@ -4731,8 +4567,6 @@ pub(crate) mod tests {
         assert_eq!(m.filter, Filter::ALL);
     }
 
-    /// A keyboard layout has no touch affordances, so its zones are empty and
-    /// no tap can find them.
     #[test]
     fn a_wide_terminal_draws_no_touch_affordances() {
         let mut m = model();
@@ -4741,7 +4575,6 @@ pub(crate) mod tests {
         assert_eq!(m.leader_zone.width, 0);
     }
 
-    /// **`Space` on an empty query is the leader; mid-query it is a space.**
     /// The query is the mode, which is how a modeless surface gets a prefix key.
     #[test]
     fn space_leads_when_the_query_is_empty_and_types_when_it_is_not() {
@@ -4769,8 +4602,6 @@ pub(crate) mod tests {
         assert!(m.sheet);
     }
 
-    /// `SPC f` opens the filter checklist; with nothing typed, Space toggles
-    /// the selected box, and the list stays open so toggles compose.
     #[test]
     fn the_filter_list_toggles_with_space_and_stays_open() {
         let mut m = model();
@@ -4784,8 +4615,6 @@ pub(crate) mod tests {
         assert!(m.check.is_some(), "and the list is still open");
     }
 
-    /// Typing searches the checklist, so Space then types a space; Esc clears
-    /// the typing before it closes the list.
     #[test]
     fn typing_searches_the_filter_list_and_esc_peels_it() {
         let mut m = model();
@@ -4800,8 +4629,6 @@ pub(crate) mod tests {
         assert!(!m.esc_armed, "closing it did not arm the quit");
     }
 
-    /// The Space sheet runs letters and nothing searches it: a letter with no
-    /// verb says so and leaves the sheet as it was.
     #[test]
     fn a_letter_with_no_verb_says_so() {
         let mut m = model();
@@ -4813,7 +4640,6 @@ pub(crate) mod tests {
         assert!(!m.sheet, "one Esc closes it");
     }
 
-    /// The chrome is inert under a pushed record, which covers it.
     #[test]
     fn a_pushed_record_makes_the_chrome_untappable() {
         let mut m = model();
@@ -4828,7 +4654,6 @@ pub(crate) mod tests {
         assert!(m.mouse_on, "and the field did not drop reporting either");
     }
 
-    /// The record owns `↑`/`↓` while it is open; the list does not move.
     #[test]
     fn arrows_move_the_record_selector_and_not_the_list() {
         let mut m = model();
@@ -4847,7 +4672,6 @@ pub(crate) mod tests {
         assert_ne!(m.cursor, before);
     }
 
-    /// The selector is clamped to the record it is on, both ends.
     #[test]
     fn the_record_selector_cannot_run_off_either_end() {
         let mut m = model();
@@ -4862,9 +4686,8 @@ pub(crate) mod tests {
         assert_eq!(m.record_cursor(), rows - 1);
     }
 
-    /// **A letter is a verb on the record, not search text.** Invariant 1 scopes
-    /// find-fast to the browse surface, which is what frees this surface to have
-    /// keys at all — and is why editing needs no control key.
+    /// Find-fast is scoped to the browse surface, which frees the record to have
+    /// letter keys, so editing needs no control key.
     #[test]
     fn letters_are_verbs_on_the_record_not_query_text() {
         let mut m = model();
@@ -4874,8 +4697,6 @@ pub(crate) mod tests {
         assert!(m.flash.is_some(), "and an unknown verb says so rather than doing nothing");
     }
 
-    /// `e` edits **the row the selector is on** — one verb over every field,
-    /// which is the whole reason a per-field control key was the wrong shape.
     #[test]
     fn e_edits_the_selected_row() {
         let mut m = model();
@@ -4922,9 +4743,8 @@ pub(crate) mod tests {
         assert!(!m.sheet, "running an item closes the sheet");
     }
 
-    /// **`Enter` has no button**, and does not need one: a thumb opens the
-    /// highlighted row by tapping it a second time, which is the gesture the
-    /// button would have duplicated.
+    /// A thumb opens the highlighted row by tapping it again, so `Enter` needs no
+    /// button.
     #[test]
     fn opening_needs_no_button() {
         let mut m = model();
@@ -4937,8 +4757,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A tap in the margin at either end is not a button — that is the edge of
-    /// the row, and guessing there would be guessing.
     #[test]
     fn the_margins_are_not_buttons() {
         let bar = model().rows_on_screen - 3;
@@ -4949,11 +4767,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// **Tapping the search bar is the keyboard affordance**.
-    /// It sits there rather than in the action bar because tapping the field you
-    /// want to type into is what a thumb does anyway — and because Termux's own
-    /// extra-keys row can already carry a keyboard toggle, so a second button
-    /// for it wastes a quarter of the only touch chrome there is.
     #[test]
     fn tapping_the_search_bar_drops_mouse_reporting_for_the_ime() {
         let mut m = model();
@@ -4965,14 +4778,12 @@ pub(crate) mod tests {
             assert!(!m.mouse_on && m.keyboard_hint, "row {row} is part of the target");
         }
 
-        // And the very next keystroke puts reporting back, as before.
+        // And the next keystroke puts reporting back.
         update(&mut m, Msg::Char('c'));
         assert!(m.mouse_on && !m.keyboard_hint);
         assert_eq!(m.query, "c");
     }
 
-    /// **The expiring filter is a filter, not a mode**: it re-orders the same
-    /// list, search still narrows it, and `Esc` peels it off.
     #[test]
     fn the_expiring_filter_narrows_and_peels() {
         let mut m = model();
@@ -4993,8 +4804,6 @@ pub(crate) mod tests {
         assert_eq!(m.rows.len(), 4);
     }
 
-    /// The cursor never wraps and never leaves the list, however hard it is
-    /// pushed.
     #[test]
     fn cursor_movement_clamps_at_both_ends() {
         let mut m = model();
@@ -5008,8 +4817,6 @@ pub(crate) mod tests {
         assert_eq!(m.cursor, 0);
     }
 
-    /// Searching down to nothing leaves a valid, empty state on `+ new` — and
-    /// `Enter` there in a session that cannot write says why.
     #[test]
     fn an_empty_result_is_a_valid_state() {
         let mut m = model();
@@ -5025,8 +4832,8 @@ pub(crate) mod tests {
         assert_eq!(m.query, "zzz");
     }
 
-    /// Scrolling drags the cursor with it: nothing scrolls away from the
-    /// highlight, because on a phone the highlight is where the next tap goes.
+    /// On a phone the highlight is where the next tap goes, so nothing scrolls
+    /// away from it.
     #[test]
     fn scrolling_keeps_the_cursor_on_screen() {
         let mut m = model();
@@ -5047,9 +4854,6 @@ pub(crate) mod tests {
         assert_eq!(m.offset, 0);
     }
 
-    /// **Scan-text search never blocks the render loop**. The first press
-    /// asks for a load and shows that it is waiting; the answer arrives as a
-    /// message like any other.
     #[test]
     fn the_scan_search_loads_on_a_worker_and_arrives_as_a_message() {
         let mut m = model();
@@ -5074,8 +4878,6 @@ pub(crate) mod tests {
         assert!(m.rows.is_empty(), "{:?}", m.rows);
     }
 
-    /// **Scan text widens the result, never replaces it.** A document whose name
-    /// matches must not drop out because its transcript does not say the word.
     #[test]
     fn scan_matches_are_added_to_name_matches_in_list_order() {
         let mut m = model();
@@ -5091,8 +4893,6 @@ pub(crate) mod tests {
         assert_eq!(ids, ["coc", "eng1"], "the name match first, in list order");
     }
 
-    /// Turning it on a second time costs nothing: the text is kept even while the toggle
-    /// is off, so only the first press ever waits.
     #[test]
     fn the_second_toggle_needs_no_second_load() {
         let mut m = model();
@@ -5103,9 +4903,6 @@ pub(crate) mod tests {
         assert_eq!(m.scan_search, ScanSearch::On);
     }
 
-    /// A load that lands after the user changed their mind is kept, not applied
-    /// — and it does not disarm a pending quit, because the user did not touch
-    /// anything.
     #[test]
     fn a_late_load_does_not_reopen_the_toggle_or_disarm_the_quit() {
         let mut m = model();
@@ -5120,8 +4917,6 @@ pub(crate) mod tests {
         assert!(m.esc_armed, "a worker message is not a keystroke");
     }
 
-    /// The header count is the number of documents actually wanting attention —
-    /// the number that names `:expiring`.
     #[test]
     fn the_attention_count_is_expired_plus_soon() {
         let m = model();

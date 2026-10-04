@@ -79,7 +79,6 @@ mod tests {
         assert_eq!(slugify("COC/Certificate"), "coc-certificate");
     }
 
-    /// A name with nothing a slug can keep still produces an id.
     #[test]
     fn a_name_with_no_ascii_still_produces_an_id() {
         assert_eq!(slugify("路照"), FALLBACK);
@@ -87,7 +86,6 @@ mod tests {
         assert_eq!(slugify(""), FALLBACK);
     }
 
-    /// Two devices creating the same name mint different ids.
     #[test]
     fn two_devices_cannot_mint_the_same_id_for_the_same_name() {
         let none = BTreeSet::new();
@@ -95,14 +93,12 @@ mod tests {
         assert_eq!(mint("Passport", "phone", &none), "passport-phone");
     }
 
-    /// A repeat on one device counts up.
     #[test]
     fn a_repeat_on_the_same_device_counts_up() {
         let taken = BTreeSet::from(["passport-desk", "passport-desk-2"]);
         assert_eq!(mint("Passport", "desk", &taken), "passport-desk-3");
     }
 
-    /// No minted id is a Windows reserved name: each ends with its device.
     #[test]
     fn a_reserved_name_is_not_reserved_once_the_device_is_on_it() {
         let none = BTreeSet::new();
@@ -112,7 +108,6 @@ mod tests {
         }
     }
 
-    /// The device half is slugged too.
     #[test]
     fn the_device_half_is_slugged_as_well() {
         let none = BTreeSet::new();

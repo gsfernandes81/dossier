@@ -711,16 +711,10 @@ mod tests {
         Store::build(&fold_lines(&lines))
     }
 
-    /// **Every field survives a round trip through the journal**, which is what
-    /// makes a delete undoable: the fold's `create`-after-tombstone starts from
-    /// empty, so restoring a document means re-sending everything it had.
-    ///
-    /// The fixture is written as an **exhaustive struct literal on purpose** —
-    /// no `..Default::default()`. A field added to `Doc` will not compile here
-    /// until somebody decides what it round-trips as, which is the only way this
-    /// test can keep catching the bug it exists for: a field mapped on the way
-    /// in, forgotten on the way out, and silently lost the first time anyone
-    /// undoes a deletion.
+    /// An exhaustive struct literal on purpose, with no `..Default::default()`: a
+    /// field added to `Doc` will not compile here until somebody decides what it
+    /// round-trips as, so it cannot be mapped on the way in and lost on the way
+    /// out the first time anyone undoes a deletion.
     #[test]
     fn a_document_survives_a_round_trip_through_its_own_fields() {
         let original = Doc {
@@ -755,7 +749,6 @@ mod tests {
         assert_eq!(rebuilt.docs[0], original, "a field was mapped in but not back out");
     }
 
-    /// A bundle and a location survive a round trip through the journal too.
     #[test]
     fn bundles_and_locations_round_trip() {
         let bundle = Bundle {
@@ -794,7 +787,6 @@ mod tests {
         entity(ts, "bundle", id, &fields)
     }
 
-    /// A bundle is its own record, never a document.
     #[test]
     fn a_bundle_is_not_a_document() {
         let store = build(vec![bundle(100, "joining", "Joining", Some("2026-11-01"))]);
@@ -804,7 +796,6 @@ mod tests {
         assert_eq!(joining.date.as_deref(), Some("2026-11-01"));
     }
 
-    /// Bundles run newest first, and undated ones come last by name.
     #[test]
     fn bundles_run_newest_first_and_undated_last() {
         let store = build(vec![
@@ -817,7 +808,6 @@ mod tests {
         assert_eq!(order, ["new", "old", "alpha", "zeta"]);
     }
 
-    /// A bare bundle id in the list reads as an entry with no file chosen.
     #[test]
     fn a_bare_bundle_entry_reads_as_the_whole_version() {
         let store =
@@ -825,7 +815,6 @@ mod tests {
         assert_eq!(store.docs[0].bundles, [Membership { bundle: "joining".into(), file: None }]);
     }
 
-    /// Versions come back oldest first, and only the newest is listed.
     #[test]
     fn versions_run_oldest_first_and_only_the_latest_is_listed() {
         let store = build(vec![
@@ -840,8 +829,6 @@ mod tests {
         assert_eq!(store.listed(), 1);
     }
 
-    /// Versions that replace each other in a loop are found, and a newer
-    /// version replacing one of them is not part of the loop.
     #[test]
     fn a_loop_of_versions_is_found() {
         let store = build(vec![
@@ -855,8 +842,7 @@ mod tests {
         assert_eq!(found, ["a", "b"]);
     }
 
-    /// Two versions replacing one older version are both kept and both listed —
-    /// an offline duplicate stays visible until it is merged.
+    /// An offline duplicate stays visible until it is merged.
     #[test]
     fn two_versions_of_one_document_are_both_latest() {
         let store = build(vec![
@@ -869,8 +855,6 @@ mod tests {
         assert_eq!(store.listed(), 2);
     }
 
-    /// Of two latest versions, the later-issued one is the latest and the
-    /// other conflicts, however far down the chain they branch.
     #[test]
     fn the_earlier_issued_of_two_latest_versions_conflicts() {
         let store = build(vec![
@@ -896,7 +880,6 @@ mod tests {
         assert_eq!(store.conflicts(), 1);
     }
 
-    /// A cycle of versions cannot hang the walk.
     #[test]
     fn a_cycle_of_versions_terminates() {
         let store = build(vec![
@@ -906,8 +889,6 @@ mod tests {
         assert_eq!(store.versions("a").len(), 2);
     }
 
-    /// **A bundle holds exact versions**: a newer version is not a member,
-    /// and an entry whose bundle was deleted reads as nothing.
     #[test]
     fn a_bundle_holds_the_exact_version_it_was_given() {
         let store = build(vec![
@@ -942,8 +923,6 @@ mod tests {
         assert_eq!(names, ["Joining Documents"], "the deleted bundle reads as nothing");
     }
 
-    /// A version is found by the name of a bundle it is in, and only that
-    /// version: the bundle does not follow to a newer one.
     #[test]
     fn search_finds_a_version_by_its_bundle() {
         let store = build(vec![
@@ -954,8 +933,6 @@ mod tests {
         assert_eq!(ids(&store, &store.search("joining")), ["pp-2019"]);
     }
 
-    /// The expiry watch covers latest versions only, though each version keeps
-    /// its own date.
     #[test]
     fn the_watch_covers_latest_documents_only() {
         let store = build(vec![
@@ -972,7 +949,6 @@ mod tests {
         assert_eq!(old.expiry_date.as_deref(), Some("2029-01-01"));
     }
 
-    /// A location reads its name and parent; one with no name shows its id.
     #[test]
     fn a_location_reads_its_name_and_parent() {
         let tree = build(vec![
@@ -984,8 +960,6 @@ mod tests {
         assert_eq!(tree.parent("folder"), Some("desk"));
     }
 
-    /// A document with nothing but a name round-trips too — the absent fields
-    /// stay absent rather than coming back as empty strings.
     #[test]
     fn an_empty_document_round_trips_without_inventing_fields() {
         let fields = Doc { id: "bare".into(), name: "Bare".into(), ..Doc::default() }.as_fields();
@@ -1010,8 +984,6 @@ mod tests {
         doc(ts, id, &fields)
     }
 
-    /// **Shelf order** follows the location tree in sibling order, then the
-    /// name; unfiled and digital-only documents come last.
     #[test]
     fn documents_sort_in_shelf_order() {
         let s = build(vec![
@@ -1030,7 +1002,6 @@ mod tests {
         assert_eq!(order, ["c", "x", "a", "b", "y", "z"]);
     }
 
-    /// Inside one location the name breaks ties, then the id.
     #[test]
     fn name_then_id_break_the_tie() {
         let s = build(vec![
@@ -1043,8 +1014,6 @@ mod tests {
         assert_eq!(order, ["first", "third", "second"]);
     }
 
-    /// A count of hard copies takes in everything inside a location, old
-    /// versions included.
     #[test]
     fn a_location_counts_every_hard_copy_inside_it() {
         let s = build(vec![
@@ -1103,8 +1072,7 @@ mod tests {
         assert_eq!(by_id("coc-2019").status("2026-10-20", "2027-01-18"), Status::Untracked);
     }
 
-    /// Status is the expiry against today and the warn window, and every state
-    /// has a marker — colour is never the only signal.
+    /// Every state has a marker, so colour is never the only signal.
     #[test]
     fn status_classifies_against_today_and_the_window() {
         let s = build(vec![
@@ -1124,7 +1092,6 @@ mod tests {
         }
     }
 
-    /// The place column is the hard copy's path, and empty when there is none.
     #[test]
     fn the_place_column_reads_as_the_path() {
         let s = build(vec![
@@ -1142,8 +1109,6 @@ mod tests {
         assert_eq!(place("e"), "");
     }
 
-    /// **Enter never dies.** With no file linked there is nothing to open, and
-    /// the caller falls through to the record.
     #[test]
     fn the_primary_file_is_the_one_enter_opens() {
         let s = build(vec![doc(
@@ -1166,8 +1131,6 @@ mod tests {
         assert!(bare.docs[0].primary_file().is_none());
     }
 
-    /// Search runs over name, notes, tags and bundles — and an exact hit is
-    /// never displaced by a fuzzy one.
     #[test]
     fn search_covers_the_whole_record_and_prefers_exact() {
         let s = build(vec![
@@ -1194,7 +1157,6 @@ mod tests {
         assert_eq!(ids("").len(), 3, "an empty query is the whole list");
     }
 
-    /// The fuzzy pass only runs when the exact one found nothing.
     #[test]
     fn a_typo_falls_back_but_a_hit_does_not() {
         let s = build(vec![
@@ -1209,15 +1171,13 @@ mod tests {
         assert!(ids("zzzz").is_empty(), "{:?}", ids("zzzz"));
     }
 
-    /// Locations come through the same fold as documents.
     #[test]
     fn locations_are_read_from_the_fold() {
         let s = build(vec![location(10, "cert-file", "Cert File", None)]);
         assert_eq!(s.locations.get("cert-file").map(|l| l.name.as_str()), Some("Cert File"));
     }
 
-    /// A document with no name is still built — hiding it would make a
-    /// half-written record invisible instead of fixable.
+    /// Hiding it would make a half-written record invisible instead of fixable.
     #[test]
     fn a_nameless_document_still_appears() {
         let s = build(vec![doc(100, "orphan", &[("location", "cert-file".into())])]);

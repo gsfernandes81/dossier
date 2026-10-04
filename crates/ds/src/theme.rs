@@ -186,7 +186,6 @@ impl Theme {
 mod tests {
     use super::*;
 
-    /// With colour off, every tone that means something still stands out.
     #[test]
     fn every_meaningful_tone_survives_monochrome() {
         let mono = Theme { color: false };
@@ -198,7 +197,6 @@ mod tests {
         }
     }
 
-    /// The band never looks like the selected row.
     #[test]
     fn the_band_is_not_the_selection() {
         let theme = Theme { color: true };
@@ -213,7 +211,6 @@ mod tests {
         );
     }
 
-    /// Tones that would vanish on the band are restyled for it.
     #[test]
     fn the_band_restyles_the_tones_that_would_vanish_on_it() {
         let theme = Theme { color: true };
@@ -230,8 +227,6 @@ mod tests {
         assert_eq!(mono.on_band(Tone::Armed), mono.style(Tone::Armed));
     }
 
-    /// In colour, the three attention states are three different colours — and
-    /// each is still paired with its glyph by the renderer.
     #[test]
     fn attention_states_differ_in_colour() {
         let theme = Theme { color: true };
@@ -242,8 +237,7 @@ mod tests {
         assert_eq!(theme.status(crate::Status::Ok).fg, None, "healthy is not coloured at all");
     }
 
-    /// On is marked more than off in both modes, so a lit toggle never reads
-    /// as an unlit one.
+    /// A lit toggle must never read as an unlit one.
     #[test]
     fn lit_is_more_than_pressable() {
         let mono = Theme { color: false };

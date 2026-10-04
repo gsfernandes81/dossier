@@ -521,8 +521,6 @@ mod tests {
         Settings { base_url, api_key: "k".into(), verify_tls: true }
     }
 
-    /// **A daemon that is not running is a state, not an error** — `ds status`
-    /// still prints everything else it knows.
     #[test]
     fn an_absent_daemon_is_a_state() {
         // Port 1 is reserved and never listening.
@@ -531,8 +529,7 @@ mod tests {
         assert!(status.detail.is_some());
     }
 
-    /// A rejected key is told apart from an absent daemon, because the fix is
-    /// completely different.
+    /// The fix for each is completely different.
     #[test]
     fn a_rejected_key_is_told_apart_from_an_absent_daemon() {
         let (url, handle) = serve(vec![("/rest/system/version", 403, "{}")]);
@@ -543,8 +540,6 @@ mod tests {
         assert_eq!(seen, ["/rest/system/version key=k"], "the key is sent as a header");
     }
 
-    /// **Verification is never dropped off loopback.** The request is refused
-    /// before a socket is opened, and the report says why.
     #[test]
     fn skipping_verification_off_loopback_is_refused() {
         let settings = Settings {
@@ -557,7 +552,6 @@ mod tests {
         assert!(status.detail.unwrap().contains("only safe on loopback"));
     }
 
-    /// Loopback is recognized in all the forms a config file writes it.
     #[test]
     fn loopback_is_recognized_in_every_form() {
         for url in ["https://127.0.0.1:8384", "http://localhost:8384", "https://[::1]:8384"] {
@@ -568,16 +562,14 @@ mod tests {
         }
     }
 
-    /// A bare `host:port` gets **https**, because Termux's daemon redirects
-    /// plain http — and a redirect would leave the loopback TLS exception.
+    /// Termux's daemon redirects plain http, and following the redirect would
+    /// leave the loopback TLS exception.
     #[test]
     fn a_bare_address_becomes_https() {
         assert_eq!(normalize("127.0.0.1:8384"), "https://127.0.0.1:8384");
         assert_eq!(normalize("http://127.0.0.1:8384/"), "http://127.0.0.1:8384");
     }
 
-    /// The folder that matters is the one containing the store — not the first
-    /// one, and not all of them.
     #[test]
     fn the_store_folder_is_the_one_containing_the_root() {
         let doc = serde_json::json!([
@@ -597,8 +589,6 @@ mod tests {
         );
     }
 
-    /// A folder path that equals the root counts, and one that merely shares a
-    /// prefix does not — `/home/u/Sync2` is not inside `/home/u/Sync`.
     #[test]
     fn folder_matching_is_by_path_component_not_by_prefix() {
         let doc = serde_json::json!([{"id": "docs", "path": "/home/u/Sync", "paused": false}]);
@@ -606,10 +596,8 @@ mod tests {
         assert!(folder_containing(&doc, Path::new("/home/u/Sync2"), None).is_none());
     }
 
-    /// **Under WSL, a Windows daemon's folder is found.** It reports
-    /// `C:\Users\…`, the store is at `/mnt/c/users/…` in whatever case `ds init`
-    /// was given, and the two are the same place. A folder the Linux side has
-    /// no name for (a network share) is skipped rather than guessed at.
+    /// A folder the Linux side has no name for, such as a network share, is
+    /// skipped rather than guessed at.
     #[test]
     fn under_wsl_a_windows_folder_path_matches_its_mount() {
         let wsl = Wsl { mount_root: "/mnt/".into(), distro: Some("Ubuntu".into()) };
@@ -629,8 +617,6 @@ mod tests {
         assert!(folder_containing(&doc, Path::new("/home/g/sync"), Some(&wsl)).is_none());
     }
 
-    /// An unanswered loopback under WSL names the likely cause and both fixes;
-    /// anywhere else it stays the plain fact.
     #[test]
     fn an_unreachable_loopback_under_wsl_explains_nat() {
         let wsl = Wsl { mount_root: "/mnt/".into(), distro: None };
@@ -645,8 +631,6 @@ mod tests {
         assert!(!plain.detail.expect("detail").contains("WSL"));
     }
 
-    /// The API key and address come out of the `<gui>` element, with a scheme
-    /// added when the GUI serves TLS.
     #[test]
     fn syncthing_config_yields_its_api_address_and_key() {
         let xml = r#"<configuration version="37">
@@ -663,9 +647,8 @@ mod tests {
         );
     }
 
-    /// Pointing `address` at the Windows host with verification off is still
-    /// refused under WSL — the loopback rule does not bend — but the refusal
-    /// says what to do instead, because that is the workaround people try.
+    /// Verification off against the Windows host is the workaround people try,
+    /// so the refusal says what to do instead.
     #[test]
     fn a_refusal_under_wsl_points_at_mirrored_networking() {
         let wsl = Wsl { mount_root: "/mnt/".into(), distro: None };
@@ -679,8 +662,6 @@ mod tests {
         assert!(status.detail.expect("detail").contains("networkingMode=mirrored"));
     }
 
-    /// The happy path: a version, the store's folder, its state, and the device
-    /// counts — with this device excluded from them.
     #[test]
     fn a_healthy_daemon_reports_the_folder_and_the_peers() {
         let (url, handle) = serve(vec![
@@ -701,7 +682,6 @@ mod tests {
         assert_eq!((status.connected, status.devices), (1, 1), "self is not a peer");
     }
 
-    /// An address is `host:port`, and two pasted together is not one.
     #[test]
     fn an_address_has_a_host_and_a_port() {
         for good in

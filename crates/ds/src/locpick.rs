@@ -484,8 +484,6 @@ mod tests {
             .collect()
     }
 
-    /// It opens one level above the hard copy, with that location open and
-    /// selected.
     #[test]
     fn it_opens_one_level_above_the_hard_copy() {
         let store = store();
@@ -495,7 +493,6 @@ mod tests {
         assert_eq!(shape(&picker, &store), ["desk", "├ ▸ folder", "└ ▾ pouch", "  └ passport"]);
     }
 
-    /// An unfiled document opens on the whole tree, on its first location.
     #[test]
     fn an_unfiled_document_opens_at_the_top() {
         let mut store = store();
@@ -505,8 +502,6 @@ mod tests {
         assert_eq!(picker.cursor, Target::Location("desk".into()));
     }
 
-    /// Two levels show beneath the root, counting documents: a first-level
-    /// location opens in place, and its own locations stay closed.
     #[test]
     fn a_first_level_location_opens_in_place() {
         let store = store();
@@ -527,8 +522,6 @@ mod tests {
         );
     }
 
-    /// `→` on a second-level location moves the root down instead of showing a
-    /// third level, and `←` on the root moves it back up.
     #[test]
     fn a_third_level_steps_in() {
         let store = store();
@@ -549,7 +542,6 @@ mod tests {
         assert_eq!(picker.cursor, Target::Location("folder".into()));
     }
 
-    /// The cursor skips documents and stops on a "more" row, which expands.
     #[test]
     fn the_cursor_skips_documents_and_stops_on_more() {
         let store = store();
@@ -563,9 +555,6 @@ mod tests {
         assert!(shape(&picker, &store).contains(&"  └ stcw".to_string()));
     }
 
-    /// Typing searches every location; the cursor starts on the first match,
-    /// `+ new` is pinned above it and anchored where typing began, and rubbing
-    /// the text out brings the tree back on that row.
     #[test]
     fn typing_searches_with_new_pinned_above() {
         let store = store();
@@ -587,8 +576,6 @@ mod tests {
         assert_eq!(picker.cursor, Target::Location("pouch".into()));
     }
 
-    /// Moving a location never offers it, or anything inside it, as a place
-    /// to go.
     #[test]
     fn a_moving_location_is_left_out() {
         let store = store();

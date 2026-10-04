@@ -174,8 +174,7 @@ pub fn two_pass<'a, T>(items: impl Iterator<Item = (T, &'a str)> + Clone, query:
 mod tests {
     use super::*;
 
-    /// Folding is case- and accent-insensitive, so a document typed with
-    /// diacritics is findable without them.
+    /// A document typed with diacritics is findable without them.
     #[test]
     fn folding_strips_case_and_accents() {
         assert_eq!(fold("Résumé"), "resume");
@@ -183,8 +182,8 @@ mod tests {
         assert_eq!(fold("Ausweis für Führerschein"), "ausweis fur fuhrerschein");
     }
 
-    /// **A short query never fuzzes.** At four characters or fewer a one-edit
-    /// neighbourhood is noise: `cat` would reach `car`, `cab`, `bat` and `can`.
+    /// At four characters or fewer a one-edit neighbourhood is noise: `cat` would
+    /// reach `car`, `cab`, `bat` and `can`.
     #[test]
     fn short_terms_have_no_budget() {
         assert_eq!(budget("cat"), 0);
@@ -203,7 +202,6 @@ mod tests {
         assert_eq!(distance("medical", "mediacl", 2), 1);
     }
 
-    /// The cap is honoured, and a length difference is decided without the DP.
     #[test]
     fn distance_is_capped() {
         assert_eq!(distance("a", "abcdefgh", 2), 3, "capped at k+1, not the true 7");
@@ -211,7 +209,6 @@ mod tests {
         assert_eq!(distance("same", "same", 0), 0);
     }
 
-    /// Real typos land inside their budget; unrelated words do not.
     #[test]
     fn typos_match_and_different_words_do_not() {
         let hay = fold("Passport (IN) — identity travel");
@@ -220,7 +217,6 @@ mod tests {
         assert!(!term_matches("password", &hay), "a different word entirely");
     }
 
-    /// Exact substring matching is the fast path and needs no fuzzy pass.
     #[test]
     fn exact_substrings_match_without_fuzzing() {
         let hay = fold("COC Certificate (Master) — marine");
@@ -230,8 +226,7 @@ mod tests {
         assert!(!Query::new("eng-1").matches(&hay, false));
     }
 
-    /// **Every term must match.** Adding a word narrows, never widens — the
-    /// property that makes typing more feel like progress.
+    /// Adding a word narrows, never widens, so typing more feels like progress.
     #[test]
     fn terms_are_anded() {
         let hay = fold("COC Certificate (Master) — marine");
@@ -239,15 +234,12 @@ mod tests {
         assert!(!Query::new("certificate motorcycle").matches(&hay, true));
     }
 
-    /// An empty query matches everything — the unfiltered list.
     #[test]
     fn an_empty_query_matches_everything() {
         assert!(Query::new("").matches(&fold("anything at all"), false));
         assert!(Query::new("").matches("", false));
     }
 
-    /// The fuzzy pass is genuinely more forgiving than the exact one, and only
-    /// where the budget allows it.
     #[test]
     fn the_fuzzy_pass_forgives_what_the_exact_one_does_not() {
         let hay = fold("ENG-1 Medical Certificate");

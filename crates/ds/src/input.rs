@@ -87,7 +87,6 @@ mod tests {
         Event::Key(KeyEvent::new(code, modifiers))
     }
 
-    /// Every bare printable becomes search text.
     #[test]
     fn every_bare_letter_is_search_text() {
         for c in ['s', 'b', 'u', 'f', 'q', 'x', ':', '?', '1'] {
@@ -99,7 +98,6 @@ mod tests {
         }
     }
 
-    /// A modified letter is never search text.
     #[test]
     fn a_modified_letter_never_reaches_the_query() {
         for modifiers in [KeyModifiers::ALT, KeyModifiers::CONTROL | KeyModifiers::ALT] {
@@ -133,7 +131,6 @@ mod tests {
         assert_eq!(to_msg(&press(KeyCode::Char('e'), KeyModifiers::NONE)), Some(Msg::Char('e')));
     }
 
-    /// Control combinations are verbs, and `ctrl+c` is always the exit.
     #[test]
     fn control_combinations_are_the_only_letter_verbs() {
         assert_eq!(to_msg(&press(KeyCode::Char('c'), KeyModifiers::CONTROL)), Some(Msg::Quit));
@@ -148,7 +145,6 @@ mod tests {
         assert_eq!(to_msg(&press(KeyCode::Char('y'), KeyModifiers::CONTROL)), Some(Msg::Redo));
     }
 
-    /// A key release is not a key press.
     #[test]
     fn releases_and_repeats_are_dropped() {
         let mut event = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
@@ -156,7 +152,6 @@ mod tests {
         assert_eq!(to_msg(&Event::Key(event)), None);
     }
 
-    /// Taps and wheel events are the touch story; drags are deliberately not.
     #[test]
     fn taps_and_scrolls_arrive_but_drags_do_not() {
         let tap = MouseEvent {

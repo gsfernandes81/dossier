@@ -93,8 +93,8 @@ fn fresh() -> (TempDir, PathBuf) {
     (dir, root)
 }
 
-/// The full report names the journal, counts the documents, and says nothing is
-/// wrong, though one document has expired: expiry is not a status finding.
+/// Expiry is not a status finding, so an expired document leaves the report
+/// clean.
 #[test]
 fn status_reports_the_store() {
     let (_dir, root) = sample();
@@ -106,8 +106,6 @@ fn status_reports_the_store() {
     assert!(text.contains("no problems found"), "{text}");
 }
 
-/// **A healthy store makes `--quiet` say nothing and exit 0.** That silence is
-/// the entire value of running it from cron.
 #[test]
 fn quiet_status_is_silent_when_healthy() {
     let (_dir, root) = sample();
@@ -116,7 +114,6 @@ fn quiet_status_is_silent_when_healthy() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), "", "nothing to say");
 }
 
-/// A damaged store makes it speak, and exit non-zero so cron notices.
 #[test]
 fn quiet_status_reports_damage_and_exits_non_zero() {
     let (_dir, root) = sample();
@@ -128,8 +125,6 @@ fn quiet_status_reports_damage_and_exits_non_zero() {
     assert!(text.contains("unreadable line"), "{text}");
 }
 
-/// A fresh device has no journal, and that is not damage — it says so and still
-/// exits 0.
 #[test]
 fn a_device_with_no_journal_is_not_damaged() {
     let (_dir, root) = fresh();
@@ -140,8 +135,8 @@ fn a_device_with_no_journal_is_not_damaged() {
     assert!(text.contains("documents 0"), "{text}");
 }
 
-/// `ds open` refuses to guess. Nothing matched and too much matched are both
-/// exit 2, with the candidates listed so the next attempt can be exact.
+/// Nothing matched and too much matched are both exit 2, with the candidates
+/// listed so the next attempt can be exact.
 #[test]
 fn open_refuses_to_guess() {
     let (_dir, root) = sample();
@@ -172,8 +167,6 @@ fn open_says_when_a_file_has_not_synced() {
     assert!(stderr.contains("Syncthing"), "{stderr}");
 }
 
-/// `ds init` writes the config the whole write path hangs off, and says which
-/// writer id this device will append as.
 #[test]
 fn init_names_the_device() {
     let (_dir, root) = fresh();
@@ -198,8 +191,6 @@ fn init_does_not_create_the_journal() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("not there yet"));
 }
 
-/// An existing config is never silently replaced: `device` is this device's
-/// identity, and changing it strands every op written under the old one.
 #[test]
 fn init_refuses_to_overwrite_without_force() {
     let (_dir, root) = fresh();
@@ -218,8 +209,6 @@ fn init_refuses_to_overwrite_without_force() {
     assert!(std::fs::read_to_string(config_path(&root)).unwrap().contains("desk"));
 }
 
-/// A device name outside the frozen writer grammar is refused, and the message
-/// says what the grammar is rather than only that the name was wrong.
 #[test]
 fn init_refuses_a_device_name_the_grammar_rejects() {
     let (_dir, root) = fresh();
@@ -231,9 +220,7 @@ fn init_refuses_a_device_name_the_grammar_rejects() {
     assert!(!config_path(&root).exists(), "nothing was written");
 }
 
-/// **With no terminal and no flag, `ds init` fails fast instead of hanging.**
-/// A CI job or a pipe has no one to answer the question, and a command that
-/// waits forever for an answer that cannot come is the worse failure.
+/// A CI job or a pipe has no one to answer the question, so waiting would hang.
 #[test]
 fn init_without_a_terminal_or_a_flag_fails_fast() {
     let (_dir, root) = fresh();

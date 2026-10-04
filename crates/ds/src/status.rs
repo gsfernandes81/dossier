@@ -286,7 +286,6 @@ mod tests {
         )
     }
 
-    /// A sound store says what it is, and that nothing is wrong.
     #[test]
     fn a_sound_store_says_what_it_is() {
         let r = report(&present(), vec![doc("passport"), doc("visa")]);
@@ -297,8 +296,8 @@ mod tests {
         assert_eq!(r.problems(), "");
     }
 
-    /// An expired document is the store working, not a finding, so a
-    /// `--quiet` cron job stays silent about it.
+    /// An expired document is the store working, so a `--quiet` cron job stays
+    /// silent about it.
     #[test]
     fn an_expired_document_is_not_a_finding() {
         let mut past = doc("past");
@@ -308,8 +307,7 @@ mod tests {
         assert!(!r.render().contains("expir"), "{}", r.render());
     }
 
-    /// A conflicting latest version is a finding, so it is found without
-    /// opening that document's Versions view.
+    /// It is then found without opening the document's Versions view.
     #[test]
     fn a_conflicting_latest_version_is_a_finding() {
         let mut conflicting = doc("pp-phone");
@@ -319,8 +317,7 @@ mod tests {
         assert!(r.problems().contains("versions  1 conflicting latest"), "{}", r.problems());
     }
 
-    /// Versions replacing each other in a loop hide every one of them, so the
-    /// loop is a finding that says how to break it.
+    /// A loop hides every one of its versions.
     #[test]
     fn a_loop_of_versions_is_a_finding() {
         let mut a = doc("a");
@@ -335,7 +332,6 @@ mod tests {
         assert!(problems.contains("renews to none"), "{problems}");
     }
 
-    /// A linked file that is not under the root is a finding, named.
     #[test]
     fn a_missing_file_is_a_finding() {
         let mut passport = doc("passport");
@@ -353,8 +349,6 @@ mod tests {
         );
     }
 
-    /// Malformed lines are said once, in the loader's words, which name the
-    /// file and what happened to the lines.
     #[test]
     fn malformed_lines_are_said_once() {
         let load = Load {
@@ -367,7 +361,6 @@ mod tests {
         assert!(!text.contains("malformed"), "{text}");
     }
 
-    /// A conflict copy names the file and what to do.
     #[test]
     fn a_conflict_copy_is_reported_as_never_read() {
         let load = Load {
@@ -403,8 +396,6 @@ mod tests {
         }
     }
 
-    /// A paused folder is a finding, said once: the summary line leaves it
-    /// to the findings.
     #[test]
     fn a_paused_folder_is_said_once() {
         let mut r = report(&present(), Vec::new());
@@ -424,8 +415,6 @@ mod tests {
         assert!(r.render().contains("no versioning"));
     }
 
-    /// A failed check is a finding and has no summary line; never configured
-    /// is a summary line that says how, and no finding.
     #[test]
     fn a_failed_check_is_a_finding_and_unconfigured_is_not() {
         let mut r = report(&present(), Vec::new());
@@ -439,7 +428,6 @@ mod tests {
         assert!(r.render().contains("syncthing not configured — `ds init` sets the API key"));
     }
 
-    /// A reachable daemon with no folder holding the store is a finding.
     #[test]
     fn a_store_outside_every_folder_is_a_finding() {
         let mut r = report(&present(), Vec::new());
@@ -447,7 +435,6 @@ mod tests {
         assert!(r.problems().contains("the store is in no synced folder"), "{}", r.problems());
     }
 
-    /// A device with no journal yet says so plainly, and is not damaged.
     #[test]
     fn a_missing_journal_is_stated_not_implied() {
         let r = report(&Load::default(), Vec::new());

@@ -146,7 +146,6 @@ fn entries(purpose: &Purpose, model: &crate::Model) -> Vec<Entry> {
 mod tests {
     use super::*;
 
-    /// The filter list shows every box whether on or off, then clear all.
     #[test]
     fn the_filter_list_shows_off_as_well_as_on() {
         let mut model = crate::app::tests::model();
@@ -159,7 +158,6 @@ mod tests {
         assert_eq!(ons(&model), [Some(true), Some(false), Some(false), None]);
     }
 
-    /// Typing narrows the rows as search folds them.
     #[test]
     fn typing_narrows_the_list() {
         let model = crate::app::tests::model();

@@ -129,8 +129,6 @@ pub fn items(model: &Model) -> Vec<Item> {
 mod tests {
     use super::*;
 
-    /// Each view lists its own verbs: the Find view filters, the Details view
-    /// edits.
     #[test]
     fn the_verbs_follow_the_view() {
         let mut model = crate::app::tests::model();

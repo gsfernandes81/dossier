@@ -245,9 +245,8 @@ mod tests {
         assert_eq!(width(&truncate_left("desk › leather folder › slot 3", 12)), 12);
     }
 
-    /// **Two states, no ladder.** The phone and a 60-column tmux split get the
-    /// same single-pane layout; the split appears only when there is really room
-    /// for two panes.
+    /// A 60-column tmux split gets the phone's single-pane layout; the split
+    /// appears only when there is room for two panes.
     #[test]
     fn there_are_exactly_two_layout_states() {
         assert!(!splits(45) && !splits(80) && !splits(99));
@@ -256,7 +255,6 @@ mod tests {
         assert_eq!(row_height(80), 1);
     }
 
-    /// The floor is a refusal, not a glitch.
     #[test]
     fn the_floor_is_checked_on_both_axes() {
         assert!(too_small(37, 40));
@@ -273,9 +271,8 @@ mod tests {
         assert_eq!(visible_rows(100, 26), 23, "a desktop, single-line rows");
     }
 
-    /// **Widths are cells, never characters.** A CJK name is two cells per
-    /// character, and a column that used `len()` would run straight through its
-    /// neighbour.
+    /// A CJK name is two cells per character, so a column that used `len()` would
+    /// run straight through its neighbour.
     #[test]
     fn truncation_counts_cells_not_characters() {
         assert_eq!(width("護照"), 4, "two characters, four cells");
@@ -287,9 +284,6 @@ mod tests {
         assert_eq!(truncate_left("護照護照", 5), "…護照", "the end survives");
     }
 
-    /// **Wrapping happens here, not in a widget**, so a continuation line can be
-    /// indented under its own column instead of starting at the left margin —
-    /// where it would read as a new field.
     #[test]
     fn wrapping_breaks_on_words_and_respects_cells() {
         let lines = wrap("Revalidation booked at MMD, slot 14 Oct. Bring originals", 20);
@@ -302,7 +296,6 @@ mod tests {
         assert!(wrap("", 10).is_empty(), "{:?}", wrap("", 10));
     }
 
-    /// The compact date is month-year, and a non-date is left alone.
     #[test]
     fn short_dates_keep_the_month_and_year() {
         assert_eq!(short_date("2026-09-28"), "09-26");

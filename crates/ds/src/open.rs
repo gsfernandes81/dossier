@@ -217,14 +217,9 @@ mod tests {
         assert!(error.to_string().contains("Syncthing"));
     }
 
-    /// **The WSL opener, end to end, with a stand-in `rundll32.exe`.** Put
-    /// where Windows keeps the real one, it is found by the `PATH`-miss
-    /// fallback — the `appendWindowsPath = false` case — and records what it was
-    /// given: the translated Windows path as **one** argument (spaces and a
-    /// comma intact), after the handler, started from the drive.
-    ///
-    /// Skipped on a real WSL, where the real `rundll32.exe` is on `PATH` and
-    /// would try to open the file on the desktop.
+    /// A stand-in `rundll32.exe` where Windows keeps the real one is found by the
+    /// `PATH`-miss fallback (`appendWindowsPath = false`). Skipped on a real WSL,
+    /// where the real one is on `PATH` and would open the file on the desktop.
     #[cfg(unix)]
     #[test]
     fn under_wsl_a_file_goes_to_rundll32_as_one_windows_path() {

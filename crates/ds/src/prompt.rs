@@ -381,8 +381,6 @@ mod tests {
         dir
     }
 
-    /// A folder question lists only folders; `Tab` fills the top one, and a
-    /// chosen row opens on `Enter` rather than finishing the line.
     #[test]
     fn a_folder_line_lists_folders_and_opens_the_chosen_one() {
         let base = sandbox();
@@ -398,7 +396,6 @@ mod tests {
         assert_eq!(press(&mut editor, KeyCode::Enter), Step::Done("Sync/Documents/".into()));
     }
 
-    /// `Esc` leaves, and a secret is shown as dots.
     #[test]
     fn esc_cancels_and_a_secret_stays_hidden() {
         let mut editor = LineEditor::new(Kind::Secret, PathBuf::new(), None);
@@ -407,8 +404,6 @@ mod tests {
         assert_eq!(press(&mut editor, KeyCode::Esc), Step::Cancel);
     }
 
-    /// An empty reply keeps the default, a yes-or-no takes either word, and an
-    /// optional question can be skipped.
     #[test]
     fn a_reply_settles_against_the_default() {
         let question = |kind, default, required| Question {
@@ -429,7 +424,6 @@ mod tests {
         assert_eq!(settle(&question(Kind::YesNo, None, true), "maybe"), Err(()));
     }
 
-    /// A prompt never prints a secret, only its ends.
     #[test]
     fn a_secret_default_is_masked() {
         assert_eq!(masked("abcdefghijkl"), "abcd…ijkl");
