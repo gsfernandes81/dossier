@@ -265,9 +265,6 @@ pub fn memberships_value(memberships: &[Membership]) -> Option<Value> {
 }
 
 /// The whole browsable store, built once per load.
-///
-/// `PartialEq`/`Eq` so it can ride inside a [`crate::Msg`], which derives them
-/// for the same reason every other message does: a test asserts on messages.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Store {
     /// Documents in shelf order.

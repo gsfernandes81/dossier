@@ -347,10 +347,6 @@ mod tests {
     use super::*;
     use crate::edit::Field;
 
-    /// **An empty editable field is still a row.** A row that appeared only once
-    /// it had a value could never be the row you use to give it one — this is
-    /// the whole affordance for adding notes or an issue date, so it has to hold
-    /// for a document with none of them.
     #[test]
     fn every_editable_field_has_a_row_even_when_it_is_empty() {
         let model = crate::app::tests::model();

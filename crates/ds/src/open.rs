@@ -14,16 +14,12 @@
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
 //! Handing a file to the platform's opener, and when the opener is missing,
-//! saying what to install. On Termux `termux-open` needs the Termux:API
-//! package and its app from the same store, or it silently does nothing.
+//! saying what to install.
 //!
-//! **Under WSL** the file goes to Windows, because that is where the default
-//! application is: the path is translated ([`crate::wsl`]) and handed to
-//! `rundll32 url.dll,FileProtocolHandler` — the shell's own "open this", in one
-//! argument. Not `explorer.exe`, whose parser splits a name at its commas even
-//! inside quotes; not `cmd /C start`, which re-reads `&` and `^` in a name that
-//! WSL's interop left unquoted for having no spaces; not `wslview`, which is an
-//! optional package.
+//! Under WSL the translated path ([`crate::wsl`]) goes to `rundll32
+//! url.dll,FileProtocolHandler` as one argument: `explorer.exe` splits a name at
+//! its commas even inside quotes, `cmd /C start` re-reads `&` and `^` in a name
+//! WSL's interop left unquoted, and `wslview` is an optional package.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -79,8 +75,7 @@ const WSL_INTEROP_HINT: &str = "WSL cannot run Windows programs — set `enabled
 
 /// `ENOEXEC`: what `exec` of a `.exe` returns when WSL's interop is switched
 /// off, since the kernel then sees a PE file it has no loader for. The value is
-/// the same on every Linux architecture, and a one-number dependency on `libc`
-/// would cost more than it says.
+/// the same on every Linux architecture.
 const ENOEXEC: i32 = 8;
 
 const TERMUX_HINT: &str = "run `pkg install termux-api` and install the Termux:API app from the \
