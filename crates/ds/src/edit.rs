@@ -174,8 +174,8 @@ pub struct Edit {
     pub armed_discard: bool,
     /// A save is in flight; a second `Enter` is refused until it lands.
     pub saving: bool,
-    /// The row of a live list under the line that `↑`/`↓` chose, if any.
-    pub chosen: Option<usize>,
+    /// The live list under a path being typed.
+    pub list: Option<crate::complete::Completion>,
 }
 
 impl Edit {
@@ -190,8 +190,21 @@ impl Edit {
             original,
             armed_discard: false,
             saving: false,
-            chosen: None,
+            list: None,
         }
+    }
+
+    /// Lets the live list follow the line after it was typed into.
+    pub fn typed(&mut self) {
+        if let Some(list) = &mut self.list {
+            list.typed(&self.buffer);
+        }
+    }
+
+    /// The live list's rows for the line.
+    #[must_use]
+    pub fn matches(&self) -> Vec<&crate::complete::Entry> {
+        self.list.as_ref().map(|list| list.matches(&self.buffer)).unwrap_or_default()
     }
 
     /// The journal field it writes; a bundle's date is `date`.

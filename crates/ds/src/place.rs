@@ -92,9 +92,14 @@ impl Tree {
         for (id, parent) in &parents {
             children.entry(parent.clone()).or_default().push(id.clone());
         }
+        let folded: BTreeMap<&str, String> = nodes
+            .values()
+            .map(|location| (location.id.as_str(), crate::search::fold(&location.name)))
+            .collect();
         for siblings in children.values_mut() {
-            siblings
-                .sort_by(|a, b| natural_cmp(&nodes[a].name, &nodes[b].name).then_with(|| a.cmp(b)));
+            siblings.sort_by(|a, b| {
+                natural_cmp(&folded[a.as_str()], &folded[b.as_str()]).then_with(|| a.cmp(b))
+            });
         }
         Self { nodes, parents, children, looped }
     }
@@ -278,13 +283,10 @@ fn loops(nodes: &BTreeMap<String, Location>) -> BTreeSet<String> {
     looped
 }
 
-/// Orders names the way a person reads them: `slot 2` before `slot 10`.
-///
-/// Runs of digits compare as numbers; everything else compares folded, as
-/// search folds it.
+/// Orders names already folded by [`crate::search::fold`] the way a person
+/// reads them: `slot 2` before `slot 10`.
 #[must_use]
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
-    let (a, b) = (crate::search::fold(a), crate::search::fold(b));
     let mut left = a.chars().peekable();
     let mut right = b.chars().peekable();
     loop {
@@ -344,7 +346,7 @@ mod tests {
         assert_eq!(tree.children(Some("folder")), ["s2", "s10"]);
         assert_eq!(tree.children(None), ["desk", "bag"]);
         assert_eq!(tree.shelf(), ["desk", "folder", "s2", "s10", "pouch", "bag"]);
-        assert_eq!(natural_cmp("Slot 2", "slot 10"), Ordering::Less);
+        assert_eq!(natural_cmp("slot 2", "slot 10"), Ordering::Less);
         assert_eq!(natural_cmp("slot 02", "slot 2"), Ordering::Equal);
     }
 

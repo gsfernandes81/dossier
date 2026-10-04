@@ -465,7 +465,7 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
             return;
         }
     }
-    let matches = model.attach_matches();
+    let matches = model.edit.as_ref().map(crate::edit::Edit::matches).unwrap_or_default();
     if let (Some(edit), false) = (&model.edit, matches.is_empty()) {
         let (head, tail) = crate::complete::split(&edit.buffer);
         let rows = matches.iter().map(|entry| ("  ".to_string(), entry.label(), "")).collect();
@@ -473,7 +473,7 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         let panel = Panel {
             crumb: format!("in {place}"),
             filter: Some(tail),
-            cursor: edit.chosen,
+            cursor: edit.list.as_ref().and_then(|list| list.chosen),
             subject: None,
         };
         model.panel = draw_panel(frame, area, &panel, rows, theme);
@@ -1229,7 +1229,7 @@ fn locpick_hints(picker: &crate::locpick::LocationPicker) -> Vec<&'static str> {
 fn hints(model: &Model) -> Vec<&'static str> {
     use crate::app::View;
     if model.edit.is_some() {
-        return if model.attach_matches().is_empty() {
+        return if model.edit.as_ref().is_some_and(|edit| edit.matches().is_empty()) {
             vec!["⏎ save", "esc discard"]
         } else {
             vec!["↑↓ choose", "tab fill", "⏎ save", "esc discard"]

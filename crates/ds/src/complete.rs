@@ -30,9 +30,18 @@ pub struct Entry {
     pub name: String,
     /// Whether it is a folder.
     pub dir: bool,
+    /// The name folded as search folds it, once.
+    folded: String,
 }
 
 impl Entry {
+    /// An entry named `name`.
+    #[must_use]
+    pub fn new(name: String, dir: bool) -> Self {
+        let folded = crate::search::fold(&name);
+        Self { name, dir, folded }
+    }
+
     /// The name as the list shows it: a folder ends in `/`.
     #[must_use]
     pub fn label(&self) -> String {
@@ -93,14 +102,16 @@ pub fn read(base: &Path, typed: &str, dirs_only: bool, wsl: Option<&crate::wsl::
                 .filter_map(Result::ok)
                 .filter_map(|entry| {
                     let name = entry.file_name().into_string().ok()?;
-                    let dir = std::fs::metadata(entry.path()).is_ok_and(|meta| meta.is_dir());
-                    (dir || !dirs_only).then_some(Entry { name, dir })
+                    // The listing says what an entry is; only a link needs a stat.
+                    let kind = entry.file_type().ok()?;
+                    let dir = if kind.is_symlink() { entry.path().is_dir() } else { kind.is_dir() };
+                    (dir || !dirs_only).then(|| Entry::new(name, dir))
                 })
                 .collect()
         })
         .unwrap_or_default();
     entries.sort_by(|a, b| {
-        b.dir.cmp(&a.dir).then_with(|| crate::place::natural_cmp(&a.name, &b.name))
+        b.dir.cmp(&a.dir).then_with(|| crate::place::natural_cmp(&a.folded, &b.folded))
     });
     Folder { head, entries }
 }
@@ -120,7 +131,7 @@ impl Folder {
         self.entries
             .iter()
             .filter(|entry| tail.starts_with('.') || !entry.name.starts_with('.'))
-            .filter(|entry| crate::search::fold(&entry.name).starts_with(&tail))
+            .filter(|entry| entry.folded.starts_with(&tail))
             .collect()
     }
 
@@ -133,6 +144,77 @@ impl Folder {
             format!("{}{}{separator}", self.head, entry.name)
         } else {
             format!("{}{}", self.head, entry.name)
+        }
+    }
+}
+
+/// The live list under a line being typed: the folder it is in and the row
+/// the arrows chose. The line itself belongs to the caller.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Completion {
+    base: PathBuf,
+    dirs_only: bool,
+    wsl: Option<crate::wsl::Wsl>,
+    folder: Folder,
+    /// The row `↑`/`↓` chose; `None` is the line itself.
+    pub chosen: Option<usize>,
+}
+
+impl Completion {
+    /// A list for `line`, read relative to `base`; `dirs_only` leaves out files.
+    #[must_use]
+    pub fn new(base: PathBuf, dirs_only: bool, wsl: Option<crate::wsl::Wsl>, line: &str) -> Self {
+        let folder = read(&base, line, dirs_only, wsl.as_ref());
+        Self { base, dirs_only, wsl, folder, chosen: None }
+    }
+
+    /// The rows `line` leaves.
+    #[must_use]
+    pub fn matches(&self, line: &str) -> Vec<&Entry> {
+        if self.folder.holds(line) {
+            self.folder.matching(line)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Follows `line` after it was typed into: no row is chosen, and the
+    /// folder is read again once the line has left it.
+    pub fn typed(&mut self, line: &str) {
+        self.chosen = None;
+        if !self.folder.holds(line) {
+            self.folder = read(&self.base, line, self.dirs_only, self.wsl.as_ref());
+        }
+    }
+
+    /// Moves the choice; `↑` from the first row goes back to the line.
+    pub fn step(&mut self, line: &str, down: bool) {
+        self.chosen = step(self.chosen, self.matches(line).len(), down);
+    }
+
+    /// Fills `line` with the chosen row, or the top one.
+    pub fn tab(&mut self, line: &mut String) {
+        let at = self.chosen.unwrap_or(0);
+        self.pick(line, at);
+    }
+
+    /// Fills `line` with row `at`: true when it is a file, which finishes
+    /// the line; a folder opens instead.
+    pub fn pick(&mut self, line: &mut String, at: usize) -> bool {
+        let Some(entry) = self.matches(line).get(at).map(|entry| (*entry).clone()) else {
+            return false;
+        };
+        *line = self.folder.fill(&entry);
+        self.typed(line);
+        !entry.dir
+    }
+
+    /// `Enter`: true when the line is finished — nothing was chosen, or a
+    /// file was. A chosen folder opens instead.
+    pub fn enter(&mut self, line: &mut String) -> bool {
+        match self.chosen {
+            Some(at) => self.pick(line, at),
+            None => true,
         }
     }
 }
@@ -205,7 +287,7 @@ mod tests {
         let scans = folder.matching("Sc")[0].clone();
         assert_eq!(folder.fill(&scans), "Scans/");
         let windows = Folder { head: "C:\\Users\\".into(), entries: vec![] };
-        assert_eq!(windows.fill(&Entry { name: "g".into(), dir: true }), "C:\\Users\\g\\");
+        assert_eq!(windows.fill(&Entry::new("g".into(), true)), "C:\\Users\\g\\");
     }
 
     /// A folder that is not there lists nothing rather than failing.

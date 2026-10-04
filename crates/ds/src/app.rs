@@ -38,6 +38,7 @@
 //! is on screen. Recomputing that geometry here would make two sources of truth
 //! and they would drift.
 
+use crate::complete::Completion;
 use crate::edit::{Field, Target};
 use crate::layout;
 use crate::{Doc, Status, Store};
@@ -515,8 +516,6 @@ pub struct Model {
     pub bundle_list: RowGeometry,
     /// The Syncthing folder root, which paths being attached are relative to.
     pub root: Option<std::path::PathBuf>,
-    /// The folder the path being attached is in, read for its live list.
-    pub folder: Option<crate::complete::Folder>,
     /// The screen row the `+ new` row was last drawn on.
     pub new_row: Option<u16>,
     /// The views pushed over the Find view, innermost last.
@@ -618,7 +617,6 @@ impl Model {
             on_new: false,
             bundle_list: RowGeometry::default(),
             root: None,
-            folder: None,
             new_row: None,
             views: Vec::new(),
             esc_armed: false,
@@ -1831,37 +1829,15 @@ impl Model {
             Field::Notes => Some(doc.notes.clone()),
             Field::Attach => None,
         };
-        let target = Target::Doc(doc.id.clone());
-        self.edit = Some(crate::edit::Edit::new(target, field, current.as_deref()));
+        let mut edit =
+            crate::edit::Edit::new(Target::Doc(doc.id.clone()), field, current.as_deref());
+        if field == Field::Attach {
+            edit.list = self.root.clone().map(|root| Completion::new(root, false, None, ""));
+        }
+        self.edit = Some(edit);
         self.sheet = false;
         self.show_details();
-        self.refresh_folder();
         Effect::Redraw
-    }
-
-    /// Rereads the folder an attach path is in, when the path has left it.
-    fn refresh_folder(&mut self) {
-        let Some(edit) = self.edit.as_ref().filter(|edit| edit.field == Field::Attach) else {
-            self.folder = None;
-            return;
-        };
-        let Some(root) = &self.root else { return };
-        if !self.folder.as_ref().is_some_and(|folder| folder.holds(&edit.buffer)) {
-            self.folder = Some(crate::complete::read(root, &edit.buffer, false, None));
-        }
-    }
-
-    /// The live list's rows for the path being attached.
-    #[must_use]
-    pub fn attach_matches(&self) -> Vec<crate::complete::Entry> {
-        let Some(edit) = self.edit.as_ref().filter(|edit| edit.field == Field::Attach) else {
-            return Vec::new();
-        };
-        self.folder
-            .as_ref()
-            .filter(|folder| folder.holds(&edit.buffer))
-            .map(|folder| folder.matching(&edit.buffer).into_iter().cloned().collect())
-            .unwrap_or_default()
     }
 
     /// Starts a new document by asking for its name, the one field it cannot
@@ -2373,78 +2349,66 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
 /// * **Taps and scrolls are inert**, the same rule a pushed record already
 ///   follows: you cannot act on a surface the current one is covering.
 fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
-    // rust: the edit is cloned out, worked on, and put back, exactly as
-    // `sheet_key` does with the sheet. Holding `model.edit.as_mut()` across a
-    // write to `model.flash` would be two mutable borrows of one struct, and the
-    // borrow checker is right to refuse: a message can change both. The clone is
-    // two short strings.
-    let mut edit = model.edit.clone()?;
+    let mut edit = model.edit.take()?;
+    let (effect, open) = edit_step(model, &mut edit, msg);
+    if open {
+        model.edit = Some(edit);
+    }
+    effect
+}
 
-    // "Any other key disarms" — the same rule the quit arming follows, applied
-    // to the discard so the two behave identically.
+/// One key on an open edit: what it did, and whether the edit stays open.
+fn edit_step(model: &mut Model, edit: &mut crate::edit::Edit, msg: &Msg) -> (Option<Effect>, bool) {
+    // Any other key disarms, as it does for quitting.
     if !matches!(msg, Msg::Esc | Msg::Quit) {
         edit.armed_discard = false;
     }
-
-    if edit.field == Field::Attach {
-        if let Some(effect) = attach_key(model, &mut edit, msg) {
-            model.edit = Some(edit);
-            model.refresh_folder();
-            return Some(effect);
-        }
-        if let Msg::Tap { .. } = msg {
-            model.edit = Some(edit);
-            return edit_key(model, &Msg::Enter);
-        }
+    if let Some(effect) = attach_key(model, edit, msg) {
+        return (Some(effect), true);
     }
-
+    // A tap on a file row picked it; saving it is `Enter`.
+    if let (Msg::Tap { .. }, Some(_)) = (msg, &edit.list) {
+        return edit_step(model, edit, &Msg::Enter);
+    }
     let effect = match msg {
         Msg::Char(c) => {
             edit.buffer.push(*c);
+            edit.typed();
             Effect::Redraw
         }
         Msg::Backspace => {
             edit.buffer.pop();
+            edit.typed();
             Effect::Redraw
         }
-        // A second `Enter` while the first is in flight would append the same
-        // op twice: harmless to the fold, but a lie in the history.
+        // A second append of the same op is harmless to the fold but a lie
+        // in the history.
         Msg::Enter if edit.saving => Effect::Idle,
-        Msg::Enter => match model.save(&mut edit) {
+        Msg::Enter => match model.save(edit) {
             Ok(effect) if edit.saving => effect,
-            Ok(effect) => {
-                model.edit = None;
-                return Some(effect);
-            }
+            Ok(effect) => return (Some(effect), false),
             Err(complaint) => {
                 // The typing survives a refusal: it is what needs correcting.
                 model.flash = Some(complaint);
                 Effect::Redraw
             }
         },
-        // Quitting throws an unsaved edit away, so it asks first, as Esc does.
         Msg::Quit if edit.dirty() && !edit.armed_discard => {
             edit.armed_discard = true;
             model.flash = Some("unsaved edit — ^q again to quit without saving".into());
             Effect::Redraw
         }
-        Msg::Esc => {
-            if edit.saving {
-                // Cancelling an append already on its way would leave the screen
-                // and the journal disagreeing about what happened.
-                model.flash = Some("saving — one moment".into());
-                Effect::Redraw
-            } else if edit.dirty() && !edit.armed_discard {
-                edit.armed_discard = true;
-                Effect::Redraw
-            } else {
-                model.edit = None;
-                return Some(Effect::Redraw);
-            }
+        Msg::Esc if edit.saving => {
+            model.flash = Some("saving — one moment".into());
+            Effect::Redraw
         }
-        // Swallowed: the edit buffer has no cursor of its own yet, and these
-        // would otherwise act on the list or query under the editor. Pressing
-        // the verb again must not reseed the buffer and lose the typing.
+        Msg::Esc if edit.dirty() && !edit.armed_discard => {
+            edit.armed_discard = true;
+            Effect::Redraw
+        }
+        Msg::Esc => return (Some(Effect::Redraw), false),
+        // Swallowed: they would act on the surface under the editor, and the
+        // verb pressed again must not reseed the buffer.
         Msg::EditField(_)
         | Msg::Undo
         | Msg::Redo
@@ -2455,67 +2419,44 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         | Msg::Tab
         | Msg::Tap { .. }
         | Msg::Scroll(_) => Effect::Idle,
-        _ => return None,
+        _ => return (None, true),
     };
-    model.edit = Some(edit);
-    model.refresh_folder();
-    Some(effect)
+    (Some(effect), true)
 }
 
-/// Keys for the live list over a path being attached: `↑`/`↓` choose a row,
-/// `Tab` fills the chosen or top one, and `Enter` or a tap on a row picks it —
-/// a folder opens, a file fills the line and is saved. `None` leaves the key to
-/// the line: typing, and `Enter` with nothing chosen.
-fn attach_key(model: &mut Model, edit: &mut crate::edit::Edit, msg: &Msg) -> Option<Effect> {
-    let folder = model.folder.clone().filter(|folder| folder.holds(&edit.buffer))?;
-    let hits: Vec<crate::complete::Entry> =
-        folder.matching(&edit.buffer).into_iter().cloned().collect();
-    let pick = |edit: &mut crate::edit::Edit, entry: &crate::complete::Entry| {
-        edit.buffer = folder.fill(entry);
-        edit.chosen = None;
-    };
+/// Keys for the live list under a path being attached: `↑`/`↓` choose a
+/// row, `Tab` fills the chosen or top one, and `Enter` or a tap on a row picks
+/// it — a folder opens, a file fills the line to be saved. A tap anywhere else
+/// is inert. `None` leaves the key to the line.
+fn attach_key(model: &Model, edit: &mut crate::edit::Edit, msg: &Msg) -> Option<Effect> {
+    let list = edit.list.as_mut()?;
+    let line = &mut edit.buffer;
     match msg {
-        Msg::Move(Motion::Up) => {
-            edit.chosen = crate::complete::step(edit.chosen, hits.len(), false);
-        }
-        Msg::Move(Motion::Down) => {
-            edit.chosen = crate::complete::step(edit.chosen, hits.len(), true);
-        }
-        Msg::Tab => {
-            if let Some(entry) = edit.chosen.and_then(|at| hits.get(at)).or(hits.first()) {
-                pick(edit, entry);
-            }
-        }
-        Msg::Enter => {
-            if let Some(entry) = edit.chosen.and_then(|at| hits.get(at)) {
-                pick(edit, entry);
-                if !entry.dir {
-                    return None;
-                }
-            } else {
-                // A folder typed whole opens, as a chosen one does: a folder
-                // is never a soft copy.
-                let typed = edit.buffer.trim();
-                let root = model.root.as_ref()?;
-                if typed.is_empty() || !root.join(typed).is_dir() {
-                    return None;
-                }
-                if !typed.ends_with(['/', '\\']) {
-                    edit.buffer.push('/');
-                }
-            }
-        }
-        Msg::Tap { col, row } => {
-            let at = model.panel.at(*col, *row).filter(|&at| at < hits.len())?;
-            let entry = &hits[at];
-            pick(edit, entry);
-            if !entry.dir {
+        Msg::Move(Motion::Up) => list.step(line, false),
+        Msg::Move(Motion::Down) => list.step(line, true),
+        Msg::Tab => list.tab(line),
+        Msg::Enter if list.chosen.is_some() => {
+            if list.enter(line) {
                 return None;
             }
         }
-        Msg::Char(_) | Msg::Backspace => {
-            edit.chosen = None;
-            return None;
+        Msg::Enter => {
+            // A folder typed whole opens, as a chosen one does: a folder is
+            // never a soft copy.
+            let typed = line.trim();
+            if typed.is_empty() || !model.root.as_ref()?.join(typed).is_dir() {
+                return None;
+            }
+            if !typed.ends_with(['/', '\\']) {
+                line.push('/');
+            }
+            list.typed(line);
+        }
+        Msg::Tap { col, row } => {
+            let Some(at) = model.panel.at(*col, *row) else { return Some(Effect::Idle) };
+            if list.pick(line, at) {
+                return None;
+            }
         }
         _ => return None,
     }
@@ -4888,7 +4829,10 @@ pub(crate) mod tests {
     }
 
     fn listed(m: &Model) -> Vec<String> {
-        m.attach_matches().iter().map(crate::complete::Entry::label).collect()
+        m.edit
+            .as_ref()
+            .map(|edit| edit.matches().into_iter().map(crate::complete::Entry::label).collect())
+            .unwrap_or_default()
     }
 
     /// The live list shows the folder being typed in; a chosen folder opens,
@@ -4929,6 +4873,21 @@ pub(crate) mod tests {
         assert_eq!(listed(&m), ["pan.pdf", "passport.pdf"]);
     }
 
+    /// A tap off the live list leaves the typing alone; a tap on a file row
+    /// picks it and saves it.
+    #[test]
+    fn only_a_tap_on_a_row_does_anything_while_attaching() {
+        let mut m = attaching_under("taps");
+        for c in "Identity/pas".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        m.panel = RowGeometry { top: 5, left: 0, width: 40, items: vec![0], ..Default::default() };
+        assert_eq!(update(&mut m, Msg::Tap { col: 3, row: 1 }), Effect::Idle);
+        assert_eq!(m.edit.as_ref().unwrap().buffer, "Identity/pas", "nothing saved or changed");
+        let written = files_written(&update(&mut m, Msg::Tap { col: 3, row: 5 }));
+        assert_eq!(written.expect("a files write")[0]["path"], "Identity/passport.pdf");
+    }
+
     /// Quitting with an unsaved edit asks first, as Esc does; a second press
     /// quits.
     #[test]
@@ -4949,7 +4908,11 @@ pub(crate) mod tests {
             update(&mut m, Msg::Char(c));
         }
         update(&mut m, Msg::Move(Motion::Up));
-        assert_eq!(m.edit.as_ref().unwrap().chosen, Some(1), "↑ from the line is the last row");
+        assert_eq!(
+            m.edit.as_ref().unwrap().list.as_ref().unwrap().chosen,
+            Some(1),
+            "↑ from the line is the last row"
+        );
         let written = files_written(&update(&mut m, Msg::Enter)).expect("a files write");
         assert_eq!(written[0]["path"], "Identity/passport.pdf");
     }

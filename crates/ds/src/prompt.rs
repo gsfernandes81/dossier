@@ -22,7 +22,7 @@ use std::path::PathBuf;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::complete::{Entry, Folder};
+use crate::complete::{Completion, Entry};
 
 /// Rows the live list shows under the line.
 const SHOWN: usize = 8;
@@ -198,12 +198,8 @@ pub enum Step {
 pub struct LineEditor {
     /// What has been typed.
     pub buffer: String,
-    /// The list row `↑`/`↓` chose, if any.
-    pub chosen: Option<usize>,
     kind: Kind,
-    base: PathBuf,
-    wsl: Option<crate::wsl::Wsl>,
-    folder: Option<Folder>,
+    list: Option<Completion>,
 }
 
 impl LineEditor {
@@ -213,37 +209,17 @@ impl LineEditor {
     /// and Enter keeps it, while typing replaces it rather than appending.
     #[must_use]
     pub fn new(kind: Kind, base: PathBuf, wsl: Option<crate::wsl::Wsl>) -> Self {
-        let mut editor =
-            Self { buffer: String::new(), chosen: None, kind, base, wsl, folder: None };
-        editor.refresh();
-        editor
-    }
-
-    fn refresh(&mut self) {
-        if self.kind != Kind::Folder {
-            return;
-        }
-        if !self.folder.as_ref().is_some_and(|folder| folder.holds(&self.buffer)) {
-            self.folder =
-                Some(crate::complete::read(&self.base, &self.buffer, true, self.wsl.as_ref()));
-        }
+        let list = (kind == Kind::Folder).then(|| Completion::new(base, true, wsl, ""));
+        Self { buffer: String::new(), kind, list }
     }
 
     /// The live list's rows.
     #[must_use]
     pub fn matches(&self) -> Vec<Entry> {
-        self.folder
+        self.list
             .as_ref()
-            .map(|folder| folder.matching(&self.buffer).into_iter().cloned().collect())
+            .map(|list| list.matches(&self.buffer).into_iter().cloned().collect())
             .unwrap_or_default()
-    }
-
-    fn pick(&mut self, entry: &Entry) {
-        if let Some(folder) = &self.folder {
-            self.buffer = folder.fill(entry);
-        }
-        self.chosen = None;
-        self.refresh();
     }
 
     /// Applies one key: `Tab` fills the chosen or top row, `Enter` on a chosen
@@ -251,36 +227,34 @@ impl LineEditor {
     /// leaves.
     pub fn key(&mut self, key: KeyEvent) -> Step {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let hits = self.matches();
-        match key.code {
-            KeyCode::Esc => return Step::Cancel,
-            KeyCode::Char('c') if ctrl => return Step::Cancel,
-            KeyCode::Char('u') if ctrl => {
-                self.buffer.clear();
-                self.chosen = None;
-            }
-            KeyCode::Char(c) if !ctrl => {
-                self.buffer.push(c);
-                self.chosen = None;
-            }
-            KeyCode::Backspace => {
-                self.buffer.pop();
-                self.chosen = None;
-            }
-            KeyCode::Up => self.chosen = crate::complete::step(self.chosen, hits.len(), false),
-            KeyCode::Down => self.chosen = crate::complete::step(self.chosen, hits.len(), true),
-            KeyCode::Tab => {
-                if let Some(entry) = self.chosen.and_then(|at| hits.get(at)).or(hits.first()) {
-                    self.pick(&entry.clone());
+        let buffer = &mut self.buffer;
+        match (key.code, &mut self.list) {
+            (KeyCode::Esc, _) => return Step::Cancel,
+            (KeyCode::Char('c'), _) if ctrl => return Step::Cancel,
+            (KeyCode::Enter, None) => return Step::Done(buffer.clone()),
+            (KeyCode::Enter, Some(list)) => {
+                if list.enter(buffer) {
+                    return Step::Done(buffer.clone());
                 }
             }
-            KeyCode::Enter => match self.chosen.and_then(|at| hits.get(at)) {
-                Some(entry) => self.pick(&entry.clone()),
-                None => return Step::Done(self.buffer.clone()),
-            },
+            (KeyCode::Up | KeyCode::Down, Some(list)) => {
+                list.step(buffer, key.code == KeyCode::Down);
+            }
+            (KeyCode::Tab, Some(list)) => list.tab(buffer),
+            (KeyCode::Char('u'), list) if ctrl => {
+                buffer.clear();
+                typed(list.as_mut(), buffer);
+            }
+            (KeyCode::Char(c), list) if !ctrl => {
+                buffer.push(c);
+                typed(list.as_mut(), buffer);
+            }
+            (KeyCode::Backspace, list) => {
+                buffer.pop();
+                typed(list.as_mut(), buffer);
+            }
             _ => {}
         }
-        self.refresh();
         Step::Continue
     }
 
@@ -298,14 +272,22 @@ impl LineEditor {
     /// it in view.
     #[must_use]
     pub fn rows(&self) -> Vec<(bool, String)> {
-        let hits = self.matches();
-        let skip = self.chosen.map_or(0, |at| (at + 1).saturating_sub(SHOWN));
-        hits.iter()
+        let chosen = self.list.as_ref().and_then(|list| list.chosen);
+        let skip = chosen.map_or(0, |at| (at + 1).saturating_sub(SHOWN));
+        self.matches()
+            .iter()
             .enumerate()
             .skip(skip)
             .take(SHOWN)
-            .map(|(at, entry)| (self.chosen == Some(at), entry.label()))
+            .map(|(at, entry)| (chosen == Some(at), entry.label()))
             .collect()
+    }
+}
+
+/// Lets the live list follow a line that was typed into.
+fn typed(list: Option<&mut Completion>, line: &str) {
+    if let Some(list) = list {
+        list.typed(line);
     }
 }
 
