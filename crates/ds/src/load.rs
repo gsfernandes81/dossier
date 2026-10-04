@@ -79,7 +79,7 @@ pub fn load(journal: &Journal) -> Result<Loaded, journal::store::Error> {
     let load = journal.load(Namespace::Meta)?;
     let folded = journal::fold(&load.lines);
     let store = Store::build(&folded);
-    let (today, warn_until) = window(store.warn_days());
+    let (today, warn_until) = window();
     Ok(Loaded {
         store,
         stats: folded.stats,
@@ -90,23 +90,15 @@ pub fn load(journal: &Journal) -> Result<Loaded, journal::store::Error> {
     })
 }
 
-/// A century. The warn window is clamped to it because the setting comes from
-/// the journal, and a hostile or fat-fingered value must not be able to stop the
-/// app from starting — `jiff` panics when a span is built from a nonsense count,
-/// before any checked arithmetic gets a chance to say no.
-const MAX_WARN_DAYS: i64 = 36_500;
-
 /// Today and the far edge of the warn window, both ISO.
 ///
 /// Resolved once, at startup: every expiry comparison after this is a string
 /// comparison against these two, which is why nothing else in the crate needs a
-/// date library. A negative window means "warn about nothing but what has
-/// already expired", which is a coherent thing to want and costs no special case.
+/// date library.
 #[must_use]
-pub fn window(warn_days: i64) -> (String, String) {
+pub fn window() -> (String, String) {
     let today = Zoned::now().date();
-    let days = warn_days.clamp(-MAX_WARN_DAYS, MAX_WARN_DAYS);
-    let warn_until = today.checked_add(days.days()).unwrap_or(today);
+    let warn_until = today.checked_add(crate::doc::WARN_DAYS.days()).unwrap_or(today);
     (today.to_string(), warn_until.to_string())
 }
 
@@ -178,16 +170,11 @@ mod tests {
         );
     }
 
-    /// The window is today plus the setting, and an absurd setting cannot stop
-    /// the app from starting.
+    /// The window runs from today to [`crate::doc::WARN_DAYS`] ahead.
     #[test]
-    fn the_warn_window_is_today_plus_the_setting() {
-        let (today, warn_until) = window(90);
+    fn the_warn_window_is_today_plus_the_constant() {
+        let (today, warn_until) = window();
         assert_eq!(today.len(), 10, "ISO date: {today}");
         assert!(warn_until > today);
-        let (_, absurd) = window(i64::MAX);
-        assert!(absurd.starts_with("21"), "an absurd window clamps to a century: {absurd}");
-        let (today, past) = window(-30);
-        assert!(past < today, "a negative window warns about nothing not already expired");
     }
 }

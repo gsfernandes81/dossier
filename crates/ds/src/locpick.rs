@@ -484,7 +484,6 @@ mod tests {
                 place("pouch", "passport pouch", Some("desk")),
                 place("bag", "ship bag", None),
             ]),
-            ..Store::default()
         }
     }
 
