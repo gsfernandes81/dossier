@@ -91,6 +91,7 @@ pub mod sheet;
 pub mod status;
 pub mod syncthing;
 pub mod theme;
+pub mod versions;
 pub mod wsl;
 
 pub use app::{update, Effect, Model, Msg, View};

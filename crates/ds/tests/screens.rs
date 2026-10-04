@@ -563,6 +563,35 @@ fn a_conflict_is_counted_in_the_header() {
     assert!(lines[0].contains(" exp "), "the expiring count stays: {:?}", lines[0]);
 }
 
+/// The Versions view lists each version on two lines — dates and standing,
+/// then where its paper is — newest first.
+#[test]
+fn the_versions_view_draws_two_lines_a_version() {
+    let mut m = model(47, 24);
+    let old = m.store.index_of("eng1").unwrap();
+    let mut new = m.store.docs[old].clone();
+    new.id = "eng1-2".into();
+    new.issue_date = Some("2026-09-01".into());
+    new.expiry_date = Some("2028-09-01".into());
+    new.supersedes = Some("eng1".into());
+    m.store.docs[old].superseded = true;
+    m.store.docs[old].issue_date = Some("2024-01-14".into());
+    m.store.docs[old].expiry_date = Some("2026-01-13".into());
+    m.store.docs.push(new);
+    m.views.push(ds::View::Versions { doc: "eng1".into(), cursor: 0 });
+    let lines = screen(&mut m, 47, 24);
+    let text = lines.join("\n");
+    assert!(lines[1].contains("ENG-1 Medical"), "{text}");
+    assert!(lines[2].contains("versions, newest first"), "{text}");
+    assert!(lines[4].starts_with("▸ 2026-09-01 → 2028-09-01"), "{text}");
+    assert!(lines[4].trim_end().ends_with("latest"), "{text}");
+    assert!(lines[5].contains("cert"), "where its paper is: {text}");
+    assert!(lines[6].contains("2024-01-14 → 2026-01-13"), "{text}");
+    assert!(lines[6].trim_end().ends_with("! expired"), "{text}");
+    assert!(text.contains("2 versions"), "{text}");
+    assert!(text.contains("⏎ open"), "{text}");
+}
+
 /// An empty store offers its first document, with nothing typed.
 #[test]
 fn an_empty_store_explains_itself() {

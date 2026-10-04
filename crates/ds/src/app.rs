@@ -135,6 +135,13 @@ pub enum View {
         /// The selected row ([`crate::detail::rows`]).
         cursor: usize,
     },
+    /// Every version of the document `doc` belongs to.
+    Versions {
+        /// The id of the version it was opened from.
+        doc: String,
+        /// The selected version ([`crate::versions::rows`]).
+        cursor: usize,
+    },
 }
 
 /// Where the cursor should go.
@@ -568,6 +575,9 @@ impl Model {
             Some(View::Details { doc, .. }) => {
                 self.store.index_of(doc).map(|i| &self.store.docs[i])
             }
+            Some(View::Versions { doc, cursor }) => {
+                crate::versions::rows(&self.store, doc).get(*cursor).map(|&i| &self.store.docs[i])
+            }
             None if self.on_new => None,
             None => self.rows.get(self.cursor).map(|&i| &self.store.docs[i]),
         }
@@ -584,7 +594,7 @@ impl Model {
     pub fn record_cursor(&self) -> usize {
         match self.views.last() {
             Some(View::Details { cursor, .. }) => *cursor,
-            None => 0,
+            Some(View::Versions { .. }) | None => 0,
         }
     }
 
@@ -605,12 +615,45 @@ impl Model {
         }
     }
 
+    /// Opens the Versions view on the current document, its own version
+    /// selected.
+    fn open_versions(&mut self) -> Effect {
+        let Some(doc) = self.current().map(|doc| doc.id.clone()) else { return Effect::Idle };
+        let cursor = crate::versions::rows(&self.store, &doc)
+            .iter()
+            .position(|&i| self.store.docs[i].id == doc);
+        self.views.push(View::Versions { doc, cursor: cursor.unwrap_or(0) });
+        Effect::Redraw
+    }
+
+    /// Selects a version, or opens it when it is already selected.
+    fn versions_tap(&mut self, index: usize) -> Effect {
+        let Some(View::Versions { cursor, .. }) = self.views.last_mut() else {
+            return Effect::Idle;
+        };
+        if *cursor == index {
+            return self.open_version();
+        }
+        *cursor = index;
+        Effect::Redraw
+    }
+
+    /// Opens the selected version's Details view.
+    fn open_version(&mut self) -> Effect {
+        let Some(doc) = self.current().map(|doc| doc.id.clone()) else { return Effect::Idle };
+        self.views.push(View::Details { doc, cursor: 0 });
+        Effect::Redraw
+    }
+
     /// Drops every view whose record is gone from the store.
     fn prune_views(&mut self) {
         let store = &self.store;
         self.views.retain(|view| match view {
-            View::Details { doc, .. } => store.index_of(doc).is_some(),
+            View::Details { doc, .. } | View::Versions { doc, .. } => store.index_of(doc).is_some(),
         });
+        if let Some(View::Versions { doc, cursor }) = self.views.last_mut() {
+            *cursor = (*cursor).min(crate::versions::rows(store, doc).len().saturating_sub(1));
+        }
     }
 
     /// Whether the list offers `+ new`: once something is typed, or always on
@@ -1281,6 +1324,10 @@ impl Model {
                 self.sheet = false;
                 self.new_version()
             }
+            crate::sheet::Act::Versions => {
+                self.sheet = false;
+                self.open_versions()
+            }
             crate::sheet::Act::Quit => Effect::Quit,
         }
     }
@@ -1713,6 +1760,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         }
     }
 
+    if matches!(model.views.last(), Some(View::Versions { .. })) {
+        if let Some(effect) = versions_key(model, &msg) {
+            return effect;
+        }
+    }
+
     match msg {
         Msg::Quit => Effect::Quit,
         Msg::Esc => model.peel(was_armed),
@@ -1913,7 +1966,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             // A pushed record covers the list, so the chrome under it belongs to
             // a surface you cannot see. Tapping it would mutate that surface
             // blind — the stack metaphor has to hold for touch too.
-            let pushed = model.detail() && !crate::layout::splits(model.cols);
+            let pushed = !model.views.is_empty() && !crate::layout::splits(model.cols);
             let (top, bottom) = search_zone(model);
             if model.sheet && !model.leader_zone.hit(col, row) {
                 // Anywhere else dismisses it, the way a menu should.
@@ -1938,9 +1991,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                     // type", so it is what drops mouse reporting for one tap.
                     model.raise_keyboard()
                 }
-            } else if let Some(index) = model.detail().then(|| model.record.at(col, row)).flatten()
-            {
-                model.record_tap(index)
+            } else if let Some(index) = model.record.at(col, row) {
+                match model.views.last() {
+                    Some(View::Details { .. }) => model.record_tap(index),
+                    Some(View::Versions { .. }) => model.versions_tap(index),
+                    None => Effect::Idle,
+                }
             } else if model.new_row == Some(row) && !pushed {
                 if model.on_new {
                     model.drill()
@@ -1951,15 +2007,21 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             } else if let Some(index) = model.row_at(row) {
                 // Two taps, never a double-tap timer: timing gestures are
                 // miserable on a laggy terminal.
-                if index == model.cursor && !model.on_new {
+                let id = model.store.docs[model.rows[index]].id.clone();
+                let shown = match model.views.as_slice() {
+                    [] => true,
+                    [View::Details { doc, .. }] => *doc == id,
+                    _ => false,
+                };
+                if index == model.cursor && !model.on_new && shown {
                     model.drill()
                 } else {
                     model.on_new = false;
                     model.cursor = index;
-                    // Beside the list, Details shows whichever row was tapped.
-                    if let [View::Details { doc, cursor }] = model.views.as_mut_slice() {
-                        doc.clone_from(&model.store.docs[model.rows[index]].id);
-                        *cursor = 0;
+                    // Beside the list, the views give way to the tapped row's
+                    // Details view.
+                    if !model.views.is_empty() {
+                        model.views = vec![View::Details { doc: id, cursor: 0 }];
                     }
                     Effect::Redraw
                 }
@@ -2134,6 +2196,38 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         Msg::Backspace | Msg::Enter | Msg::Move(_) | Msg::Left | Msg::Right => Some(Effect::Idle),
         _ => None,
     }
+}
+
+/// Keys on the Versions view: the arrows walk the versions, `Enter` opens one,
+/// and the only letters are undo and redo.
+fn versions_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    let count = match model.views.last() {
+        Some(View::Versions { doc, .. }) => crate::versions::rows(&model.store, doc).len(),
+        _ => return None,
+    };
+    let Some(View::Versions { cursor, .. }) = model.views.last_mut() else { return None };
+    let last = count.saturating_sub(1);
+    Some(match msg {
+        Msg::Move(motion) => {
+            *cursor = match motion {
+                Motion::Up => cursor.saturating_sub(1),
+                Motion::Down => (*cursor + 1).min(last),
+                Motion::PageUp | Motion::Home => 0,
+                Motion::PageDown | Motion::End => last,
+            };
+            Effect::Redraw
+        }
+        Msg::Enter => model.open_version(),
+        Msg::Char(' ') => update(model, Msg::Leader),
+        Msg::Char('u') => model.undo(),
+        Msg::Char('r') => model.redo(),
+        Msg::Char(c) => {
+            model.flash = Some(format!("no verb on `{c}` here — space for the menu"));
+            Effect::Redraw
+        }
+        Msg::Backspace | Msg::Left | Msg::Right => Effect::Idle,
+        _ => return None,
+    })
 }
 
 /// Keys while a checklist is open: typing searches it, and with nothing typed
@@ -3697,6 +3791,73 @@ pub(crate) mod tests {
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("eng1"));
         assert_eq!(m.record_cursor(), 0, "a different document starts at its top row");
         assert_eq!(m.views.len(), 1, "it replaced the view rather than stacking one");
+    }
+
+    /// A model whose passport has an older version and two latest ones.
+    fn with_versions() -> Model {
+        let mut m = writable();
+        let mut add = |id: &str, issued: &str, supersedes: &str| {
+            let mut version = m.store.docs[2].clone();
+            version.id = id.into();
+            version.issue_date = Some(issued.into());
+            version.supersedes = Some(supersedes.into());
+            m.store.docs.push(version);
+        };
+        add("passport-desk", "2026-02-10", "passport");
+        add("passport-phone", "2026-01-05", "passport");
+        m.store.docs[2].superseded = true;
+        let phone = m.store.index_of("passport-phone").unwrap();
+        m.store.docs[phone].conflicting = true;
+        m.requery();
+        m
+    }
+
+    /// The latest version comes first, then a conflicting latest one, then
+    /// the older ones.
+    #[test]
+    fn versions_run_latest_then_conflicting_then_older() {
+        let m = with_versions();
+        let ids: Vec<&str> = crate::versions::rows(&m.store, "passport")
+            .into_iter()
+            .map(|i| m.store.docs[i].id.as_str())
+            .collect();
+        assert_eq!(ids, ["passport-desk", "passport-phone", "passport"]);
+    }
+
+    /// `v` opens the Versions view on the version it came from; `Enter` opens
+    /// an older version's Details view though the list does not hold it, and
+    /// `Esc` walks back one view at a time.
+    #[test]
+    fn the_versions_view_opens_any_version() {
+        let mut m = with_versions();
+        m.cursor = m.rows.iter().position(|&i| m.store.docs[i].id == "passport-desk").unwrap();
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('v'));
+        assert!(matches!(m.views.last(), Some(View::Versions { cursor: 0, .. })));
+        assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("passport-desk"));
+
+        update(&mut m, Msg::Move(Motion::End));
+        update(&mut m, Msg::Enter);
+        assert!(m.detail());
+        assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("passport"));
+
+        update(&mut m, Msg::Esc);
+        assert!(matches!(m.views.last(), Some(View::Versions { cursor: 2, .. })));
+        update(&mut m, Msg::Esc);
+        assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("passport-desk"));
+        update(&mut m, Msg::Esc);
+        assert!(m.views.is_empty(), "{:?}", m.views);
+    }
+
+    /// The Versions view's letters are undo and redo; any other says so.
+    #[test]
+    fn the_versions_view_has_no_other_letters() {
+        let mut m = with_versions();
+        m.views.push(View::Versions { doc: "passport".into(), cursor: 0 });
+        update(&mut m, Msg::Char('e'));
+        assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("no verb on `e`")));
+        assert!(m.edit.is_none());
     }
 
     /// **An IME dismissal must never quit the app.** Termux sends `Esc` to close

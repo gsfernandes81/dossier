@@ -38,6 +38,8 @@ pub enum Act {
     Location,
     /// Make a newer version of the record's document.
     NewVersion,
+    /// List every version of the record's document.
+    Versions,
     /// Rename the selected physical location.
     Rename,
     /// Move the selected physical location into another.
@@ -72,7 +74,13 @@ const fn item(key: char, label: &'static str, act: Act) -> Item {
 /// The sheet's verbs for what is on screen.
 #[must_use]
 pub fn items(model: &Model) -> Vec<Item> {
-    if model.locpick.is_some() {
+    if matches!(model.views.last(), Some(crate::app::View::Versions { .. })) {
+        vec![
+            Item { accel: "u ^z", ..item('u', "undo last change", Act::Undo) },
+            Item { accel: "r ^y", ..item('r', "redo", Act::Redo) },
+            item('q', "quit", Act::Quit),
+        ]
+    } else if model.locpick.is_some() {
         vec![
             item('r', "rename", Act::Rename),
             item('m', "move…", Act::Move),
@@ -86,6 +94,7 @@ pub fn items(model: &Model) -> Vec<Item> {
             Item { accel: "e", ..item('e', "edit this row", Act::Edit) },
             item('l', "location", Act::Location),
             item('n', "new version", Act::NewVersion),
+            item('v', "versions", Act::Versions),
             Item { accel: "u ^z", ..item('u', "undo last change", Act::Undo) },
             Item { accel: "r ^y", ..item('r', "redo", Act::Redo) },
             Item { accel: "d d", ..item('d', "delete this document", Act::Delete) },
@@ -113,6 +122,6 @@ mod tests {
         let keys = |model: &Model| items(model).iter().map(|item| item.key).collect::<String>();
         assert_eq!(keys(&model), "furq");
         model.views.push(crate::app::View::Details { doc: "coc".into(), cursor: 0 });
-        assert_eq!(keys(&model), "elnurdq");
+        assert_eq!(keys(&model), "elnvurdq");
     }
 }

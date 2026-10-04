@@ -199,26 +199,32 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 /// The list, and the detail pane beside or instead of it (U3).
 fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     model.record = crate::app::RowGeometry::default();
-    let (list_area, detail_area) = match (model.detail(), crate::layout::splits(area.width)) {
-        (true, true) => {
-            let split = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-                .split(area);
-            (Some(split[0]), Some(split[1]))
-        }
-        // Narrow: the record is a full-screen push, and `Esc` pops back with the
-        // cursor where it was.
-        (true, false) => (None, Some(area)),
-        (false, _) => (Some(area), None),
-    };
+    let (list_area, detail_area) =
+        match (!model.views.is_empty(), crate::layout::splits(area.width)) {
+            (true, true) => {
+                let split = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                    .split(area);
+                (Some(split[0]), Some(split[1]))
+            }
+            // Narrow: the record is a full-screen push, and `Esc` pops back with the
+            // cursor where it was.
+            (true, false) => (None, Some(area)),
+            (false, _) => (Some(area), None),
+        };
 
     match list_area {
         Some(list_area) => draw_list(frame, list_area, model, theme),
         None => model.list = ListGeometry::default(),
     }
     if let Some(detail_area) = detail_area {
-        model.record = crate::detail::draw(frame, detail_area, model, theme);
+        model.record = match model.views.last() {
+            Some(crate::app::View::Versions { doc, cursor }) => {
+                crate::versions::draw(frame, detail_area, model, doc, *cursor, theme)
+            }
+            _ => crate::detail::draw(frame, detail_area, model, theme),
+        };
     }
 }
 
@@ -844,7 +850,12 @@ fn chips(model: &Model) -> String {
 /// decoration: the whole block is the keyboard target, and one terminal row is
 /// too small a thing to ask a thumb to hit against the screen edge.
 fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
-    let count = format!("{}/{}", model.rows.len(), model.store.listed());
+    let count = match model.views.last() {
+        Some(crate::app::View::Versions { doc, .. }) => {
+            format!("{} versions", crate::versions::rows(&model.store, doc).len())
+        }
+        _ => format!("{}/{}", model.rows.len(), model.store.listed()),
+    };
     let cols = area.width as usize;
     let gutter = crate::layout::GUTTER as usize;
     let touch = area.height > 1;
@@ -1109,6 +1120,8 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
         locpick_hints(picker)
     } else if model.picker.is_some() {
         vec!["⏎ choose", "esc back"]
+    } else if matches!(model.views.last(), Some(crate::app::View::Versions { .. })) {
+        vec!["⏎ open", "esc back"]
     } else if model.detail() {
         // The record's hints **follow the selector**: the verb is shown when the
         // row under it has one and this session can actually write. A hint for a
