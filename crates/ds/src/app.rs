@@ -2634,13 +2634,12 @@ pub(crate) mod tests {
                     vec![FileRef { label: "complete".into(), path: path.into(), primary: true }]
                 })
                 .unwrap_or_default(),
-            haystack: crate::search::fold(name),
             ..Doc::default()
         }
     }
 
     pub(crate) fn model() -> Model {
-        let store = Store {
+        let mut store = Store {
             docs: vec![
                 doc("coc", "COC Certificate", Some("2026-01-01"), Some("Marine/coc.pdf")),
                 doc("eng1", "ENG-1 Medical", Some("2027-01-13"), Some("Marine/eng1.pdf")),
@@ -2649,6 +2648,7 @@ pub(crate) mod tests {
             ],
             ..Store::default()
         };
+        store.derive();
         Model::new(store, "2026-08-16".into(), "2026-11-14".into(), 45, 28)
     }
 
@@ -2888,8 +2888,8 @@ pub(crate) mod tests {
         let mut fresh = store.docs[0].clone();
         fresh.id = "seaman-book-desk".into();
         fresh.name = "Seaman Book".into();
-        fresh.haystack = crate::search::fold(&fresh.name);
         store.docs.push(fresh);
+        store.derive();
         land_as(&mut m, store);
         assert!(m.detail());
         update(&mut m, Msg::Esc);
@@ -2931,8 +2931,8 @@ pub(crate) mod tests {
         fresh.name = "Seaman Book".into();
         fresh.expiry_date = None;
         fresh.files.clear();
-        fresh.haystack = crate::search::fold(&fresh.name);
         store.docs.push(fresh);
+        store.derive();
         land_as(&mut m, store);
 
         assert!(m.edit.is_none(), "the journal answered, so the editor closed");
@@ -2976,8 +2976,8 @@ pub(crate) mod tests {
         fresh.supersedes = Some("coc".into());
         fresh.expiry_date = None;
         fresh.files.clear();
-        store.docs[0].superseded = true;
         store.docs.push(fresh);
+        store.derive();
         land_as(&mut m, store);
 
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("coc-certificate-desk"));
@@ -3827,9 +3827,7 @@ pub(crate) mod tests {
         };
         add("passport-desk", "2026-02-10", "passport");
         add("passport-phone", "2026-01-05", "passport");
-        m.store.docs[2].superseded = true;
-        let phone = m.store.index_of("passport-phone").unwrap();
-        m.store.docs[phone].conflicting = true;
+        m.store.derive();
         m.requery();
         m
     }
@@ -3911,6 +3909,7 @@ pub(crate) mod tests {
         for doc in &mut m.store.docs[..2] {
             doc.bundles.push(crate::Membership { bundle: "joining".into(), file: None });
         }
+        m.store.derive();
         m
     }
 
@@ -4130,13 +4129,13 @@ pub(crate) mod tests {
         newer.id = "coc-2".into();
         newer.supersedes = Some("coc".into());
         newer.bundles.clear();
-        m.store.docs[0].superseded = true;
         m.store.docs[0].files.push(crate::FileRef {
             label: String::new(),
             path: "Marine/coc-back.pdf".into(),
             primary: false,
         });
         m.store.docs.push(newer);
+        m.store.derive();
         m.run(crate::sheet::Act::Bundles);
         update(&mut m, Msg::Enter);
         update(&mut m, Msg::Move(Motion::End));
@@ -4238,7 +4237,11 @@ pub(crate) mod tests {
     #[test]
     fn the_list_shows_latest_documents_unless_a_toggle_widens_it() {
         let mut m = model();
-        m.store.docs[2].superseded = true;
+        let mut newer = m.store.get("passport").unwrap().clone();
+        newer.id = "passport-2".into();
+        newer.supersedes = Some("passport".into());
+        m.store.docs.push(newer);
+        m.store.derive();
         m.requery();
         let shown =
             |m: &Model| m.rows.iter().map(|&i| m.store.docs[i].id.clone()).collect::<Vec<_>>();
@@ -4804,6 +4807,7 @@ pub(crate) mod tests {
         let many: Vec<Doc> =
             (0..50).map(|i| doc(&format!("d{i}"), &format!("Doc {i}"), None, None)).collect();
         m.store = Store { docs: many, ..Store::default() };
+        m.store.derive();
         m.filter = Filter::ALL;
         m.query.clear();
         m.requery();

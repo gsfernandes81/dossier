@@ -276,7 +276,8 @@ mod tests {
     }
 
     fn report(load: &Load, docs: Vec<Doc>) -> Report {
-        let store = Store { docs, ..Store::default() };
+        let mut store = Store { docs, ..Store::default() };
+        store.derive();
         Report::new(
             "/tmp/journal".into(),
             load,
@@ -310,9 +311,8 @@ mod tests {
     /// It is then found without opening the document's Versions view.
     #[test]
     fn a_conflicting_latest_version_is_a_finding() {
-        let mut conflicting = doc("pp-phone");
-        conflicting.conflicting = true;
-        let r = report(&present(), vec![doc("pp-desk"), conflicting]);
+        let version = |id: &str| Doc { supersedes: Some("pp".into()), ..doc(id) };
+        let r = report(&present(), vec![doc("pp"), version("pp-desk"), version("pp-phone")]);
         assert!(!r.healthy());
         assert!(r.problems().contains("versions  1 conflicting latest"), "{}", r.problems());
     }

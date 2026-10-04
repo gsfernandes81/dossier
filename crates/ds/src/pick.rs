@@ -300,8 +300,8 @@ mod tests {
                 Choice::Renew(None),
                 renew("coc"),
                 renew("eng1"),
-                renew("testimonial"),
-                renew("passport-phone")
+                renew("passport-phone"),
+                renew("testimonial")
             ],
             "none first, and not the version it already replaces"
         );

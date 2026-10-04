@@ -40,9 +40,7 @@ type Row = (
 );
 
 /// The store the mockups are drawn from: marine certificates, motorcycle
-/// papers, identity documents — declared in the shelf order [`Store::build`]
-/// would put them in (that sort has its own test in `doc.rs`; these tests are
-/// about what the screen does with the list, not how it was ordered).
+/// papers, identity documents.
 fn sample_store() -> Store {
     let rows: &[Row] = &[
         (
@@ -97,7 +95,6 @@ fn sample_store() -> Store {
                     primary: true,
                 }]
             },
-            haystack: ds::search::fold(&format!("{name} {tag}")),
             ..Doc::default()
         })
         .collect();
@@ -116,11 +113,17 @@ fn sample_store() -> Store {
             parent: Some((*location).into()),
         });
     }
-    Store { docs, locations: ds::Tree::new(locations), ..Store::default() }
+    let mut store = Store { docs, locations: ds::Tree::new(locations), ..Store::default() };
+    store.derive();
+    store
 }
 
 fn model(cols: u16, rows: u16) -> Model {
-    Model::new(sample_store(), "2026-10-20".into(), "2027-01-18".into(), cols, rows)
+    model_of(sample_store(), cols, rows)
+}
+
+fn model_of(store: Store, cols: u16, rows: u16) -> Model {
+    Model::new(store, "2026-10-20".into(), "2027-01-18".into(), cols, rows)
 }
 
 /// Which cells of one screen row carry a modifier — the way to check that a
@@ -501,8 +504,15 @@ fn the_expiring_filter_is_visible_in_the_bar() {
 
 #[test]
 fn a_conflict_is_counted_in_the_header() {
-    let mut m = model(45, 28);
-    m.store.docs[0].conflicting = true;
+    let mut store = sample_store();
+    for id in ["pan-desk", "pan-phone"] {
+        let mut version = store.get("pan").unwrap().clone();
+        version.id = id.into();
+        version.supersedes = Some("pan".into());
+        store.docs.push(version);
+    }
+    store.derive();
+    let mut m = model_of(store, 45, 28);
     let lines = screen(&mut m, 45, 28);
     assert!(lines[0].contains("! 1 conflict"), "{:?}", lines[0]);
     assert!(lines[0].contains(" exp "), "the expiring count stays: {:?}", lines[0]);
@@ -510,17 +520,18 @@ fn a_conflict_is_counted_in_the_header() {
 
 #[test]
 fn the_versions_view_draws_two_lines_a_version() {
-    let mut m = model(47, 24);
-    let old = m.store.index_of("eng1").unwrap();
-    let mut new = m.store.docs[old].clone();
+    let mut store = sample_store();
+    let old = store.index_of("eng1").unwrap();
+    let mut new = store.docs[old].clone();
     new.id = "eng1-2".into();
     new.issue_date = Some("2026-09-01".into());
     new.expiry_date = Some("2028-09-01".into());
     new.supersedes = Some("eng1".into());
-    m.store.docs[old].superseded = true;
-    m.store.docs[old].issue_date = Some("2024-01-14".into());
-    m.store.docs[old].expiry_date = Some("2026-01-13".into());
-    m.store.docs.push(new);
+    store.docs[old].issue_date = Some("2024-01-14".into());
+    store.docs[old].expiry_date = Some("2026-01-13".into());
+    store.docs.push(new);
+    store.derive();
+    let mut m = model_of(store, 47, 24);
     m.views.push(ds::View::Versions { doc: "eng1-2".into() });
     let lines = screen(&mut m, 47, 24);
     let text = lines.join("\n");
@@ -558,24 +569,27 @@ fn the_renews_picker_has_three_heading_rows() {
 /// A model whose store holds two bundles; the dated one holds two documents,
 /// one of them an old version.
 fn with_bundles(cols: u16, rows: u16) -> Model {
-    let mut m = model(cols, rows);
+    let mut store = sample_store();
     let bundle = |id: &str, name: &str, date: Option<&str>| ds::Bundle {
         id: id.into(),
         name: name.into(),
         date: date.map(Into::into),
         ..ds::Bundle::default()
     };
-    m.store.bundles = vec![
+    store.bundles = vec![
         bundle("visa", "US visa application", Some("2027-03-27")),
         bundle("ideas", "Ideas", None),
     ];
+    let mut newer = store.get("eng1").unwrap().clone();
+    newer.id = "eng1-2".into();
+    newer.supersedes = Some("eng1".into());
+    store.docs.push(newer);
     for id in ["eng1", "dl"] {
-        let i = m.store.index_of(id).unwrap();
-        m.store.docs[i].bundles.push(ds::Membership { bundle: "visa".into(), file: None });
+        let i = store.index_of(id).unwrap();
+        store.docs[i].bundles.push(ds::Membership { bundle: "visa".into(), file: None });
     }
-    let eng1 = m.store.index_of("eng1").unwrap();
-    m.store.docs[eng1].superseded = true;
-    m
+    store.derive();
+    model_of(store, cols, rows)
 }
 
 #[test]
@@ -745,7 +759,8 @@ fn a_fresh_store_says_how_to_start_and_where() {
 fn wide_glyphs_do_not_break_the_columns() {
     let mut store = sample_store();
     store.docs[0].name = "護照護照護照護照護照護照護照護照護照護照護照護照".into();
-    let mut m = Model::new(store, "2026-10-20".into(), "2027-01-18".into(), 45, 28);
+    store.derive();
+    let mut m = model_of(store, 45, 28);
     let lines = screen(&mut m, 45, 28);
     let row = &lines[1];
     assert!(row.contains('…'), "the name was cut: {:?}", row);
@@ -762,7 +777,8 @@ fn a_long_note_hangs_under_its_column() {
     let mut store = sample_store();
     store.docs[0].notes =
         "Revalidation booked at MMD, slot 14 Oct. Bring originals and two photographs.".into();
-    let mut m = Model::new(store, "2026-10-20".into(), "2027-01-18".into(), 45, 28);
+    store.derive();
+    let mut m = model_of(store, 45, 28);
     update(&mut m, Msg::Enter);
     let lines = screen(&mut m, 45, 28);
 

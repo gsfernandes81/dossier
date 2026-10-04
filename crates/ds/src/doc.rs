@@ -31,7 +31,7 @@
 //!   has an expiry date and is neither superseded by a newer document nor
 //!   explicitly ignored. Being superseded is a *collection-level* fact — some
 //!   other document's `supersedes` points here — so it can only be computed with
-//!   the whole store in hand, which is why [`Store::build`] does it once.
+//!   the whole store in hand, which is why [`Store::derive`] does it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -437,13 +437,7 @@ impl Store {
     /// fixable, and `ds status` exists to surface exactly that.
     #[must_use]
     pub fn build(fold: &Fold) -> Self {
-        // Superseded-ness is a fact about the collection, not the document:
-        // it is true when some *other* document's `supersedes` points here. One
-        // pass to collect it, so the per-document check is a set lookup.
-        let superseded: BTreeSet<String> =
-            fold.kind("doc").filter_map(|(_, entity)| string(entity, "supersedes")).collect();
-
-        let mut bundles: Vec<Bundle> = fold
+        let bundles = fold
             .kind("bundle")
             .map(|(id, entity)| Bundle {
                 id: id.to_string(),
@@ -452,64 +446,68 @@ impl Store {
                 notes: string(entity, "notes").unwrap_or_default(),
             })
             .collect();
-        let bundle_names: BTreeMap<&str, &str> =
-            bundles.iter().map(|bundle| (bundle.id.as_str(), bundle.name.as_str())).collect();
-
-        let mut docs: Vec<Doc> = fold
+        let docs = fold
             .kind("doc")
-            .map(|(id, entity)| {
-                let name = string(entity, "name").unwrap_or_default();
-                let notes = string(entity, "notes").unwrap_or_default();
-                let tags = strings(entity, "tags");
-                let bundles = memberships(entity);
-                let haystack = crate::search::fold(
-                    &[name.as_str(), notes.as_str()]
-                        .into_iter()
-                        .chain(tags.iter().map(String::as_str))
-                        .chain(
-                            bundles
-                                .iter()
-                                .filter_map(|entry| bundle_names.get(entry.bundle.as_str()))
-                                .copied(),
-                        )
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                );
-                Doc {
-                    id: id.to_string(),
-                    name,
-                    tags,
-                    bundles,
-                    issue_date: string(entity, "issue_date"),
-                    expiry_date: string(entity, "expiry_date"),
-                    ignore_expiry: flag(entity, "ignore_expiry"),
-                    supersedes: string(entity, "supersedes"),
-                    location: string(entity, "location"),
-                    files: files(entity),
-                    notes,
-                    superseded: superseded.contains(id),
-                    conflicting: false,
-                    haystack,
-                }
+            .map(|(id, entity)| Doc {
+                id: id.to_string(),
+                name: string(entity, "name").unwrap_or_default(),
+                tags: strings(entity, "tags"),
+                bundles: memberships(entity),
+                issue_date: string(entity, "issue_date"),
+                expiry_date: string(entity, "expiry_date"),
+                ignore_expiry: flag(entity, "ignore_expiry"),
+                supersedes: string(entity, "supersedes"),
+                location: string(entity, "location"),
+                files: files(entity),
+                notes: string(entity, "notes").unwrap_or_default(),
+                ..Doc::default()
             })
             .collect();
-
-        mark_conflicts(&mut docs);
-
         let locations = Tree::new(fold.kind("location").map(|(id, entity)| Location {
             id: id.to_string(),
             name: string(entity, "name").unwrap_or_else(|| id.to_string()),
             parent: string(entity, "parent"),
         }));
+        let mut store = Self { docs, locations, bundles };
+        store.derive();
+        store
+    }
 
-        let shelf: BTreeMap<&str, usize> =
+    /// Recomputes `haystack`, `superseded` and `conflicting`, then sorts docs
+    /// and bundles into list order.
+    pub fn derive(&mut self) {
+        let superseded: BTreeSet<String> =
+            self.docs.iter().filter_map(|doc| doc.supersedes.clone()).collect();
+        let bundle_names: BTreeMap<&str, &str> =
+            self.bundles.iter().map(|bundle| (bundle.id.as_str(), bundle.name.as_str())).collect();
+        for doc in &mut self.docs {
+            doc.haystack = crate::search::fold(
+                &[doc.name.as_str(), doc.notes.as_str()]
+                    .into_iter()
+                    .chain(doc.tags.iter().map(String::as_str))
+                    .chain(
+                        doc.bundles
+                            .iter()
+                            .filter_map(|entry| bundle_names.get(entry.bundle.as_str()))
+                            .copied(),
+                    )
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+            doc.superseded = superseded.contains(&doc.id);
+            doc.conflicting = false;
+        }
+        mark_conflicts(&mut self.docs);
+
+        let locations = &self.locations;
+        let ranks: BTreeMap<&str, usize> =
             locations.shelf().into_iter().enumerate().map(|(rank, id)| (id, rank)).collect();
         let rank = |doc: &Doc| match locations.hard_copy(doc.location.as_deref()) {
-            HardCopy::At(id) => shelf.get(id).copied().unwrap_or(usize::MAX),
+            HardCopy::At(id) => ranks.get(id).copied().unwrap_or(usize::MAX),
             HardCopy::Unfiled | HardCopy::DigitalOnly => usize::MAX,
         };
-        docs.sort_by_cached_key(|doc| (rank(doc), doc.name.to_lowercase(), doc.id.clone()));
-        bundles.sort_by_cached_key(|bundle| {
+        self.docs.sort_by_cached_key(|doc| (rank(doc), doc.name.to_lowercase(), doc.id.clone()));
+        self.bundles.sort_by_cached_key(|bundle| {
             (
                 bundle.date.is_none(),
                 std::cmp::Reverse(bundle.date.clone()),
@@ -517,8 +515,6 @@ impl Store {
                 bundle.id.clone(),
             )
         });
-
-        Self { docs, locations, bundles }
     }
 
     /// How many latest versions conflict with another.
