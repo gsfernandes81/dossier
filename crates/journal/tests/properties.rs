@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Property tests for the fold invariants (REWRITE.md §3.3, §10).
+//! Property tests for the fold invariants.
 //!
 //! The golden vectors pin behaviours someone thought of. These state the claims
 //! that must hold for *every* op stream — which is the only honest way to say
@@ -22,7 +22,7 @@
 //!
 //! One precondition runs through all of them: **`(ts, w)` is unique**. That is
 //! not an assumption about luck, it is the hybrid logical clock's guarantee (a
-//! writer never repeats a `ts`, §3.2) enforced by the single-writer lock. Where
+//! writer never repeats a `ts`) enforced by the single-writer lock. Where
 //! it is violated the fold stops being a function of the op *set* — so the
 //! generator below enforces it, and `FoldStats::duplicate_keys` is how a real
 //! store notices the guarantee was broken.
@@ -129,9 +129,6 @@ proptest! {
     fn any_permutation_folds_the_same(specs in stream(), rotation in 0usize..60) {
         let forward = lines(&specs);
         let mut rotated = forward.clone();
-        // rust: the length has to be read before `rotate_left` takes the
-        // mutable borrow — the borrow checker will not let one call both read
-        // and mutate the same value.
         let len = rotated.len();
         if len > 0 {
             rotated.rotate_left(rotation % len);

@@ -8,10 +8,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# The format is JSONL and the contract (REWRITE.md §3) is shared with a Python
-# implementation, so the serializer is not an implementation detail — it is half
-# the interoperability story. serde_json's default map is a BTreeMap, which
-# gives the sorted-key canonical output §10's golden vectors compare on.
+# The format is JSONL shared with a Python implementation, so the serializer is
+# half the interoperability story. serde_json's default map is a BTreeMap, which
+# gives the sorted-key canonical output the golden vectors compare on.
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Typed errors at the library boundary: a caller has to be able to tell "this
@@ -26,7 +25,6 @@ thiserror = { workspace = true }
 # Syncthing folder (the standing rule: tests never touch real data).
 tempfile = "3"
 
-# REWRITE.md §10 names property tests for the fold invariants. They are the only
-# way to state "fold(A ∪ B) ≡ fold(B ∪ A)" as a claim about *all* op streams
+# Property tests for the fold invariants are the only way to state "fold(A ∪ B) ≡ fold(B ∪ A)" as a claim about *all* op streams
 # rather than about the three the author thought of.
 proptest = "1"

@@ -13,29 +13,25 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The frozen filename grammar (REWRITE.md §3.1).
+//! The frozen filename grammar.
 //!
 //! Discovery is a directory glob — there is no registry — so *what counts as a
 //! journal file* is load-bearing safety, not cosmetics. Fold the wrong file and
 //! the store gains ops that were deliberately set aside; fold a Syncthing
 //! conflict copy and the "conflicts are structurally impossible" guarantee dies
-//! quietly.
-//!
-//! Deliberately hand-written rather than a regex: the grammar is six characters
-//! wide, it is checked once per file at startup, and a regex crate would be a
-//! dependency carried for one line (REWRITE.md §4.3 asks for a justification
-//! per dependency — this one could not have written it).
+//! quietly. Hand-written rather than a regex: the grammar is six characters
+//! wide and not worth a dependency.
 
 /// Extension every journal file ends with.
 pub const EXTENSION: &str = ".jsonl";
 
 /// The glob that must be in `.stignore` on **both devices before any journal
-/// exists in the synced tree** (REWRITE.md §3.1, §6 R7 pre-step).
+/// exists in the synced tree**.
 ///
 /// Compaction writes `<writer>.jsonl.tmp-<pid>` next to the file it is
-/// rewriting, in the *synced* directory, because an atomic rename has to be
-/// same-filesystem (the v2 EXDEV lesson). Without this ignore, Syncthing would
-/// happily replicate half-written temp files to the other device.
+/// rewriting, in the *synced* directory, because a cross-device rename fails
+/// with `EXDEV`. Without this ignore, Syncthing would replicate half-written
+/// temp files to the other device.
 pub const COMPACTION_TEMP_GLOB: &str = "*.jsonl.tmp-*";
 
 /// Whether `name` is a Syncthing conflict copy.
@@ -46,11 +42,9 @@ pub fn is_sync_conflict(name: &str) -> bool {
 
 /// Returns the writer id of a journal file this build may fold, or `None`.
 ///
-/// Grammar: `^[a-z0-9][a-z0-9-]*\.jsonl$` — lowercase, digits and hyphens, with
-/// no dots before the extension. Every exclusion the contract lists follows
-/// from that (a `.sync-conflict-…` copy and a `…jsonl.tmp-1234` temp both carry
-/// extra dots), but the conflict case is checked explicitly anyway: it is the
-/// one whose silent inclusion would be a correctness bug rather than noise.
+/// Grammar: `^[a-z0-9][a-z0-9-]*\.jsonl$`. Conflict copies and compaction
+/// temps already fail it on their extra dots; the conflict case is checked
+/// explicitly anyway, because folding one would be a correctness bug.
 #[must_use]
 pub fn writer_of(name: &str) -> Option<&str> {
     if is_sync_conflict(name) {

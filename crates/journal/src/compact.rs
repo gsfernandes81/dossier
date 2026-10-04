@@ -19,7 +19,7 @@
 //! fifteen edits to one document's name leave fourteen ops that no fold will
 //! ever consult again. Compaction rewrites a writer's file as the minimal set
 //! that reproduces its contribution — and **only its own file**, which is why it
-//! needs no coordination with the other device at all (§3.3).
+//! needs no coordination with the other device at all.
 //!
 //! # What is kept, and why each rule exists
 //!
@@ -28,7 +28,7 @@
 //! | every `create` and `delete` | tombstones are retained forever, or a late `set` from a device that missed the delete would resurrect the document |
 //! | the newest `set`/`unset` per `(ent, id, field)` | it is the only one that can still win a last-writer-wins comparison |
 //! | the newest `state`/`reading`/`proposal` per `(ent, id)` | same, per key |
-//! | **everything newer than 30 days** | the journal *is* the undo history, with a durable 30-day horizon (§3.3) |
+//! | **everything newer than 30 days** | the journal *is* the undo history, with a durable 30-day horizon |
 //! | every line this build did not understand | opaque and malformed lines are preserved verbatim — compaction must never be the thing that discards them |
 //!
 //! # The two rules that are easy to get wrong
@@ -40,7 +40,7 @@
 //!
 //! **Ops older than their entity's newest tombstone are dropped.** They can
 //! never apply again: a tombstone hides everything older, and a later `create`
-//! starts from empty fields (§3.3). Keeping them would only make the file
+//! starts from empty fields. Keeping them would only make the file
 //! bigger.
 //!
 //! Everything here is a **pure function** of the lines and the clock —
@@ -54,7 +54,7 @@ use crate::op::{Line, OpKind};
 
 /// How long every op is retained regardless of whether the fold still needs it.
 ///
-/// This is the undo horizon (§3.3): undo is "append the inverse op", and the
+/// This is the undo horizon: undo is "append the inverse op", and the
 /// previous value has to still be readable for that to work. 30 days of edits
 /// costs a few hundred kilobytes.
 pub const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
@@ -66,7 +66,7 @@ pub const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// of the file is dead makes that transfer worth it.
 ///
 /// Expressed as a divisor rather than a `0.25` so the whole crate stays free of
-/// floating point — the same reason the op format bans floats (§3.2): integer
+/// floating point — the same reason the op format bans floats: integer
 /// comparisons are exact and mean the same thing in both implementations.
 pub const LIVE_RATIO_TRIGGER: usize = 4;
 
@@ -95,7 +95,7 @@ impl Plan {
         self.keep.len() * 100 / self.total
     }
 
-    /// Whether this file is worth rewriting (§3.3's trigger).
+    /// Whether this file is worth rewriting.
     #[must_use]
     pub fn worth_doing(&self) -> bool {
         self.total > 0 && self.keep.len() * LIVE_RATIO_TRIGGER < self.total
@@ -197,9 +197,6 @@ mod tests {
     const OLD: i64 = NOW - RETENTION_MS - 1_000_000;
 
     fn line(ts: i64, kind: &str, id: &str, field: Option<&str>, val: Option<&str>) -> Line {
-        // rust: `write!` into a `String` needs `fmt::Write` in scope, and appends
-        // without the extra allocation `push_str(&format!(…))` makes. Writing to
-        // a `String` cannot fail, hence the `expect`.
         use std::fmt::Write as _;
         let mut json =
             format!(r#"{{"v":1,"ts":{ts},"w":"desk-core","op":"{kind}","ent":"doc","id":"{id}""#);
@@ -309,7 +306,7 @@ mod tests {
     }
 
     /// Compaction can never lower a file's highest timestamp — which is exactly
-    /// what makes a `max_ts` regression a trustworthy damage signal (§3.3).
+    /// what makes a `max_ts` regression a trustworthy damage signal.
     #[test]
     fn the_highest_timestamp_always_survives() {
         let lines = vec![

@@ -15,7 +15,7 @@
 
 //! The fold: ops in, current state out.
 //!
-//! This is the heart of the store (REWRITE.md §3.3). Everything else — files,
+//! This is the heart of the store. Everything else — files,
 //! writers, Syncthing — exists to deliver ops here. The fold is a **pure
 //! function of the set of ops**, which is what makes conflicts structurally
 //! impossible: two devices that have seen the same ops in any order compute the
@@ -30,8 +30,8 @@
 //!    ignored *unless a `create` newer than the tombstone precedes them*. A
 //!    stray `set` can never resurrect half a document.
 //! 3. **`state` entries are per-key LWW**, independent of create/delete,
-//!    because v2 ships restore verbs (`h` un-dismisses an orphan) that a
-//!    monotone union could not express.
+//!    because a restore verb (`h` un-dismisses an orphan) takes a dismissal
+//!    back, which a monotone union could not express.
 //!
 //! The commutativity claim — `fold(A ∪ B) ≡ fold(B ∪ A)` — is property-tested
 //! in `tests/properties.rs`, and the exact behaviours above are pinned by the
@@ -48,9 +48,8 @@ pub type EntityKey = (String, String);
 
 /// One entity's current fields.
 ///
-/// rust: a `BTreeMap`, not a `HashMap`. Sorted iteration is not a nicety here —
-/// it *is* the canonical serialization (§10), and a `HashMap` would make the
-/// golden vectors non-deterministic between runs.
+/// A `BTreeMap` because sorted iteration *is* the canonical serialization; a
+/// `HashMap` would make the golden vectors non-deterministic between runs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Entity {
     /// Field name → value, last writer wins per field.
@@ -78,7 +77,7 @@ pub struct FoldStats {
     ///
     /// Two jobs: it seeds the hybrid logical clock on startup, and its
     /// **regression** between runs is the signal that a journal was reverted
-    /// behind Syncthing's back (§3.3, the Proton-revert defense).
+    /// behind Syncthing's back.
     pub max_ts_by_writer: BTreeMap<String, i64>,
 }
 
@@ -140,7 +139,7 @@ impl Fold {
     }
 
     /// The canonical JSON of this state — the byte string the Rust and Python
-    /// folds must agree on (REWRITE.md §10).
+    /// folds must agree on.
     ///
     /// Canonical means: keys sorted at every level, no insignificant
     /// whitespace, UTF-8 with no ASCII escaping, integers only. In Python the
@@ -208,13 +207,8 @@ impl Fold {
 /// This runs on every launch, so it works in **borrowed keys** and materializes
 /// owned `String`s only for the entities that survive. The obvious version —
 /// `(op.ent.clone(), op.id.clone())` per op — allocates three strings for every
-/// op in the store (150,000 of them at the §9 stress size) to build map keys
+/// op in the store (150,000 of them at the stress-test size) to build map keys
 /// that are almost always already present. Same output, a fraction of the work.
-///
-/// rust: the `'a` lifetime says the borrowed keys live as long as the input
-/// lines, which is what lets the working maps hold `&str` into the ops. This is
-/// the one place in the crate where a lifetime earns its keep; the public types
-/// stay owned.
 pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
     let mut result = Fold::default();
     let mut ops: Vec<&'a Op> = Vec::new();

@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! End-to-end truncation detection, on a real directory (REWRITE.md §3.3).
+//! End-to-end truncation detection, on a real directory.
 //!
 //! The unit tests check the rules in isolation. This one plays out the actual
 //! scenario the defense exists for: a store loads normally, something outside

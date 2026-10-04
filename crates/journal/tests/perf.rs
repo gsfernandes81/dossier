@@ -13,26 +13,18 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The synthetic perf gate: **fold 50k ops / 1k docs in under 20 ms**
-//! (REWRITE.md §9, generous margin in CI).
+//! The synthetic perf gate: **fold 50k ops / 1k docs in under 20 ms**, the
+//! fold's share of the phone's "< 100 ms to usable" startup budget.
 //!
-//! This number is load-bearing for the phone budget. Startup is
-//! `read → parse → fold → paint`, the R0.2 spike measured paint at ~0.1 ms, and
-//! §3.3's sizing note claims serde_json folds a store this size in single-digit
-//! milliseconds. If that claim is wrong, the whole "< 100 ms to usable" budget
-//! is wrong, and it is better to find out in R1 than in R3.
-//!
-//! The gate asserts only in **release** builds. A debug build is an order of
-//! magnitude slower for reasons that have nothing to do with the design, and a
-//! test that fails on `cargo test` but passes on `cargo test --release` teaches
-//! people to ignore it. Debug runs still print, so the number is never hidden.
+//! It asserts only in **release** builds: a debug build is an order of
+//! magnitude slower for reasons unrelated to the design. Debug runs still print.
 
 use std::time::Instant;
 
 use journal::{fold, parse_line, Line};
 
 /// Ops per document, roughly what a real record accumulates: a create plus
-/// ~15 fields (REWRITE.md §3.3) and a few later edits.
+/// ~15 fields and a few later edits.
 const OPS_PER_DOC: usize = 50;
 const DOCS: usize = 1_000;
 
@@ -113,7 +105,7 @@ fn folding_50k_ops_stays_within_the_budget() {
     // by the printed number.
     assert!(
         ms(fold_time) < 50.0,
-        "fold took {:.1}ms for {} ops — target is 20ms (REWRITE.md §9)",
+        "fold took {:.1}ms for {} ops — target is 20ms",
         ms(fold_time),
         raw.len()
     );

@@ -15,8 +15,6 @@
 
 //! The op — one line of a journal file, and the unit the whole store is built from.
 //!
-//! REWRITE.md §3.2 is the contract this module implements:
-//!
 //! ```json
 //! {"v":1,"ts":1755300000123,"w":"desk-core","op":"set","ent":"doc","id":"coc-card-2025","f":"expiry_date","val":"2026-09-28"}
 //! ```
@@ -42,12 +40,10 @@ use serde_json::Value;
 /// lines instead of corrupting them.
 pub const FORMAT_VERSION: u32 = 1;
 
-/// What an op does. Frozen list (REWRITE.md §3.2).
+/// What an op does. Frozen list.
 ///
-/// rust: a fieldless enum with serde's `rename_all`, so the wire format is the
-/// lowercase word and the compiler still forces every `match` to be exhaustive.
-/// Adding a variant here is a format change and breaks the build everywhere it
-/// must be considered — which is the point.
+/// Adding a variant is a format change, and the exhaustive matches make the
+/// build break everywhere it must be considered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OpKind {
@@ -61,8 +57,8 @@ pub enum OpKind {
     /// Remove one field.
     Unset,
     /// A review/suggestion entry's state — per-key LWW, independent of
-    /// create/delete, because v2 ships restore verbs that a monotone union
-    /// could never express (REWRITE.md §3.2).
+    /// create/delete, because a restore verb takes a dismissal back, which a
+    /// monotone union could never express.
     State,
     /// A scan reading (the `enrich` namespace).
     Reading,
@@ -71,10 +67,8 @@ pub enum OpKind {
 }
 
 impl OpKind {
-    /// Whether this op belongs to the lazily-loaded `enrich` namespace.
-    ///
-    /// The split exists so the hot startup fold never parses transcripts
-    /// (REWRITE.md §3.1); this is the predicate that keeps the two honest.
+    /// Whether this op belongs to the lazily-loaded `enrich` namespace, which
+    /// keeps transcripts out of the startup fold.
     #[must_use]
     pub fn is_enrich(self) -> bool {
         matches!(self, OpKind::Reading | OpKind::Proposal)
@@ -83,22 +77,14 @@ impl OpKind {
 
 /// One parsed op.
 ///
-/// rust: `#[serde(flatten)] extra` collects any field this build does not know
-/// about and re-emits it on serialize. Without it, compaction — which rewrites
-/// a writer's own file — would quietly delete tomorrow's fields out of today's
-/// lines. It is three words of annotation standing in for a whole class of data
-/// loss.
-///
-/// It is not free: `flatten` makes serde buffer each line's fields instead of
-/// deserializing them in place, measured at **18% of parse time** (40.0 ms vs
-/// 32.7 ms for 50,000 ops). Kept anyway — that is 7 ms against silently
-/// dropping data a future version wrote, at a store size three times the real
-/// one. Revisit only if the phone measurement says parse is the bottleneck.
+/// `#[serde(flatten)] extra` collects any field this build does not know and
+/// re-emits it on serialize; without it, compaction would delete a newer
+/// version's fields from this writer's lines. It costs about 18% of parse time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Op {
     /// Format version (always [`FORMAT_VERSION`] for a folded op).
     pub v: u32,
-    /// Hybrid logical clock timestamp in milliseconds (REWRITE.md §3.2).
+    /// Hybrid logical clock timestamp in milliseconds.
     ///
     /// Not raw wall time: strictly monotonic *per writer*, so a backwards clock
     /// jump can never reorder a writer against itself.
@@ -125,8 +111,8 @@ pub struct Op {
 impl Op {
     /// The total order for last-writer-wins: `(ts, w)`.
     ///
-    /// Unique across the whole store because a writer never repeats a `ts`
-    /// (§3.2), which is what makes the fold a *function* rather than a race.
+    /// Unique across the whole store because a writer never repeats a `ts`,
+    /// which is what makes the fold a *function* rather than a race.
     #[must_use]
     pub fn order_key(&self) -> (i64, &str) {
         (self.ts, self.w.as_str())
@@ -176,7 +162,7 @@ pub enum Line {
     /// Broken bytes: not JSON, not an object, or missing required fields.
     ///
     /// Counted and surfaced as a `ds status` anomaly, preserved through
-    /// compaction, **never silently discarded** (REWRITE.md §3.3).
+    /// compaction, **never silently discarded**.
     Malformed {
         /// The original bytes.
         raw: String,
@@ -204,14 +190,9 @@ impl Line {
 ///
 /// # Performance
 ///
-/// Journal parsing is on the phone's startup path — ~15,000 ops for the real
-/// store, and `tests/perf.rs` stresses 50,000 — so this function has a **fast
-/// path and a slow path**. The fast path deserializes straight into [`Op`].
-/// The slow path re-reads the line as a generic `Value` only to explain *why*
-/// it did not fit, which is rare by construction: a healthy journal never takes
-/// it. Parsing into `Value` first and then into `Op` (the obvious version)
-/// walks the line twice and allocates a whole `Map` per op — measured at 3× the
-/// cost of the fold itself, for lines that are almost always fine.
+/// The fast path deserializes straight into [`Op`]; only a line that does not
+/// fit is re-read as a generic `Value` to explain why. Parsing every line into
+/// `Value` first measured at 3× the cost of the fold itself.
 pub fn parse_line(raw: &str) -> Line {
     match serde_json::from_str::<Op>(raw) {
         Ok(op) if op.v != FORMAT_VERSION => {
@@ -269,7 +250,7 @@ fn classify_failure(raw: &str) -> Line {
         Some(_) => return malformed("`op` is not a string"),
     }
 
-    // The format is integers-only by construction (§3.2) — a float would make
+    // The format is integers-only by construction — a float would make
     // the canonical JSON comparison against the Python fold unimplementable, so
     // it is malformed data, not a value to round-trip.
     if contains_float(&value) {
@@ -297,14 +278,9 @@ fn contains_float(value: &Value) -> bool {
 
 /// Parse a whole file body into lines, dropping a torn final line.
 ///
-/// A journal's last line can be torn — the process died mid-`write` — and
-/// REWRITE.md §3.3 says such a line was never durable, so it is dropped with a
-/// warning rather than reported as corruption. The signal is the **absence of a
-/// trailing newline**: every durable append ends in one.
-///
-/// Returns the classified lines and the torn tail, if there was one. (A writer
-/// opening its own file for append must truncate that tail *before* appending —
-/// otherwise the next op is glued onto it and the new op is the one destroyed.)
+/// A final line with no trailing newline was torn by a process dying
+/// mid-`write`; it was never durable, so it is returned separately rather than
+/// reported as corruption.
 pub fn parse_body(body: &str) -> (Vec<Line>, Option<String>) {
     if body.is_empty() {
         return (Vec::new(), None);

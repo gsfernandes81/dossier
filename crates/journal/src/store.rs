@@ -21,7 +21,7 @@
 //! └─ enrich/  desk-lab.jsonl                       ← loaded lazily
 //! ```
 //!
-//! Two decisions shape this module (REWRITE.md §3.1):
+//! Two decisions shape this module:
 //!
 //! 1. **The namespace split is enforced by the loader, not by convention.**
 //!    `meta` is read on every launch; `enrich` — scan transcripts, intake
@@ -134,7 +134,7 @@ pub struct FileReport {
     /// Writer id (the file stem).
     pub writer: String,
     /// Size on disk, in bytes — the secondary corroborator for truncation
-    /// detection (§3.3); on its own a shrink is just compaction.
+    /// detection; on its own a shrink is just compaction.
     pub bytes: u64,
     /// Highest `ts` in the file. **This** is the truncation signal: compaction
     /// can never lower it, a revert always does.
@@ -148,7 +148,7 @@ pub struct FileReport {
 /// The result of loading one namespace.
 #[derive(Debug, Default)]
 pub struct Load {
-    /// Every parsed line, ready for [`crate::fold`].
+    /// Every parsed line, ready for [`crate::fold()`].
     pub lines: Vec<Line>,
     /// Per-file accounting, for high-water marks and `ds status`.
     pub files: Vec<FileReport>,

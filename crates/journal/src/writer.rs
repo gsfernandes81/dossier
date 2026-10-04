@@ -16,8 +16,8 @@
 //! Appending to a journal: the clock, the lock, and the torn tail.
 //!
 //! A writer appends to **its own file and no other** — that single rule is what
-//! makes Syncthing conflicts structurally impossible (REWRITE.md §3.1). This
-//! module enforces it and the three things that have to be true around it:
+//! makes Syncthing conflicts structurally impossible. This module enforces it
+//! and the three things that have to be true around it:
 //!
 //! 1. **The timestamp is a hybrid logical clock, not the wall clock.**
 //!    `ts = max(now_ms, own_last_ts + 1)`, seeded from the highest `ts` seen
@@ -34,10 +34,6 @@
 //!    trailing newline was never durable, and appending after it would glue two
 //!    ops into one unparseable line — destroying the *new* op, which is the
 //!    worse outcome. So the writer truncates it first, every time.
-//!
-//! Callers never construct an [`Op`] directly; they describe one with a
-//! [`Draft`] and the writer stamps `v`, `ts` and `w`. Forging a timestamp or
-//! writing under another writer's id is not a mistake this API can make.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -50,10 +46,8 @@ use crate::names;
 use crate::op::{Op, OpKind, FORMAT_VERSION};
 use crate::store::{Journal, Namespace};
 
-/// The hybrid logical clock (REWRITE.md §3.2).
-///
-/// Human-meaningful (it is milliseconds since the epoch, and stays that way
-/// unless the clock misbehaves) but strictly monotonic per writer.
+/// The hybrid logical clock: milliseconds since the epoch, strictly monotonic
+/// per writer.
 #[derive(Debug, Clone, Copy)]
 pub struct Hlc {
     last: i64,
@@ -110,10 +104,8 @@ fn now_ms() -> i64 {
 
 /// An op as a caller describes it — everything except the bookkeeping.
 ///
-/// rust: a separate type from [`Op`] rather than an `Op` with optional fields.
-/// The writer owns `v`, `ts` and `w`, so they are simply absent here; a caller
-/// *cannot* stamp the wrong writer id or invent a timestamp, because there is
-/// nowhere to put one.
+/// The writer owns `v`, `ts` and `w`, so they are absent here: a caller cannot
+/// stamp the wrong writer id or invent a timestamp.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Draft {
     /// What the op does.
@@ -183,7 +175,7 @@ impl Draft {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Another process holds this writer id. **Not fatal** — the caller should
-    /// continue read-only with a visible notice (§3.1), because browsing,
+    /// continue read-only with a visible notice, because browsing,
     /// opening and `ds status` all still work.
     #[error("another process is already writing as `{writer}` (lock: {lock})")]
     Locked {
@@ -338,11 +330,10 @@ impl Writer {
 
     /// Append several ops as one consecutive run.
     ///
-    /// The contract needs this for edits that are only correct together — an id
-    /// rename is create-new + copy fields + reference fixups + delete-old, and
-    /// a bundle rename rewrites every member (§3.2, §4.1). Emitting them
-    /// through one call keeps them adjacent in one writer's file, which is as
-    /// close to atomic as an append-only log gets.
+    /// For edits that are only correct together — an id rename is create-new +
+    /// copy fields + reference fixups + delete-old. One call keeps them
+    /// adjacent in one writer's file, as close to atomic as an append-only log
+    /// gets.
     ///
     /// # Errors
     /// [`Error::Io`] or [`Error::Serialize`]. On an I/O failure part-way, the
@@ -381,7 +372,7 @@ impl Writer {
 
     /// Flush to disk.
     ///
-    /// Call after a user-initiated save (§3.3). Edits are rare and an fsync
+    /// Call after a user-initiated save. Edits are rare and an fsync
     /// costs nothing at this rate; the alternative is telling someone their
     /// document is saved when a power cut would disagree.
     ///
@@ -411,10 +402,8 @@ impl Writer {
     ///
     /// Returns `None` when nothing was done. The rewrite is a same-directory
     /// temp plus a rename — atomic, and same-directory because a cross-device
-    /// rename fails with `EXDEV` (the lesson v2 learned the hard way). The temp
-    /// name deliberately does not match the journal grammar, so a compaction
-    /// that dies half-way leaves a file the next fold ignores rather than a
-    /// truncated history it believes.
+    /// rename fails with `EXDEV`. A compaction that dies half-way leaves a temp
+    /// the next fold ignores.
     ///
     /// # Errors
     /// [`Error::Io`] or [`Error::Serialize`]. On failure the original file is
@@ -431,9 +420,8 @@ impl Writer {
         let directory = self.path.parent().unwrap_or_else(|| Path::new("."));
         let temp = directory.join(names::compaction_temp_file(&self.writer_id, std::process::id()));
 
-        // Build the whole new body in memory first. A writer's file is a few
-        // megabytes at the store's real scale (§3.3), and holding it means the
-        // window where the temp exists is as short as possible.
+        // Built in memory first (a writer's file is a few megabytes), so the
+        // temp exists for as short a window as possible.
         let mut rewritten = String::with_capacity(body.len());
         for &index in &plan.keep {
             match &lines[index] {
@@ -465,7 +453,7 @@ impl Writer {
 /// Whether [`Writer::compact`] should respect the trigger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum When {
-    /// Only if the file is mostly dead ops (the §3.3 trigger). What a clean
+    /// Only if the file is mostly dead ops. What a clean
     /// exit uses.
     IfWorthwhile,
     /// Regardless — for a maintenance verb the user asked for.

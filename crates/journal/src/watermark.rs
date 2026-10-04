@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Truncation detection — the Proton-revert defense (REWRITE.md §3.3).
+//! Truncation detection — the Proton-revert defense.
 //!
 //! Single-writer-per-file makes Syncthing *conflicts* structurally impossible.
 //! It does not make **damage** impossible, and the difference matters: a cloud
@@ -24,7 +24,7 @@
 //!
 //! **The signal is a `max_ts` regression, not a size change.** Compaction
 //! legitimately shrinks a file, sometimes drastically, but it can never lower
-//! the highest timestamp in it (it always keeps the newest ops, §3.3). A revert
+//! the highest timestamp in it (it always keeps the newest ops). A revert
 //! by definition deletes them. So:
 //!
 //! | observation | verdict |

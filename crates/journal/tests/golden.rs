@@ -15,8 +15,8 @@
 
 //! Golden vectors — the fixtures both implementations must satisfy.
 //!
-//! REWRITE.md §10 requires shared test vectors so the Rust core and the Python
-//! satellite cannot drift: each fixture is raw journal file bodies plus the
+//! Shared test vectors keep the Rust core and the Python satellite from
+//! drifting: each fixture is raw journal file bodies plus the
 //! **canonical JSON** the fold must produce, and both languages compare that
 //! string byte-for-byte. The fixtures are plain JSON in `tests/golden/` with a
 //! schema documented in `tests/golden/README.md`, precisely so the Python side
@@ -156,8 +156,7 @@ fn compaction_preserves_the_fold() {
 /// Every fixture folds to exactly its recorded canonical JSON.
 ///
 /// This is the contract with the Python satellite: same bytes in, same bytes
-/// out. A diff here is either a real behaviour change (update the vector *and*
-/// REWRITE.md §3 in the same slice) or a bug.
+/// out. A diff here is either a bug or a format change.
 #[test]
 fn every_vector_folds_to_its_canonical_json() {
     for vector in load_vectors() {
@@ -220,7 +219,7 @@ fn health_counters_match_the_vectors() {
     }
 }
 
-/// Every vector §10 names has a fixture. Without this, a vector could be
+/// Every required vector has a fixture. Without this, a vector could be
 /// quietly deleted and the suite would still pass.
 #[test]
 fn the_required_vectors_are_all_present() {
