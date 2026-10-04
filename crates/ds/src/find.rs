@@ -505,10 +505,8 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
                 (lead, entry.label.clone(), "")
             })
             .collect();
-        let typed =
-            if check.filter.is_empty() { String::new() } else { format!("  {}█", check.filter) };
         let panel = Panel {
-            crumb: format!("{}{typed}", check.crumb()),
+            crumb: format!("{}{}", check.crumb(), typed(&check.filter)),
             filter: Some(&check.filter),
             cursor: Some(check.cursor),
             subject: None,
@@ -617,8 +615,8 @@ fn draw_locpick(
     }
 }
 
-/// The location picker's three heading rows between rules, and the location
-/// the subject is in now.
+/// The location picker's heading, closed by a rule, and the location the
+/// subject is in now.
 fn locpick_heading(
     store: &crate::Store,
     picker: &crate::locpick::LocationPicker,
@@ -628,13 +626,6 @@ fn locpick_heading(
 ) -> (Vec<Line<'static>>, Option<String>) {
     use crate::locpick::Mode;
     use crate::place::HardCopy;
-    let gutter = crate::layout::GUTTER as usize;
-    let rule = || {
-        Line::styled(
-            format!(" {}", "─".repeat(cols.saturating_sub(gutter * 2))),
-            theme.style(Tone::Muted),
-        )
-    };
     let current = match &picker.mode {
         Mode::File(doc) => store.filed_at(doc).map(str::to_string),
         Mode::Move(moving) => store.locations.parent(moving).map(str::to_string),
@@ -663,53 +654,75 @@ fn locpick_heading(
             ("SPC m  move…", name, "physical location", now)
         }
     };
-    let kind_cols = width(kind) + gutter;
-    let head = vec![
-        rule(),
-        {
-            let typed = if picker.filter.is_empty() {
-                String::new()
-            } else {
-                format!("  {}█", picker.filter)
-            };
-            let note = if picker.searching() {
-                let n = picker
-                    .rows(store)
-                    .iter()
-                    .filter(|row| matches!(row, crate::locpick::Row::Match(_)))
-                    .count();
-                crate::layout::plural(n, "match", "matches")
-            } else {
-                "type to search".to_string()
-            };
-            let left = truncate(
-                &format!(" {crumb}{typed}"),
-                cols.saturating_sub(width(&note) + gutter + 1),
-            );
-            let gap = cols.saturating_sub(width(&left) + width(&note) + gutter);
-            Line::from(vec![
-                Span::styled(left, theme.style(Tone::Accent)),
-                Span::raw(" ".repeat(gap)),
-                Span::styled(note, theme.style(Tone::Muted)),
-                Span::raw(" ".repeat(gutter)),
-            ])
-        },
-        Line::from(vec![
-            Span::styled(
-                format!(" {}", fit(subject, cols.saturating_sub(kind_cols + 2))),
-                theme.style(Tone::Title),
-            ),
-            Span::raw(" "),
-            Span::styled(kind.to_string(), theme.style(Tone::Muted)),
-        ]),
-        Line::styled(
-            format!(" now: {}", crate::layout::truncate_left(&now, cols.saturating_sub(7))),
-            theme.style(Tone::Muted),
-        ),
-        rule(),
-    ];
-
+    let panel = Panel {
+        crumb: format!("{crumb}{}", typed(&picker.filter)),
+        filter: Some(&picker.filter),
+        cursor: None,
+        subject: Some((subject.to_string(), kind, now)),
+    };
+    let matches = picker
+        .rows(store)
+        .iter()
+        .filter(|row| matches!(row, crate::locpick::Row::Match(_)))
+        .count();
+    let mut head = panel_heading(&panel, matches, cols, theme);
+    head.push(rule(cols, theme));
     (head, current)
+}
+
+/// What has been typed into a panel's search, as its crumb shows it.
+fn typed(filter: &str) -> String {
+    if filter.is_empty() {
+        String::new()
+    } else {
+        format!("  {filter}█")
+    }
+}
+
+/// A muted rule across the panel, inside the gutters.
+fn rule(cols: usize, theme: Theme) -> Line<'static> {
+    let gutter = crate::layout::GUTTER as usize;
+    Line::styled(
+        format!(" {}", "─".repeat(cols.saturating_sub(gutter * 2))),
+        theme.style(Tone::Muted),
+    )
+}
+
+/// A panel's heading: a rule, the crumb with how many rows match, and what
+/// it acts on with where that is now.
+fn panel_heading(panel: &Panel, matches: usize, cols: usize, theme: Theme) -> Vec<Line<'static>> {
+    let gutter = crate::layout::GUTTER as usize;
+    let note = match panel.filter {
+        None => String::new(),
+        Some(filter) if filter.trim().is_empty() => "type to search".to_string(),
+        Some(_) => crate::layout::plural(matches, "match", "matches"),
+    };
+    let crumb =
+        truncate(&format!(" {}", panel.crumb), cols.saturating_sub(width(&note) + gutter + 1));
+    let gap = cols.saturating_sub(width(&crumb) + width(&note) + gutter);
+    let mut lines = vec![
+        rule(cols, theme),
+        Line::from(vec![
+            Span::styled(crumb, theme.style(Tone::Accent)),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(note, theme.style(Tone::Muted)),
+            Span::raw(" ".repeat(gutter)),
+        ]),
+    ];
+    if let Some((name, kind, now)) = &panel.subject {
+        let name = truncate(name, cols.saturating_sub(width(kind) + gutter + 2));
+        let gap = cols.saturating_sub(1 + width(&name) + width(kind) + gutter);
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {name}"), theme.style(Tone::Title)),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(kind.to_string(), theme.style(Tone::Muted)),
+        ]));
+        lines.push(Line::styled(
+            format!(" now: {}", crate::layout::truncate_left(now, cols.saturating_sub(7))),
+            theme.style(Tone::Muted),
+        ));
+    }
+    lines
 }
 
 /// One row of the location tree.
@@ -860,37 +873,7 @@ fn draw_panel(
         width: area.width,
         height,
     };
-    let note = match panel.filter {
-        None => String::new(),
-        Some("") => "type to search".to_string(),
-        Some(_) => crate::layout::plural(rows.len(), "match", "matches"),
-    };
-    let head_gap = cols.saturating_sub(width(&panel.crumb) + width(&note) + gutter * 2);
-    let mut lines = vec![
-        Line::styled(
-            format!(" {}", "─".repeat(cols.saturating_sub(gutter * 2))),
-            theme.style(Tone::Muted),
-        ),
-        Line::from(vec![
-            Span::styled(format!(" {}", panel.crumb), theme.style(Tone::Accent)),
-            Span::raw(" ".repeat(head_gap)),
-            Span::styled(note, theme.style(Tone::Muted)),
-            Span::raw(" ".repeat(gutter)),
-        ]),
-    ];
-    if let Some((name, kind, now)) = &panel.subject {
-        let room = cols.saturating_sub(width(kind) + gutter + 2);
-        let gap = cols.saturating_sub(1 + width(&truncate(name, room)) + width(kind) + gutter);
-        lines.push(Line::from(vec![
-            Span::styled(format!(" {}", truncate(name, room)), theme.style(Tone::Title)),
-            Span::raw(" ".repeat(gap)),
-            Span::styled(kind.to_string(), theme.style(Tone::Muted)),
-        ]));
-        lines.push(Line::styled(
-            format!(" now: {}", crate::layout::truncate_left(now, cols.saturating_sub(7))),
-            theme.style(Tone::Muted),
-        ));
-    }
+    let mut lines = panel_heading(panel, rows.len(), cols, theme);
     let count = rows.len();
     let room = (height as usize).saturating_sub(lines.len());
     let skip = panel.cursor.map_or(0, |cursor| (cursor + 1).saturating_sub(room));
