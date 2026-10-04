@@ -1825,20 +1825,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         model.keyboard_hint = false;
     }
 
-    // Delete arms only on a consecutive `d`: any key or tap disarms it, and
-    // its caution goes with it. A worker's message or a resize does not.
-    if model.delete_armed
-        && msg != Msg::Char('d')
-        && !from_worker(&msg)
-        && !matches!(msg, Msg::Resize { .. })
-    {
+    // `d d` and `Esc Esc` act only on consecutive presses: any other key or
+    // tap disarms. A resize does not, since Termux's `Esc` also drops the
+    // keyboard and resizes the terminal.
+    if model.delete_armed && msg != Msg::Char('d') && disarms(&msg) {
         model.delete_armed = false;
         model.flash = None;
     }
-
-    // Esc arms only on a *consecutive* Esc; any other key disarms it.
     let was_armed = model.esc_armed;
-    if msg != Msg::Esc && !from_worker(&msg) {
+    if msg != Msg::Esc && disarms(&msg) {
         model.esc_armed = false;
     }
     if is_key(&msg) {
@@ -2669,6 +2664,11 @@ fn pick(model: &mut Model, picker: crate::pick::Picker, hits: &[crate::pick::Ent
 /// IME affordance dropped, any more than a finished scan load does.
 fn is_key(msg: &Msg) -> bool {
     !from_worker(msg) && !matches!(msg, Msg::Tap { .. } | Msg::Scroll(_) | Msg::Resize { .. })
+}
+
+/// Whether `msg` ends a `d d` or `Esc Esc` pair.
+fn disarms(msg: &Msg) -> bool {
+    !from_worker(msg) && !matches!(msg, Msg::Resize { .. })
 }
 
 /// Whether a thread of the program sent `msg`, rather than the person.
@@ -4291,6 +4291,14 @@ pub(crate) mod tests {
         update(&mut m, Msg::Move(Motion::Down));
         assert!(!m.esc_armed);
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw, "arms again rather than quitting");
+    }
+
+    #[test]
+    fn a_resize_between_the_escs_still_quits() {
+        let mut m = model();
+        update(&mut m, Msg::Esc);
+        update(&mut m, Msg::Resize { cols: 47, rows: 45 });
+        assert_eq!(update(&mut m, Msg::Esc), Effect::Quit);
     }
 
     #[test]
