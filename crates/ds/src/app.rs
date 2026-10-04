@@ -1415,11 +1415,7 @@ impl Model {
 
     /// Links the typed path as one more soft copy of `doc`, the first being
     /// primary, or says why it cannot be.
-    fn attach(&self, doc: &str, typed: &str) -> Result<Change, String> {
-        if typed.trim().is_empty() {
-            return Err("type a path, or choose one from the list".into());
-        }
-        let path = crate::edit::relative_path(typed)?;
+    fn attach(&self, doc: &str, path: String, field: &str) -> Result<Change, String> {
         if self.root.as_ref().is_some_and(|root| root.join(&path).is_dir()) {
             return Err(format!("{path} is a folder — choose a file in it"));
         }
@@ -1429,7 +1425,7 @@ impl Model {
         }
         let primary = files.is_empty();
         files.push(crate::FileRef { label: String::new(), path, primary });
-        Ok(self.flip("doc", doc, "files", crate::doc::files_value(&files)))
+        Ok(self.flip("doc", doc, field, crate::doc::files_value(&files)))
     }
 
     /// Saves an open edit, or says why it cannot be saved. An edit that
@@ -1441,7 +1437,11 @@ impl Model {
         }
         let (change, landed) = match (edit.target.clone(), edit.field) {
             (Target::Doc(id), Field::Attach) => {
-                (self.attach(&id, &edit.buffer)?, Landed::on(&id, "saved"))
+                let path = edit
+                    .value()?
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .ok_or("type a path, or choose one from the list")?;
+                (self.attach(&id, path, edit.journal_field())?, Landed::on(&id, "saved"))
             }
             (Target::Doc(id), _) => {
                 let change = self.flip("doc", &id, edit.journal_field(), edit.value()?);
