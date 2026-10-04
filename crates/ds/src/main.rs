@@ -68,7 +68,7 @@ use journal::Journal;
 #[command(name = "ds", version, about, long_about = None)]
 struct Args {
     /// The Syncthing root — the folder the journal and the documents live in.
-    #[arg(long, value_name = "DIR", global = true)]
+    #[arg(long, value_name = "DIR", global = true, env = "DS_ROOT")]
     root: Option<PathBuf>,
 
     /// A journal directory to read directly, instead of `<root>/.dossier/journal`.
@@ -157,9 +157,12 @@ fn run(args: &Args, start: Instant) -> io::Result<u8> {
     // A config that exists but is broken is fatal; one that is simply absent is
     // not. A fresh device has none until `ds init`, and `--root` covers it.
     let config = ds::config::Config::load().map_err(io::Error::other)?;
-    let journal =
-        load::locate(args.journal.clone(), args.root.clone(), config.syncthing_root.clone());
-    let root = load::root_for(args.root.clone(), config.syncthing_root.clone(), &journal);
+    let Some((journal, root)) =
+        load::locate(args.journal.clone(), args.root.clone(), config.syncthing_root.clone())
+    else {
+        eprintln!("ds: this device is not set up — run `ds init`, or pass --root");
+        return Ok(code::FAILED);
+    };
     let loaded = load::load(&journal).map_err(io::Error::other)?;
 
     match &args.command {
@@ -187,11 +190,7 @@ fn init(args: &Args, device: Option<String>, force: bool) -> u8 {
         );
         return code::FAILED;
     };
-    let answers = ds::init::Answers {
-        device,
-        root: args.root.clone().or_else(|| std::env::var_os("DS_ROOT").map(PathBuf::from)),
-        force,
-    };
+    let answers = ds::init::Answers { device, root: args.root.clone(), force };
     let machine = ds::init::Machine::current();
     let result = if ds::init::stdin_is_interactive() {
         let mut prompt = ds::prompt::Terminal { wsl: machine.wsl.clone() };

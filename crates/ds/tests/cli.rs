@@ -76,21 +76,24 @@ fn sample(name: &str) -> PathBuf {
 /// path through the Known Folder API, which ignores the environment entirely.
 /// While `ds` only read config that was merely useless; a writing test would
 /// have written the CI runner's real `%LOCALAPPDATA%\dossier\config.toml`.
-fn ds(root: &Path, args: &[&str]) -> Output {
+fn sandboxed(root: &Path, args: &[&str]) -> Command {
     let sandbox = root.join("config-home");
     std::fs::create_dir_all(&sandbox).expect("mkdir");
-    Command::new(env!("CARGO_BIN_EXE_ds"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ds"));
+    command
         .args(args)
-        .arg("--root")
-        .arg(root)
         .env("DS_CONFIG_DIR", &sandbox)
         .env("XDG_CONFIG_HOME", &sandbox)
         .env("HOME", &sandbox)
         .env("LOCALAPPDATA", &sandbox)
         .env("APPDATA", &sandbox)
-        .env_remove("DS_ROOT")
-        .output()
-        .expect("run ds")
+        .env_remove("DS_ROOT");
+    command
+}
+
+/// [`sandboxed`], run with `--root`.
+fn ds(root: &Path, args: &[&str]) -> Output {
+    sandboxed(root, args).arg("--root").arg(root).output().expect("run ds")
 }
 
 /// The config file `ds` in this sandbox would read and write.
@@ -254,18 +257,25 @@ fn init_refuses_a_device_name_the_grammar_rejects() {
 #[test]
 fn init_without_a_terminal_or_a_flag_fails_fast() {
     let root = fresh("init-notty");
-    let sandbox = root.join("config-home");
-    std::fs::create_dir_all(&sandbox).expect("mkdir");
-    let out = Command::new(env!("CARGO_BIN_EXE_ds"))
-        .args(["init"])
-        .arg("--root")
+    let out = sandboxed(&root, &["init", "--root"])
         .arg(&root)
-        .env("DS_CONFIG_DIR", &sandbox)
-        .env_remove("DS_ROOT")
         .stdin(Stdio::null())
         .output()
         .expect("run ds");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("--device"), "{stderr}");
+}
+
+/// A device that was never set up refuses and says how, rather than reading
+/// whatever folder it was started in.
+#[test]
+fn a_device_not_set_up_points_at_init() {
+    let root = fresh("not-set-up");
+    for args in [&[][..], &["status"]] {
+        let out = sandboxed(&root, args).current_dir(&root).output().expect("run ds");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{stderr}");
+        assert!(stderr.contains("run `ds init`, or pass --root"), "{stderr}");
+    }
 }

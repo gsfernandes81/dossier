@@ -30,7 +30,7 @@ ratatui = "0.30"
 jiff = { version = "0.2", features = ["tzdb-bundle-always"] }
 # Argument parsing. `ds` grows subcommands (`status`, `open`) in later slices;
 # derive keeps their definitions next to the types they fill in.
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 # `val` payloads arrive as JSON values and stay that way until a field is read.
 serde_json = { workspace = true }
 # Deriving the config's shape, so a malformed file is a parse error naming the

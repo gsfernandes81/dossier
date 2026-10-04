@@ -48,26 +48,28 @@ pub struct Loaded {
     pub warn_until: String,
 }
 
-/// Decide which journal directory to read.
+/// Finds the journal to read and the root its file paths resolve against.
 ///
-/// Precedence, most specific first: an explicit `--journal`, then `--root` or
-/// `$DS_ROOT`, then the per-device config's `syncthing_root`, then the current
-/// directory. The explicit flags win because the way R3 is daily-driven before
-/// cutover is by pointing it at an exported copy.
+/// `root` is `--root` or `$DS_ROOT`, and beats the config's. An explicit
+/// journal is read as given, and a journal at `<root>/.dossier/journal`
+/// implies its own root when nothing else names one. Returns `None` when
+/// nothing names a store: this device is not set up.
 #[must_use]
 pub fn locate(
     journal: Option<PathBuf>,
     root: Option<PathBuf>,
     config_root: Option<PathBuf>,
-) -> Journal {
-    if let Some(journal) = journal {
-        return Journal::new(journal);
+) -> Option<(Journal, PathBuf)> {
+    let root = root.or(config_root);
+    match (journal, root) {
+        (Some(journal), root) => {
+            let journal = Journal::new(journal);
+            let root = root.unwrap_or_else(|| implied_root(journal.path()));
+            Some((journal, root))
+        }
+        (None, Some(root)) => Some((Journal::under_root(root.clone()), root)),
+        (None, None) => None,
     }
-    let root = root
-        .or_else(|| std::env::var_os("DS_ROOT").map(PathBuf::from))
-        .or(config_root)
-        .unwrap_or_else(|| PathBuf::from("."));
-    Journal::under_root(root)
 }
 
 /// Read, fold, and build.
@@ -102,23 +104,6 @@ pub fn window() -> (String, String) {
     (today.to_string(), warn_until.to_string())
 }
 
-/// The Syncthing root a stored path is resolved against.
-///
-/// `--root` if given, else the config's, else the journal's grandparent — a
-/// journal at `<root>/.dossier/journal` implies its own root, so pointing `ds`
-/// at a copied journal still opens files from the right place.
-#[must_use]
-pub fn root_for(
-    explicit: Option<PathBuf>,
-    config_root: Option<PathBuf>,
-    journal: &Journal,
-) -> PathBuf {
-    explicit
-        .or_else(|| std::env::var_os("DS_ROOT").map(PathBuf::from))
-        .or(config_root)
-        .unwrap_or_else(|| implied_root(journal.path()))
-}
-
 fn implied_root(journal: &Path) -> PathBuf {
     journal.parent().and_then(Path::parent).map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
@@ -127,32 +112,36 @@ fn implied_root(journal: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    /// The explicit flag wins over everything, because pointing at an exported
-    /// copy is how R3 is used before cutover.
+    /// An explicit journal is read as given, and an explicit root still
+    /// decides where its files are.
     #[test]
     fn an_explicit_journal_beats_every_default() {
-        let journal = locate(
+        let (journal, root) = locate(
             Some(PathBuf::from("/tmp/copy")),
             Some(PathBuf::from("/home/u/Sync")),
             Some(PathBuf::from("/config/root")),
-        );
+        )
+        .expect("located");
         assert_eq!(journal.path(), Path::new("/tmp/copy"));
+        assert_eq!(root, Path::new("/home/u/Sync"));
     }
 
     /// Otherwise the root decides, and the journal is the fixed place inside it.
     #[test]
     fn a_root_implies_the_journal_directory() {
-        let journal = locate(None, Some(PathBuf::from("/home/u/Sync")), None);
+        let (journal, root) =
+            locate(None, Some(PathBuf::from("/home/u/Sync")), Some(PathBuf::from("/config")))
+                .expect("located");
         assert!(journal.path().ends_with(".dossier/journal"), "{}", journal.path().display());
         assert!(journal.path().starts_with("/home/u/Sync"));
+        assert_eq!(root, Path::new("/home/u/Sync"));
     }
 
-    /// The config's root is the fallback — which is what makes a bare `ds` work
-    /// on a configured device.
+    /// The config's root is what makes a bare `ds` work on a configured device.
     #[test]
-    fn the_config_root_is_the_last_resort_before_the_cwd() {
-        std::env::remove_var("DS_ROOT");
-        let journal = locate(None, None, Some(PathBuf::from("/config/root")));
+    fn the_config_root_is_the_fallback() {
+        let (journal, _) =
+            locate(None, None, Some(PathBuf::from("/config/root"))).expect("located");
         assert!(journal.path().starts_with("/config/root"));
     }
 
@@ -160,14 +149,15 @@ mod tests {
     /// from `<root>/.dossier/journal` is the root.
     #[test]
     fn a_journal_path_implies_its_root() {
-        std::env::remove_var("DS_ROOT");
-        let journal = Journal::new("/mnt/copy/.dossier/journal");
-        assert_eq!(root_for(None, None, &journal), Path::new("/mnt/copy"));
-        assert_eq!(
-            root_for(Some(PathBuf::from("/elsewhere")), None, &journal),
-            Path::new("/elsewhere"),
-            "an explicit root still wins"
-        );
+        let (_, root) =
+            locate(Some(PathBuf::from("/mnt/copy/.dossier/journal")), None, None).expect("located");
+        assert_eq!(root, Path::new("/mnt/copy"));
+    }
+
+    /// Nothing naming a store is a device that is not set up.
+    #[test]
+    fn nothing_named_is_not_set_up() {
+        assert!(locate(None, None, None).is_none());
     }
 
     /// The window runs from today to [`crate::doc::WARN_DAYS`] ahead.
