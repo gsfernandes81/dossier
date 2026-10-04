@@ -224,11 +224,8 @@ pub enum Error {
 /// Dropping it releases the lock (the OS does, whether or not the process exits
 /// cleanly — which is why an advisory lock beats a PID file here).
 #[derive(Debug)]
-// The `writer_id` field stutters with the type name, but `id` alone would read
-// as an *entity* id — the thing this crate has most of — so the clarity wins.
-#[allow(clippy::struct_field_names)]
 pub struct Writer {
-    writer_id: String,
+    name: String,
     path: PathBuf,
     file: File,
     clock: Hlc,
@@ -304,7 +301,7 @@ impl Writer {
             .map_err(io("open journal file", &path))?;
 
         Ok(Self {
-            writer_id: writer_id.to_string(),
+            name: writer_id.to_string(),
             path,
             file,
             clock: Hlc::seeded(max_ts_seen),
@@ -315,7 +312,7 @@ impl Writer {
     /// The writer id this handle appends as.
     #[must_use]
     pub fn writer_id(&self) -> &str {
-        &self.writer_id
+        &self.name
     }
 
     /// The file being appended to.
@@ -341,7 +338,7 @@ impl Writer {
         let mut written = Vec::new();
         let mut buffer = String::new();
         for draft in drafts {
-            let op = draft.stamp(self.clock.tick(), &self.writer_id);
+            let op = draft.stamp(self.clock.tick(), &self.name);
             buffer.push_str(&op.to_line()?);
             buffer.push('\n');
             written.push(op);
@@ -407,7 +404,7 @@ impl Writer {
         }
 
         let directory = self.path.parent().unwrap_or_else(|| Path::new("."));
-        let temp = directory.join(names::compaction_temp_file(&self.writer_id, std::process::id()));
+        let temp = directory.join(names::compaction_temp_file(&self.name, std::process::id()));
 
         // Built in memory first (a writer's file is a few megabytes), so the
         // temp exists for as short a window as possible.
