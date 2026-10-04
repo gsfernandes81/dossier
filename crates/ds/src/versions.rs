@@ -24,7 +24,7 @@ use ratatui::Frame;
 use crate::app::{Model, RowGeometry};
 use crate::layout::{truncate, truncate_left, width, wrap};
 use crate::theme::{Theme, Tone};
-use crate::{Doc, HardCopy, Status, Store};
+use crate::{Doc, Status, Store};
 
 /// What a conflicting latest version is, said where one is listed.
 const CONFLICT_NOTE: &str = "conflicting latest: a second document that also claims to replace \
@@ -81,11 +81,7 @@ fn version_lines(
         Span::raw(" ".repeat(gap)),
         Span::styled(right, right_style),
     ]);
-    let place = match model.store.hard_copy(doc) {
-        HardCopy::At(_) => model.store.place(doc),
-        HardCopy::Unfiled => "unfiled".into(),
-        HardCopy::DigitalOnly => "digital only".into(),
-    };
+    let place = model.store.hard_copy_text(doc);
     let second = Line::styled(
         format!("    {}", truncate_left(&place, cols.saturating_sub(4 + gutter))),
         theme.style(Tone::Muted),

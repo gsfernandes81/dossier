@@ -266,7 +266,7 @@ impl LocationPicker {
     }
 
     /// Whether this mode hides `id`: the moving location and everything in it.
-    fn left_out(&self, store: &Store, id: &str) -> bool {
+    pub(crate) fn left_out(&self, store: &Store, id: &str) -> bool {
         matches!(&self.mode, Mode::Move(moving) if store.locations.is_within(id, moving))
     }
 

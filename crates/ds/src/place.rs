@@ -143,14 +143,32 @@ impl Tree {
     /// The ids from the top level down to `id`, inclusive.
     #[must_use]
     pub fn ancestry(&self, id: &str) -> Vec<&str> {
-        let mut chain = Vec::new();
-        let mut at = self.nodes.get_key_value(id).map(|(key, _)| key.as_str());
-        while let Some(id) = at {
-            chain.push(id);
-            at = self.parent(id);
-        }
+        let start = self.nodes.get_key_value(id).map(|(key, _)| key.as_str());
+        let mut chain: Vec<&str> = std::iter::successors(start, |at| self.parent(at)).collect();
         chain.reverse();
         chain
+    }
+
+    /// Where `parent` is, as a sentence names it: its path, or the top level.
+    #[must_use]
+    pub fn place(&self, parent: Option<&str>) -> String {
+        parent.map_or_else(|| "the top level".into(), |id| self.path(id))
+    }
+
+    /// Refuses `name` when a sibling in `parent` other than `except` has it.
+    ///
+    /// # Errors
+    /// The refusal, naming where the clash is.
+    pub fn clash(
+        &self,
+        parent: Option<&str>,
+        name: &str,
+        except: Option<&str>,
+    ) -> Result<(), String> {
+        match self.sibling_named(parent, name, except) {
+            Some(_) => Err(format!("{} already has a {name}", self.place(parent))),
+            None => Ok(()),
+        }
     }
 
     /// The names from the top level down to `id`, joined with ` › `.
@@ -179,7 +197,8 @@ impl Tree {
     /// Whether `id` is `ancestor` or inside it.
     #[must_use]
     pub fn is_within(&self, id: &str, ancestor: &str) -> bool {
-        self.ancestry(id).contains(&ancestor)
+        self.nodes.contains_key(id)
+            && std::iter::successors(Some(id), |at| self.parent(at)).any(|at| at == ancestor)
     }
 
     /// Every location in sibling order, parents before children.

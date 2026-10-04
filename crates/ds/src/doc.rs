@@ -560,6 +560,17 @@ impl Store {
         }
     }
 
+    /// Where a document's hard copy is, in words: its path, `digital only` or
+    /// `unfiled`.
+    #[must_use]
+    pub fn hard_copy_text(&self, doc: &Doc) -> String {
+        match self.hard_copy(doc) {
+            HardCopy::At(id) => self.locations.path(id),
+            HardCopy::DigitalOnly => "digital only".into(),
+            HardCopy::Unfiled => "unfiled".into(),
+        }
+    }
+
     /// How many documents have their hard copy in `id` or anywhere inside it,
     /// old versions included.
     #[must_use]

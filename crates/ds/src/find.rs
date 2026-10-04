@@ -594,7 +594,6 @@ fn locpick_heading(
     theme: Theme,
 ) -> (Vec<Line<'static>>, Option<String>) {
     use crate::locpick::Mode;
-    use crate::place::HardCopy;
     let current = match &picker.mode {
         Mode::File(doc) => store.filed_at(doc).map(str::to_string),
         Mode::Move(moving) => store.locations.parent(moving).map(str::to_string),
@@ -608,11 +607,7 @@ fn locpick_heading(
         ),
         (Mode::File(doc), None) => {
             let doc = store.get(doc);
-            let now = match doc.map(|doc| store.hard_copy(doc)) {
-                Some(HardCopy::At(id)) => store.locations.path(id),
-                Some(HardCopy::DigitalOnly) => "digital only".into(),
-                Some(HardCopy::Unfiled) | None => "unfiled".into(),
-            };
+            let now = doc.map_or_else(|| "unfiled".into(), |doc| store.hard_copy_text(doc));
             ("SPC l  location", doc.map_or("", |doc| doc.name.as_str()), "document", now)
         }
         (Mode::Move(moving), None) => {
@@ -755,10 +750,7 @@ fn tree_line(
             Line::styled(format!(" {lead}{hidden} more"), theme.style(Tone::Muted))
         }
         Row::New => {
-            let place = picker
-                .anchor
-                .as_deref()
-                .map_or_else(|| "top level".into(), |id| store.locations.path(id));
+            let place = store.locations.place(picker.anchor.as_deref());
             let text = format!("+ new \"{}\" in {place}", picker.new_name());
             Line::styled(
                 format!(" {}", truncate(&text, cols.saturating_sub(1 + gutter))),
@@ -797,7 +789,7 @@ fn count(
         .locations
         .subtree(id)
         .iter()
-        .filter(|at| !matches!(&picker.mode, crate::locpick::Mode::Move(moving) if store.locations.is_within(at, moving)))
+        .filter(|at| !picker.left_out(store, at))
         .count()
         .saturating_sub(1);
     let (n, long, short) = match (held, inside) {

@@ -152,8 +152,7 @@ fn render_row(
         Row::Editable(what) => render_editable(what, doc, model, inner, theme),
         Row::Location => {
             let label = "hard copy location";
-            let place = model.store.place(doc);
-            let value = if place.is_empty() { "unfiled".to_string() } else { place };
+            let value = model.store.hard_copy_text(doc);
             let room = inner.saturating_sub(width(label) + 2);
             vec![Line::from(vec![
                 Span::styled(format!(" {label} "), theme.style(Tone::Muted)),

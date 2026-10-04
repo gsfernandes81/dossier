@@ -1270,13 +1270,10 @@ impl Model {
             return Err(reason);
         }
         let tree = &self.store.locations;
-        let place = parent.map_or_else(|| "the top level".into(), |id| tree.path(id));
         if name.is_empty() {
             return Err("type a name first".into());
         }
-        if tree.sibling_named(parent, name, None).is_some() {
-            return Err(format!("{place} already has a {name}"));
-        }
+        tree.clash(parent, name, None)?;
         if self.store.get(doc).is_none() {
             return Ok(Effect::Redraw);
         }
@@ -1314,10 +1311,7 @@ impl Model {
     fn rename(&self, id: &str, name: &str) -> Result<(Change, Landed), String> {
         let tree = &self.store.locations;
         let parent = tree.parent(id);
-        if tree.sibling_named(parent, name, Some(id)).is_some() {
-            let place = parent.map_or_else(|| "the top level".into(), |p| tree.path(p));
-            return Err(format!("{place} already has a {name}"));
-        }
+        tree.clash(parent, name, Some(id))?;
         let change = self.flip("location", id, "name", Some(name.into()));
         Ok((change, Landed::saying(format!("renamed to {name}"))))
     }
@@ -1347,10 +1341,8 @@ impl Model {
         if into.is_some_and(|into| tree.is_within(into, id)) {
             return Err("a location cannot go inside itself".into());
         }
-        let place = into.map_or_else(|| "the top level".into(), |p| tree.path(p));
-        if tree.sibling_named(into, &location.name, Some(id)).is_some() {
-            return Err(format!("{place} already has a {}", location.name));
-        }
+        tree.clash(into, &location.name, Some(id))?;
+        let place = tree.place(into);
         let note = format!("moved {} into {place}", location.name);
         let change = self.flip("location", id, "parent", into.map(Into::into));
         Ok(self.append(change, Landed::saying(note)))
