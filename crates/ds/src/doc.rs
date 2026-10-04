@@ -91,7 +91,7 @@ pub struct Membership {
 }
 
 /// A named set of document versions, kept for a purpose.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Bundle {
     /// The journal entity id.
     pub id: String,
@@ -120,7 +120,7 @@ impl Bundle {
 }
 
 /// A document as the browse surface needs it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Doc {
     /// Slug; the journal entity id.
     pub id: String,
@@ -978,23 +978,7 @@ mod tests {
     /// stay absent rather than coming back as empty strings.
     #[test]
     fn an_empty_document_round_trips_without_inventing_fields() {
-        let fields = Doc {
-            id: "bare".into(),
-            name: "Bare".into(),
-            tags: Vec::new(),
-            bundles: Vec::new(),
-            issue_date: None,
-            expiry_date: None,
-            ignore_expiry: false,
-            supersedes: None,
-            location: None,
-            files: Vec::new(),
-            notes: String::new(),
-            superseded: false,
-            conflicting: false,
-            haystack: crate::search::fold("Bare"),
-        }
-        .as_fields();
+        let fields = Doc { id: "bare".into(), name: "Bare".into(), ..Doc::default() }.as_fields();
         assert_eq!(fields.len(), 1, "only the name: {fields:?}");
 
         let rebuilt = build(vec![doc(100, "bare", &fields)]);

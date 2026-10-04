@@ -434,22 +434,7 @@ mod tests {
     }
 
     fn doc(id: &str, at: &str) -> Doc {
-        Doc {
-            id: id.into(),
-            name: id.into(),
-            tags: Vec::new(),
-            bundles: Vec::new(),
-            issue_date: None,
-            expiry_date: None,
-            ignore_expiry: false,
-            supersedes: None,
-            location: Some(at.into()),
-            files: Vec::new(),
-            notes: String::new(),
-            superseded: false,
-            conflicting: false,
-            haystack: String::new(),
-        }
+        Doc { id: id.into(), name: id.into(), location: Some(at.into()), ..Doc::default() }
     }
 
     fn store() -> Store {

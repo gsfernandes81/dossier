@@ -2806,22 +2806,15 @@ pub(crate) mod tests {
         Doc {
             id: id.into(),
             name: name.into(),
-            tags: Vec::new(),
-            bundles: Vec::new(),
-            issue_date: None,
             expiry_date: expiry.map(str::to_string),
-            ignore_expiry: false,
-            supersedes: None,
             location: Some("cert-file".into()),
             files: file
                 .map(|path| {
                     vec![FileRef { label: "complete".into(), path: path.into(), primary: true }]
                 })
                 .unwrap_or_default(),
-            notes: String::new(),
-            superseded: false,
-            conflicting: false,
             haystack: crate::search::fold(name),
+            ..Doc::default()
         }
     }
 
@@ -4235,7 +4228,7 @@ pub(crate) mod tests {
             id: id.into(),
             name: name.into(),
             date: date.map(Into::into),
-            notes: String::new(),
+            ..crate::Bundle::default()
         };
         m.store.bundles = vec![
             bundle("joining", "Joining", Some("2026-11-01")),
@@ -4317,8 +4310,7 @@ pub(crate) mod tests {
         store.bundles.push(crate::Bundle {
             id: id.into(),
             name: "Panama".into(),
-            date: None,
-            notes: String::new(),
+            ..crate::Bundle::default()
         });
         update(&mut m, Msg::Saved(Box::new(store)));
         assert!(matches!(m.views.last(), Some(View::Bundle { id, .. }) if id == "panama-desk"));

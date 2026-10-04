@@ -83,11 +83,7 @@ fn sample_store() -> Store {
             id: (*id).into(),
             name: (*name).into(),
             tags: vec![(*tag).into()],
-            bundles: Vec::new(),
-            issue_date: None,
             expiry_date: expiry.map(str::to_string),
-            ignore_expiry: false,
-            supersedes: None,
             location: Some(if *slot == 0 {
                 ds::place::DIGITAL_ONLY.into()
             } else {
@@ -102,10 +98,8 @@ fn sample_store() -> Store {
                     primary: true,
                 }]
             },
-            notes: String::new(),
-            superseded: false,
-            conflicting: false,
             haystack: ds::search::fold(&format!("{name} {tag}")),
+            ..Doc::default()
         })
         .collect();
     let mut locations = Vec::new();
@@ -633,7 +627,7 @@ fn with_bundles(cols: u16, rows: u16) -> Model {
         id: id.into(),
         name: name.into(),
         date: date.map(Into::into),
-        notes: String::new(),
+        ..ds::Bundle::default()
     };
     m.store.bundles = vec![
         bundle("visa", "US visa application", Some("2027-03-27")),

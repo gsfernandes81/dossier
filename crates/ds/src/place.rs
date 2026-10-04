@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const DIGITAL_ONLY: &str = "none";
 
 /// A physical location as stored.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Location {
     /// The journal entity id.
     pub id: String,

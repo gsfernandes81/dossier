@@ -286,22 +286,7 @@ mod tests {
     use journal::Anomaly;
 
     fn doc(id: &str) -> Doc {
-        Doc {
-            id: id.into(),
-            name: id.into(),
-            tags: Vec::new(),
-            bundles: Vec::new(),
-            issue_date: None,
-            expiry_date: None,
-            ignore_expiry: false,
-            supersedes: None,
-            location: None,
-            files: Vec::new(),
-            notes: String::new(),
-            superseded: false,
-            conflicting: false,
-            haystack: String::new(),
-        }
+        Doc { id: id.into(), name: id.into(), ..Doc::default() }
     }
 
     fn present() -> Load {
