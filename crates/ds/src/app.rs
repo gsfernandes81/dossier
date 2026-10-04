@@ -36,6 +36,8 @@ pub enum Msg {
     Saved(Box<Store>),
     /// Another writer's ops arrived, and here is the store re-folded with them.
     Reloaded(Box<Store>),
+    /// The platform opener could not open a file, and why.
+    OpenFailed(String),
     /// The append did not land. The editor stays open with the typing intact:
     /// the screen must never claim a value the journal refused.
     SaveFailed {
@@ -1956,6 +1958,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.flash = Some(landed.note.unwrap_or_else(|| "saved".into()));
             Effect::Redraw
         }
+        Msg::OpenFailed(reason) => {
+            model.flash = Some(reason);
+            Effect::Redraw
+        }
         Msg::Reloaded(store) => {
             if *store == model.store {
                 return Effect::Idle;
@@ -2712,7 +2718,14 @@ fn is_key(msg: &Msg) -> bool {
 
 /// Whether a thread of the program sent `msg`, rather than the person.
 fn from_worker(msg: &Msg) -> bool {
-    matches!(msg, Msg::ScansLoaded(_) | Msg::Saved(_) | Msg::Reloaded(_) | Msg::SaveFailed { .. })
+    matches!(
+        msg,
+        Msg::ScansLoaded(_)
+            | Msg::Saved(_)
+            | Msg::Reloaded(_)
+            | Msg::SaveFailed { .. }
+            | Msg::OpenFailed(_)
+    )
 }
 
 /// The rows the search bar occupies, inclusive, which raise the keyboard when

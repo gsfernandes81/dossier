@@ -462,11 +462,12 @@ fn event_loop(
             Effect::Redraw => {}
             Effect::Open(stored) => {
                 let path = open::resolve(root, &stored);
-                // The opener's failure is the user's news, not the program's:
-                // it lands in the footer and the app carries on.
-                if let Err(error) = open::open_file(&path) {
-                    model.flash = Some(error.to_string());
-                }
+                let tx = tx.clone();
+                std::thread::spawn(move || {
+                    if let Err(error) = open::open_file(&path) {
+                        let _ = tx.send(Msg::OpenFailed(error.to_string()));
+                    }
+                });
             }
             Effect::Append(drafts) => {
                 // The result comes back as `Msg::Saved` or `Msg::SaveFailed`.
