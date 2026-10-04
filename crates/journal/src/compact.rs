@@ -28,10 +28,11 @@
 //! *other* writer may have set that field earlier, and this file's `unset` is
 //! what keeps it removed. Drop it and the other device's value comes back.
 //!
-//! **Ops older than their entity's newest tombstone are dropped.** They can
-//! never apply again: a tombstone hides everything older, and a later `create`
-//! starts from empty fields. Keeping them would only make the file
-//! bigger.
+//! **`set`/`unset` ops older than their entity's newest tombstone are
+//! dropped.** They can never apply again: a tombstone hides every older field
+//! write, and a later `create` starts from empty fields. `state` and enrich
+//! ops are per key and independent of the lifecycle, so a tombstone buries
+//! none of them.
 //!
 //! Everything here is a **pure function** of the lines and the clock —
 //! [`plan`] decides, and the writer does the I/O. That is what lets the
@@ -124,8 +125,7 @@ pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
         };
         match newest.get(&key) {
             Some(&previous) => {
-                let previous_ts = lines[previous].as_op().map_or(i64::MIN, |op| op.ts);
-                if op.ts > previous_ts {
+                if lines[previous].as_op().is_none_or(|prev| op.order_key() > prev.order_key()) {
                     newest.insert(key, index);
                 }
             }
@@ -147,13 +147,14 @@ pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
                 op.ts >= cutoff
                     || match op.op {
                         OpKind::Create | OpKind::Delete => true,
-                        _ => {
-                            // Dead behind a tombstone, or superseded by a newer
-                            // op for the same key.
+                        OpKind::Set | OpKind::Unset => {
                             let buried = newest_tombstone
                                 .get(&op.entity_key())
                                 .is_some_and(|tomb| op.ts < *tomb);
                             !buried && survivors.contains(&index)
+                        }
+                        OpKind::State | OpKind::Reading | OpKind::Proposal => {
+                            survivors.contains(&index)
                         }
                     }
             }
@@ -211,6 +212,17 @@ mod tests {
         assert!(survivors.iter().filter_map(Line::as_op).any(|op| op.op == OpKind::Delete));
         assert_eq!(fold(&survivors).canonical_json(), fold(&lines).canonical_json());
         assert_eq!(plan.dropped(), 1, "the set behind the tombstone is dead and goes");
+    }
+
+    #[test]
+    fn a_state_older_than_a_tombstone_survives() {
+        let lines = vec![
+            line(OLD, Draft::state("review", "x", 3)),
+            line(OLD + 1, Draft::delete("review", "x")),
+        ];
+        let plan = plan(&lines, NOW);
+        assert_eq!(plan.dropped(), 0);
+        assert_eq!(fold(&kept(&lines, &plan)).canonical_json(), fold(&lines).canonical_json());
     }
 
     #[test]

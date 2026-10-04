@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc efdc433edd02fb210801431abde707262469aac0a40a69be185308be79335819 # shrinks to a = [Op { v: 1, ts: 1, w: "desk-core", op: State, ent: "doc", id: "a", f: None, val: Some(Number(0)), extra: {} }, Op { v: 1, ts: 2, w: "desk-core", op: Delete, ent: "doc", id: "a", f: None, val: None, extra: {} }], b = [], k = 2
+cc 68e91c347bd08fef9dd7769644901712eaf45c0529aab0db0b0617a8be2da9e2 # shrinks to a = [Op { v: 1, ts: 92, w: "desk-core", op: State, ent: "doc", id: "coc-2025", f: None, val: Some(Number(1)), extra: {} }, Op { v: 1, ts: 92, w: "phone-core", op: State, ent: "doc", id: "coc-2025", f: None, val: Some(Number(0)), extra: {} }], b = [], k = 93

@@ -136,17 +136,17 @@ proptest! {
         prop_assert_eq!(&entity.fields["slot"], &json!(3));
     }
 
-    /// `now` ranges over the whole clock, so the retention window sometimes
-    /// covers everything and sometimes nothing.
+    /// The cutoff runs past the whole `ts` range, so the retention window
+    /// covers everything, part, or nothing.
     #[test]
-    fn compaction_preserves_the_fold(a in stream(), b in stream(), now in 0i64..2_000i64) {
+    fn compaction_preserves_the_fold(a in stream(), b in stream(), k in 0i64..600) {
         let b = disjoint(&a, b);
 
         let (mine, theirs) = (lines(&a), lines(&b));
         let mut before = mine.clone();
         before.extend(theirs.clone());
 
-        let plan = compaction_plan(&mine, now);
+        let plan = compaction_plan(&mine, journal::compact::RETENTION_MS + k);
         let mut after: Vec<Line> = plan.keep.iter().map(|&i| mine[i].clone()).collect();
         after.extend(theirs);
 
@@ -157,9 +157,9 @@ proptest! {
     /// The truncation defense treats a `max_ts` regression as damage, so a
     /// compaction that lowered it would raise a false alarm.
     #[test]
-    fn compaction_never_lowers_the_high_water_mark(specs in stream(), now in 0i64..2_000i64) {
+    fn compaction_never_lowers_the_high_water_mark(specs in stream(), k in 0i64..600) {
         let all = lines(&specs);
-        let plan = compaction_plan(&all, now);
+        let plan = compaction_plan(&all, journal::compact::RETENTION_MS + k);
         let max = |lines: &[Line]| lines.iter().filter_map(Line::as_op).map(|op| op.ts).max();
         let kept: Vec<Line> = plan.keep.iter().map(|&i| all[i].clone()).collect();
         prop_assert_eq!(max(&kept), max(&all));
