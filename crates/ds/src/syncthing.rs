@@ -134,6 +134,78 @@ pub struct Folder {
     pub folder_state: Option<String>,
 }
 
+/// What Syncthing's own `config.xml` says about its API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    /// The file it was read from.
+    pub path: PathBuf,
+    /// Where the API listens, when the file says.
+    pub address: Option<String>,
+    /// The REST API key.
+    pub apikey: String,
+}
+
+/// The API address and key in the `<gui>` element of a Syncthing
+/// `config.xml`. The file is machine-written, so a plain search reads it.
+#[must_use]
+pub fn read_gui(xml: &str) -> Option<(Option<String>, String)> {
+    let start = xml.find("<gui")?;
+    let gui = &xml[start..start + xml[start..].find("</gui>")?];
+    let tls = gui[..gui.find('>')?].contains("tls=\"true\"");
+    let inner = |name: &str| {
+        let open = format!("<{name}>");
+        let from = gui.find(&open)? + open.len();
+        let to = from + gui[from..].find(&format!("</{name}>"))?;
+        Some(gui[from..to].trim().to_string()).filter(|value| !value.is_empty())
+    };
+    let apikey = inner("apikey")?;
+    let address = inner("address").map(|address| {
+        if tls && !address.contains("://") {
+            format!("https://{address}")
+        } else {
+            address
+        }
+    });
+    Some((address, apikey))
+}
+
+/// Where Syncthing keeps its `config.xml` on this machine, most likely first.
+/// Under WSL that includes every Windows profile's, since Syncthing usually
+/// runs on Windows. None on Termux, where the app's files are its own.
+#[must_use]
+pub fn config_candidates(wsl: Option<&Wsl>) -> Vec<PathBuf> {
+    if crate::open::is_termux() {
+        return Vec::new();
+    }
+    let mut paths = Vec::new();
+    if let Some(local) = dirs::data_local_dir().filter(|_| cfg!(windows)) {
+        paths.push(local.join("Syncthing").join("config.xml"));
+    }
+    if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
+        paths.push(PathBuf::from(state).join("syncthing").join("config.xml"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".local").join("state").join("syncthing").join("config.xml"));
+        paths.push(home.join(".config").join("syncthing").join("config.xml"));
+        paths.push(home.join("Library/Application Support/Syncthing/config.xml"));
+    }
+    if let Some(wsl) = wsl {
+        paths.extend(crate::wsl::windows_profiles(wsl).into_iter().map(|profile| {
+            profile.join("AppData").join("Local").join("Syncthing").join("config.xml")
+        }));
+    }
+    paths
+}
+
+/// The first Syncthing config among `paths` that holds an API key.
+#[must_use]
+pub fn discover(paths: &[PathBuf]) -> Option<Found> {
+    paths.iter().find_map(|path| {
+        let (address, apikey) = read_gui(&std::fs::read_to_string(path).ok()?)?;
+        Some(Found { path: path.clone(), address, apikey })
+    })
+}
+
 /// Where and how to reach the daemon.
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -574,6 +646,24 @@ mod tests {
 
         let plain = query(&dead(), Path::new("/tmp"), None);
         assert!(!plain.detail.expect("detail").contains("WSL"));
+    }
+
+    /// The API key and address come out of the `<gui>` element, with a scheme
+    /// added when the GUI serves TLS.
+    #[test]
+    fn syncthing_config_yields_its_api_address_and_key() {
+        let xml = r#"<configuration version="37">
+    <folder id="docs" path="/x"></folder>
+    <gui enabled="true" tls="true" debugging="false">
+        <address>127.0.0.1:8384</address>
+        <apikey>AbC123</apikey>
+    </gui>
+</configuration>"#;
+        assert_eq!(read_gui(xml), Some((Some("https://127.0.0.1:8384".into()), "AbC123".into())));
+        assert_eq!(
+            read_gui("<configuration><gui><address>x</address></gui></configuration>"),
+            None
+        );
     }
 
     /// Pointing `address` at the Windows host with verification off is still

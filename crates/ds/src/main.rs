@@ -107,18 +107,15 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         query: Vec<String>,
     },
-    /// Name this device, so it can write.
-    ///
-    /// Listed under maintenance rather than with the daily verbs (REWRITE.md
-    /// §4.1): it is run once per device, and every launch after that depends on
-    /// what it decided.
+    /// Set this device up: its name, the Syncthing folder and API, and on
+    /// Termux what the phone still needs. Re-run it to change any of them.
     Init {
         /// This device's name — the first half of its writer id (`phone` →
         /// `phone-core`). Asked for interactively when omitted.
         #[arg(long, value_name = "NAME")]
         device: Option<String>,
 
-        /// Replace an existing config.
+        /// Rename an already named device without asking.
         #[arg(long)]
         force: bool,
     },
@@ -195,24 +192,40 @@ fn init(args: &Args, device: Option<String>, force: bool) -> u8 {
         root: args.root.clone().or_else(|| std::env::var_os("DS_ROOT").map(PathBuf::from)),
         force,
     };
-    let stdin = io::stdin();
-    let mut input = stdin.lock();
-    let mut output = io::stdout();
-    let interactive = ds::init::stdin_is_interactive();
-    match ds::init::run(
-        &path,
-        &answers,
-        &mut input,
-        &mut output,
-        interactive,
-        ds::wsl::Wsl::current(),
-    ) {
-        Ok(()) => 0,
+    let machine = ds::init::Machine::current();
+    let result = if ds::init::stdin_is_interactive() {
+        let mut prompt = ds::prompt::Terminal { wsl: machine.wsl.clone() };
+        ds::init::run(&path, &answers, &mut prompt, &machine)
+    } else {
+        let stdin = io::stdin();
+        let mut input = stdin.lock();
+        let mut output = io::stdout();
+        let mut prompt =
+            ds::prompt::Lines { input: &mut input, output: &mut output, interactive: false };
+        ds::init::run(&path, &answers, &mut prompt, &machine)
+    };
+    match result {
+        Ok(config) => {
+            check_syncthing(&config, machine.wsl.as_ref());
+            0
+        }
         Err(error) => {
             eprintln!("ds: {error}");
             code::FAILED
         }
     }
+}
+
+/// Asks Syncthing, with the settings init just wrote, how the folder is doing,
+/// so a wrong key or address shows now rather than at the next `ds status`.
+fn check_syncthing(config: &ds::config::Config, wsl: Option<&ds::wsl::Wsl>) {
+    let (Some(settings), Some(root)) =
+        (ds::syncthing::Settings::from_config(&config.syncthing), &config.syncthing_root)
+    else {
+        return;
+    };
+    let sync = ds::syncthing::query(&settings, root, wsl);
+    println!("  syncthing      {}", ds::status::Report::sync_line(&sync));
 }
 
 /// `ds status`.

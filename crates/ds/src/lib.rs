@@ -87,6 +87,7 @@ pub mod locpick;
 pub mod open;
 pub mod pick;
 pub mod place;
+pub mod prompt;
 pub mod scans;
 pub mod search;
 pub mod sheet;

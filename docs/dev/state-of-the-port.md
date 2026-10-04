@@ -39,9 +39,10 @@ Three facts that shape what the rest of R4 costs:
   save rather than at launch.
 - **The binary has three subcommands**, `status`, `open` and `init`, plus the
   TUI. Every other verb in REWRITE.md's module map — `file`, `export`,
-  `organize`, the review filters — is unbuilt. `ds init` so far asks only for the
-  device name and the root; the Syncthing key and the Termux checks §4.1 wants
-  are one more `ask` each.
+  `organize`, the review filters — is unbuilt. `ds init` is complete: the
+  device name, the root with a live folder list, the Syncthing API key (read
+  from Syncthing's own `config.xml` where it can be), the Termux checks, and a
+  re-run that keeps every answer Enter leaves alone.
 
 The Python package in `dossier/` is still the working v2 app and stays until R6
 guts it. The Rust work has not touched it.

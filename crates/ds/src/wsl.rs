@@ -292,8 +292,19 @@ pub fn windows_twin(wsl: &Wsl, device: &str, root: Option<&Path>) -> Option<Twin
         }
     });
     let root = root.as_deref();
-    let drives = std::fs::read_dir(&wsl.mount_root).ok()?;
-    let mut profiles = drives
+    windows_profiles(wsl).into_iter().find_map(|profile| {
+        let config = profile.join("AppData").join("Local").join("dossier").join("config.toml");
+        let theirs = crate::config::Config::read(&config).ok()?;
+        twin_of(wsl, device, root, &theirs)
+            .then(|| Twin { config, writer: crate::init::writer_id(device) })
+    })
+}
+
+/// Every Windows user profile on every mounted drive, as Linux paths.
+#[must_use]
+pub fn windows_profiles(wsl: &Wsl) -> Vec<PathBuf> {
+    let Ok(drives) = std::fs::read_dir(&wsl.mount_root) else { return Vec::new() };
+    drives
         .filter_map(Result::ok)
         .filter(|drive| {
             let name = drive.file_name();
@@ -302,14 +313,9 @@ pub fn windows_twin(wsl: &Wsl, device: &str, root: Option<&Path>) -> Option<Twin
         })
         .filter_map(|drive| std::fs::read_dir(drive.path().join("Users")).ok())
         .flatten()
-        .filter_map(Result::ok);
-    profiles.find_map(|profile| {
-        let config =
-            profile.path().join("AppData").join("Local").join("dossier").join("config.toml");
-        let theirs = crate::config::Config::read(&config).ok()?;
-        twin_of(wsl, device, root, &theirs)
-            .then(|| Twin { config, writer: crate::init::writer_id(device) })
-    })
+        .filter_map(Result::ok)
+        .map(|profile| profile.path())
+        .collect()
 }
 
 /// The rule [`windows_twin`] applies to one Windows config, split out so it can

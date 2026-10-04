@@ -1,0 +1,478 @@
+// Copyright © 2026-present gsfernandes81
+//
+// This file is part of "dossier".
+//
+// dossier is free software: you can redistribute it and/or modify it under the
+// terms of the GNU Affero General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option) any later version.
+//
+// dossier is distributed in the hope that it will be useful, but WITHOUT ANY
+// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+// PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License along with
+// dossier. If not, see <https://www.gnu.org/licenses/>.
+
+//! Asking `ds init`'s questions: plainly, one line each, when stdin is a pipe
+//! or a test; on a terminal, with a line editor that lists folders as a path is
+//! typed and hides a secret.
+
+use std::io::{BufRead, Write};
+use std::path::PathBuf;
+
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use crate::complete::{Entry, Folder};
+
+/// Rows the live list shows under the line.
+const SHOWN: usize = 8;
+
+/// What kind of answer a question takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// Free text.
+    Text,
+    /// A folder, typed with a live list of folders.
+    Folder,
+    /// A secret, never shown as typed.
+    Secret,
+    /// Yes or no.
+    YesNo,
+}
+
+/// One question.
+#[derive(Debug, Clone)]
+pub struct Question<'a> {
+    /// What is asked.
+    pub prompt: &'a str,
+    /// The answer an empty reply keeps.
+    pub default: Option<&'a str>,
+    /// What kind of answer it takes.
+    pub kind: Kind,
+    /// Whether an empty reply with no default is asked again. When not, it
+    /// skips the question.
+    pub required: bool,
+    /// The flag that answers it without asking.
+    pub flag: &'static str,
+}
+
+/// Why a question went unanswered.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// A value was missing and there was no terminal to ask at.
+    #[error("no terminal to ask on — pass {flag}")]
+    NotATerminal {
+        /// The flag that would have supplied it.
+        flag: &'static str,
+    },
+    /// The person left with `Esc` or `ctrl+c`.
+    #[error("cancelled — nothing was written")]
+    Cancelled,
+    /// Reading or writing the terminal failed.
+    #[error("cannot talk to the terminal: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Something that can ask questions and say things.
+pub trait Prompt {
+    /// The reply, or the default when it is empty; `None` when an optional
+    /// question is skipped.
+    ///
+    /// # Errors
+    /// [`Error`] when there is nobody to ask, they cancel, or the terminal fails.
+    fn ask(&mut self, question: &Question) -> Result<Option<String>, Error>;
+
+    /// Writes a line of output.
+    ///
+    /// # Errors
+    /// When the output cannot be written.
+    fn say(&mut self, line: &str) -> std::io::Result<()>;
+
+    /// Whether there is a person to ask.
+    fn interactive(&self) -> bool;
+}
+
+/// A secret as a prompt may show it: its ends, never its middle.
+#[must_use]
+pub fn masked(secret: &str) -> String {
+    let chars: Vec<char> = secret.chars().collect();
+    if chars.len() <= 8 {
+        return "•".repeat(chars.len());
+    }
+    let head: String = chars[..4].iter().collect();
+    let tail: String = chars[chars.len() - 4..].iter().collect();
+    format!("{head}…{tail}")
+}
+
+/// How the question's default reads in its prompt.
+fn hint(question: &Question) -> String {
+    match (question.kind, question.default) {
+        (Kind::YesNo, Some("yes")) => " [Y/n]".into(),
+        (Kind::YesNo, _) => " [y/N]".into(),
+        (Kind::Secret, Some(default)) => format!(" (now {} — Enter keeps it)", masked(default)),
+        (_, Some(default)) => format!(" (now {default} — Enter keeps it)"),
+        (_, None) if !question.required => " (Enter skips)".into(),
+        (_, None) => String::new(),
+    }
+}
+
+/// What a reply means once the default and the kind have had their say:
+/// `Err(())` asks again.
+fn settle(question: &Question, reply: &str) -> Result<Option<String>, ()> {
+    let reply = reply.trim();
+    if question.kind == Kind::YesNo {
+        return match reply.to_lowercase().as_str() {
+            "" => Ok(question.default.map(str::to_string)),
+            "y" | "yes" => Ok(Some("yes".into())),
+            "n" | "no" => Ok(Some("no".into())),
+            _ => Err(()),
+        };
+    }
+    match (reply.is_empty(), question.default) {
+        (false, _) => Ok(Some(reply.to_string())),
+        (true, Some(default)) => Ok(Some(default.to_string())),
+        (true, None) if question.required => Err(()),
+        (true, None) => Ok(None),
+    }
+}
+
+/// Questions asked one line at a time over plain streams — a pipe, or a test.
+pub struct Lines<'a, R: BufRead, W: Write> {
+    /// Where replies come from.
+    pub input: &'a mut R,
+    /// Where questions go.
+    pub output: &'a mut W,
+    /// Whether a person is on the other end. When not, an unanswered question
+    /// is an error rather than a wait: `ds init` in a pipe fails fast.
+    pub interactive: bool,
+}
+
+impl<R: BufRead, W: Write> Prompt for Lines<'_, R, W> {
+    fn ask(&mut self, question: &Question) -> Result<Option<String>, Error> {
+        if !self.interactive {
+            return match (question.default, question.required) {
+                (Some(default), _) => Ok(Some(default.to_string())),
+                (None, true) => Err(Error::NotATerminal { flag: question.flag }),
+                (None, false) => Ok(None),
+            };
+        }
+        loop {
+            write!(self.output, "{}{}\n> ", question.prompt, hint(question))?;
+            self.output.flush()?;
+            let mut line = String::new();
+            if self.input.read_line(&mut line)? == 0 {
+                return Err(Error::NotATerminal { flag: question.flag });
+            }
+            match settle(question, &line) {
+                Ok(answer) => return Ok(answer),
+                Err(()) if question.kind == Kind::YesNo => writeln!(self.output, "  (y or n)")?,
+                Err(()) => {
+                    writeln!(self.output, "  (that one has no sensible default — please answer)")?;
+                }
+            }
+        }
+    }
+
+    fn say(&mut self, line: &str) -> std::io::Result<()> {
+        writeln!(self.output, "{line}")
+    }
+
+    fn interactive(&self) -> bool {
+        self.interactive
+    }
+}
+
+/// What a key did to the line being edited.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Step {
+    /// Keep editing.
+    Continue,
+    /// The line is finished.
+    Done(String),
+    /// The person left.
+    Cancel,
+}
+
+/// One line being typed, with the live list under it for a folder.
+#[derive(Debug, Clone)]
+pub struct LineEditor {
+    /// What has been typed.
+    pub buffer: String,
+    /// The list row `↑`/`↓` chose, if any.
+    pub chosen: Option<usize>,
+    kind: Kind,
+    base: PathBuf,
+    wsl: Option<crate::wsl::Wsl>,
+    folder: Option<Folder>,
+}
+
+impl LineEditor {
+    /// Starts a line of `kind` holding `start`; relative folders are read from
+    /// `base`.
+    #[must_use]
+    pub fn new(kind: Kind, start: &str, base: PathBuf, wsl: Option<crate::wsl::Wsl>) -> Self {
+        let mut editor =
+            Self { buffer: start.to_string(), chosen: None, kind, base, wsl, folder: None };
+        editor.refresh();
+        editor
+    }
+
+    fn refresh(&mut self) {
+        if self.kind != Kind::Folder {
+            return;
+        }
+        if !self.folder.as_ref().is_some_and(|folder| folder.holds(&self.buffer)) {
+            self.folder =
+                Some(crate::complete::read(&self.base, &self.buffer, true, self.wsl.as_ref()));
+        }
+    }
+
+    /// The live list's rows.
+    #[must_use]
+    pub fn matches(&self) -> Vec<Entry> {
+        self.folder
+            .as_ref()
+            .map(|folder| folder.matching(&self.buffer).into_iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    fn pick(&mut self, entry: &Entry) {
+        if let Some(folder) = &self.folder {
+            self.buffer = folder.fill(entry);
+        }
+        self.chosen = None;
+        self.refresh();
+    }
+
+    /// Applies one key: `Tab` fills the chosen or top row, `Enter` on a chosen
+    /// row opens it and otherwise finishes the line, and `Esc` or `ctrl+c`
+    /// leaves.
+    pub fn key(&mut self, key: KeyEvent) -> Step {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let hits = self.matches();
+        match key.code {
+            KeyCode::Esc => return Step::Cancel,
+            KeyCode::Char('c') if ctrl => return Step::Cancel,
+            KeyCode::Char('u') if ctrl => {
+                self.buffer.clear();
+                self.chosen = None;
+            }
+            KeyCode::Char(c) if !ctrl => {
+                self.buffer.push(c);
+                self.chosen = None;
+            }
+            KeyCode::Backspace => {
+                self.buffer.pop();
+                self.chosen = None;
+            }
+            KeyCode::Up => self.chosen = crate::complete::step(self.chosen, hits.len(), false),
+            KeyCode::Down => self.chosen = crate::complete::step(self.chosen, hits.len(), true),
+            KeyCode::Tab => {
+                if let Some(entry) = self.chosen.and_then(|at| hits.get(at)).or(hits.first()) {
+                    self.pick(&entry.clone());
+                }
+            }
+            KeyCode::Enter => match self.chosen.and_then(|at| hits.get(at)) {
+                Some(entry) => self.pick(&entry.clone()),
+                None => return Step::Done(self.buffer.clone()),
+            },
+            _ => {}
+        }
+        self.refresh();
+        Step::Continue
+    }
+
+    /// The line as shown: a secret as dots.
+    #[must_use]
+    pub fn shown(&self) -> String {
+        if self.kind == Kind::Secret {
+            "•".repeat(self.buffer.chars().count())
+        } else {
+            self.buffer.clone()
+        }
+    }
+
+    /// The list rows on screen, with the chosen one marked, scrolled to keep
+    /// it in view.
+    #[must_use]
+    pub fn rows(&self) -> Vec<(bool, String)> {
+        let hits = self.matches();
+        let skip = self.chosen.map_or(0, |at| (at + 1).saturating_sub(SHOWN));
+        hits.iter()
+            .enumerate()
+            .skip(skip)
+            .take(SHOWN)
+            .map(|(at, entry)| (self.chosen == Some(at), entry.label()))
+            .collect()
+    }
+}
+
+/// Questions asked on a real terminal, through [`LineEditor`].
+pub struct Terminal {
+    /// The WSL this runs under, so a folder typed as Windows writes it lists.
+    pub wsl: Option<crate::wsl::Wsl>,
+}
+
+impl Terminal {
+    fn edit(&self, question: &Question) -> Result<String, Error> {
+        use ratatui::crossterm::{cursor, event, queue, style, terminal};
+        let start = match question.kind {
+            Kind::Text | Kind::Folder => question.default.unwrap_or_default(),
+            Kind::Secret | Kind::YesNo => "",
+        };
+        let base = std::env::current_dir().unwrap_or_default();
+        let mut editor = LineEditor::new(question.kind, start, base, self.wsl.clone());
+        let mut out = std::io::stdout();
+        terminal::enable_raw_mode()?;
+        let result = (|| -> Result<String, Error> {
+            loop {
+                let cols = terminal::size()
+                    .ok()
+                    .filter(|(cols, _)| *cols > 0)
+                    .map_or(80, |(cols, _)| cols as usize);
+                let line = format!("> {}", editor.shown());
+                let line = crate::layout::truncate_left(&line, cols.saturating_sub(1));
+                queue!(
+                    out,
+                    cursor::MoveToColumn(0),
+                    terminal::Clear(terminal::ClearType::FromCursorDown)
+                )?;
+                queue!(out, style::Print(&line))?;
+                let rows = editor.rows();
+                for (chosen, label) in &rows {
+                    let label =
+                        crate::layout::truncate(&format!("  {label}"), cols.saturating_sub(1));
+                    queue!(out, style::Print("\r\n"))?;
+                    if *chosen {
+                        queue!(out, style::PrintStyledContent(style::Stylize::reverse(label)))?;
+                    } else {
+                        queue!(out, style::Print(label))?;
+                    }
+                }
+                if !rows.is_empty() {
+                    let up = u16::try_from(rows.len()).unwrap_or(u16::MAX);
+                    let at = u16::try_from(crate::layout::width(&line)).unwrap_or(u16::MAX);
+                    queue!(out, cursor::MoveUp(up), cursor::MoveToColumn(at))?;
+                }
+                out.flush()?;
+                if let event::Event::Key(key) = event::read()? {
+                    if key.kind != event::KeyEventKind::Press {
+                        continue;
+                    }
+                    match editor.key(key) {
+                        Step::Continue => {}
+                        Step::Done(text) => return Ok(text),
+                        Step::Cancel => return Err(Error::Cancelled),
+                    }
+                }
+            }
+        })();
+        let _ =
+            queue!(out, terminal::Clear(terminal::ClearType::FromCursorDown), style::Print("\r\n"));
+        let _ = out.flush();
+        terminal::disable_raw_mode()?;
+        result
+    }
+}
+
+impl Prompt for Terminal {
+    fn ask(&mut self, question: &Question) -> Result<Option<String>, Error> {
+        loop {
+            println!("{}{}", question.prompt, hint(question));
+            let reply = self.edit(question)?;
+            match settle(question, &reply) {
+                Ok(answer) => return Ok(answer),
+                Err(()) if question.kind == Kind::YesNo => println!("  (y or n)"),
+                Err(()) => println!("  (that one has no sensible default — please answer)"),
+            }
+        }
+    }
+
+    fn say(&mut self, line: &str) -> std::io::Result<()> {
+        writeln!(std::io::stdout(), "{line}")
+    }
+
+    fn interactive(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn press(editor: &mut LineEditor, code: KeyCode) -> Step {
+        editor.key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    fn typed(editor: &mut LineEditor, text: &str) {
+        for c in text.chars() {
+            press(editor, KeyCode::Char(c));
+        }
+    }
+
+    fn sandbox(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ds-prompt-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        for folder in ["Sync/Documents", "Sync/Music", "Other"] {
+            std::fs::create_dir_all(dir.join(folder)).expect("mkdir");
+        }
+        std::fs::write(dir.join("Sync/notes.txt"), "").expect("write");
+        dir
+    }
+
+    /// A folder question lists only folders; `Tab` fills the top one, and a
+    /// chosen row opens on `Enter` rather than finishing the line.
+    #[test]
+    fn a_folder_line_lists_folders_and_opens_the_chosen_one() {
+        let base = sandbox("folder");
+        let mut editor = LineEditor::new(Kind::Folder, "", base, None);
+        typed(&mut editor, "Sy");
+        press(&mut editor, KeyCode::Tab);
+        assert_eq!(editor.buffer, "Sync/");
+        let labels: Vec<String> = editor.matches().iter().map(Entry::label).collect();
+        assert_eq!(labels, ["Documents/", "Music/"], "no files");
+        press(&mut editor, KeyCode::Down);
+        assert_eq!(press(&mut editor, KeyCode::Enter), Step::Continue);
+        assert_eq!(editor.buffer, "Sync/Documents/");
+        assert_eq!(press(&mut editor, KeyCode::Enter), Step::Done("Sync/Documents/".into()));
+    }
+
+    /// `Esc` leaves, and a secret is shown as dots.
+    #[test]
+    fn esc_cancels_and_a_secret_stays_hidden() {
+        let mut editor = LineEditor::new(Kind::Secret, "", PathBuf::new(), None);
+        typed(&mut editor, "abc");
+        assert_eq!(editor.shown(), "•••");
+        assert_eq!(press(&mut editor, KeyCode::Esc), Step::Cancel);
+    }
+
+    /// An empty reply keeps the default, a yes-or-no takes either word, and an
+    /// optional question can be skipped.
+    #[test]
+    fn a_reply_settles_against_the_default() {
+        let question = |kind, default, required| Question {
+            prompt: "?",
+            default,
+            kind,
+            required,
+            flag: "--x",
+        };
+        assert_eq!(
+            settle(&question(Kind::Text, Some("phone"), true), ""),
+            Ok(Some("phone".into()))
+        );
+        assert_eq!(settle(&question(Kind::Text, None, true), " "), Err(()));
+        assert_eq!(settle(&question(Kind::Secret, None, false), ""), Ok(None));
+        assert_eq!(settle(&question(Kind::YesNo, Some("yes"), true), ""), Ok(Some("yes".into())));
+        assert_eq!(settle(&question(Kind::YesNo, Some("yes"), true), "N"), Ok(Some("no".into())));
+        assert_eq!(settle(&question(Kind::YesNo, None, true), "maybe"), Err(()));
+    }
+
+    /// A prompt never prints a secret, only its ends.
+    #[test]
+    fn a_secret_default_is_masked() {
+        assert_eq!(masked("abcdefghijkl"), "abcd…ijkl");
+        assert_eq!(masked("short"), "•••••");
+    }
+}

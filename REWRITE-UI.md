@@ -408,6 +408,15 @@ at once. Filter's last row is **clear all**.
   follows a document to its newer versions. `+ new` creates the bundle and ticks it in
   the same change, as the location picker's `+ new` files into what it creates.
 
+### Typing a path
+
+Wherever a path is typed — a soft copy being attached, the root `ds init` asks
+for — **a live list of the folder being typed in** shows under the line,
+folders first, narrowed by what follows the last separator. Nothing is selected
+until `↑`/`↓` chooses a row; `Enter` or a tap on a row picks it, opening a
+folder or taking a file, and `Enter` with nothing chosen takes the line as
+typed, which is how a default is kept. `Tab` fills the chosen or top row.
+
 ### Search-first creation
 
 Wherever a search lists things that can be created — documents in the Find

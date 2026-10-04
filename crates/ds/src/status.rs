@@ -216,7 +216,8 @@ impl Report {
 
     /// The Syncthing line: state, then the facts that decide whether these
     /// documents actually move.
-    fn sync_line(sync: &crate::syncthing::Status) -> String {
+    #[must_use]
+    pub fn sync_line(sync: &crate::syncthing::Status) -> String {
         let mut line = sync.state.label().to_string();
         if let Some(version) = &sync.version {
             let _ = write!(line, " · {version}");
