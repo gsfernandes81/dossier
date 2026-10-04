@@ -1031,7 +1031,7 @@ fn entry_row(model: &Model, key: &'static str, cols: usize, theme: Theme) -> Lin
 fn mode_line(model: &Model) -> String {
     use crate::app::View;
     let top = model.views.last();
-    if model.delete_armed {
+    if model.delete_armed && model.locpick.is_none() {
         return match top {
             Some(View::Bundle { id, .. }) => {
                 let name = model.store.bundle(id).map_or("", |bundle| bundle.name.as_str());
@@ -1081,8 +1081,8 @@ fn info_row(model: &Model, cols: usize, theme: Theme) -> Line<'static> {
 /// How many rows the status line needs: one, or as many as an armed location
 /// delete's caution wraps to.
 fn status_rows(model: &Model, cols: u16) -> u16 {
-    match (&model.remove_armed, &model.flash) {
-        (Some(_), Some(flash)) => {
+    match (model.delete_armed && model.locpick.is_some(), &model.flash) {
+        (true, Some(flash)) => {
             u16::try_from(wrap(flash, cols.saturating_sub(2) as usize).len().clamp(1, 4))
                 .unwrap_or(1)
         }

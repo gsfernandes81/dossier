@@ -504,15 +504,9 @@ pub struct Model {
     /// direction says when the journal confirms it and dropped when it
     /// refuses, so a write that never landed can never be taken back.
     pending: Option<Pending>,
-    /// The physical location one more `d` deletes, with everything inside it.
-    pub remove_armed: Option<String>,
-    /// One more `d` and the record's document is tombstoned.
-    ///
-    /// The same arming idiom `Esc` and quit already use, for the same reason:
-    /// on a phone the thumb that meant `e` is one row from the key that means
-    /// this. It is armed rather than confirmed with a dialog because a dialog
-    /// would be a fourth surface, and because the write **is** reversible — `u`
-    /// puts the document back, fields and all.
+    /// One more `d` deletes what is in front: the document, the bundle, or
+    /// the picked location with everything inside it. Armed rather than
+    /// confirmed in a dialog, since `u` puts it back.
     pub delete_armed: bool,
     /// Whether this session can write, and why not when it cannot.
     pub write: WriteState,
@@ -1387,7 +1381,7 @@ impl Model {
             "Caution: {name} holds {holds}. Press d again to delete and remove their location \
              attributes"
         ));
-        self.remove_armed = Some(id);
+        self.delete_armed = true;
         Effect::Redraw
     }
 
@@ -1857,12 +1851,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         model.keyboard_hint = false;
     }
 
-    // Delete arms only on a *consecutive* `d`; any other key disarms it, the
-    // same rule Esc and quit follow. Worker messages are not keystrokes and so
-    // do not disarm — a scan landing mid-decision must not silently make the
-    // next `d` mean something different from what the screen is offering.
-    if msg != Msg::Char('d') && is_key(&msg) {
+    // Delete arms only on a consecutive `d`: any key or tap disarms it, and
+    // its caution goes with it. A worker's message or a resize does not.
+    if model.delete_armed
+        && msg != Msg::Char('d')
+        && !from_worker(&msg)
+        && !matches!(msg, Msg::Resize { .. })
+    {
         model.delete_armed = false;
+        model.flash = None;
     }
 
     // Esc arms only on a *consecutive* Esc; any other key disarms it.
@@ -2520,17 +2517,14 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         }
         return None;
     }
-    if let Some(id) = model.remove_armed.take() {
-        if *msg == Msg::Char('d') {
+    if model.delete_armed && *msg == Msg::Char('d') {
+        model.delete_armed = false;
+        model.flash = None;
+        if let Some(id) = model.picked_location() {
             return Some(model.remove(&id));
         }
-        if is_key(msg) {
-            model.flash = None;
-            return Some(Effect::Redraw);
-        }
-        model.remove_armed = Some(id);
     }
-    let mut picker = model.locpick.clone()?;
+    let mut picker = model.locpick.take()?;
     let effect = match msg {
         Msg::Move(Motion::Up) => {
             picker.step(&model.store, false);
@@ -2573,10 +2567,11 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             Effect::Redraw
         }
         Msg::Enter => return Some(locpick_enter(model, picker)),
-        Msg::Tap { col, row } => {
-            let Some(index) = model.tree.at(*col, *row) else { return Some(Effect::Idle) };
+        Msg::Tap { col, row } => 'tap: {
             let rows = picker.rows(&model.store);
-            let Some(tapped) = rows.get(index) else { return Some(Effect::Idle) };
+            let Some(tapped) = model.tree.at(*col, *row).and_then(|index| rows.get(index)) else {
+                break 'tap Effect::Idle;
+            };
             let chevron = match tapped {
                 crate::locpick::Row::Location { lead, open: Some(open), id, .. } => {
                     let at = model.tree.left
@@ -2604,7 +2599,10 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             Effect::Redraw
         }
         Msg::Scroll(_) | Msg::Move(_) => Effect::Idle,
-        _ => return None,
+        _ => {
+            model.locpick = Some(picker);
+            return None;
+        }
     };
     model.locpick = Some(picker);
     Some(effect)
@@ -2652,49 +2650,54 @@ fn locpick_enter(model: &mut Model, mut picker: crate::locpick::LocationPicker) 
 /// Keys while a picker is open. `None` falls through, so `ctrl+q` and `Esc`
 /// keep their meaning.
 fn picker_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
-    let picker = model.picker.clone()?;
+    let mut picker = model.picker.take()?;
     let hits = picker.matching(&model.store);
-    let state = model.picker.as_mut()?;
-    match msg {
+    let effect = match msg {
         Msg::Char(c) => {
-            state.filter.push(*c);
-            state.cursor = 0;
-            Some(Effect::Redraw)
+            picker.filter.push(*c);
+            picker.cursor = 0;
+            Effect::Redraw
         }
         Msg::Backspace => {
-            if state.filter.pop().is_none() {
-                model.picker = None;
+            if picker.filter.pop().is_none() {
+                return Some(Effect::Redraw);
             }
-            Some(Effect::Redraw)
+            Effect::Redraw
         }
         Msg::Move(Motion::Up) => {
-            state.cursor = state.cursor.saturating_sub(1);
-            Some(Effect::Redraw)
+            picker.cursor = picker.cursor.saturating_sub(1);
+            Effect::Redraw
         }
         Msg::Move(Motion::Down) => {
-            state.cursor = (state.cursor + 1).min(hits.len().saturating_sub(1));
-            Some(Effect::Redraw)
+            picker.cursor = (picker.cursor + 1).min(hits.len().saturating_sub(1));
+            Effect::Redraw
         }
-        Msg::Enter => Some(match hits.get(picker.cursor) {
-            Some(entry) => model.choose(&picker, entry.choice.clone()),
-            None => Effect::Idle,
-        }),
-        Msg::Tap { col, row } => Some(match model.panel.at(*col, *row) {
-            Some(index) if index == picker.cursor => match hits.get(index) {
-                Some(entry) => model.choose(&picker, entry.choice.clone()),
-                None => Effect::Idle,
-            },
+        Msg::Enter => return Some(pick(model, picker, &hits)),
+        Msg::Tap { col, row } => match model.panel.at(*col, *row) {
+            None => return Some(Effect::Redraw),
+            Some(index) if index == picker.cursor => return Some(pick(model, picker, &hits)),
             Some(index) => {
-                state.cursor = index;
+                picker.cursor = index;
                 Effect::Redraw
             }
-            None => {
-                model.picker = None;
-                Effect::Redraw
-            }
-        }),
-        Msg::Move(_) | Msg::Left | Msg::Right | Msg::Leader | Msg::Scroll(_) => Some(Effect::Idle),
-        _ => None,
+        },
+        Msg::Move(_) | Msg::Left | Msg::Right | Msg::Leader | Msg::Scroll(_) => Effect::Idle,
+        _ => {
+            model.picker = Some(picker);
+            return None;
+        }
+    };
+    model.picker = Some(picker);
+    Some(effect)
+}
+
+/// Runs the picker's selected entry, which closes it; with none, it stays.
+fn pick(model: &mut Model, picker: crate::pick::Picker, hits: &[crate::pick::Entry]) -> Effect {
+    if let Some(entry) = hits.get(picker.cursor) {
+        model.choose(&picker, entry.choice.clone())
+    } else {
+        model.picker = Some(picker);
+        Effect::Idle
     }
 }
 
@@ -3469,6 +3472,20 @@ pub(crate) mod tests {
         );
     }
 
+    /// A tap between the two `d`s disarms, so the second deletes nothing.
+    #[test]
+    fn a_tap_disarms_a_location_delete() {
+        let mut m = with_locations(writable());
+        picking(&mut m);
+        update(&mut m, Msg::Move(Motion::Up));
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('d'));
+        assert!(m.delete_armed);
+        update(&mut m, Msg::Tap { col: 0, row: 0 });
+        assert!(!m.delete_armed && m.flash.is_none(), "the caution goes with the arm");
+        assert!(!matches!(update(&mut m, Msg::Char('d')), Effect::Append(_)));
+    }
+
     /// Deleting a location that holds anything warns with what it holds, and
     /// only a second `d` deletes it and everything inside; any other key
     /// cancels.
@@ -3487,7 +3504,7 @@ pub(crate) mod tests {
             )
         );
         update(&mut m, Msg::Move(Motion::Down));
-        assert!(m.remove_armed.is_none(), "any other key cancels");
+        assert!(!m.delete_armed, "any other key cancels");
 
         update(&mut m, Msg::Move(Motion::Up));
         update(&mut m, Msg::Char(' '));
