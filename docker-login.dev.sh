@@ -110,11 +110,8 @@ if claude auth status >/dev/null 2>&1; then
 fi
 cat <<'EOF'
 
-  Attach a shell:   docker exec -it ds-dev fish    (or over ssh: ssh -t ds-dev bash)
-  Work in it:       ssh ds-dev  — the claude-sessions menu: Enter attaches or resumes,
-                    n starts a session in /workspace, c closes, s a shell, ? the keys
-  Idle sessions:    stopped after 90m and left resumable — ~/.local/share/claude-offload.log
-  Its replacement:  dry run, logs only — ~/.local/share/claude-sessions-dry-run.log
-                    and ~/.local/share/claude-sessions/ (hook.log, offload.log)
+  Attach a shell:   docker exec -it ds-dev fish
+  Work in it:       ssh ds-dev  — the claude-sessions menu (? lists its keys)
+  Idle sessions:    offloaded and left resumable from the menu
   Re-run logins:    make dev-login
 EOF

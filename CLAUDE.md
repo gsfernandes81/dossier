@@ -144,9 +144,10 @@ For developing dossier remotely (e.g. on a Pi/home server, driven from claude.ai
 Claude mobile app, or Zed-remote), the repo ships a Docker dev environment. Since
 **2026-08-24** `Dockerfile.dev` no longer builds one — it is a **thin child of
 `gsrpi-dev-base`**, the shared image the four dev containers on that Pi run
-(`infra-dev`, `or3-dev`, `dd-dev`, this): python 3.13-slim, uv's siblings git and `gh`,
-Node + Claude Code, fish, screen, abduco, the ssh client and server, the `dev` user, the
-dotfiles and the entrypoint all come from there, pulled from
+(`infra-dev`, `or3-dev`, `dd-dev`, this): python 3.13-slim-trixie, uv's siblings git and
+`gh`, Node + a self-updating Claude Code, claude-sessions, fish, screen, abduco, the ssh
+client and server, the `dev` user, the dotfiles and the entrypoint all come from there,
+pulled from
 `ghcr.io/gsfernandes81/gsrpi-dev-base` at the tag pinned in `ARG BASE_TAG`. This repo
 adds a compiler, `uv`, and its own venv (`--all-extras --group driver`). The clone is
 **bind-mounted** at `/workspace`; the venv lives at `/home/dev/venv`, outside the mount.
@@ -184,15 +185,15 @@ that repo checked out — the `FROM` pulls.
 - **Attach:** `docker exec -it ds-dev fish`, or over SSH: `ssh -t <host> 'docker exec -it
   ds-dev fish'`. **There is no Remote Control here as of 2026-08-25** — the supervisor is
   deleted, not defaulted off, and every dev container on this host is reached the same
-  way: ssh in, then `abduco -A claude claude`, which holds the session across a dropped
-  link. The base still pre-seeds Claude's workspace-trust flag for `/workspace` in
-  `~/.claude.json` so a fresh volume does not meet a dialog nobody can answer.
-- **An idle claude is offloaded after 90 minutes and left resumable.** The base runs
-  `offload-idle-claude.sh`: a session detached, silent and running nothing for longer than
-  a claude can schedule its own wake-up (the runtime clamps that to an hour) is stopped,
-  and `~/.local/share/claude-offload.log` holds the `claude --resume` that brings it back.
-  It never touches an attached session, one with work running under it, or one with no
-  transcript. One idle session's process tree measures over a gigabyte.
+  way: `ssh ds-dev`, which lands on the
+  [claude-sessions](https://github.com/gsfernandes81/claude-sessions) menu. How sessions
+  are started, held and resumed is that repo's to describe. Don't set `ForceCommand` in
+  `sshd_config.dev.d/`, because it would replace the menu. The base still pre-seeds
+  Claude's workspace-trust flag for `/workspace` in `~/.claude.json` so a fresh volume
+  does not meet a dialog nobody can answer.
+- **Idle sessions are offloaded and can be resumed.** claude-sessions handles this. Expect
+  an idle session to be stopped and resumable from the menu later. A session with a timer
+  running or a wake-up scheduled is not idle.
 - **sshd is the foreground process**, and it is the only long-lived one: the container's
   lifetime is the door's. `docker logs ds-dev` shows sshd and the start-up lines.
 - **Two sshd defaults the base changed are put back** in `sshd_config.dev.d/`:
