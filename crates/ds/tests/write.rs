@@ -211,11 +211,10 @@ fn a_created_document_survives_a_reload() {
     let (mut model, loaded) = load_model(&journal);
     let before = model.store.docs.len();
 
-    update(&mut model, Msg::Char(' '));
-    update(&mut model, Msg::Char('n'));
     for c in "Seaman Book".chars() {
         update(&mut model, Msg::Char(c));
     }
+    assert!(model.on_new, "nothing matches, so + new is selected");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
         panic!("naming a new document must ask for an append");
     };
@@ -371,8 +370,7 @@ fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
     ts = write_and_reload(&journal, &dir, back, ts, &mut model);
     assert_eq!(model.current().and_then(|d| d.expiry_date.clone()).as_deref(), Some("2026-09-28"));
 
-    update(&mut model, Msg::Char(' '));
-    let Effect::Append(again) = update(&mut model, Msg::Char('r')) else { panic!("no redo") };
+    let Effect::Append(again) = update(&mut model, Msg::Redo) else { panic!("no redo") };
     write_and_reload(&journal, &dir, again, ts, &mut model);
 
     let reloaded = ds::load::load(&journal).expect("reload");
@@ -397,11 +395,10 @@ fn a_created_document_can_be_taken_back_and_put_again() {
     let (mut model, loaded) = load_model(&journal);
     let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
 
-    update(&mut model, Msg::Char(' '));
-    update(&mut model, Msg::Char('n'));
     for c in "Seaman Book".chars() {
         update(&mut model, Msg::Char(c));
     }
+    assert!(model.on_new, "nothing matches, so + new is selected");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
     ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
     assert!(model.store.docs.iter().any(|d| d.id == "seaman-book-desk"));
@@ -414,8 +411,7 @@ fn a_created_document_can_be_taken_back_and_put_again() {
         "the tombstone took it out of the fold"
     );
 
-    update(&mut model, Msg::Char(' '));
-    let Effect::Append(again) = update(&mut model, Msg::Char('r')) else { panic!("no redo") };
+    let Effect::Append(again) = update(&mut model, Msg::Redo) else { panic!("no redo") };
     write_and_reload(&journal, &dir, again, ts, &mut model);
 
     let reloaded = ds::load::load(&journal).expect("reload");

@@ -219,22 +219,41 @@ fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 }
 
 fn draw_list(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
+    let mut area = area;
+    model.new_row = None;
+    if model.offers_new() && area.height > 1 {
+        let text = if model.query.trim().is_empty() {
+            "+ new document".to_string()
+        } else {
+            format!("+ new \"{}\"", model.query.trim())
+        };
+        let room = (area.width as usize).saturating_sub(2);
+        let line = Line::from(vec![
+            Span::raw(cursor_cell(model.on_new)),
+            Span::styled(fit(&text, room), theme.style(Tone::Accent)),
+        ]);
+        let line = if model.on_new { line.style(theme.selected()) } else { line };
+        frame.render_widget(Paragraph::new(line), Rect { height: 1, ..area });
+        model.new_row = Some(area.y);
+        area = Rect { y: area.y + 1, height: area.height - 1, ..area };
+    }
     let row_height = crate::layout::row_height(model.cols);
     let visible = (area.height / row_height).max(1) as usize;
     model.scroll_into_view(visible);
     model.list = ListGeometry { top: area.y, height: area.height, row_height };
 
     if model.rows.is_empty() {
-        let lines = match (&model.missing_journal, model.query.is_empty()) {
-            // A fresh store: say how to start it, and — because the journal is
-            // born on the first save — where that save will put it, so a wrong
-            // root is caught before anything is written there.
+        let fresh = model.query.trim().is_empty() && model.offers_new();
+        let lines = match (&model.missing_journal, fresh) {
+            // Because the journal is born on the first save, say where that
+            // save will put it, so a wrong root is caught before anything is
+            // written there.
             (Some(path), true) => vec![
-                "  no documents yet — Space, then n, adds one".to_string(),
+                "  no documents yet".to_string(),
                 "  the first one creates the journal at".to_string(),
                 format!("  {path}"),
             ],
-            (None, true) => vec!["  no documents yet — Space, then n, adds one".to_string()],
+            (None, true) => vec!["  no documents yet".to_string()],
             (_, false) => vec!["  nothing matches".to_string()],
         };
         let lines: Vec<Line> =
@@ -248,7 +267,7 @@ fn draw_list(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     for slot in 0..visible {
         let Some(&index) = model.rows.get(model.offset + slot) else { break };
         let doc = &model.store.docs[index];
-        let selected = model.offset + slot == model.cursor;
+        let selected = model.offset + slot == model.cursor && !model.on_new;
         let status = model.status(doc);
         let place = model.store.place(doc);
         if row_height == 1 {

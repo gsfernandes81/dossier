@@ -394,6 +394,10 @@ pub struct Model {
     /// terminal's own scrollback (termux-app #4302), so if the list does not
     /// move the finger, nothing does.
     pub offset: usize,
+    /// The cursor is on the `+ new` row pinned above the list.
+    pub on_new: bool,
+    /// The screen row the `+ new` row was last drawn on.
+    pub new_row: Option<u16>,
     /// Detail is a sticky toggle (U3): once open it follows the cursor until
     /// closed.
     pub detail: bool,
@@ -509,6 +513,8 @@ impl Model {
             rows: Vec::new(),
             cursor: 0,
             offset: 0,
+            on_new: false,
+            new_row: None,
             detail: false,
             esc_armed: false,
             mouse_on: true,
@@ -548,7 +554,18 @@ impl Model {
     /// The highlighted document, if anything matched.
     #[must_use]
     pub fn current(&self) -> Option<&Doc> {
+        if self.on_new {
+            return None;
+        }
         self.rows.get(self.cursor).map(|&i| &self.store.docs[i])
+    }
+
+    /// Whether the list offers `+ new`: once something is typed, or always on
+    /// a store with no documents, so the first launch is never a dead end.
+    #[must_use]
+    pub fn offers_new(&self) -> bool {
+        !self.query.trim().is_empty()
+            || !self.store.docs.iter().any(|doc| doc.kind == crate::doc::Kind::Document)
     }
 
     /// The expiry standing of a document, against today and the warn window.
@@ -571,7 +588,8 @@ impl Model {
     /// Rows that fit on screen right now.
     #[must_use]
     pub fn visible_rows(&self) -> usize {
-        layout::visible_rows(self.cols, self.rows_on_screen)
+        let pinned = u16::from(self.offers_new());
+        layout::visible_rows(self.cols, self.rows_on_screen.saturating_sub(pinned))
     }
 
     /// Re-run filter + search and clamp the cursor.
@@ -623,12 +641,22 @@ impl Model {
         };
         self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
         self.offset = self.offset.min(self.cursor);
+        self.on_new = self.offers_new() && (self.on_new || self.rows.is_empty());
     }
 
     /// Move the cursor, clamped. Never wraps: a wrapping list on a phone is a
     /// way to lose your place with a fat thumb.
     fn move_cursor(&mut self, motion: Motion) {
         if self.rows.is_empty() {
+            return;
+        }
+        let up = matches!(motion, Motion::Up | Motion::PageUp | Motion::Home);
+        if self.offers_new() && up && (self.cursor == 0 || motion == Motion::Home) {
+            self.cursor = 0;
+            self.on_new = true;
+            return;
+        }
+        if std::mem::take(&mut self.on_new) && !up {
             return;
         }
         let last = self.rows.len() - 1;
@@ -652,6 +680,9 @@ impl Model {
     /// Goes one layer deeper: from the list into the record, from the record
     /// into the selected file row's file, or the primary file on any other row.
     fn drill(&mut self) -> Effect {
+        if self.on_new {
+            return self.create_from_query();
+        }
         let Some(doc) = self.current() else {
             self.flash = Some("nothing to open".into());
             return Effect::Redraw;
@@ -689,6 +720,7 @@ impl Model {
         self.query_cursor = self.query_cursor.min(self.query.chars().count());
         self.query.insert(byte_index(&self.query, self.query_cursor), c);
         self.query_cursor += 1;
+        self.on_new = false;
         self.requery();
     }
 
@@ -701,6 +733,7 @@ impl Model {
         let end = byte_index(&self.query, self.query_cursor);
         self.query.replace_range(start..end, "");
         self.query_cursor -= 1;
+        self.on_new = false;
         self.requery();
     }
 
@@ -1102,12 +1135,12 @@ impl Model {
             self.sheet = false;
             return Effect::Redraw;
         }
-        if !self.query.is_empty() {
+        if self.detail {
+            self.detail = false;
+        } else if !self.query.is_empty() {
             self.query.clear();
             self.query_cursor = 0;
             self.requery();
-        } else if self.detail {
-            self.detail = false;
         } else if self.filter != Filter::ALL {
             self.filter = Filter::ALL;
             self.requery();
@@ -1168,10 +1201,6 @@ impl Model {
             crate::sheet::Act::Edit => {
                 self.sheet = false;
                 self.record_verb('e')
-            }
-            crate::sheet::Act::New => {
-                self.sheet = false;
-                self.open_new()
             }
             crate::sheet::Act::Undo => {
                 self.sheet = false;
@@ -1338,6 +1367,36 @@ impl Model {
         Effect::Redraw
     }
 
+    /// Creates the document the query names and opens it, or asks for a name
+    /// when nothing is typed.
+    fn create_from_query(&mut self) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let name = self.query.trim().to_string();
+        let Ok(Some(value)) = crate::edit::Field::Name.validate(&name) else {
+            return self.open_new();
+        };
+        let doc = self.mint_id(&name);
+        let drafts = vec![
+            journal::Draft::create("doc", &doc),
+            journal::Draft::set("doc", &doc, "name", value),
+        ];
+        self.pending = Some(Change {
+            forward: drafts.clone(),
+            back: vec![journal::Draft::delete("doc", &doc)],
+        });
+        self.direction = Direction::Forward;
+        self.edit = Some(crate::edit::Edit {
+            doc,
+            buffer: name,
+            saving: true,
+            ..crate::edit::Edit::creating()
+        });
+        Effect::Append(drafts)
+    }
+
     /// Put the last write this session made back the way it was.
     ///
     /// **An undo is an ordinary append**, never a rewrite: §3.1's whole
@@ -1493,6 +1552,7 @@ impl Model {
         self.requery();
         let found = self.rows.iter().position(|&i| self.store.docs[i].id == anchor);
         if let Some(position) = found {
+            self.on_new = false;
             self.cursor = position;
             self.scroll_into_view(self.visible_rows());
         }
@@ -1803,12 +1863,20 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 }
             } else if let Some(index) = model.detail.then(|| model.record.at(col, row)).flatten() {
                 model.record_tap(index)
+            } else if model.new_row == Some(row) && !pushed {
+                if model.on_new {
+                    model.drill()
+                } else {
+                    model.on_new = true;
+                    Effect::Redraw
+                }
             } else if let Some(index) = model.row_at(row) {
                 // Two taps, never a double-tap timer: timing gestures are
                 // miserable on a laggy terminal.
-                if index == model.cursor {
+                if index == model.cursor && !model.on_new {
                     model.drill()
                 } else {
+                    model.on_new = false;
                     model.cursor = index;
                     Effect::Redraw
                 }
@@ -2474,21 +2542,77 @@ pub(crate) mod tests {
     #[test]
     fn creating_a_document_appends_the_create_before_the_name() {
         let mut m = writable();
-        update(&mut m, Msg::Char(' '));
-        update(&mut m, Msg::Char('n'));
-        assert!(m.edit.as_ref().is_some_and(|edit| edit.creating), "the name is being asked for");
-        assert!(!m.detail, "and the record is not opened on a document that does not exist");
-
-        for c in "Seaman Book".chars() {
-            update(&mut m, Msg::Char(c));
-        }
         assert_eq!(
-            update(&mut m, Msg::Enter),
+            create(&mut m, "Seaman Book"),
             Effect::Append(vec![
                 journal::Draft::create("doc", "seaman-book-desk"),
                 journal::Draft::set("doc", "seaman-book-desk", "name", "Seaman Book"),
             ])
         );
+        assert!(!m.detail, "the record waits for the journal to answer");
+    }
+
+    /// Types `name` into the search and presses `Enter` on `+ new`.
+    fn create(m: &mut Model, name: &str) -> Effect {
+        for c in name.chars() {
+            update(m, Msg::Char(c));
+        }
+        while !m.on_new {
+            update(m, Msg::Move(Motion::Up));
+        }
+        update(m, Msg::Enter)
+    }
+
+    /// `+ new` appears once something is typed, and the cursor starts on it
+    /// only when nothing matches: what already exists is seen first.
+    #[test]
+    fn new_is_offered_above_the_matches_once_something_is_typed() {
+        let mut m = writable();
+        assert!(!m.offers_new(), "an empty search lists every document, as fzf does");
+        update(&mut m, Msg::Char('c'));
+        assert!(m.offers_new());
+        assert!(!m.on_new, "the cursor starts on the first match");
+        update(&mut m, Msg::Move(Motion::Up));
+        assert!(m.on_new, "one up from it");
+        assert!(m.current().is_none());
+        update(&mut m, Msg::Move(Motion::Down));
+        assert!(!m.on_new);
+        assert_eq!(m.cursor, 0, "and back down lands on the first match");
+        for c in "zzzz".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert!(m.on_new, "nothing matches, so + new is selected");
+    }
+
+    /// The created document opens with the search still typed, so coming back
+    /// from it lands where the user left.
+    #[test]
+    fn the_search_survives_creating_from_it() {
+        let mut m = writable();
+        create(&mut m, "Seaman Book");
+        let mut store = m.store.clone();
+        let mut fresh = store.docs[0].clone();
+        fresh.id = "seaman-book-desk".into();
+        fresh.name = "Seaman Book".into();
+        fresh.haystack = crate::search::fold(&fresh.name);
+        store.docs.push(fresh);
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert!(m.detail);
+        update(&mut m, Msg::Esc);
+        assert!(!m.detail, "Esc closes the record first");
+        assert_eq!(m.query, "Seaman Book", "and the search is still there");
+    }
+
+    /// On a store with no documents `+ new document` shows with nothing typed
+    /// and asks for the name, so the first launch is never a dead end.
+    #[test]
+    fn an_empty_store_offers_a_new_document_and_asks_for_its_name() {
+        let mut m = writable();
+        m.store.docs.clear();
+        m.requery();
+        assert!(m.on_new);
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
+        assert!(m.edit.as_ref().is_some_and(|edit| edit.creating), "the name is being asked for");
     }
 
     /// **The id is minted from the store the user can see** — a name that would
@@ -2498,12 +2622,7 @@ pub(crate) mod tests {
     fn a_new_id_avoids_every_id_already_in_the_store() {
         let mut m = writable();
         m.store.docs[0].id = "passport-desk".into();
-        update(&mut m, Msg::Char(' '));
-        update(&mut m, Msg::Char('n'));
-        for c in "Passport".chars() {
-            update(&mut m, Msg::Char(c));
-        }
-        let Effect::Append(drafts) = update(&mut m, Msg::Enter) else { panic!("no append") };
+        let Effect::Append(drafts) = create(&mut m, "Passport") else { panic!("no append") };
         assert_eq!(drafts[0], journal::Draft::create("doc", "passport-desk-2"));
     }
 
@@ -2513,12 +2632,7 @@ pub(crate) mod tests {
     #[test]
     fn a_created_document_opens_on_its_record() {
         let mut m = writable();
-        update(&mut m, Msg::Char(' '));
-        update(&mut m, Msg::Char('n'));
-        for c in "Seaman Book".chars() {
-            update(&mut m, Msg::Char(c));
-        }
-        update(&mut m, Msg::Enter);
+        create(&mut m, "Seaman Book");
 
         // What the writer thread posts back once the ops have landed.
         let mut store = m.store.clone();
@@ -2543,8 +2657,7 @@ pub(crate) mod tests {
     #[test]
     fn creating_is_refused_with_a_reason_when_the_session_cannot_write() {
         let mut m = model();
-        update(&mut m, Msg::Char(' '));
-        update(&mut m, Msg::Char('n'));
+        create(&mut m, "Seaman Book");
         assert!(m.edit.is_none());
         assert!(m.flash.is_some());
     }
@@ -2602,12 +2715,7 @@ pub(crate) mod tests {
     #[test]
     fn creating_a_document_inverts_to_a_delete() {
         let mut m = writable();
-        update(&mut m, Msg::Char(' '));
-        update(&mut m, Msg::Char('n'));
-        for c in "Seaman Book".chars() {
-            update(&mut m, Msg::Char(c));
-        }
-        update(&mut m, Msg::Enter);
+        create(&mut m, "Seaman Book");
         let store = m.store.clone();
         update(&mut m, Msg::Saved(Box::new(store)));
         assert_eq!(
@@ -3424,12 +3532,12 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
 
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw);
-        assert!(m.query.is_empty(), "first press cleared the search");
-        assert!(m.detail, "and nothing else");
+        assert!(!m.detail, "first press closed the record");
+        assert_eq!(m.query, "c", "and nothing else");
+        assert!(!m.esc_armed, "closing something is not arming");
 
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw);
-        assert!(!m.detail, "second press closed the record");
-        assert!(!m.esc_armed, "closing something is not arming");
+        assert!(m.query.is_empty(), "second press cleared the search");
 
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw);
         assert!(m.esc_armed, "at base state it arms");
@@ -3956,8 +4064,8 @@ pub(crate) mod tests {
         assert_eq!(m.cursor, 0);
     }
 
-    /// Searching down to nothing leaves a valid, empty state — and `Enter`
-    /// against it says so rather than panicking on an index.
+    /// Searching down to nothing leaves a valid, empty state on `+ new` — and
+    /// `Enter` there in a session that cannot write says why.
     #[test]
     fn an_empty_result_is_a_valid_state() {
         let mut m = model();
@@ -3966,8 +4074,10 @@ pub(crate) mod tests {
         }
         assert!(m.rows.is_empty(), "{:?}", m.rows);
         assert!(m.current().is_none());
+        assert!(m.on_new);
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
-        assert_eq!(m.flash.as_deref(), Some("nothing to open"));
+        assert!(m.flash.is_some());
+        assert!(m.edit.is_none());
 
         update(&mut m, Msg::Backspace);
         assert_eq!(m.query, "zzz");

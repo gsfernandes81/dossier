@@ -503,7 +503,8 @@ fn typing_narrows_the_list_and_the_count() {
         update(&mut m, Msg::Char(c));
     }
     let lines = screen(&mut m, 45, 28);
-    assert!(lines[1].contains("COC Certificate"));
+    assert!(lines[1].contains("+ new \"coc\""), "pinned above the matches: {:?}", lines[1]);
+    assert!(lines[2].starts_with("▸ COC Certificate"), "the cursor on the match: {:?}", lines[2]);
     assert!(lines[27].contains("coc█"), "the query is shown with a cursor: {:?}", lines[27]);
     assert!(lines[26].trim_start().starts_with("1/14"), "matched/total: {:?}", lines[26]);
 }
@@ -551,27 +552,28 @@ fn the_expiring_filter_is_visible_in_the_bar() {
     assert!(lines[1].contains("Motorcycle Insurance"), "soonest first: {:?}", lines[1]);
 }
 
-/// An empty store renders as a sentence, not as a blank rectangle.
+/// An empty store offers its first document, with nothing typed.
 #[test]
 fn an_empty_store_explains_itself() {
     let mut m = Model::new(Store::default(), "2026-10-20".into(), "2027-01-18".into(), 45, 28);
     let lines = screen(&mut m, 45, 28);
-    assert!(lines[1].contains("no documents yet"), "{:?}", lines[1]);
+    assert!(lines[1].starts_with("▸ + new document"), "{:?}", lines[1]);
+    assert!(lines[2].contains("no documents yet"), "{:?}", lines[2]);
     assert!(lines[26].trim_start().starts_with("0/0"));
 }
 
-/// **A fresh store says how to start it** — the keys that add a document, and
-/// where the first save will create the journal, so a wrong root is caught
-/// before anything is written there. Never a command that would not help.
+/// **A fresh store says where the first save will create the journal**, so a
+/// wrong root is caught before anything is written there. Never a command that
+/// would not help.
 #[test]
 fn a_fresh_store_says_how_to_start_and_where() {
     let mut m = Model::new(Store::default(), "2026-10-20".into(), "2027-01-18".into(), 45, 28);
     m.missing_journal = Some("/mnt/c/Docs/.dossier/journal".into());
     let lines = screen(&mut m, 45, 28);
     let text = lines.join("\n");
-    assert!(lines[1].contains("Space, then n, adds one"), "{text}");
-    assert!(lines[2].contains("the first one creates the journal at"), "{text}");
-    assert_eq!(lines[3].trim_end(), "  /mnt/c/Docs/.dossier/journal", "{text}");
+    assert!(lines[1].contains("+ new document"), "{text}");
+    assert!(lines[3].contains("the first one creates the journal at"), "{text}");
+    assert_eq!(lines[4].trim_end(), "  /mnt/c/Docs/.dossier/journal", "{text}");
     assert!(!text.contains("ds init"), "init creates no documents: {text}");
 }
 

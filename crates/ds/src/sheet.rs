@@ -28,8 +28,6 @@ pub enum Act {
     Filter,
     /// Edit the record row the selector is on.
     Edit,
-    /// Start a new document by asking for its name.
-    New,
     /// Put the last write this session made back the way it was.
     Undo,
     /// Put back the last write that was taken back.
@@ -85,7 +83,6 @@ pub fn items(model: &Model) -> Vec<Item> {
         vec![
             Item { accel: "e", ..item('e', "edit this row", Act::Edit) },
             item('l', "location", Act::Location),
-            item('n', "new document", Act::New),
             Item { accel: "u ^z", ..item('u', "undo last change", Act::Undo) },
             Item { accel: "r ^y", ..item('r', "redo", Act::Redo) },
             Item { accel: "d d", ..item('d', "delete this document", Act::Delete) },
@@ -94,7 +91,6 @@ pub fn items(model: &Model) -> Vec<Item> {
     } else {
         vec![
             item('f', "filter", Act::Filter),
-            item('n', "new document", Act::New),
             Item { accel: "^z", ..item('u', "undo last change", Act::Undo) },
             Item { accel: "^y", ..item('r', "redo", Act::Redo) },
             item('q', "quit", Act::Quit),
@@ -112,8 +108,8 @@ mod tests {
     fn the_verbs_follow_the_view() {
         let mut model = crate::app::tests::model();
         let keys = |model: &Model| items(model).iter().map(|item| item.key).collect::<String>();
-        assert_eq!(keys(&model), "fnurq");
+        assert_eq!(keys(&model), "furq");
         model.detail = true;
-        assert_eq!(keys(&model), "elnurdq");
+        assert_eq!(keys(&model), "elurdq");
     }
 }
