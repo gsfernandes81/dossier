@@ -51,6 +51,7 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::{
+    cursor::Show,
     event::{self, DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -323,8 +324,8 @@ fn browse(
     let follower = Follower::new(journal.clone(), owner.ok(), loaded.stamp, loaded.stats.max_ts());
     let session = Session::start(follower, tx.clone());
 
-    let mut stderr = io::stderr();
-    let mut terminal = enter_terminal(&mut stderr)?;
+    let mut tui = Tui::enter()?;
+    let terminal = &mut tui.0;
     let init_at = start.elapsed();
     terminal.draw(|frame| find::draw(frame, &mut model, theme))?;
     let paint_at = start.elapsed();
@@ -339,20 +340,19 @@ fn browse(
             model.store.docs.len(),
         );
         if timing == "exit" {
-            // Print *after* restoring the terminal, or the alternate-screen
-            // switch eats the line — the exact bug v2's probe hit and fixed.
-            leave_terminal(&mut terminal, &mut stderr, model.mouse_on)?;
+            // After restoring the terminal, or leaving the alternate screen
+            // erases the line.
+            drop(tui);
             writeln!(io::stderr(), "{line}")?;
             return Ok(());
         }
         writeln!(io::stderr(), "{line}")?;
     }
 
-    let result = event_loop(&mut terminal, &mut model, theme, root, journal, &tx, &rx, &session);
-    leave_terminal(&mut terminal, &mut stderr, model.mouse_on)?;
-    // The terminal is restored *first*, then the writer is waited for: a save
-    // still in its fsync when `ctrl+q` arrived has to finish, and the user
-    // should be looking at their shell while it does, not at a frozen TUI.
+    let result = event_loop(terminal, &mut model, theme, root, journal, &tx, &rx, &session);
+    // Restored before the writer is waited for, so a save still in its fsync
+    // finishes behind the shell rather than a frozen screen.
+    drop(tui);
     session.finish();
     result
 }
@@ -398,28 +398,37 @@ fn ms(duration: std::time::Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
 }
 
-type Tui = Terminal<CrosstermBackend<Stderr>>;
+/// The terminal in raw mode on the alternate screen, painted on stderr so
+/// stdout stays free for piping. Dropping it restores the terminal.
+struct Tui(Terminal<CrosstermBackend<Stderr>>);
 
-/// Raw mode, alternate screen, SGR mouse reporting.
-///
-/// The TUI paints to **stderr** so stdout stays free for piping — `ds open`
-/// prints the path it opened, and a future command's output is meant to be read
-/// by something other than a person.
-fn enter_terminal(stderr: &mut Stderr) -> io::Result<Tui> {
-    enable_raw_mode()?;
-    // `EnableMouseCapture` turns on SGR (1006) reporting, which is what Termux
-    // needs for taps to arrive as clicks at all (DESIGN §14, confirmed in R0.2).
-    execute!(stderr, EnterAlternateScreen, EnableMouseCapture)?;
-    Terminal::new(CrosstermBackend::new(io::stderr()))
+impl Tui {
+    fn enter() -> io::Result<Self> {
+        enable_raw_mode()?;
+        // SGR mouse reporting is what makes Termux taps arrive as clicks.
+        execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
+        // Restored before the message prints, or the alternate screen eats
+        // the only diagnostic a stripped release build gives.
+        let report = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            restore_terminal();
+            report(info);
+        }));
+        Ok(Self(Terminal::new(CrosstermBackend::new(io::stderr()))?))
+    }
 }
 
-fn leave_terminal(terminal: &mut Tui, stderr: &mut Stderr, mouse_on: bool) -> io::Result<()> {
-    if mouse_on {
-        execute!(stderr, DisableMouseCapture)?;
+impl Drop for Tui {
+    fn drop(&mut self) {
+        restore_terminal();
     }
-    execute!(stderr, LeaveAlternateScreen)?;
-    disable_raw_mode()?;
-    terminal.show_cursor()
+}
+
+/// Leaves raw mode, the alternate screen and mouse reporting; harmless when
+/// they are already off.
+fn restore_terminal() {
+    let _ = execute!(io::stderr(), DisableMouseCapture, LeaveAlternateScreen, Show);
+    let _ = disable_raw_mode();
 }
 
 /// The loop: messages in from **one** channel, frames out.
@@ -430,7 +439,7 @@ fn leave_terminal(terminal: &mut Tui, stderr: &mut Stderr, mouse_on: bool) -> io
 /// done.
 #[allow(clippy::too_many_arguments)] // The shell's whole state, and it is flat.
 fn event_loop(
-    terminal: &mut Tui,
+    terminal: &mut Terminal<CrosstermBackend<Stderr>>,
     model: &mut Model,
     theme: Theme,
     root: &Path,

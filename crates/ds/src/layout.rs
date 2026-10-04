@@ -294,15 +294,24 @@ pub fn wrap(text: &str, cols: usize) -> Vec<String> {
 pub fn short_date(iso: &str) -> String {
     let bytes = iso.as_bytes();
     if bytes.len() == 10 && bytes[4] == b'-' && bytes[7] == b'-' {
-        format!("{}-{}", &iso[5..7], &iso[2..4])
-    } else {
-        iso.to_string()
+        if let (Some(yy), Some(mm)) = (iso.get(2..4), iso.get(5..7)) {
+            return format!("{mm}-{yy}");
+        }
     }
+    iso.to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A date-shaped string that is not ASCII passes through rather than
+    /// being cut inside a character.
+    #[test]
+    fn a_non_ascii_date_passes_through() {
+        assert_eq!(short_date("aéb-xy-zw"), "aéb-xy-zw");
+        assert_eq!(short_date("2026-09-28"), "09-26");
+    }
 
     /// A path cut to fit keeps its end, where the innermost location is.
     #[test]
