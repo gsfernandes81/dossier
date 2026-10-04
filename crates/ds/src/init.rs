@@ -229,15 +229,7 @@ fn ask_root(
 /// A root as stored: `~` expanded and a relative path made absolute, so it
 /// does not depend on where `ds` is started.
 fn absolute(root: PathBuf) -> PathBuf {
-    let root = match root.strip_prefix("~") {
-        Ok(rest) => dirs::home_dir().map_or(root.clone(), |home| home.join(rest)),
-        Err(_) => root,
-    };
-    if root.is_relative() {
-        std::path::absolute(&root).unwrap_or(root)
-    } else {
-        root
-    }
+    crate::config::absolute(&crate::config::expand_home(root))
 }
 
 /// A typed folder without the separator the live list leaves on its end.

@@ -258,10 +258,21 @@ fn quote(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
-/// Expand a leading `~` against the home directory.
-fn expand_home(path: PathBuf) -> PathBuf {
+/// Expands a leading `~` against the home directory.
+pub(crate) fn expand_home(path: PathBuf) -> PathBuf {
     let Ok(rest) = path.strip_prefix("~") else { return path };
     dirs::home_dir().map_or(path.clone(), |home| home.join(rest))
+}
+
+/// Makes a relative path absolute against the working directory. An absolute
+/// one is left alone: `std::path::absolute` would also rewrite its separators
+/// on Windows, moving a WSL mount path off its prefix.
+pub(crate) fn absolute(path: &Path) -> PathBuf {
+    if path.is_relative() {
+        std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+    } else {
+        path.to_path_buf()
+    }
 }
 
 #[cfg(test)]

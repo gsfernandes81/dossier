@@ -135,7 +135,7 @@ pub fn open_file(path: &Path) -> Result<(), OpenError> {
 fn open_on_windows(wsl: &Wsl, path: &Path) -> Result<(), OpenError> {
     // A relative root (`--root .`) is still a path Windows must be able to
     // name from wherever *it* starts.
-    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let absolute = crate::config::absolute(path);
     let Some(windows) = wsl.to_windows(&absolute) else {
         return Err(OpenError::Failed {
             opener: RUNDLL32.into(),

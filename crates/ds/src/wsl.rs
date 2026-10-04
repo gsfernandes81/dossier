@@ -280,17 +280,8 @@ pub struct Twin {
 /// launch.
 #[must_use]
 pub fn windows_twin(wsl: &Wsl, device: &str, root: Option<&Path>) -> Option<Twin> {
-    // `--root .` is a relative path, and relative text never matches a drive
-    // path — which would let the one collision this exists for slip through.
-    // Only a relative one is touched: `absolute` also normalizes separators on
-    // Windows, which would move an absolute root off its own mount prefix.
-    let root = root.map(|root| {
-        if root.is_relative() {
-            std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf())
-        } else {
-            root.to_path_buf()
-        }
-    });
+    // Relative text never matches a drive path, so `--root .` would slip by.
+    let root = root.map(crate::config::absolute);
     let root = root.as_deref();
     windows_profiles(wsl).into_iter().find_map(|profile| {
         let config = profile.join("AppData").join("Local").join("dossier").join("config.toml");
