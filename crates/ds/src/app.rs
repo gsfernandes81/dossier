@@ -63,6 +63,8 @@ pub enum Msg {
     /// and an enum is as big as its widest arm — every `Msg` in the queue would
     /// otherwise carry a store's worth of space around with it.
     Saved(Box<Store>),
+    /// Another writer's ops arrived, and here is the store re-folded with them.
+    Reloaded(Box<Store>),
     /// The append did not land. The editor stays open with the typing intact:
     /// the screen must never claim a value the journal refused.
     SaveFailed {
@@ -2187,15 +2189,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
     // same rule Esc and quit follow. Worker messages are not keystrokes and so
     // do not disarm — a scan landing mid-decision must not silently make the
     // next `d` mean something different from what the screen is offering.
-    if !matches!(msg, Msg::Char('d') | Msg::ScansLoaded(_) | Msg::Saved(_) | Msg::SaveFailed { .. })
-        && is_key(&msg)
-    {
+    if msg != Msg::Char('d') && is_key(&msg) {
         model.delete_armed = false;
     }
 
     // Esc arms only on a *consecutive* Esc; any other key disarms it.
     let was_armed = model.esc_armed;
-    if !matches!(msg, Msg::Esc | Msg::ScansLoaded(_) | Msg::Saved(_) | Msg::SaveFailed { .. }) {
+    if msg != Msg::Esc && !from_worker(&msg) {
         model.esc_armed = false;
     }
     if is_key(&msg) {
@@ -2287,6 +2287,16 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 model.views.push(view);
             }
             model.flash = Some(landed.note.unwrap_or_else(|| "saved".into()));
+            Effect::Redraw
+        }
+        Msg::Reloaded(store) => {
+            if *store == model.store {
+                return Effect::Idle;
+            }
+            let anchor = model.current().map(|doc| doc.id.clone()).unwrap_or_default();
+            model.adopt(*store, &anchor);
+            model.prune_views();
+            model.flash = Some("updated from another device".into());
             Effect::Redraw
         }
         Msg::SaveFailed { reason, permanent } => {
@@ -3132,15 +3142,12 @@ fn picker_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
 /// a save landing must not disarm a pending quit or restore mouse reporting the
 /// IME affordance dropped, any more than a finished scan load does.
 fn is_key(msg: &Msg) -> bool {
-    !matches!(
-        msg,
-        Msg::Tap { .. }
-            | Msg::Scroll(_)
-            | Msg::Resize { .. }
-            | Msg::ScansLoaded(_)
-            | Msg::Saved(_)
-            | Msg::SaveFailed { .. }
-    )
+    !from_worker(msg) && !matches!(msg, Msg::Tap { .. } | Msg::Scroll(_) | Msg::Resize { .. })
+}
+
+/// Whether a thread of the program sent `msg`, rather than the person.
+fn from_worker(msg: &Msg) -> bool {
+    matches!(msg, Msg::ScansLoaded(_) | Msg::Saved(_) | Msg::Reloaded(_) | Msg::SaveFailed { .. })
 }
 
 /// The rows the search bar occupies, inclusive — and therefore the rows that
@@ -3214,7 +3221,7 @@ pub(crate) mod tests {
     }
 
     /// The store as it would fold after `coc`'s expiry became `2027-04-01` —
-    /// what the writer thread posts back, built the same way it builds it.
+    /// what the journal thread posts back.
     fn restored(from: &Model, id: &str, expiry: Option<&str>) -> Store {
         let mut store = from.store.clone();
         for doc in &mut store.docs {
@@ -3292,6 +3299,44 @@ pub(crate) mod tests {
         assert!(m.edit.is_none(), "the journal answered, so the editor closed");
         assert_eq!(m.current().unwrap().expiry_date.as_deref(), Some("2027-04-01"));
         assert_eq!(m.flash.as_deref(), Some("saved"));
+    }
+
+    /// Another device's edit is adopted where the person is, said on the
+    /// band, and leaves an open edit and the undo history alone.
+    #[test]
+    fn another_devices_edit_arrives_in_place() {
+        let mut m = writable();
+        update(&mut m, Msg::Move(Motion::Down));
+        update(&mut m, Msg::EditField(crate::edit::Field::Notes));
+        let store = restored(&m, "eng1", Some("2028-01-01"));
+        assert_eq!(update(&mut m, Msg::Reloaded(Box::new(store))), Effect::Redraw);
+        assert_eq!(m.current().unwrap().id, "eng1");
+        assert_eq!(m.current().unwrap().expiry_date.as_deref(), Some("2028-01-01"));
+        assert_eq!(m.flash.as_deref(), Some("updated from another device"));
+        assert!(m.edit.is_some(), "the typing is kept");
+        assert!(m.undo.is_empty(), "nothing this session did");
+    }
+
+    /// A read that changed nothing on screen is not news.
+    #[test]
+    fn an_unchanged_read_is_silent() {
+        let mut m = model();
+        let same = m.store.clone();
+        assert_eq!(update(&mut m, Msg::Reloaded(Box::new(same))), Effect::Idle);
+        assert_eq!(m.flash, None);
+    }
+
+    /// A document another device deleted closes the views that showed it.
+    #[test]
+    fn a_document_deleted_elsewhere_closes_its_views() {
+        let mut m = model();
+        update(&mut m, Msg::Enter);
+        assert!(m.detail());
+        let mut store = m.store.clone();
+        store.docs.retain(|doc| doc.id != "coc");
+        update(&mut m, Msg::Reloaded(Box::new(store)));
+        assert!(!m.detail(), "{:?}", m.views);
+        assert_eq!(m.current().unwrap().id, "eng1");
     }
 
     /// **Every simple field goes through the one verb**, seeded with what is
@@ -3455,7 +3500,7 @@ pub(crate) mod tests {
         let mut m = writable();
         create(&mut m, "Seaman Book");
 
-        // What the writer thread posts back once the ops have landed.
+        // What the journal thread posts back once the ops have landed.
         let mut store = m.store.clone();
         let mut fresh = store.docs[0].clone();
         fresh.id = "seaman-book-desk".into();

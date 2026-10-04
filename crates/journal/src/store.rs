@@ -176,6 +176,11 @@ impl Load {
     }
 }
 
+/// What a namespace's files look like on disk: names, sizes and modification
+/// times. Equal stamps mean nothing was added, removed, appended or rewritten.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Stamp(Vec<(String, u64, Option<std::time::SystemTime>)>);
+
 /// Failure to read the journal *directory* — the one situation that must not
 /// degrade into "the store is empty".
 #[derive(Debug, thiserror::Error)]
@@ -225,6 +230,28 @@ impl Journal {
     #[must_use]
     pub fn file_path(&self, namespace: Namespace, writer: &str) -> PathBuf {
         self.root.join(namespace.dir()).join(names::writer_file(writer))
+    }
+
+    /// A stamp of one namespace's files, far cheaper than a load: one listing
+    /// and a `stat` per file. An unreadable or missing directory stamps empty.
+    #[must_use]
+    pub fn stamp(&self, namespace: Namespace) -> Stamp {
+        let Ok(entries) = std::fs::read_dir(self.root.join(namespace.dir())) else {
+            return Stamp::default();
+        };
+        let mut files: Vec<_> = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                // Not `entry.metadata()`: on Windows that is the directory
+                // entry's copy, which NTFS updates lazily while another
+                // process holds the file open for appending.
+                let meta = std::fs::metadata(entry.path()).ok()?;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                Some((name, meta.len(), meta.modified().ok()))
+            })
+            .collect();
+        files.sort();
+        Stamp(files)
     }
 
     /// Load one namespace: every writer file, parsed and classified.
@@ -475,5 +502,25 @@ mod tests {
         let load = journal.load(Namespace::Meta).expect("loads");
         let writers: Vec<&str> = load.files.iter().map(|f| f.writer.as_str()).collect();
         assert_eq!(writers, ["desk-core", "desk-lab", "phone-core"]);
+    }
+
+    /// A stamp changes when a file grows or appears, and not otherwise.
+    #[test]
+    fn a_stamp_changes_only_with_the_files() {
+        let (_dir, journal) = journal_with(
+            Namespace::Meta,
+            &[("desk-core.jsonl", op(1, "desk-core", "create", "a") + "\n")],
+        );
+        let before = journal.stamp(Namespace::Meta);
+        assert_eq!(journal.stamp(Namespace::Meta), before);
+        let file = journal.file_path(Namespace::Meta, "desk-core");
+        let body = std::fs::read_to_string(&file).expect("read")
+            + &op(2, "desk-core", "create", "b")
+            + "\n";
+        std::fs::write(&file, body).expect("write");
+        let grown = journal.stamp(Namespace::Meta);
+        assert_ne!(grown, before);
+        std::fs::write(journal.file_path(Namespace::Meta, "phone-core"), "").expect("write");
+        assert_ne!(journal.stamp(Namespace::Meta), grown);
     }
 }

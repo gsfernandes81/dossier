@@ -87,6 +87,12 @@ impl Hlc {
         self.tick_at(now_ms())
     }
 
+    /// Raises the floor to `ts`, a timestamp seen in another writer's ops, so
+    /// the next edit here sorts after it whatever the two clocks say.
+    pub fn observe(&mut self, ts: i64) {
+        self.last = self.last.max(ts);
+    }
+
     /// The last timestamp handed out.
     #[must_use]
     pub fn last(&self) -> i64 {
@@ -392,6 +398,11 @@ impl Writer {
             path: self.path.clone(),
             source,
         })
+    }
+
+    /// Raises the clock's floor to `ts`; see [`Hlc::observe`].
+    pub fn observe(&mut self, ts: i64) {
+        self.clock.observe(ts);
     }
 
     /// The clock, for callers that need the next `ts` without appending.

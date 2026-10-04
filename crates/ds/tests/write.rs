@@ -84,7 +84,7 @@ fn an_edit_becomes_an_op_and_survives_a_reload() {
         panic!("a valid date must ask for an append");
     };
 
-    // What the writer thread does with it, exactly as `main.rs` does it.
+    // What the journal thread's writer does with it.
     let mut writer = Writer::open(
         &journal,
         Namespace::Meta,
@@ -251,8 +251,8 @@ fn a_created_document_survives_a_reload() {
 #[test]
 fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
     let (dir, journal) = journal_with_a_document("undo");
-    let (mut model, loaded) = load_model(&journal);
-    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let (mut model, _) = load_model(&journal);
+    let mut follower = follower(&dir, &journal);
 
     update(&mut model, Msg::EditField(Field::Expiry));
     for _ in 0..10 {
@@ -262,7 +262,7 @@ fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
         update(&mut model, Msg::Char(c));
     }
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
-    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
     assert_eq!(model.current().and_then(|d| d.expiry_date.clone()).as_deref(), Some("2031-05-31"));
 
     // Now take it back.
@@ -270,7 +270,7 @@ fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
     let Effect::Append(inverse) = update(&mut model, Msg::Char('u')) else {
         panic!("undo must ask for an append");
     };
-    write_and_reload(&journal, &dir, inverse, ts, &mut model);
+    write_and_reload(&mut follower, inverse, &mut model);
 
     let reloaded = ds::load::load(&journal).expect("reload");
     let doc = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("the document");
@@ -292,8 +292,8 @@ fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
 #[test]
 fn undo_walks_back_more_than_one_write() {
     let (dir, journal) = journal_with_a_document("undo-twice");
-    let (mut model, loaded) = load_model(&journal);
-    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let (mut model, _) = load_model(&journal);
+    let mut follower = follower(&dir, &journal);
 
     for value in ["2031-05-31", "2032-06-30"] {
         update(&mut model, Msg::EditField(Field::Expiry));
@@ -304,7 +304,7 @@ fn undo_walks_back_more_than_one_write() {
             update(&mut model, Msg::Char(c));
         }
         let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
-        ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+        write_and_reload(&mut follower, drafts, &mut model);
     }
     assert_eq!(model.current().and_then(|d| d.expiry_date.clone()).as_deref(), Some("2032-06-30"));
 
@@ -313,7 +313,7 @@ fn undo_walks_back_more_than_one_write() {
         let Effect::Append(inverse) = update(&mut model, Msg::Char('u')) else {
             panic!("undo must ask for an append");
         };
-        ts = write_and_reload(&journal, &dir, inverse, ts, &mut model);
+        write_and_reload(&mut follower, inverse, &mut model);
         assert_eq!(
             model.current().and_then(|d| d.expiry_date.clone()).as_deref(),
             Some(expected),
@@ -327,24 +327,16 @@ fn undo_walks_back_more_than_one_write() {
     assert!(model.flash.as_deref().is_some_and(|say| say.contains("nothing to undo")));
 }
 
-/// Append what the model asked for, fold the journal back, and hand the model
-/// the new store exactly as the writer thread does — the only way a test can
-/// take more than one step down the write path.
+/// Saves what the model asked for through the session's own follower and
+/// hands the model what comes back.
 fn write_and_reload(
-    journal: &Journal,
-    dir: &std::path::Path,
+    follower: &mut ds::follow::Follower,
     drafts: Vec<journal::Draft>,
-    max_ts: i64,
     model: &mut Model,
-) -> i64 {
-    let mut writer = Writer::open(journal, Namespace::Meta, "desk-core", &lock_dir(dir), max_ts)
-        .expect("open the writer");
-    let ops = writer.append_all(drafts).expect("append");
-    writer.commit().expect("fsync");
-    drop(writer);
-    let reloaded = ds::load::load(journal).expect("reload");
-    update(model, Msg::Saved(Box::new(reloaded.store)));
-    ops.iter().map(|op| op.ts).max().unwrap_or(max_ts)
+) {
+    let msg = follower.save(drafts);
+    assert!(matches!(msg, Msg::Saved(_)), "{msg:?}");
+    update(model, msg);
 }
 
 /// **Redo puts the write back, and the journal ends up holding all three ops.**
@@ -353,8 +345,8 @@ fn write_and_reload(
 #[test]
 fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
     let (dir, journal) = journal_with_a_document("redo");
-    let (mut model, loaded) = load_model(&journal);
-    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let (mut model, _) = load_model(&journal);
+    let mut follower = follower(&dir, &journal);
 
     update(&mut model, Msg::EditField(Field::Expiry));
     for _ in 0..10 {
@@ -364,15 +356,15 @@ fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
         update(&mut model, Msg::Char(c));
     }
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
-    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
 
     update(&mut model, Msg::Char(' '));
     let Effect::Append(back) = update(&mut model, Msg::Char('u')) else { panic!("no undo") };
-    ts = write_and_reload(&journal, &dir, back, ts, &mut model);
+    write_and_reload(&mut follower, back, &mut model);
     assert_eq!(model.current().and_then(|d| d.expiry_date.clone()).as_deref(), Some("2026-09-28"));
 
     let Effect::Append(again) = update(&mut model, Msg::Redo) else { panic!("no redo") };
-    write_and_reload(&journal, &dir, again, ts, &mut model);
+    write_and_reload(&mut follower, again, &mut model);
 
     let reloaded = ds::load::load(&journal).expect("reload");
     let doc = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("the document");
@@ -393,27 +385,27 @@ fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
 #[test]
 fn a_created_document_can_be_taken_back_and_put_again() {
     let (dir, journal) = journal_with_a_document("recreate");
-    let (mut model, loaded) = load_model(&journal);
-    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let (mut model, _) = load_model(&journal);
+    let mut follower = follower(&dir, &journal);
 
     for c in "Seaman Book".chars() {
         update(&mut model, Msg::Char(c));
     }
     assert!(model.on_new, "nothing matches, so + new is selected");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
-    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
     assert!(model.store.docs.iter().any(|d| d.id == "seaman-book-desk"));
 
     update(&mut model, Msg::Char(' '));
     let Effect::Append(back) = update(&mut model, Msg::Char('u')) else { panic!("no undo") };
-    ts = write_and_reload(&journal, &dir, back, ts, &mut model);
+    write_and_reload(&mut follower, back, &mut model);
     assert!(
         !model.store.docs.iter().any(|d| d.id == "seaman-book-desk"),
         "the tombstone took it out of the fold"
     );
 
     let Effect::Append(again) = update(&mut model, Msg::Redo) else { panic!("no redo") };
-    write_and_reload(&journal, &dir, again, ts, &mut model);
+    write_and_reload(&mut follower, again, &mut model);
 
     let reloaded = ds::load::load(&journal).expect("reload");
     let doc = reloaded
@@ -449,8 +441,8 @@ fn undoing_a_delete_restores_every_field() {
     std::fs::write(meta.join("desk-core.jsonl"), format!("{}\n", lines.join("\n"))).expect("write");
     let journal = Journal::new(&dir);
 
-    let (mut model, loaded) = load_model(&journal);
-    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let (mut model, _) = load_model(&journal);
+    let mut follower = follower(&dir, &journal);
     let before = model.store.docs.iter().find(|d| d.id == "coc").expect("the document").clone();
 
     update(&mut model, Msg::Enter);
@@ -458,7 +450,7 @@ fn undoing_a_delete_restores_every_field() {
     let Effect::Append(drafts) = update(&mut model, Msg::Char('d')) else {
         panic!("the second d must ask for an append");
     };
-    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
     assert!(
         !model.store.docs.iter().any(|d| d.id == "coc"),
         "the tombstone took it out of the fold"
@@ -466,7 +458,7 @@ fn undoing_a_delete_restores_every_field() {
 
     update(&mut model, Msg::Char(' '));
     let Effect::Append(back) = update(&mut model, Msg::Char('u')) else { panic!("no undo") };
-    write_and_reload(&journal, &dir, back, ts, &mut model);
+    write_and_reload(&mut follower, back, &mut model);
 
     let reloaded = ds::load::load(&journal).expect("reload");
     let after = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("it is back");
@@ -479,8 +471,8 @@ fn undoing_a_delete_restores_every_field() {
 #[test]
 fn a_location_created_while_filing_is_taken_back_whole() {
     let (dir, journal) = journal_with_a_document("new-location");
-    let (mut model, loaded) = load_model(&journal);
-    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let (mut model, _) = load_model(&journal);
+    let mut follower = follower(&dir, &journal);
 
     update(&mut model, Msg::Enter);
     update(&mut model, Msg::Leader);
@@ -491,7 +483,7 @@ fn a_location_created_while_filing_is_taken_back_whole() {
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
         panic!("+ new must ask for an append");
     };
-    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
     let doc = model.store.docs.iter().find(|d| d.id == "coc").expect("the document");
     assert_eq!(model.store.place(doc), "grey box");
     assert_eq!(model.flash.as_deref(), Some("filed in grey box"));
@@ -499,7 +491,7 @@ fn a_location_created_while_filing_is_taken_back_whole() {
     let Effect::Append(drafts) = update(&mut model, Msg::Undo) else {
         panic!("undo must ask for an append");
     };
-    write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
     let doc = model.store.docs.iter().find(|d| d.id == "coc").expect("the document");
     assert_eq!(doc.location, None, "unfiled again");
     assert!(model.store.locations.is_empty(), "and the location is gone");
@@ -524,8 +516,8 @@ fn a_deleted_location_comes_back_with_everything_inside() {
     text.push_str(&format!("{}\n", lines.join("\n")));
     std::fs::write(&file, text).expect("write");
 
-    let (mut model, loaded) = load_model(&journal);
-    let mut ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let (mut model, _) = load_model(&journal);
+    let mut follower = follower(&dir, &journal);
     let place = |model: &Model| {
         let doc = model.store.docs.iter().find(|d| d.id == "coc").expect("the document");
         model.store.place(doc)
@@ -541,14 +533,14 @@ fn a_deleted_location_comes_back_with_everything_inside() {
     let Effect::Append(drafts) = update(&mut model, Msg::Char('d')) else {
         panic!("the second d must ask for an append");
     };
-    ts = write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
     assert!(model.store.locations.is_empty(), "both locations are gone");
     assert_eq!(place(&model), "", "the hard copy reads as unfiled");
 
     let Effect::Append(drafts) = update(&mut model, Msg::Undo) else {
         panic!("undo must ask for an append");
     };
-    write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
     assert_eq!(place(&model), "desk › leather folder", "filed again, where it was");
 }
 
@@ -557,13 +549,13 @@ fn a_deleted_location_comes_back_with_everything_inside() {
 #[test]
 fn a_new_version_replaces_the_old_one_in_the_fold() {
     let (dir, journal) = journal_with_a_document("version");
-    let (mut model, loaded) = load_model(&journal);
-    let ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let (mut model, _) = load_model(&journal);
+    let mut follower = follower(&dir, &journal);
 
     update(&mut model, Msg::Enter);
     update(&mut model, Msg::Char(' '));
     let Effect::Append(drafts) = update(&mut model, Msg::Char('n')) else { panic!("no append") };
-    write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
 
     let store = ds::load::load(&journal).expect("reload").store;
     let ids: Vec<&str> = store.versions("coc").iter().map(|&i| store.docs[i].id.as_str()).collect();
@@ -581,8 +573,8 @@ fn a_new_version_replaces_the_old_one_in_the_fold() {
 #[test]
 fn a_created_bundle_folds_as_its_own_record() {
     let (dir, journal) = journal_with_a_document("bundle");
-    let (mut model, loaded) = load_model(&journal);
-    let ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+    let (mut model, _) = load_model(&journal);
+    let mut follower = follower(&dir, &journal);
 
     update(&mut model, Msg::Char(' '));
     update(&mut model, Msg::Char('b'));
@@ -590,10 +582,63 @@ fn a_created_bundle_folds_as_its_own_record() {
         update(&mut model, Msg::Char(c));
     }
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
-    write_and_reload(&journal, &dir, drafts, ts, &mut model);
+    write_and_reload(&mut follower, drafts, &mut model);
 
     let store = ds::load::load(&journal).expect("reload").store;
     assert_eq!(store.bundle("joining-desk").map(|b| b.name.as_str()), Some("Joining"));
     assert_eq!(store.docs.len(), 1, "no document was made");
     assert!(matches!(model.views.last(), Some(ds::View::Bundle { .. })), "it opened");
+}
+
+/// One op of `writer`'s, as a journal line.
+fn line(ts: i64, writer: &str, field: &str, value: &str) -> String {
+    format!(
+        r#"{{"v":1,"ts":{ts},"w":"{writer}","op":"set","ent":"doc","id":"coc","f":"{field}","val":"{value}"}}"#
+    )
+}
+
+/// The follower a session on this journal would start with.
+fn follower(dir: &std::path::Path, journal: &Journal) -> ds::follow::Follower {
+    let loaded = ds::load::load(journal).expect("load");
+    let owner = ds::follow::Owner::new("desk", dir, &lock_dir(dir));
+    ds::follow::Follower::new(journal.clone(), Some(owner), loaded.stamp, loaded.stats.max_ts())
+}
+
+fn name_in(msg: &Msg) -> String {
+    let (Msg::Saved(store) | Msg::Reloaded(store)) = msg else { panic!("no store in {msg:?}") };
+    store.docs.iter().find(|doc| doc.id == "coc").expect("coc").name.clone()
+}
+
+/// **Another device's op reaches a running session**: a poll finds nothing
+/// until a file changes, then hands over the store re-read with it.
+#[test]
+fn a_poll_brings_in_another_writers_op() {
+    let (dir, journal) = journal_with_a_document("follow");
+    let mut follower = follower(&dir, &journal);
+    assert!(follower.poll().is_none(), "nothing changed");
+
+    let phone = dir.join("meta").join("phone-core.jsonl");
+    std::fs::write(&phone, line(1_700_000_000_010, "phone-core", "name", "COC PHONE") + "\n")
+        .expect("write");
+    let reloaded = follower.poll().expect("the new file is noticed");
+    assert!(matches!(reloaded, Msg::Reloaded(_)));
+    assert_eq!(name_in(&reloaded), "COC PHONE");
+    assert!(follower.poll().is_none(), "and read once");
+}
+
+/// **An edit made after reading another device's op wins over it**, even when
+/// that device's clock runs a day ahead: the writer's clock is raised past
+/// everything it has read.
+#[test]
+fn a_save_sorts_after_what_it_read() {
+    let (dir, journal) = journal_with_a_document("follow-clock");
+    let mut follower = follower(&dir, &journal);
+    let ahead = journal::Hlc::seeded(0).tick() + 86_400_000;
+    let phone = dir.join("meta").join("phone-core.jsonl");
+    std::fs::write(&phone, line(ahead, "phone-core", "name", "COC PHONE") + "\n").expect("write");
+
+    let saved = follower.save(vec![journal::Draft::set("doc", "coc", "name", "COC DESK")]);
+    assert_eq!(name_in(&saved), "COC DESK", "{saved:?}");
+    let reread = ds::load::load(&journal).expect("load");
+    assert_eq!(reread.store.docs[0].name, "COC DESK", "and on disk");
 }

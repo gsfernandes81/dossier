@@ -693,8 +693,9 @@ until the cutover step the user personally green-lights.
       arrives as `Msg::ScansLoaded`. So the event loop is now **channel-driven**:
       terminal input has its own thread and lands in the same queue as worker
       results, and the loop blocks on one `recv()`. No polling timeout, no busy
-      wait — an idle `ds` still costs zero CPU, which on a phone is battery. This
-      is the shape R5's tree walks and Syncthing polls plug into.
+      wait in the render loop; the one periodic wake is the journal thread's
+      stamp check (below). This is the shape R5's tree walks and Syncthing polls
+      plug into.
     - Scan hits **widen** the result rather than replacing it, appended in list
       order, so a document found by name never drops out because its transcript
       does not say the word. A load that lands after the user changed their mind
@@ -718,10 +719,17 @@ until the cutover step the user personally green-lights.
     - **Lock, append, fsync and re-fold all run on the writer's own thread**
       (invariant 7). That thread owns the `Writer` and is reachable only through
       a channel, which is how "one process, one writer" is spelled in the type
-      system rather than in a comment. A save re-folds the journal's lines in
-      memory and posts a new `Store` back; it never patches the old one, because
-      a patch would have to re-implement LWW, the shelf sort, watch membership
-      and `Doc.superseded` — which is a fact about the *collection*.
+      system rather than in a comment. A save reads the journal back and posts a
+      new `Store`; it never patches the old one, because a patch would have to
+      re-implement LWW, the shelf sort, watch membership and `Doc.superseded` —
+      which is a fact about the *collection*.
+    - **A running session follows the journal.** Every two seconds the same
+      thread stamps the namespace (a listing and a `stat` per file) and reads
+      it only when the stamp changed, posting `Msg::Reloaded`; the band says
+      "updated from another device". Every store the UI gets is a fresh read,
+      so another writer's ops arrive with a save too, in order. The writer's
+      clock is raised past every `ts` read (`Writer::observe`), so an edit made
+      after reading another device's sorts after it, whatever the clocks say.
     - Detail gained no selection, deliberately: `ctrl+e` names its field, so the
       §5b verb-pair change still waits on the cursor it needs.
   - **Slice 2 done (2026-08-21) — the record gets a selector, and editing stops

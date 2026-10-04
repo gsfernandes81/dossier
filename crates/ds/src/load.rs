@@ -40,6 +40,8 @@ pub struct Loaded {
     pub load: Load,
     /// What the fold made of it.
     pub stats: FoldStats,
+    /// The journal's files as they were just before this load.
+    pub stamp: journal::Stamp,
     /// The directory that was read.
     pub path: PathBuf,
     /// Today, ISO.
@@ -78,6 +80,7 @@ pub fn locate(
 /// Only when the journal directory exists but cannot be listed — the one
 /// situation that must never degrade into "the store is empty".
 pub fn load(journal: &Journal) -> Result<Loaded, journal::store::Error> {
+    let stamp = journal.stamp(Namespace::Meta);
     let load = journal.load(Namespace::Meta)?;
     let folded = journal::fold(&load.lines);
     let store = Store::build(&folded);
@@ -86,6 +89,7 @@ pub fn load(journal: &Journal) -> Result<Loaded, journal::store::Error> {
         store,
         stats: folded.stats,
         load,
+        stamp,
         path: journal.path().to_path_buf(),
         today,
         warn_until,

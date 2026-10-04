@@ -26,8 +26,9 @@ Three facts that shape what the rest of R4 costs:
 
 - **The write path is wired, and it is the shape the rest of R4 plugs into.**
   An edit becomes `Effect::Append(Vec<Draft>)`; a thread that owns the `Writer`
-  performs it — lock, append, fsync — then re-folds in memory and posts the new
-  store back as `Msg::Saved`. Undo is another `Vec<Draft>` down the same
+  performs it — lock, append, fsync — then reads the journal back and posts the
+  new store as `Msg::Saved`. The same thread polls the journal's stamp every two
+  seconds and posts `Msg::Reloaded` when another writer's ops arrive. Undo is another `Vec<Draft>` down the same
   channel, and compaction-on-clean-exit is that thread's shutdown work. Nothing
   else in the program can reach the `Writer`.
 - **The writer opens on the first append, never at launch.** `Writer::open`
@@ -98,8 +99,9 @@ Each is recorded where it belongs; the link is the point of the row.
 | The record is a surface with its own verbs: search locked out, bare letters free, `e` edits the selected row | `detail.rs`, `Model::record_verb` |
 | The record has a selector; `↑`/`↓` drive it and never the list underneath | `Model::move_record` |
 | Twelve-documents-at-45×28 is superseded by the measured sizes | swept through `layout.rs`, `find.rs`, `screens.rs`, REWRITE-UI |
-| The writer opens lazily, on the first append — never at launch | `main.rs::writer_session` |
-| A save re-folds; it never patches the `Store` in place | `main.rs::write_loop` |
+| The writer opens lazily, on the first append — never at launch | `follow.rs::open` |
+| A save re-reads the journal; it never patches the `Store` in place | `Follower::save` |
+| A session follows other writers: stamp poll, `Msg::Reloaded`, clock raised past what it read | `follow.rs`, `Writer::observe` |
 | Editing is `e` on the record's selected row | `Model::record_verb` |
 | The search prompt is `>`, as in fzf; `:` alone opens the command line, as in Helix; `Space` is the leader | REWRITE.md §4.5, REWRITE-UI §3 |
 | `Enter` drills, `Esc` peels; `←`/`→` move the query cursor; `Home`/`End` follow the query | REWRITE-UI §5b |
