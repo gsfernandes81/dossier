@@ -476,22 +476,9 @@ impl Writer {
             rewritten.push('\n');
         }
 
-        {
-            let mut file = File::create(&temp).map_err(io("create temp file", &temp))?;
-            file.write_all(rewritten.as_bytes()).map_err(io("write temp file", &temp))?;
-            // Flush before the rename, or a crash could leave the rename done
-            // and the contents not — the one ordering that loses data.
-            file.sync_all().map_err(io("flush temp file", &temp))?;
-        }
-        std::fs::rename(&temp, &self.path).map_err(io("rename temp file over", &self.path))?;
-
-        // The old handle still points at the replaced file, so reopen.
-        self.file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(io("reopen after compaction", &self.path))?;
+        self.file = replace(&self.path, &temp, rewritten.as_bytes()).inspect_err(|_| {
+            let _ = std::fs::remove_file(&temp);
+        })?;
 
         Ok(Some(Report {
             lines_before: plan.total,
@@ -523,6 +510,30 @@ pub struct Report {
     pub bytes_before: u64,
     /// Bytes after.
     pub bytes_after: u64,
+}
+
+/// Writes `body` to a new `temp`, flushes it and renames it over `path`.
+///
+/// Returns an append handle opened on `temp` before the rename, so nothing can
+/// fail once the old file is replaced; the handle follows the file across the
+/// rename on every platform (std opens with `FILE_SHARE_DELETE` on Windows).
+fn replace(path: &Path, temp: &Path, body: &[u8]) -> Result<File, Error> {
+    let io = |action: &'static str, path: &Path| {
+        let path = path.to_path_buf();
+        move |source: std::io::Error| Error::Io { action, path: path.clone(), source }
+    };
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .append(true)
+        .open(temp)
+        .map_err(io("create temp file", temp))?;
+    file.write_all(body).map_err(io("write temp file", temp))?;
+    // Flushed before the rename, or a crash could leave the rename done and
+    // the contents not.
+    file.sync_all().map_err(io("flush temp file", temp))?;
+    std::fs::rename(temp, path).map_err(io("rename temp file over", path))?;
+    Ok(file)
 }
 
 fn create_dir_all(path: &Path, action: &'static str) -> Result<(), Error> {
@@ -786,8 +797,8 @@ mod tests {
         assert_eq!(before, after);
     }
 
-    /// The writer keeps working after a compaction — the old file handle points
-    /// at a replaced inode, so it has to be reopened.
+    /// The writer keeps appending to the compacted file, not the inode it
+    /// replaced.
     #[test]
     fn appends_continue_after_a_compaction() {
         let fixture = fixture();
@@ -825,6 +836,29 @@ mod tests {
             .filter(|name| name.contains(".tmp-"))
             .collect();
         assert!(leftovers.is_empty(), "temp files must never be left in the synced tree");
+    }
+
+    /// A compaction that fails removes its temp and leaves the journal as it
+    /// was, still appendable.
+    #[test]
+    fn a_failed_compaction_cleans_up_after_itself() {
+        let fixture = fixture();
+        let mut writer = open(&fixture, "desk-core");
+        writer.append(Draft::create("doc", "x")).expect("append");
+        let before = std::fs::read(writer.path()).expect("read");
+        let temp = writer
+            .path()
+            .with_file_name(names::compaction_temp_file("desk-core", std::process::id()));
+        std::fs::write(&temp, "stale").expect("plant a stale temp");
+
+        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
+        assert!(writer.compact(future, When::Always).is_err(), "the temp name is taken");
+        assert!(!temp.exists(), "the temp is removed on failure");
+        assert_eq!(std::fs::read(writer.path()).expect("read"), before);
+
+        writer.append(Draft::set("doc", "x", "slot", 7)).expect("append after failure");
+        let load = fixture.journal.load(Namespace::Meta).expect("loads");
+        assert_eq!(fold(&load.lines).get("doc", "x").expect("alive").fields["slot"], 7);
     }
 
     /// An id outside the frozen grammar is refused before anything is created —
