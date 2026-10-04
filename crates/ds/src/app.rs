@@ -2385,12 +2385,8 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     }
     let mut picker = model.locpick.take()?;
     let effect = match msg {
-        Msg::Move(Motion::Up) => {
-            picker.step(&model.store, false);
-            Effect::Redraw
-        }
-        Msg::Move(Motion::Down) => {
-            picker.step(&model.store, true);
+        Msg::Move(motion) => {
+            select(&picker.selectable(&model.store), &mut picker.cursor, *motion);
             Effect::Redraw
         }
         Msg::Right => {
@@ -2457,7 +2453,7 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             }
             Effect::Redraw
         }
-        Msg::Scroll(_) | Msg::Move(_) => Effect::Idle,
+        Msg::Scroll(_) => Effect::Idle,
         _ => {
             model.locpick = Some(picker);
             return None;

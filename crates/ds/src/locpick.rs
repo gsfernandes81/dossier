@@ -288,17 +288,6 @@ impl LocationPicker {
         !self.children(store, Some(id)).is_empty() || !self.filed(store, id).is_empty()
     }
 
-    /// Moves the cursor one selectable row up or down.
-    pub fn step(&mut self, store: &Store, down: bool) {
-        let targets = self.selectable(store);
-        let at = targets.iter().position(|t| *t == self.cursor).unwrap_or(0);
-        let next =
-            if down { (at + 1).min(targets.len().saturating_sub(1)) } else { at.saturating_sub(1) };
-        if let Some(target) = targets.get(next) {
-            self.cursor = target.clone();
-        }
-    }
-
     /// `→`: opens a first-level location in place, or moves the root down so a
     /// second-level one can open as a first level.
     pub fn right(&mut self, store: &Store) {
@@ -548,9 +537,9 @@ mod tests {
         let mut picker = LocationPicker::file(&store, "passport");
         picker.root = Some("folder".into());
         picker.open = BTreeSet::from(["slot3".to_string()]);
-        picker.cursor = Target::Location("slot3".into());
-        picker.step(&store, true);
-        assert_eq!(picker.cursor, Target::More("slot3".into()));
+        let targets = picker.selectable(&store);
+        let slot3 = targets.iter().position(|t| *t == Target::Location("slot3".into())).unwrap();
+        assert_eq!(targets[slot3 + 1], Target::More("slot3".into()));
         picker.expanded.insert("slot3".into());
         assert!(shape(&picker, &store).contains(&"  └ stcw".to_string()));
     }
