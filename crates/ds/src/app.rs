@@ -866,6 +866,27 @@ impl Model {
                 self.write_files(&picker.doc, &files)
             }
             (Purpose::File(_), Choice::Attach) => self.open_edit(crate::edit::Field::Attach),
+            (Purpose::Renews, Choice::Renew(older)) => {
+                let id = picker.doc.clone();
+                let field = |value: Option<&str>| match value {
+                    Some(value) => journal::Draft::set(
+                        "doc",
+                        &id,
+                        "supersedes",
+                        serde_json::Value::from(value),
+                    ),
+                    None => journal::Draft::unset("doc", &id, "supersedes"),
+                };
+                let forward = vec![field(older.as_deref())];
+                self.pending = Some(Change {
+                    forward: forward.clone(),
+                    back: vec![field(doc.supersedes.as_deref())],
+                });
+                self.direction = Direction::Forward;
+                self.pending_anchor = Some(id);
+                Effect::Append(forward)
+            }
+            (_, _) => Effect::Redraw,
         }
     }
 
@@ -1370,6 +1391,9 @@ impl Model {
             }
             ('e', Some(crate::detail::Row::DigitalOnly)) => self.toggle_digital_only(),
             ('e', Some(crate::detail::Row::Location)) => self.open_locations(),
+            ('e', Some(crate::detail::Row::Renews)) => {
+                self.open_picker(crate::pick::Purpose::Renews)
+            }
             ('e', Some(_)) => {
                 self.flash = Some("that row cannot be edited yet".into());
                 Effect::Redraw
@@ -2470,13 +2494,23 @@ fn picker_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             Some(Effect::Redraw)
         }
         Msg::Enter => Some(match hits.get(picker.cursor) {
-            Some(entry) => model.choose(&picker, entry.choice),
+            Some(entry) => model.choose(&picker, entry.choice.clone()),
             None => Effect::Idle,
         }),
-        Msg::Tap { .. } => {
-            model.picker = None;
-            Some(Effect::Redraw)
-        }
+        Msg::Tap { col, row } => Some(match model.panel.at(*col, *row) {
+            Some(index) if index == picker.cursor => match hits.get(index) {
+                Some(entry) => model.choose(&picker, entry.choice.clone()),
+                None => Effect::Idle,
+            },
+            Some(index) => {
+                state.cursor = index;
+                Effect::Redraw
+            }
+            None => {
+                model.picker = None;
+                Effect::Redraw
+            }
+        }),
         Msg::Move(_) | Msg::Left | Msg::Right | Msg::Leader | Msg::Scroll(_) => Some(Effect::Idle),
         _ => None,
     }
@@ -3848,6 +3882,30 @@ pub(crate) mod tests {
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("passport-desk"));
         update(&mut m, Msg::Esc);
         assert!(m.views.is_empty(), "{:?}", m.views);
+    }
+
+    /// `e` on the `renews` row links the document to an older one, as one
+    /// change undo takes back.
+    #[test]
+    fn renews_links_a_document_to_an_older_one() {
+        let mut m = writable();
+        update(&mut m, Msg::Enter);
+        let rows = crate::detail::rows(m.current().unwrap());
+        m.set_record_cursor(rows.iter().position(|r| *r == crate::detail::Row::Renews).unwrap());
+        update(&mut m, Msg::Char('e'));
+        for c in "testim".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![journal::Draft::set("doc", "coc", "supersedes", "testimonial")])
+        );
+        let store = m.store.clone();
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert_eq!(
+            m.undo.last().map(|change| change.back.clone()),
+            Some(vec![journal::Draft::unset("doc", "coc", "supersedes")])
+        );
     }
 
     /// The Versions view's letters are undo and redo; any other says so.

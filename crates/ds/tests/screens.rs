@@ -592,6 +592,25 @@ fn the_versions_view_draws_two_lines_a_version() {
     assert!(text.contains("⏎ open"), "{text}");
 }
 
+/// The renews picker names the document and what it renews now under its
+/// heading, then the documents it may renew.
+#[test]
+fn the_renews_picker_has_three_heading_rows() {
+    let mut m = writable(47, 24);
+    m.cursor = m.rows.iter().position(|&i| m.store.docs[i].id == "eng1").unwrap();
+    update(&mut m, Msg::Enter);
+    let rows = ds::detail::rows(m.current().unwrap());
+    m.set_record_cursor(rows.iter().position(|r| *r == ds::detail::Row::Renews).unwrap());
+    update(&mut m, Msg::Char('e'));
+    let lines = screen(&mut m, 47, 24);
+    let text = lines.join("\n");
+    let heading = lines.iter().position(|line| line.contains("e  edit")).expect(&text);
+    assert!(lines[heading + 1].contains("ENG-1 Medical"), "{text}");
+    assert!(lines[heading + 1].trim_end().ends_with("document"), "{text}");
+    assert!(lines[heading + 2].contains("now: renews nothing"), "{text}");
+    assert!(text.contains("Driving Licence"), "{text}");
+}
+
 /// An empty store offers its first document, with nothing typed.
 #[test]
 fn an_empty_store_explains_itself() {

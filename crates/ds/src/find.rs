@@ -410,9 +410,9 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
             crumb: picker.crumb(&model.store),
             filter: Some(&picker.filter),
             cursor: Some(picker.cursor),
-            subject: None,
+            subject: picker.subject(&model.store),
         };
-        draw_panel(frame, area, &panel, rows, theme);
+        model.panel = draw_panel(frame, area, &panel, rows, theme);
         return;
     }
     if let Some(check) = &model.check {
@@ -800,7 +800,9 @@ fn draw_panel(
         ));
     }
     let count = rows.len();
-    for (index, (lead, label, right)) in rows.into_iter().enumerate() {
+    let room = (height as usize).saturating_sub(lines.len());
+    let skip = panel.cursor.map_or(0, |cursor| (cursor + 1).saturating_sub(room));
+    for (index, (lead, label, right)) in rows.into_iter().enumerate().skip(skip) {
         let gap = cols.saturating_sub(width(&lead) + width(&label) + width(right) + gutter);
         let mut line = Line::from(vec![
             Span::styled(lead, theme.style(Tone::Accent)),
@@ -821,7 +823,7 @@ fn draw_panel(
         top: rect.y + u16::try_from(heading).unwrap_or(u16::MAX),
         left: rect.x,
         width: rect.width,
-        items: (0..count).collect(),
+        items: (skip..count).collect(),
     }
 }
 

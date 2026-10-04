@@ -53,6 +53,8 @@ pub enum Row {
     Location,
     /// The digital-only checkbox.
     DigitalOnly,
+    /// The older version this one replaces.
+    Renews,
 }
 
 impl Row {
@@ -65,7 +67,8 @@ impl Row {
             | Row::File(_)
             | Row::Fact("files")
             | Row::DigitalOnly
-            | Row::Location => Some("e edit"),
+            | Row::Location
+            | Row::Renews => Some("e edit"),
             Row::Fact(_) => None,
         }
     }
@@ -100,9 +103,7 @@ pub fn rows(doc: &crate::Doc) -> Vec<Row> {
     } else {
         rows.extend((0..doc.files.len()).map(Row::File));
     }
-    if doc.supersedes.is_some() {
-        rows.push(Row::Fact("renews"));
-    }
+    rows.push(Row::Renews);
     rows.push(Row::Editable(Field::Notes));
     rows
 }
@@ -209,19 +210,30 @@ fn render_row(
             spans.push(Span::raw(truncate(&file.path, inner.saturating_sub(LABEL_COLS + 5))));
             vec![Line::from(spans)]
         }
-        Row::Fact("renews") => {
-            let older = doc.supersedes.clone().unwrap_or_default();
-            let title =
-                model.store.docs.iter().find(|d| d.id == older).map_or(older, |d| d.name.clone());
-            vec![Line::from(vec![
-                label("renews", theme),
-                Span::styled(
-                    truncate(&title, inner.saturating_sub(LABEL_COLS)),
-                    theme.style(Tone::Accent),
-                ),
-            ])]
+        Row::Renews => {
+            let title = renews(&model.store, doc);
+            vec![field("renews", &nonempty(title), inner, theme)]
         }
         Row::Fact(other) => vec![field(other, "—", inner, theme)],
+    }
+}
+
+/// The older version a document replaces, by name and issue date, or empty.
+#[must_use]
+pub fn renews(store: &crate::Store, doc: &crate::Doc) -> String {
+    let Some(older) = doc.supersedes.as_deref() else { return String::new() };
+    match store.index_of(older).map(|i| &store.docs[i]) {
+        Some(older) => version_name(older),
+        None => older.to_string(),
+    }
+}
+
+/// A version's name, with its issue date when it has one.
+#[must_use]
+pub fn version_name(doc: &crate::Doc) -> String {
+    match &doc.issue_date {
+        Some(issued) => format!("{} · issued {issued}", doc.name),
+        None => doc.name.clone(),
     }
 }
 

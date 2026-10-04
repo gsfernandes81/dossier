@@ -36,10 +36,12 @@ pub struct Picker {
 pub enum Purpose {
     /// What to do with one linked file, by index into `Doc::files`.
     File(usize),
+    /// Which older document this one replaces.
+    Renews,
 }
 
 /// What choosing an entry does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Choice {
     /// Make this file the one `Enter` opens.
     MakePrimary,
@@ -47,6 +49,8 @@ pub enum Choice {
     Detach,
     /// Type the path of another file to link.
     Attach,
+    /// Replace this older document, or none.
+    Renew(Option<String>),
 }
 
 /// One line of a picker.
@@ -75,6 +79,23 @@ impl Picker {
                 let name = path.rsplit('/').next().unwrap_or(path);
                 format!("file {name}")
             }
+            Purpose::Renews => "e  edit".into(),
+        }
+    }
+
+    /// What the picker acts on, its kind, and what it is now, when the panel
+    /// names them under its heading.
+    #[must_use]
+    pub fn subject(&self, store: &Store) -> Option<(String, &'static str, String)> {
+        let doc = store.index_of(&self.doc).map(|i| &store.docs[i])?;
+        match self.purpose {
+            Purpose::File(_) => None,
+            Purpose::Renews => {
+                let now = crate::detail::renews(store, doc);
+                let now =
+                    if now.is_empty() { "renews nothing".into() } else { format!("renews {now}") };
+                Some((doc.name.clone(), "document", now))
+            }
         }
     }
 
@@ -98,6 +119,17 @@ impl Picker {
                 entries.push(entry("attach another file", Choice::Attach));
                 entries
             }
+            Purpose::Renews => {
+                let mut entries = Vec::new();
+                if doc.supersedes.is_some() {
+                    entries.push(entry("none", Choice::Renew(None)));
+                }
+                entries.extend(renewable(store, &doc.id).into_iter().map(|i| Entry {
+                    label: crate::detail::version_name(&store.docs[i]),
+                    choice: Choice::Renew(Some(store.docs[i].id.clone())),
+                }));
+                entries
+            }
         }
     }
 
@@ -110,6 +142,30 @@ impl Picker {
             .filter(|entry| crate::search::fold(&entry.label).contains(&needle))
             .collect()
     }
+}
+
+/// The documents `id` may replace without breaking a chain: never itself or
+/// one of its own newer versions, and never one something else replaces.
+fn renewable(store: &Store, id: &str) -> Vec<usize> {
+    let mut newer = std::collections::BTreeSet::from([id]);
+    loop {
+        let before = newer.len();
+        for doc in &store.docs {
+            if doc.supersedes.as_deref().is_some_and(|older| newer.contains(older)) {
+                newer.insert(doc.id.as_str());
+            }
+        }
+        if newer.len() == before {
+            break;
+        }
+    }
+    store
+        .docs
+        .iter()
+        .enumerate()
+        .filter(|(_, doc)| !doc.superseded && !newer.contains(doc.id.as_str()))
+        .map(|(i, _)| i)
+        .collect()
 }
 
 fn entry(label: &str, choice: Choice) -> Entry {
@@ -129,6 +185,50 @@ mod tests {
             primary: false,
         });
         store
+    }
+
+    /// A chain of three passports beside two unrelated documents.
+    fn chain() -> Store {
+        let mut store = crate::app::tests::model().store;
+        let mut add = |id: &str, supersedes: &str| {
+            let mut version = store.docs[2].clone();
+            version.id = id.into();
+            version.supersedes = Some(supersedes.into());
+            store.docs.push(version);
+        };
+        add("passport-2", "passport");
+        add("passport-3", "passport-2");
+        store.docs[2].superseded = true;
+        let middle = store.index_of("passport-2").unwrap();
+        store.docs[middle].superseded = true;
+        store
+    }
+
+    fn labels(store: &Store, id: &str) -> Vec<Choice> {
+        Picker::new(id, Purpose::Renews)
+            .entries(store)
+            .into_iter()
+            .map(|entry| entry.choice)
+            .collect()
+    }
+
+    /// The renews picker offers only documents that keep the chain a chain:
+    /// never the document itself, never one of its newer versions, and never
+    /// one something else already replaces.
+    #[test]
+    fn renews_offers_only_documents_that_keep_the_chain() {
+        let store = chain();
+        let renew = |id: &str| Choice::Renew(Some(id.into()));
+        assert_eq!(
+            labels(&store, "passport"),
+            [renew("coc"), renew("eng1"), renew("testimonial")],
+            "not its newer versions"
+        );
+        assert_eq!(
+            labels(&store, "passport-2"),
+            [Choice::Renew(None), renew("coc"), renew("eng1"), renew("testimonial")],
+            "none first, and not the version it already replaces"
+        );
     }
 
     /// The primary file is not offered "make primary"; the other one is.
