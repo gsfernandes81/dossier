@@ -44,7 +44,7 @@ use crate::wsl::Wsl;
 pub enum OpenError {
     /// The path is not on this device — usually a store that has not finished
     /// syncing, which is worth saying rather than blaming the opener.
-    #[error("{0} is not on this device yet (Syncthing may still be catching up)")]
+    #[error("not on this device yet, Syncthing may still be catching up: {0}")]
     Missing(PathBuf),
     /// The platform's opener is not installed.
     #[error("{opener} not found — {hint}")]

@@ -1619,9 +1619,16 @@ impl Model {
         self.write(change, Landed::on(doc, note))
     }
 
-    /// The files list with `path` attached, or why it cannot be.
-    fn attached(&self, doc: &str, path: &serde_json::Value) -> Result<serde_json::Value, String> {
-        let path = path.as_str().unwrap_or_default().to_string();
+    /// Links the typed path as one more soft copy of `doc`, the first being
+    /// primary, or says why it cannot be.
+    fn attach(&mut self, doc: &str, typed: &str) -> Result<Effect, String> {
+        if typed.trim().is_empty() {
+            return Err("type a path, or choose one from the list".into());
+        }
+        let path = crate::edit::relative_path(typed)?;
+        if self.root.as_ref().is_some_and(|root| root.join(&path).is_dir()) {
+            return Err(format!("{path} is a folder — choose a file in it"));
+        }
         let mut files =
             self.store.index_of(doc).map(|i| self.store.docs[i].files.clone()).unwrap_or_default();
         if files.iter().any(|file| file.path == path) {
@@ -1629,7 +1636,7 @@ impl Model {
         }
         let primary = files.is_empty();
         files.push(crate::FileRef { label: String::new(), path, primary });
-        Ok(crate::doc::files_value(&files))
+        Ok(self.write_files(doc, &files))
     }
 
     /// `Esc` peels exactly one layer per press (invariant 3).
@@ -2513,7 +2520,7 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
 
     // "Any other key disarms" — the same rule the quit arming follows, applied
     // to the discard so the two behave identically.
-    if !matches!(msg, Msg::Esc) {
+    if !matches!(msg, Msg::Esc | Msg::Quit) {
         edit.armed_discard = false;
     }
 
@@ -2538,38 +2545,38 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             edit.buffer.pop();
             Effect::Redraw
         }
+        // A second `Enter` while the first is in flight would append the same
+        // op twice: harmless to the fold, but a lie in the history.
+        Msg::Enter if edit.saving => Effect::Idle,
         Msg::Enter => {
-            // A second `Enter` while the first is still in flight would append
-            // the same op twice. The journal would survive it — LWW on identical
-            // values is a no-op — but the history would carry a lie about what
-            // the user did.
-            if edit.field.of_bundle() {
-                match model.edit_bundle(&edit.doc, edit.field, &edit.buffer) {
-                    Ok(effect) => {
-                        model.edit = None;
-                        return Some(effect);
-                    }
-                    Err(complaint) => {
-                        model.flash = Some(complaint);
-                        Effect::Redraw
-                    }
+            // These save through their own checks and close at once; a
+            // document's field saves through `save_field` and closes when the
+            // journal answers.
+            let own = match edit.field {
+                field if field.of_bundle() => {
+                    Some(model.edit_bundle(&edit.doc, field, &edit.buffer))
                 }
-            } else if edit.field == crate::edit::Field::Rename {
-                match model.rename(&edit.doc, &edit.buffer) {
-                    Ok(effect) => {
-                        model.edit = None;
-                        return Some(effect);
-                    }
-                    Err(complaint) => {
-                        model.flash = Some(complaint);
-                        Effect::Redraw
-                    }
+                crate::edit::Field::Rename => Some(model.rename(&edit.doc, &edit.buffer)),
+                crate::edit::Field::Attach => Some(model.attach(&edit.doc, &edit.buffer)),
+                _ => None,
+            };
+            match own {
+                Some(Ok(effect)) => {
+                    model.edit = None;
+                    return Some(effect);
                 }
-            } else if edit.saving {
-                Effect::Idle
-            } else {
-                save_field(model, &mut edit)
+                Some(Err(complaint)) => {
+                    model.flash = Some(complaint);
+                    Effect::Redraw
+                }
+                None => save_field(model, &mut edit),
             }
+        }
+        // Quitting throws an unsaved edit away, so it asks first, as Esc does.
+        Msg::Quit if edit.dirty() && !edit.armed_discard => {
+            edit.armed_discard = true;
+            model.flash = Some("unsaved edit — ^q again to quit without saving".into());
+            Effect::Redraw
         }
         Msg::Esc => {
             if edit.saving {
@@ -2607,13 +2614,7 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
 
 /// Validates a document field's typing and asks for the append that saves it.
 fn save_field(model: &mut Model, edit: &mut crate::edit::Edit) -> Effect {
-    let validated = edit.field.validate(&edit.buffer).and_then(|value| match value {
-        Some(path) if edit.field == crate::edit::Field::Attach => {
-            model.attached(&edit.doc, &path).map(Some)
-        }
-        other => Ok(other),
-    });
-    match validated {
+    match edit.field.validate(&edit.buffer) {
         Ok(value) => {
             // The id is minted at `Enter`, not when the edit opened, because
             // it is made from the name being typed.
@@ -2675,10 +2676,22 @@ fn attach_key(model: &mut Model, edit: &mut crate::edit::Edit, msg: &Msg) -> Opt
             }
         }
         Msg::Enter => {
-            let entry = edit.chosen.and_then(|at| hits.get(at))?;
-            pick(edit, entry);
-            if !entry.dir {
-                return None;
+            if let Some(entry) = edit.chosen.and_then(|at| hits.get(at)) {
+                pick(edit, entry);
+                if !entry.dir {
+                    return None;
+                }
+            } else {
+                // A folder typed whole opens, as a chosen one does: a folder
+                // is never a soft copy.
+                let typed = edit.buffer.trim();
+                let root = model.root.as_ref()?;
+                if typed.is_empty() || !root.join(typed).is_dir() {
+                    return None;
+                }
+                if !typed.ends_with(['/', '\\']) {
+                    edit.buffer.push('/');
+                }
             }
         }
         Msg::Tap { col, row } => {
@@ -5022,6 +5035,35 @@ pub(crate) mod tests {
         assert_eq!(m.edit.as_ref().unwrap().buffer, "Identity/passport.pdf");
         let written = files_written(&update(&mut m, Msg::Enter)).expect("a files write");
         assert_eq!(written[0]["path"], "Identity/passport.pdf");
+    }
+
+    /// An empty line attaches nothing and says what to do; a folder typed
+    /// whole opens rather than becoming a soft copy.
+    #[test]
+    fn an_empty_line_or_a_folder_is_never_attached() {
+        let mut m = attaching_under("refuse");
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
+        assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("type a path")));
+        assert!(m.edit.is_some(), "the line stays open");
+
+        for c in "Identity".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "nothing written");
+        assert_eq!(m.edit.as_ref().unwrap().buffer, "Identity/", "the folder opened");
+        assert_eq!(listed(&m), ["pan.pdf", "passport.pdf"]);
+    }
+
+    /// Quitting with an unsaved edit asks first, as Esc does; a second press
+    /// quits.
+    #[test]
+    fn quitting_an_unsaved_edit_asks_first() {
+        let mut m = writable();
+        update(&mut m, Msg::EditField(crate::edit::Field::Name));
+        update(&mut m, Msg::Char('!'));
+        assert_eq!(update(&mut m, Msg::Quit), Effect::Redraw, "the first press asks");
+        assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("unsaved edit")));
+        assert_eq!(update(&mut m, Msg::Quit), Effect::Quit);
     }
 
     /// `Enter` on a chosen file fills the line and saves it at once.
