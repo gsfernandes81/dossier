@@ -13,21 +13,11 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Terminal events in, [`Msg`]s out — the only place that knows crossterm.
-//!
-//! Keeping the translation here is what lets [`crate::app`] be tested as a state
-//! machine: a test writes `Msg::Char('c')` instead of assembling a `KeyEvent`,
-//! and the rules stay readable as rules. It also means every terminal quirk has
-//! exactly one home, and the quirks are real:
-//!
-//! * **Key releases must be dropped.** A terminal that negotiated the kitty
-//!   keyboard protocol sends press *and* release; acting on both makes every
-//!   tap fire twice.
-//! * **Drags and button-ups change nothing.** Termux delivers a finger drag as a
-//!   stream of moves plus wheel events, and reacting to each would make the list
-//!   chase the finger twice over.
-//! * **Termux has no function keys** — the binding R0.2 finding. Nothing
-//!   user-facing may sit behind one, so nothing here maps one.
+//! Terminal events in, [`Msg`]s out — the only place that knows crossterm, so
+//! every terminal quirk has one home. Key releases are dropped (the kitty
+//! protocol sends both), drags change nothing (Termux sends a drag as moves
+//! and wheel events), and nothing is mapped to a function key, which Termux
+//! does not have.
 
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -49,15 +39,8 @@ pub fn to_msg(event: &Event) -> Option<Msg> {
 
 fn key_msg(key: KeyEvent) -> Option<Msg> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    // **ALT is not a typing modifier.** Termux's extra-keys `ALT` is a sticky
-    // modifier that composes with soft-keyboard letters, and crossterm delivers
-    // `alt+f` as `Char('f')` with `ALT` set — so without this guard, latching
-    // ALT and typing quietly pollutes the search. Measured on the built binary
-    // before it was fixed, not inferred.
-    //
-    // Nothing is bound to the alt tier yet. It is where R4's in-edit verbs go:
-    // on a surface that is not search-as-you-type, bare letters are the primary
-    // namespace, and `alt+s` mirrors `s` while a field is being typed into.
+    // Termux's extra-keys ALT is sticky, and crossterm delivers `alt+f` as
+    // `Char('f')` with ALT set, so a modified letter must not reach the search.
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
         // Never bound over: `ctrl+c` must always quit cleanly.
@@ -88,9 +71,8 @@ fn mouse_msg(mouse: MouseEvent) -> Option<Msg> {
         MouseEventKind::Down(MouseButton::Left) => {
             Some(Msg::Tap { col: mouse.column, row: mouse.row })
         }
-        // The app owns scrolling: Termux's mouse mode blocks the terminal's own
-        // scrollback (termux-app #4302), so if the list does not move the
-        // finger, nothing does. Three rows a notch, matching v2's feel.
+        // Termux's mouse mode blocks the terminal's own scrollback, so the app
+        // scrolls: three rows a notch.
         MouseEventKind::ScrollDown => Some(Msg::Scroll(3)),
         MouseEventKind::ScrollUp => Some(Msg::Scroll(-3)),
         _ => None,
@@ -105,8 +87,7 @@ mod tests {
         Event::Key(KeyEvent::new(code, modifiers))
     }
 
-    /// **The surface binds no letter keys.** Every bare printable — including
-    /// the ones that would be tempting hotkeys — becomes search text.
+    /// Every bare printable becomes search text.
     #[test]
     fn every_bare_letter_is_search_text() {
         for c in ['s', 'b', 'u', 'f', 'q', 'x', ':', '?', '1'] {
@@ -118,11 +99,7 @@ mod tests {
         }
     }
 
-    /// **A modified letter is never search text.** `ctrl` was always guarded;
-    /// `alt` was not, so latching Termux's `ALT` key and typing put the letters
-    /// straight into the query. The alt tier is silent until something is bound
-    /// to it, which is the honest default: a key that does nothing is better
-    /// than a key that does the wrong thing.
+    /// A modified letter is never search text.
     #[test]
     fn a_modified_letter_never_reaches_the_query() {
         for modifiers in [KeyModifiers::ALT, KeyModifiers::CONTROL | KeyModifiers::ALT] {
@@ -136,12 +113,7 @@ mod tests {
         }
     }
 
-    /// `ctrl+alt+z` is deliberately the same verb as `ctrl+z`.
-    ///
-    /// The guard asks whether CONTROL is present, not whether it is the *only*
-    /// modifier — and it stays that way on purpose. Exact-modifier matching is
-    /// how a binding breaks on a terminal that decorates keys with a modifier
-    /// nobody asked for, and the two combinations have no reason to differ.
+    /// `ctrl+alt+z` is `ctrl+z`: a terminal may add a modifier nobody asked for.
     #[test]
     fn a_bound_control_letter_ignores_extra_modifiers() {
         let both = KeyModifiers::CONTROL | KeyModifiers::ALT;
@@ -149,14 +121,8 @@ mod tests {
         assert_eq!(to_msg(&press(KeyCode::Char('q'), both)), Some(Msg::Quit));
     }
 
-    /// **Editing is a bare letter on the record, never a control key.**
-    ///
-    /// `ctrl+e` existed for one slice and was retired. Termux latches `CTRL` in
-    /// its own UI layer, so the app never sees the modifier go down — the
-    /// combination arrives as one finished key event, and there is no moment at
-    /// which the leader sheet could offer what follows it. A tier that can only
-    /// be memorised is the wrong place for a verb, so `e` on the record's
-    /// selected row does it instead and the sheet can teach it.
+    /// Editing is a bare letter, never a control key: Termux delivers ctrl
+    /// combinations as one finished key, so the Space sheet cannot teach them.
     #[test]
     fn editing_is_not_behind_a_control_key() {
         assert_eq!(
@@ -182,8 +148,7 @@ mod tests {
         assert_eq!(to_msg(&press(KeyCode::Char('y'), KeyModifiers::CONTROL)), Some(Msg::Redo));
     }
 
-    /// **A key release is not a key press.** Terminals that negotiated the kitty
-    /// protocol send both, and acting on both makes every keystroke count twice.
+    /// A key release is not a key press.
     #[test]
     fn releases_and_repeats_are_dropped() {
         let mut event = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
@@ -219,9 +184,7 @@ mod tests {
         assert_eq!(to_msg(&Event::Mouse(wheel)), Some(Msg::Scroll(-3)));
     }
 
-    /// **Nothing sits behind a function key** — Termux does not have them
-    /// (R0.2's binding finding), so a function key must not be the only way to
-    /// reach anything.
+    /// Nothing sits behind a function key; Termux has none.
     #[test]
     fn function_keys_are_bound_to_nothing() {
         for n in 1..=12 {

@@ -32,11 +32,6 @@
 //! DS_TIMING=1             print the startup breakdown to stderr at first paint
 //! DS_TIMING=exit          ...and quit right after (wrap the run in `time`)
 //! ```
-//!
-//! `DS_TIMING` deliberately mirrors v2's probe and the R0.2 spike's, so the
-//! three are measured the same way on the same phone: 1053 ms for the Python
-//! app, 6.2 ms for the spike, and this binary is the one that has to keep the
-//! second number with a real store behind it.
 
 #![warn(clippy::pedantic)]
 #![forbid(unsafe_code)]
@@ -74,9 +69,6 @@ struct Args {
     root: Option<PathBuf>,
 
     /// A journal directory to read directly, instead of `<root>/.dossier/journal`.
-    ///
-    /// Reading an exported copy is how R3 is daily-driven before cutover, so
-    /// this is a first-class flag rather than a debugging one.
     #[arg(long, value_name = "DIR", global = true)]
     journal: Option<PathBuf>,
 
@@ -88,18 +80,11 @@ struct Args {
 enum Command {
     /// Report what the store contains and anything wrong with it.
     Status {
-        /// Print only problems, and exit non-zero if there are any.
-        ///
-        /// The mode a cron job uses: silent for months, believable when it
-        /// finally speaks. Read-only by design (REWRITE.md §3.1).
+        /// Print only what is wrong, and exit 3 if anything is: for cron.
         #[arg(long)]
         quiet: bool,
 
-        /// Skip the Syncthing check.
-        ///
-        /// The only part of `status` that touches the network. Worth having a
-        /// switch for: on a metered or captive connection the two-second
-        /// timeout is the slowest thing this command does.
+        /// Skip the Syncthing check, the only part that touches the network.
         #[arg(long)]
         no_sync: bool,
     },
@@ -178,12 +163,8 @@ fn run(args: &Args, start: Instant) -> io::Result<u8> {
     }
 }
 
-/// `ds init` — the conversation, wired to the real streams.
-///
-/// The policy lives here and the mechanism in [`ds::init`]: which streams, and
-/// whether there is a person on the end of them. Everything else — the
-/// questions, the grammar check, the refusal to overwrite — is testable without
-/// a terminal, which is the only way CI can check it at all.
+/// `ds init`, wired to the real streams: a line editor on a terminal, plain
+/// lines otherwise.
 fn init(args: &Args, device: Option<String>, force: bool) -> u8 {
     let Some(path) = ds::config::path() else {
         eprintln!(
@@ -248,11 +229,8 @@ fn status(
     0
 }
 
-/// `ds open <query>` — the TUI's `Enter` verb, without the TUI.
-///
-/// An id is tried first, so a script that knows exactly what it wants is never
-/// at the mercy of a search. Several matches are **listed, not guessed**: opening
-/// the wrong document silently is worse than opening none.
+/// `ds open <query>`: an id first, then a search; several matches are listed,
+/// never guessed.
 fn open_one(loaded: &load::Loaded, root: &Path, query: &str) -> u8 {
     let docs = &loaded.store.docs;
     let matched: Vec<usize> = docs

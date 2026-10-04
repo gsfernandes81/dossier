@@ -13,21 +13,10 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Semantic colour tokens, and the promise that colour never carries meaning
-//! alone.
-//!
-//! REWRITE-UI.md §6: the renderer names *what a thing is* ([`Tone::Expired`]),
-//! never what colour it should be, and the mapping to terminal colours happens
-//! once, here. Two things fall out of that:
-//!
-//! * **The user's terminal theme carries the palette.** Everything maps to the
-//!   sixteen ANSI colours rather than to RGB, so a Termux colour scheme, a
-//!   Solarized tmux and a Windows Terminal profile each render this app in their
-//!   own colours instead of fighting it.
-//! * **`NO_COLOR` is a supported way to run**, not a degraded one. With colour
-//!   off every tone still differs by weight or reverse video, and the glyph
-//!   markers (`!`, `~`, `·`) carry the status signal on their own — which is
-//!   also what makes the app legible on a phone in sunlight.
+//! Semantic colour tokens: the renderer names what a thing is, and the
+//! mapping to the sixteen ANSI colours happens once, here, so the terminal's
+//! own theme carries the palette. Under `NO_COLOR` every tone still differs by
+//! weight or reverse video, and the glyph markers carry status on their own.
 
 use ratatui::style::{Color, Modifier, Style};
 
@@ -75,10 +64,6 @@ pub enum Tone {
 }
 
 /// The palette, resolved once at startup.
-///
-/// rust: a plain `Copy` struct rather than a trait object. There is exactly one
-/// implementation and there will be exactly one; a trait here would buy
-/// indirection and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
     /// Whether colour may be emitted at all.
@@ -100,10 +85,6 @@ impl Theme {
     }
 
     /// The style for a tone.
-    ///
-    /// The monochrome branch is not a fallback bolted on afterwards — it is
-    /// written first and checked by test, because it is what the ASCII markers
-    /// have to survive alongside.
     #[must_use]
     pub fn style(self, tone: Tone) -> Style {
         let plain = Style::default();
@@ -124,42 +105,13 @@ impl Theme {
         }
     }
 
-    /// The lit rule between the list and the entry line.
+    /// The lit status line between the list and the entry line.
     ///
-    /// **This is a status line, not a field marking.** It carries the count,
-    /// the live filters and the hints, and it sits directly above the row the
-    /// user types into — which is Vim's arrangement exactly: `StatusLine`
-    /// highlighted, `:` on the plain final line beneath it. The entry row keeps
-    /// the terminal's own background, so nothing is drawn behind the user's own
-    /// text and nothing has to fight it for contrast.
-    ///
-    /// It began as a marking *on* the field, which was worse in three ways at
-    /// once: dim placeholder text over a lit row is the least legible thing on
-    /// the screen, the band had to pin a foreground and so replaced the
-    /// terminal's own, and the list still ran into the chrome with no boundary.
-    /// Dividing is the job a band can do without fighting anything.
-    ///
-    /// **Both ends are pinned** — ANSI 7 behind, ANSI 0 in front (ratatui's
-    /// `Gray` and `Black` are SGR 47 and 30; note that `White` is SGR 97, the
-    /// *bright* slot, which the names do not say). Setting only a background
-    /// would be a coin flip on polarity, so the pair is named — and §6's promise
-    /// survives it, because the slots are ANSI and the user's own theme still
-    /// chooses the two hues.
-    ///
-    /// It was ANSI 8 on 15 first, a mid grey carrying dim white text, and that
-    /// was two greys too close together. ANSI 0 was tried on the device and is
-    /// indistinguishable from the terminal background there. ANSI 15 has the
-    /// most contrast of all and is unusable for a subtler reason: reverse video
-    /// on a black terminal *is* ANSI 15 on ANSI 0, so the bar would be
-    /// indistinguishable from the selected row.
-    ///
-    /// **This tunes the band to a dark terminal.** A light theme puts a
-    /// near-white bar on a near-white background, which is the mirror of what
-    /// ANSI 0 does on a dark one. There is no pair that works equally well both
-    /// ways; the band is tuned to one polarity and survives the other.
-    ///
-    /// Under `NO_COLOR` there is no band, and that costs only a divider rather
-    /// than the one thing marking the field.
+    /// Both ends are pinned, ANSI 7 behind and ANSI 0 in front (`Gray` and
+    /// `Black`; `White` is the bright slot), because a background alone is a
+    /// coin flip on polarity. Not ANSI 15: reverse video on a black terminal is
+    /// 15 on 0, so the band would look like the selected row. Tuned to dark
+    /// terminals; under `NO_COLOR` there is no band.
     #[must_use]
     pub fn band(self) -> Style {
         if self.color {
@@ -169,18 +121,8 @@ impl Theme {
         }
     }
 
-    /// A tone as it should be drawn **on the band**.
-    ///
-    /// The band is a light surface inside a dark one, so the tones that work
-    /// against the terminal's own background do not work against it: `Muted` is
-    /// `DIM`, whose rendering is a terminal's own business and which some
-    /// ignore outright, and `Armed` is yellow, which on a near-white row is
-    /// barely there.
-    ///
-    /// So the quiet parts of the band are a named grey rather than a dimmed
-    /// black, and a message that matters is red — the colour this app already
-    /// uses for *expired*, and one of the few with real contrast on light.
-    /// §6 still holds: the words say it, and the colour agrees with them.
+    /// A tone as it should be drawn on the band, a light row where `DIM` may
+    /// be ignored and yellow barely shows: grey for quiet, red for a message.
     #[must_use]
     pub fn on_band(self, tone: Tone) -> Style {
         if !self.color {
@@ -244,9 +186,7 @@ impl Theme {
 mod tests {
     use super::*;
 
-    /// **Colour is never the only signal.** With colour off, every tone that
-    /// means something still differs from plain text by weight or reverse video
-    /// — the property that keeps a `NO_COLOR` or monochrome terminal usable.
+    /// With colour off, every tone that means something still stands out.
     #[test]
     fn every_meaningful_tone_survives_monochrome() {
         let mono = Theme { color: false };
@@ -258,10 +198,7 @@ mod tests {
         }
     }
 
-    /// **The band must not look like the selection.** Reverse video on a black
-    /// terminal *is* ANSI 15 on ANSI 0, so a bright-white band would be
-    /// indistinguishable from the selected row — the reason the brightest pair
-    /// was rejected rather than the reason it was never tried.
+    /// The band never looks like the selected row.
     #[test]
     fn the_band_is_not_the_selection() {
         let theme = Theme { color: true };
@@ -276,9 +213,7 @@ mod tests {
         );
     }
 
-    /// **Tones on the band are not the tones off it.** The band is a light
-    /// surface inside a dark one: `DIM` is a terminal's own business and some
-    /// ignore it outright, and yellow on near-white is barely there.
+    /// Tones that would vanish on the band are restyled for it.
     #[test]
     fn the_band_restyles_the_tones_that_would_vanish_on_it() {
         let theme = Theme { color: true };

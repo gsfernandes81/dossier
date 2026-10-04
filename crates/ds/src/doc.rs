@@ -155,11 +155,7 @@ pub struct Doc {
     /// A latest version beside a later-issued one: two devices each made a
     /// new version of the same document.
     pub conflicting: bool,
-    /// Folded name + notes + tags + bundles, precomputed once.
-    ///
-    /// Search runs on every keystroke across the whole store, so the
-    /// per-keystroke work has to be a scan of prepared strings rather than a
-    /// thousand fresh allocations. Same trick the R0.2 spike measured.
+    /// Name, notes, tags and bundle names folded once, for search.
     pub haystack: String,
 }
 
@@ -201,20 +197,10 @@ impl Doc {
         })
     }
 
-    /// Every journal field this document holds, in the shape the fold reads.
-    ///
-    /// **This is what makes a delete undoable.** §3.2 keeps a tombstone forever
-    /// and makes a later `create` start from *empty*, so putting a deleted
-    /// document back means re-sending every field it had — and the fold is the
-    /// only authority on what those are.
-    ///
-    /// It is the exact inverse of [`Store::build`]'s per-document mapping, and
-    /// the pair is checked by a round-trip test rather than by eye: a field
-    /// added to one side and forgotten on this one would be data that vanishes
-    /// on undo, which is the worst kind of bug this program could have.
-    ///
-    /// `superseded` and `haystack` are absent on purpose — they are derived from
-    /// the collection and from the other fields, never stored.
+    /// Every journal field this document holds, as the fold reads it: the
+    /// inverse of [`Store::build`]'s mapping, so a deleted document can be put
+    /// back whole. `superseded`, `conflicting` and `haystack` are left out:
+    /// they are derived, never stored.
     #[must_use]
     pub fn as_fields(&self) -> Vec<(&'static str, Value)> {
         let mut fields: Vec<(&'static str, Value)> = vec![("name", self.name.clone().into())];

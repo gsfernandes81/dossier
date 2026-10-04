@@ -13,14 +13,9 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The per-device config file — and nothing else.
-//!
-//! REWRITE.md §2: per-device config stays a small TOML file in the platform
-//! config directory, holding **only** what genuinely differs between this phone
-//! and that desktop — where the Syncthing folder is mounted, what this device
-//! calls itself, and how to reach the local Syncthing API. Everything shared
-//! moved into the journal as ops, so there is no second file to keep in sync and
-//! no whole-file last-writer-wins special case.
+//! The per-device config file: only what differs between devices — where the
+//! Syncthing folder is mounted, what this device is called, and how to reach
+//! its Syncthing API. Everything shared lives in the journal.
 //!
 //! ```toml
 //! syncthing_root = "/storage/emulated/0/Sync/Documents"
@@ -31,26 +26,15 @@
 //! apikey = "…"
 //! ```
 //!
-//! **A missing config file is not an error.** A fresh device has none until
-//! [`ds init`](crate::init) writes one, and `--root` covers every case in
-//! between — which is what lets R3 be daily-driven against an exported copy
-//! before cutover.
+//! A missing file is not an error: a fresh device has none until `ds init`.
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-/// Environment override for the directory the config lives in.
-///
-/// Two jobs, and the second is why it is not optional. A portable install (a
-/// binary on a stick, a second store) can point at its own config. And **tests
-/// can sandbox it on every platform**: `tests/cli.rs` sets `XDG_CONFIG_HOME`,
-/// `HOME`, `LOCALAPPDATA` and `APPDATA`, which works on Linux — but `dirs`
-/// resolves the Windows config directory through the Known Folder API, which
-/// ignores those variables entirely. That was harmless while `ds` only *read*
-/// config; a test that writes one would have written the CI runner's real
-/// `%LOCALAPPDATA%\dossier\config.toml`. This variable is the seam that closes
-/// it, on both platforms, with one mechanism.
+/// Environment override for the config directory. Tests need it: `dirs`
+/// resolves the Windows directory through the Known Folder API, which ignores
+/// `HOME` and `APPDATA`, so nothing else can sandbox it there.
 pub const DIR_ENV: &str = "DS_CONFIG_DIR";
 
 /// Where the config lives and what it says.
@@ -73,12 +57,9 @@ pub struct Syncthing {
     pub address: Option<String>,
     /// The REST API key from Syncthing's own settings.
     pub apikey: Option<String>,
-    /// Whether to verify the TLS certificate.
-    ///
-    /// Defaults to **false** because on Termux the API is HTTPS-only with a
-    /// *self-signed* certificate (v2 Phase 15 finding: plain http 307-redirects).
-    /// The exception is scoped to loopback and nothing else — see the status
-    /// slice, which is where the client lives.
+    /// Whether to verify the TLS certificate; off by default because Termux's
+    /// API is HTTPS-only with a self-signed certificate, and only ever on
+    /// loopback.
     #[serde(default)]
     pub verify_tls: bool,
 }
@@ -115,11 +96,9 @@ pub enum Error {
     },
 }
 
-/// This device's config file path.
-///
-/// `~/.config/dossier/config.toml` on Linux and Termux, `%LOCALAPPDATA%\dossier`
-/// on Windows — the same places v2's `platformdirs` chose, so a device that
-/// already has one keeps it. [`DIR_ENV`] overrides the directory.
+/// This device's config file path: `~/.config/dossier/config.toml` on Linux
+/// and Termux, `%LOCALAPPDATA%\\dossier` on Windows. [`DIR_ENV`] overrides the
+/// directory.
 #[must_use]
 pub fn path() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os(DIR_ENV) {
@@ -129,21 +108,12 @@ pub fn path() -> Option<PathBuf> {
     Some(base.join("dossier").join("config.toml"))
 }
 
-/// Environment override for this device's local state directory.
-///
-/// Same two jobs as [`DIR_ENV`], and the same Windows reason for existing.
+/// Environment override for the state directory, for the same Windows reason
+/// as [`DIR_ENV`].
 pub const STATE_DIR_ENV: &str = "DS_STATE_DIR";
 
-/// Where this device keeps state that must **never** sync.
-///
-/// One thing lives here today and it is load-bearing: the writer's advisory
-/// lock file (REWRITE.md §3.1). A lock inside the Syncthing folder would
-/// replicate to the other device and lock *it* out of its own journal, and a
-/// lock on Android's FUSE mount is not reliable in the first place. The
-/// truncation high-water marks (§3.3) belong here too when they are wired up.
-///
-/// `~/.local/share/dossier` on Linux and Termux, `%LOCALAPPDATA%\dossier` on
-/// Windows. [`STATE_DIR_ENV`] overrides it.
+/// Where this device keeps state that must never sync: the writer's lock,
+/// which in the synced folder would lock the other device out of its journal.
 #[must_use]
 pub fn state_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os(STATE_DIR_ENV) {
@@ -174,26 +144,15 @@ impl Config {
             .map_err(|source| Error::Read { path: path.to_path_buf(), source })?;
         let mut config: Self = toml::from_str(&text)
             .map_err(|source| Error::Parse { path: path.to_path_buf(), source })?;
-        // `~` is not a path component to the OS — only to a shell. A config file
-        // is hand-written often enough that expanding it here is worth the four
-        // lines it costs.
+        // Only a shell expands `~`, and this file is written by hand.
         config.syncthing_root = config.syncthing_root.map(expand_home);
         Ok(config)
     }
 
-    /// The file this config would be written as.
-    ///
-    /// Hand-rendered rather than serialized, for one reason: the file is meant
-    /// to be **edited by hand**, and a serializer cannot write the comments that
-    /// make that possible. It is nine lines; a derive would save nothing and
-    /// cost the reader the explanation of what `verify_tls` is doing there.
+    /// The file this config would be written as, by hand so it can carry the
+    /// comments a person editing it needs.
     #[must_use]
     pub fn render(&self) -> String {
-        // rust: `write!` into a `String` rather than `push_str(&format!(…))` —
-        // the macro formats straight into the buffer instead of allocating a
-        // second one, which is what clippy::pedantic's `format_push_string` is
-        // asking for. It returns a `Result` that cannot fail for a `String`, so
-        // the `let _ =` is the honest way to say so.
         use std::fmt::Write as _;
         let mut out = String::from(
             "# dossier — this device's config.\n\
@@ -227,11 +186,9 @@ impl Config {
         out
     }
 
-    /// Write this config, replacing whatever is there.
-    ///
-    /// Same-directory temp plus rename, the house rule for any full-file
-    /// rewrite: a cross-device rename fails with `EXDEV` (v2 learned it the hard
-    /// way), and a half-written config is a device that cannot find its store.
+    /// Write this config, replacing whatever is there, through a temp file in
+    /// the same directory: a rename across devices fails, and a half-written
+    /// config is a device that cannot find its store.
     ///
     /// # Errors
     /// [`Error::Write`] for any filesystem failure, naming the file.
@@ -243,9 +200,8 @@ impl Config {
         let temp = path.with_extension(format!("toml.tmp-{}", std::process::id()));
         std::fs::write(&temp, self.render())
             .map_err(|source| Error::Write { path: temp.clone(), source })?;
-        // rust: `rename` replaces the destination on both platforms (Windows via
-        // `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING`), so `--force` needs no
-        // remove-then-write dance — which would leave a window with no config.
+        // `rename` replaces the destination on Windows too, so there is never a
+        // moment with no config.
         std::fs::rename(&temp, path).map_err(fail)
     }
 }
@@ -315,8 +271,7 @@ mod tests {
         assert!(!config.syncthing.verify_tls, "loopback + self-signed is the Termux reality");
     }
 
-    /// **A device with no config is a normal state**, not a failure — `--root`
-    /// covers it, which is exactly how R3 is driven before `ds init` exists.
+    /// A device with no config is a normal state, not a failure.
     #[test]
     fn an_empty_config_is_valid() {
         let dir = temp_dir("empty");

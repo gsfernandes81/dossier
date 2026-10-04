@@ -13,25 +13,12 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The view half of the loop: the Find surface.
+//! The view half of the loop: the Find surface, its panels and bottom rows.
 //!
-//! REWRITE-UI.md §1 — *"the app is a finder that happens to have management
-//! surfaces behind it"*. One full-width list, no location headers (U2), the
-//! search bar docked at the **bottom** where a thumb reaches it, and the counts
-//! that matter in the header. The approved mockups in `docs/dev/mockups/` are
-//! the reference this is measured against, down to the column counts.
-//!
-//! Two properties are load-bearing:
-//!
-//! 1. **The list is virtualized by hand.** Only rows that fit on screen are
-//!    built. Handing a widget 948 pre-built rows and letting it slice would make
-//!    frame time scale with the store rather than the viewport — precisely the
-//!    property the rewrite exists to avoid.
-//! 2. **Every column is measured in cells, never characters** ([`crate::layout`]).
-//!
-//! The renderer decides nothing: it reads [`Model`] and writes back only the
-//! geometry it drew, so taps hit-test against the layout that is really on
-//! screen.
+//! Only the rows that fit are built, so frame time follows the viewport and
+//! not the store, and every column is measured in cells. The renderer decides
+//! nothing: it reads [`Model`] and writes back only the geometry it drew, so
+//! taps hit-test against what is really on screen.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -67,11 +54,8 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
         return;
     }
 
-    // **Three rows of chrome, either way.** Touch spends them on the header and
-    // a two-row search bar; a keyboard on the header, a one-row bar and a hint
-    // line. There is no action bar: every verb it carried is a key the thumb
-    // already has on Termux's extra-keys row, and the two it did not are in the
-    // leader sheet, where a toggle can show its off state as well as its on one.
+    // Three rows of chrome either way: touch spends them on the header and a
+    // two-row search bar, a keyboard on the header, a one-row bar and a hint.
     let touch = crate::layout::touch_layout(area.width);
     let status = status_rows(model, area.width);
     let constraints = if touch {
@@ -137,23 +121,15 @@ fn draw_too_small(frame: &mut Frame, area: Rect, theme: Theme) {
     frame.render_widget(notice, area);
 }
 
-/// Title on the left, attention counts on the right.
-///
-/// Both halves shed detail as the terminal narrows — found the hard way in a
-/// 45-column run during R0.2, where a full-width header ran straight through the
-/// count and the terminal clipped it mid-word. At phone width the counts are the
-/// only thing worth keeping, so the title goes first.
+/// Title on the left, attention counts on the right; as the terminal narrows
+/// the counts are kept and the title gives way.
 fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let wide = area.width >= 72;
     let attention = model.due().len();
     let touch = crate::layout::touch_layout(area.width);
     let left = " dossier";
-    // On a touch layout the expiring count is the one verb a thumb cannot
-    // otherwise produce while browsing — with the keyboard down there is no
-    // letter for `CTRL` to land on. **You tap the number that told you there
-    // were three**, which is the affordance REWRITE-UI §1 already specified and
-    // the most discoverable one available. Reverse video, because in this design
-    // reverse means *you can press this* and nothing else does.
+    // On a touch layout the count is pressed to filter by it, so it is drawn
+    // in reverse video, which here means "you can press this".
     let count =
         if wide { format!(" ! {attention} expiring ") } else { format!(" ! {attention} exp ") };
     let conflicts = model.store.conflicts();
@@ -405,10 +381,6 @@ fn single_line_row(
 }
 
 /// Narrow layout: name and status, then location and tags underneath.
-///
-/// The user confirmed this in the mockup review, density trade accepted. On the
-/// measured phone (47×45 keyboard down, 47×24 up) it is twenty-one documents
-/// while browsing and ten while typing.
 fn two_line_row(
     doc: &Doc,
     place: &str,
@@ -970,9 +942,8 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     };
     frame.render_widget(Paragraph::new(info).style(theme.band()), rows[0]);
 
-    // An edit takes the entry line over rather than adding a row: three rows
-    // of chrome is the budget on both layouts (REWRITE-UI.md §5a). The `SPC`
-    // chip goes with it, since the sheet is not reachable from inside an edit.
+    // An edit takes the entry line over, keeping the chrome at three rows; the
+    // `SPC` chip goes with it, as the sheet is unreachable from an edit.
     let entry = if let Some(edit) = &model.edit {
         edit_row(edit, cols)
     } else {
@@ -1259,12 +1230,8 @@ fn hints(model: &Model) -> Vec<&'static str> {
     hints
 }
 
-/// Fit as many hints as the room allows, **dropping them one at a time from the
-/// left** rather than dropping the line whole.
-///
-/// The old all-or-nothing rule erased every hint the moment two filters were
-/// live — which is exactly when the user has the most state and the most reason
-/// to want a way back out of it.
+/// Fits as many hints as the room allows, dropping them one at a time from
+/// the left.
 fn shed(hints: &[&str], room: usize) -> String {
     for start in 0..hints.len() {
         let line = hints[start..].join("  ");

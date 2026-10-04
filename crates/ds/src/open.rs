@@ -13,18 +13,9 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Handing a file to the platform's opener — the payoff of the whole `Enter`
-//! path.
-//!
-//! A port of v2's `platform_open.py` (DESIGN §7), including the part that
-//! matters most in practice: **verify the opener exists and report what to do
-//! when it does not**. On Termux, `termux-open` comes from the Termux:API
-//! package *and* its companion app, and an F-Droid/Play-Store mismatch between
-//! them makes it a silent no-op — which is indistinguishable from "the app is
-//! broken" unless the message says otherwise.
-//!
-//! Reveal-in-file-manager and copy-path are v2 verbs that arrive with the detail
-//! surface's actions in R4; this slice is the one verb `Enter` needs.
+//! Handing a file to the platform's opener, and when the opener is missing,
+//! saying what to install. On Termux `termux-open` needs the Termux:API
+//! package and its app from the same store, or it silently does nothing.
 //!
 //! **Under WSL** the file goes to Windows, because that is where the default
 //! application is: the path is translated ([`crate::wsl`]) and handed to

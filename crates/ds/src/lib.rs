@@ -13,58 +13,10 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! `ds` — the dossier v3 core.
-//!
-//! Phase R3 of [`REWRITE.md`](../../../REWRITE.md): the read-only daily driver —
-//! browse, search, open, and `ds status`. The layout it renders is the approved
-//! plan in [`REWRITE-UI.md`](../../../REWRITE-UI.md), and the mockups in
-//! `docs/dev/mockups/` are the reference the finished surface is measured
-//! against.
-//!
-//! # Why this is a library, with a thin binary on top
-//!
-//! Everything above the journal splits cleanly into *what the data means*, *what
-//! the screen does*, and *what the terminal does*. Only the last needs a
-//! terminal, so only that is in `main.rs`; the rest is here, where the rules can
-//! be tested directly and at speed.
-//!
-//! - [`doc`] — a folded journal turned into documents: shelf order, expiry
-//!   standing, the file `Enter` opens, the search haystack.
-//! - [`place`] — the tree of physical locations a hard copy is filed in.
-//! - [`search`] — v2's typo-tolerant matching contract, ported: exact always
-//!   wins, and a short query never fuzzes.
-//! - [`app`] — the Elm-style loop's update half: `Msg` in, state changed,
-//!   [`app::Effect`] out. Every REWRITE.md §4.5 interaction invariant is a rule
-//!   in here and a test beside it.
-//! - [`find`] / [`detail`] — the view half: the Find surface and the record,
-//!   laid out to match the approved mockups.
-//! - [`edit`] — R4's write path on the model's side: which field is being
-//!   edited, what a buffer may become, and when it is safe to throw away.
-//! - [`input`] — terminal events to messages; the only module that knows
-//!   crossterm exists.
-//! - [`layout`] / [`theme`] — the responsive thresholds and cell-width
-//!   arithmetic, and the semantic colour tokens.
-//! - [`open`] — handing a file to the platform's opener, with the guidance that
-//!   makes a missing opener fixable.
-//! - [`config`] / [`load`] — the small per-device TOML, and the one path from a
-//!   directory to a store that every entry point shares.
-//! - [`init`] — `ds init`: naming this device, which is what gives the write
-//!   path a writer id to append under.
-//! - [`status`] — what `ds status` reports, as data that is rendered twice: in
-//!   full for a person, problems only for cron.
-//! - [`syncthing`] — asking the local daemon how the sync is going, status only,
-//!   with the loopback-scoped TLS exception Termux forces.
-//! - [`scans`] — what the documents *say*, loaded lazily on a worker the first
-//!   time scan-text search asks for it.
-//! - [`wsl`] — the Linux build on a Windows machine: path translation across
-//!   the boundary, and the one device-name collision only WSL can see.
-//!
-//! # Reading this code
-//!
-//! Per REWRITE.md §4.6 the codebase doubles as Rust learning material: every
-//! public item says what it is *and why it exists*, `// rust:` notes mark
-//! idioms that would surprise a Python developer, and each test states the
-//! invariant it defends before asserting it.
+//! `ds` — the TUI and CLI over a `journal` store. Everything that decides
+//! lives in this library, testable without a terminal; `main.rs` is the shell
+//! around it. The plan is [`REWRITE.md`](../../../REWRITE.md) and the layout
+//! [`REWRITE-UI.md`](../../../REWRITE-UI.md).
 
 #![warn(clippy::pedantic)]
 #![forbid(unsafe_code)]
