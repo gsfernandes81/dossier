@@ -198,11 +198,7 @@ impl Config {
             std::fs::create_dir_all(parent).map_err(fail)?;
         }
         let temp = path.with_extension(format!("toml.tmp-{}", std::process::id()));
-        std::fs::write(&temp, self.render())
-            .map_err(|source| Error::Write { path: temp.clone(), source })?;
-        // `rename` replaces the destination on Windows too, so there is never a
-        // moment with no config.
-        std::fs::rename(&temp, path).map_err(fail)
+        journal::replace_file(path, &temp, self.render().as_bytes()).map_err(fail)
     }
 }
 

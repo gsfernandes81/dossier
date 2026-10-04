@@ -405,9 +405,7 @@ impl Writer {
             rewritten.push('\n');
         }
 
-        replace(&self.path, &temp, rewritten.as_bytes()).inspect_err(|_| {
-            let _ = std::fs::remove_file(&temp);
-        })?;
+        replace_file(&self.path, &temp, rewritten.as_bytes()).map_err(io("compact", &self.path))?;
 
         let report = Report {
             lines_before: plan.total,
@@ -441,22 +439,28 @@ pub struct Report {
     pub bytes_after: u64,
 }
 
-/// Writes `body` to a new `temp`, flushes it and renames it over `path`.
+/// Replaces `path` with `body` by writing a new `temp` and renaming it over.
 ///
-/// The temp is closed before the rename: on WSL's drvfs, renaming a file
-/// still open loses it.
-fn replace(path: &Path, temp: &Path, body: &[u8]) -> Result<(), Error> {
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(temp)
-        .map_err(io("create temp file", temp))?;
-    file.write_all(body).map_err(io("write temp file", temp))?;
-    // Flushed before the rename, or a crash could leave the rename done and
-    // the contents not.
-    file.sync_all().map_err(io("flush temp file", temp))?;
-    drop(file);
-    std::fs::rename(temp, path).map_err(io("rename temp file over", path))
+/// `temp` must be in the same directory: a rename across devices fails. It is
+/// removed on any failure.
+///
+/// # Errors
+/// Any filesystem failure; `path` is then untouched.
+pub fn replace_file(path: &Path, temp: &Path, body: &[u8]) -> std::io::Result<()> {
+    let replace = || {
+        let mut file = OpenOptions::new().create_new(true).write(true).open(temp)?;
+        file.write_all(body)?;
+        // Flushed before the rename, or a crash could leave the rename done
+        // and the contents not.
+        file.sync_all()?;
+        // Closed before the rename: on WSL's drvfs, renaming a file still open
+        // loses it.
+        drop(file);
+        std::fs::rename(temp, path)
+    };
+    replace().inspect_err(|_| {
+        let _ = std::fs::remove_file(temp);
+    })
 }
 
 /// Maps an I/O error on `path` to [`Error::Io`].
