@@ -108,6 +108,22 @@ pub struct Bundle {
     pub notes: String,
 }
 
+impl Bundle {
+    /// Every stored field, as the journal holds it; the inverse of
+    /// [`Store::build`]'s mapping, so a deleted bundle can be put back whole.
+    #[must_use]
+    pub fn as_fields(&self) -> Vec<(&'static str, Value)> {
+        let mut fields: Vec<(&'static str, Value)> = vec![("name", self.name.clone().into())];
+        if let Some(date) = &self.date {
+            fields.push(("date", date.clone().into()));
+        }
+        if !self.notes.is_empty() {
+            fields.push(("notes", self.notes.clone().into()));
+        }
+        fields
+    }
+}
+
 /// A document as the browse surface needs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Doc {
@@ -204,13 +220,13 @@ impl Doc {
         };
         push("notes", (!self.notes.is_empty()).then(|| self.notes.clone().into()));
         push("tags", (!self.tags.is_empty()).then(|| self.tags.clone().into()));
-        push("bundles", (!self.bundles.is_empty()).then(|| memberships_value(&self.bundles)));
+        push("bundles", memberships_value(&self.bundles));
         push("issue_date", self.issue_date.clone().map(Into::into));
         push("expiry_date", self.expiry_date.clone().map(Into::into));
         push("ignore_expiry", self.ignore_expiry.then(|| true.into()));
         push("supersedes", self.supersedes.clone().map(Into::into));
         push("location", self.location.clone().map(Into::into));
-        push("files", (!self.files.is_empty()).then(|| files_value(&self.files)));
+        push("files", files_value(&self.files));
         fields
     }
 
@@ -232,23 +248,23 @@ pub struct Member {
     pub file: Option<String>,
 }
 
-/// The journal value of a files list.
+/// The journal value of a files list; an empty list is stored as no field.
 #[must_use]
-pub fn files_value(files: &[FileRef]) -> Value {
-    Value::Array(
+pub fn files_value(files: &[FileRef]) -> Option<Value> {
+    (!files.is_empty()).then(|| {
         files
             .iter()
             .map(|file| {
                 serde_json::json!({ "label": file.label, "path": file.path, "primary": file.primary })
             })
-            .collect(),
-    )
+            .collect()
+    })
 }
 
-/// The journal value of a bundles list.
+/// The journal value of a bundles list; an empty list is stored as no field.
 #[must_use]
-pub fn memberships_value(memberships: &[Membership]) -> Value {
-    Value::Array(
+pub fn memberships_value(memberships: &[Membership]) -> Option<Value> {
+    (!memberships.is_empty()).then(|| {
         memberships
             .iter()
             .map(|entry| {
@@ -259,8 +275,8 @@ pub fn memberships_value(memberships: &[Membership]) -> Value {
                 }
                 Value::Object(object)
             })
-            .collect(),
-    )
+            .collect()
+    })
 }
 
 /// The whole browsable store, built once per load.
@@ -530,6 +546,12 @@ impl Store {
             .collect()
     }
 
+    /// The document with this id.
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<&Doc> {
+        self.docs.iter().find(|doc| doc.id == id)
+    }
+
     /// The position of the record with this id.
     #[must_use]
     pub fn index_of(&self, id: &str) -> Option<usize> {
@@ -683,10 +705,14 @@ mod tests {
     }
 
     fn doc(ts: i64, id: &str, fields: &[(&str, Value)]) -> Vec<OwnedOp> {
+        entity(ts, "doc", id, fields)
+    }
+
+    fn entity(ts: i64, ent: &str, id: &str, fields: &[(&str, Value)]) -> Vec<OwnedOp> {
         let mut ops = vec![(
             ts,
             "create".to_string(),
-            "doc".to_string(),
+            ent.to_string(),
             id.to_string(),
             String::new(),
             Value::Null,
@@ -695,7 +721,7 @@ mod tests {
             ops.push((
                 ts + 1 + i64::try_from(i).expect("test fixtures are small"),
                 "set".to_string(),
-                "doc".to_string(),
+                ent.to_string(),
                 id.to_string(),
                 (*field).to_string(),
                 value.clone(),
@@ -757,6 +783,29 @@ mod tests {
         let rebuilt = build(vec![doc(100, "coc", &fields)]);
         assert_eq!(rebuilt.docs.len(), 1);
         assert_eq!(rebuilt.docs[0], original, "a field was mapped in but not back out");
+    }
+
+    /// A bundle and a location survive a round trip through the journal too.
+    #[test]
+    fn bundles_and_locations_round_trip() {
+        let bundle = Bundle {
+            id: "trip".into(),
+            name: "Trip".into(),
+            date: Some("2027-01-05".into()),
+            notes: "visa".into(),
+        };
+        let place = crate::Location {
+            id: "pouch".into(),
+            name: "Pouch".into(),
+            parent: Some("desk".into()),
+        };
+        let rebuilt = build(vec![
+            entity(100, "bundle", "trip", &bundle.as_fields()),
+            entity(200, "location", "desk", &[("name", "Desk".into())]),
+            entity(300, "location", "pouch", &place.as_fields()),
+        ]);
+        assert_eq!(rebuilt.bundles, [bundle]);
+        assert_eq!(rebuilt.locations.get("pouch"), Some(&place));
     }
 
     fn named(ts: i64, id: &str, name: &str, more: &[(&str, Value)]) -> Vec<OwnedOp> {

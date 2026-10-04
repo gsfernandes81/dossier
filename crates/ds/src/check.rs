@@ -115,7 +115,7 @@ fn entries(purpose: &Purpose, model: &crate::Model) -> Vec<Entry> {
     let row = |label: &str, on: Option<bool>, toggle| Entry { label: label.into(), on, toggle };
     match purpose {
         Purpose::Bundles(doc) => {
-            let Some(doc) = model.store.index_of(doc).map(|i| &model.store.docs[i]) else {
+            let Some(doc) = model.store.get(doc) else {
                 return Vec::new();
             };
             model

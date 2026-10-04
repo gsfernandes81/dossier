@@ -228,7 +228,7 @@ fn render_row(
 #[must_use]
 pub fn renews(store: &crate::Store, doc: &crate::Doc) -> String {
     let Some(older) = doc.supersedes.as_deref() else { return String::new() };
-    match store.index_of(older).map(|i| &store.docs[i]) {
+    match store.get(older) {
         Some(older) => version_name(older),
         None => older.to_string(),
     }
@@ -257,14 +257,12 @@ fn render_editable(
     theme: Theme,
 ) -> Vec<Line<'static>> {
     use crate::edit::Field;
-    let lit = model.edit.as_ref().is_some_and(|edit| edit.doc == doc.id && edit.field == what);
+    let lit = model.edit.as_ref().is_some_and(|edit| {
+        edit.target == crate::edit::Target::Doc(doc.id.clone()) && edit.field == what
+    });
     match what {
         // Typed from a picker; never a row of its own.
-        Field::Attach
-        | Field::Rename
-        | Field::BundleName
-        | Field::BundleDate
-        | Field::BundleNotes => Vec::new(),
+        Field::Attach => Vec::new(),
         // The title, and the blank line under it. It carries no label, so being
         // edited is marked on the name itself.
         Field::Name => {

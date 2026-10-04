@@ -574,11 +574,10 @@ fn draw_locpick(
 ) -> crate::app::RowGeometry {
     let store = &model.store;
     let cols = area.width as usize;
-    let renaming = model
-        .edit
-        .as_ref()
-        .filter(|edit| edit.field == crate::edit::Field::Rename)
-        .map(|edit| edit.doc.as_str());
+    let renaming = model.edit.as_ref().and_then(|edit| match &edit.target {
+        crate::edit::Target::Location(id) => Some(id.as_str()),
+        _ => None,
+    });
     let (mut head, current) = locpick_heading(store, picker, renaming, cols, theme);
     let rows = picker.rows(store);
     let cursor_row =
@@ -653,7 +652,7 @@ fn locpick_heading(
             store.locations.path(id),
         ),
         (Mode::File(doc), None) => {
-            let doc = store.index_of(doc).map(|i| &store.docs[i]);
+            let doc = store.get(doc);
             let now = match doc.map(|doc| store.hard_copy(doc)) {
                 Some(HardCopy::At(id)) => store.locations.path(id),
                 Some(HardCopy::DigitalOnly) => "digital only".into(),

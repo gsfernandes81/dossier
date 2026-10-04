@@ -171,7 +171,9 @@ pub fn draw_bundle(
     let Some(bundle) = model.store.bundle(id) else { return RowGeometry::default() };
     let members = model.store.members(id);
     let editing = |field: crate::edit::Field| {
-        model.edit.as_ref().is_some_and(|edit| edit.doc == id && edit.field == field)
+        model.edit.as_ref().is_some_and(|edit| {
+            edit.target == crate::edit::Target::Bundle(id.to_string()) && edit.field == field
+        })
     };
     let label = |text: &str, lit: bool| {
         let style = if lit { theme.band() } else { theme.style(Tone::Muted) };
@@ -185,7 +187,7 @@ pub fn draw_bundle(
         let drawn = match row {
             Row::Name => {
                 let mut style = theme.style(Tone::Title);
-                if editing(crate::edit::Field::BundleName) {
+                if editing(crate::edit::Field::Name) {
                     style = style.add_modifier(ratatui::style::Modifier::REVERSED);
                 }
                 vec![
@@ -197,18 +199,18 @@ pub fn draw_bundle(
                 ]
             }
             Row::Date => vec![Line::from(vec![
-                label("date", editing(crate::edit::Field::BundleDate)),
+                label("date", editing(crate::edit::Field::Expiry)),
                 Span::raw(bundle.date.clone().unwrap_or_else(|| "—".into())),
             ])],
             Row::Notes => {
                 let notes = if bundle.notes.is_empty() { "—" } else { bundle.notes.as_str() };
                 vec![Line::from(vec![
-                    label("notes", editing(crate::edit::Field::BundleNotes)),
+                    label("notes", editing(crate::edit::Field::Notes)),
                     Span::raw(truncate(notes, cols.saturating_sub(11 + gutter))),
                 ])]
             }
             Row::Member(doc) => {
-                let Some(doc) = model.store.index_of(doc).map(|i| &model.store.docs[i]) else {
+                let Some(doc) = model.store.get(doc) else {
                     continue;
                 };
                 let right = if doc.superseded { "newer exists" } else { "" };

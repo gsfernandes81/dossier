@@ -34,6 +34,19 @@ pub struct Location {
     pub parent: Option<String>,
 }
 
+impl Location {
+    /// Every stored field, as the journal holds it, so a deleted location can
+    /// be put back whole.
+    #[must_use]
+    pub fn as_fields(&self) -> Vec<(&'static str, serde_json::Value)> {
+        let mut fields = vec![("name", self.name.clone().into())];
+        if let Some(parent) = &self.parent {
+            fields.push(("parent", parent.clone().into()));
+        }
+        fields
+    }
+}
+
 /// Where a document's hard copy is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardCopy<'a> {

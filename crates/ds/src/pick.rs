@@ -80,7 +80,7 @@ impl Picker {
     /// The panel's heading: what is being changed.
     #[must_use]
     pub fn crumb(&self, store: &Store) -> String {
-        let doc = store.index_of(&self.doc).map(|i| &store.docs[i]);
+        let doc = store.get(&self.doc);
         match self.purpose {
             Purpose::File(index) => {
                 let path = doc.and_then(|doc| doc.files.get(index)).map_or("", |file| &file.path);
@@ -95,7 +95,7 @@ impl Picker {
     /// names them under its heading.
     #[must_use]
     pub fn subject(&self, store: &Store) -> Option<(String, &'static str, String)> {
-        let doc = store.index_of(&self.doc).map(|i| &store.docs[i])?;
+        let doc = store.get(&self.doc)?;
         match &self.purpose {
             Purpose::File(_) => None,
             Purpose::Member(bundle) => {
@@ -120,7 +120,7 @@ impl Picker {
     /// Every entry, before any typed narrowing.
     #[must_use]
     pub fn entries(&self, store: &Store) -> Vec<Entry> {
-        let Some(doc) = store.index_of(&self.doc).map(|i| &store.docs[i]) else {
+        let Some(doc) = store.get(&self.doc) else {
             return Vec::new();
         };
         match &self.purpose {

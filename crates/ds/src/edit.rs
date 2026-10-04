@@ -13,167 +13,87 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Editing one field of one document — the state, not the drawing.
+//! Editing one field on the bottom line — the state, not the drawing.
 //!
-//! R4's first slice. REWRITE-UI.md §2 fixes where editing lives (*"detail is
-//! the only editing surface"*) and how it is spelled (*"explicit save,
-//! double-`Esc` discards an edit in progress"*); this module is that contract as
-//! a small state machine, and [`crate::find`] draws it.
-//!
-//! # Why expiry is the first field
-//!
-//! It is the field this app exists for, and it exercises more of the write path
-//! than any other single one. A date that parses becomes a `set` op; an **empty
-//! buffer becomes an `unset`**, so one field proves both halves of the §3.2
-//! contract. And the consequence is visible everywhere at once — the row's
-//! marker and colour, the header's attention count, membership of the expiry
-//! watch, the order of the `expiring` filter — so a save that folded wrongly
-//! cannot hide.
-//!
-//! # Why the edit is bound to a document id, not to the cursor
-//!
-//! A save re-folds the store, and a re-fold can reorder the list: change an
-//! expiry under the `expiring` filter and the row moves, or leaves. If the edit
-//! remembered a row index it would be pointing at a different document by the
-//! time the save landed. It remembers the id instead, which cannot drift.
+//! An edit names what it edits by id, never by row: a save re-folds the store,
+//! which can reorder the list or drop the row, and an id cannot drift. Saving
+//! is explicit, and a dirty edit takes two `Esc` to throw away.
 
 /// Which field is being edited.
 ///
-/// The seam R4's fields arrive through: each one adds a variant and the compiler
-/// names every `match` that has to learn about it.
-///
-/// **These are the record's simple fields — the ones whose whole value is what
-/// you type.** `location` and `slot` are not here because a slot move shifts its
-/// neighbours, and `bundles` and `renews` are not because they are memberships
-/// of another entity. Those need their own surfaces, not a text buffer.
+/// The fields whose whole value is what is typed. A location, a bundle
+/// membership and `renews` are not here: each is a choice among other
+/// records, made in a picker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
-    /// What the document is called. The only field that may not be empty.
+    /// What the record is called; the only field that may not be empty.
     Name,
-    /// The expiry date, ISO `YYYY-MM-DD`.
+    /// The expiry date, ISO `YYYY-MM-DD`; a bundle's date.
     Expiry,
     /// The issue date, same form.
     Issued,
-    /// Flat tags, written as a list (§8 — hierarchical tags are dropped).
+    /// Flat tags, typed space-separated and stored as a list.
     Tags,
     /// Free text.
     Notes,
     /// A path to link as one more file, relative to the Syncthing root.
     Attach,
-    /// A physical location's name; the edit's id is the location's.
-    Rename,
-    /// A bundle's name; the edit's id is the bundle's, or empty for a new one.
-    BundleName,
-    /// The date a bundle is for, same form as the document dates.
-    BundleDate,
-    /// A bundle's free text.
-    BundleNotes,
 }
 
 impl Field {
-    /// The journal field name this writes (`doc` entity, REWRITE.md §3.2).
-    #[must_use]
-    pub fn journal_field(self) -> &'static str {
-        match self {
-            Field::Name | Field::Rename | Field::BundleName => "name",
-            Field::Expiry => "expiry_date",
-            Field::Issued => "issue_date",
-            Field::Tags => "tags",
-            Field::Notes | Field::BundleNotes => "notes",
-            Field::Attach => "files",
-            Field::BundleDate => "date",
-        }
-    }
-
-    /// Whether this is one of a bundle's own fields.
-    #[must_use]
-    pub fn of_bundle(self) -> bool {
-        matches!(self, Field::BundleName | Field::BundleDate | Field::BundleNotes)
-    }
-
-    /// What the store holds for this field right now, as the journal sees it.
-    ///
-    /// **This is the shape [`crate::app::Model`] inverts an edit with**, and it
-    /// is deliberately not the string [`crate::app::Model::open_edit`] seeds the
-    /// buffer from: the buffer is what a person types (`tags` as words), and
-    /// this is what the field folds from (`tags` as a list). Undo has to restore
-    /// the second one, or a restored value would not equal the one it replaced.
-    ///
-    /// `None` means the field is absent, which is what an empty list or an empty
-    /// string folds to as well — `Doc` cannot tell those apart, and neither can
-    /// anything downstream of it, so the inverse of clearing is an `unset`.
-    #[must_use]
-    pub fn stored(self, doc: &crate::Doc) -> Option<serde_json::Value> {
-        match self {
-            Field::Name => Some(doc.name.clone().into()),
-            Field::Expiry => doc.expiry_date.clone().map(Into::into),
-            Field::Issued => doc.issue_date.clone().map(Into::into),
-            Field::Tags => (!doc.tags.is_empty()).then(|| doc.tags.clone().into()),
-            Field::Notes => (!doc.notes.is_empty()).then(|| doc.notes.clone().into()),
-            Field::Attach => (!doc.files.is_empty()).then(|| crate::doc::files_value(&doc.files)),
-            Field::Rename | Field::BundleName | Field::BundleDate | Field::BundleNotes => None,
-        }
-    }
-
-    /// The prompt the entry line shows while this field is being edited.
-    ///
-    /// It names the field rather than the surface, which is what makes a
-    /// minibuffer legible: the same row asks a different question depending on
-    /// what is being asked for.
-    #[must_use]
-    pub fn prompt(self) -> &'static str {
-        match self {
-            Field::Name | Field::BundleName => "name",
-            Field::Expiry => "expiry",
-            Field::Issued => "issued",
-            Field::Tags => "tags",
-            Field::Notes | Field::BundleNotes => "notes",
-            Field::Attach => "attach",
-            Field::Rename => "rename",
-            Field::BundleDate => "date",
-        }
-    }
-
     /// What to write for a buffer, or why it cannot be written.
     ///
-    /// `Ok(None)` means "clear this field" — an empty buffer is a real
-    /// intention, not a mistake, and it becomes an `unset` op rather than a
-    /// stored empty string. A stored `""` would fold to a document with an
-    /// expiry that no comparison can classify.
+    /// `Ok(None)` clears the field: it becomes an `unset`, never a stored
+    /// empty string, which would fold to a date no comparison can classify.
     ///
     /// # Errors
-    /// The message to put on the status band, phrased as the correction rather
-    /// than the complaint.
+    /// The correction to put on the status band.
     pub fn validate(self, buffer: &str) -> Result<Option<serde_json::Value>, String> {
         let value = buffer.trim();
         if value.is_empty() {
-            // A name is the one field with nothing sensible to fall back to: a
-            // document called nothing cannot be found, listed or talked about.
-            return match self {
-                Field::Name => Err("a document needs a name".into()),
-                Field::Rename => Err("a location needs a name".into()),
-                Field::BundleName => Err("a bundle needs a name".into()),
-                _ => Ok(None),
-            };
+            return Ok(None);
         }
         match self {
-            Field::Expiry | Field::Issued | Field::BundleDate => {
+            Field::Expiry | Field::Issued => {
                 if is_iso_date(value) {
                     Ok(Some(value.into()))
                 } else {
                     Err(format!("{value:?} is not a date — write it as YYYY-MM-DD"))
                 }
             }
-            // Whitespace-separated, and written as a **list** because that is
-            // what the fold reads. A stored `"a b"` would be one tag with a
-            // space in it, which nothing would ever match.
+            // A stored `"a b"` would be one tag with a space in it.
             Field::Tags => {
                 Ok(Some(value.split_whitespace().map(str::to_string).collect::<Vec<_>>().into()))
             }
-            Field::Name | Field::Notes | Field::Rename | Field::BundleName | Field::BundleNotes => {
-                Ok(Some(value.into()))
-            }
+            Field::Name | Field::Notes => Ok(Some(value.into())),
             Field::Attach => relative_path(value).map(|path| Some(path.into())),
+        }
+    }
+}
+
+/// What an edit is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// A document, by id.
+    Doc(String),
+    /// A document the name being typed brings into existence.
+    NewDoc,
+    /// A bundle, by id.
+    Bundle(String),
+    /// A bundle the name being typed brings into existence.
+    NewBundle,
+    /// A physical location, by id; only its name is edited.
+    Location(String),
+}
+
+impl Target {
+    /// The journal entity it is.
+    #[must_use]
+    pub fn entity(&self) -> &'static str {
+        match self {
+            Target::Doc(_) | Target::NewDoc => "doc",
+            Target::Bundle(_) | Target::NewBundle => "bundle",
+            Target::Location(_) => "location",
         }
     }
 }
@@ -242,73 +162,84 @@ pub fn is_iso_date(value: &str) -> bool {
 /// An edit in progress.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edit {
-    /// The document being edited — an id, never a row (see the module header).
-    pub doc: String,
+    /// The record being edited.
+    pub target: Target,
     /// Which field.
     pub field: Field,
     /// What has been typed.
     pub buffer: String,
-    /// What was there when the edit opened, so "dirty" is a fact and not a flag
-    /// somebody has to remember to set.
+    /// What was there when the edit opened, so "dirty" is derived.
     pub original: String,
-    /// One more `Esc` and the typing is thrown away (REWRITE-UI.md §2).
+    /// One more `Esc` throws the typing away.
     pub armed_discard: bool,
-    /// A save is in flight. The editor stays open and refuses a second `Enter`
-    /// until the journal has answered, so the screen never shows a value the
-    /// store does not hold.
+    /// A save is in flight; a second `Enter` is refused until it lands.
     pub saving: bool,
-    /// **This edit is naming a document that does not exist yet**, so saving it
-    /// appends a `create` before the field.
-    ///
-    /// The id cannot be decided when the edit opens, because it is minted from
-    /// the name and the name is what is being typed — so [`Edit::doc`] is empty
-    /// until `Enter`, and filled in with the id that was actually written. That
-    /// is what lets everything downstream stay ignorant of the difference: the
-    /// save path anchors on `doc`, and by the time it looks there is one.
-    pub creating: bool,
     /// The row of a live list under the line that `↑`/`↓` chose, if any.
     pub chosen: Option<usize>,
 }
 
 impl Edit {
-    /// Open an edit on a document's field, seeded with its current value.
+    /// Opens an edit on `target`'s field, seeded with its current value.
     #[must_use]
-    pub fn new(doc: impl Into<String>, field: Field, current: Option<&str>) -> Self {
+    pub fn new(target: Target, field: Field, current: Option<&str>) -> Self {
         let original = current.unwrap_or_default().to_string();
         Self {
-            doc: doc.into(),
+            target,
             field,
             buffer: original.clone(),
             original,
             armed_discard: false,
             saving: false,
-            creating: false,
             chosen: None,
         }
     }
 
-    /// Open the edit that names a document into existence.
-    ///
-    /// It starts empty and therefore **dirty the moment anything is typed**,
-    /// which is what makes `Esc` ask twice before throwing away a name — the
-    /// same rule every other edit follows, for free.
+    /// The journal field it writes; a bundle's date is `date`.
     #[must_use]
-    pub fn creating() -> Self {
-        Self { creating: true, ..Self::new(String::new(), Field::Name, None) }
+    pub fn journal_field(&self) -> &'static str {
+        match (self.target.entity(), self.field) {
+            (_, Field::Name) => "name",
+            ("bundle", Field::Expiry) => "date",
+            (_, Field::Expiry) => "expiry_date",
+            (_, Field::Issued) => "issue_date",
+            (_, Field::Tags) => "tags",
+            (_, Field::Notes) => "notes",
+            (_, Field::Attach) => "files",
+        }
     }
 
     /// What the entry line asks for.
-    ///
-    /// A create asks for *the document*, not for a field: the same buffer means
-    /// something different, and the prompt is the only thing on screen that
-    /// says which — the record behind it still shows whatever was selected.
     #[must_use]
     pub fn prompt(&self) -> &'static str {
-        if self.creating {
-            "new document"
-        } else {
-            self.field.prompt()
+        match (&self.target, self.field) {
+            (Target::NewDoc, _) => "new document",
+            (Target::Location(_), _) => "rename",
+            (Target::Bundle(_) | Target::NewBundle, Field::Expiry) => "date",
+            (_, Field::Name) => "name",
+            (_, Field::Expiry) => "expiry",
+            (_, Field::Issued) => "issued",
+            (_, Field::Tags) => "tags",
+            (_, Field::Notes) => "notes",
+            (_, Field::Attach) => "attach",
         }
+    }
+
+    /// The value to write, or why it cannot be written: a name may not be
+    /// cleared.
+    ///
+    /// # Errors
+    /// The correction to put on the status band.
+    pub fn value(&self) -> Result<Option<serde_json::Value>, String> {
+        let value = self.field.validate(&self.buffer)?;
+        if value.is_none() && self.field == Field::Name {
+            let what = match self.target.entity() {
+                "bundle" => "bundle",
+                "location" => "location",
+                _ => "document",
+            };
+            return Err(format!("a {what} needs a name"));
+        }
+        Ok(value)
     }
 
     /// Whether anything has been typed since it opened.
@@ -367,12 +298,21 @@ mod tests {
     /// decides whether `Esc` needs one press or two.
     #[test]
     fn dirtiness_is_derived_and_so_it_can_go_back_to_clean() {
-        let mut edit = Edit::new("coc", Field::Expiry, Some("2026-09-28"));
+        let mut edit = Edit::new(Target::Doc("coc".into()), Field::Expiry, Some("2026-09-28"));
         assert!(!edit.dirty());
         edit.buffer.pop();
         assert!(edit.dirty());
         edit.buffer.push('8');
         assert!(!edit.dirty(), "back to what it was is not an edit");
+    }
+
+    /// A name cannot be cleared, and the refusal names what needs one.
+    #[test]
+    fn a_name_cannot_be_cleared() {
+        let edit = Edit::new(Target::Bundle("trip".into()), Field::Name, Some("Trip"));
+        let cleared = Edit { buffer: " ".into(), ..edit };
+        assert_eq!(cleared.value(), Err("a bundle needs a name".into()));
+        assert_eq!(cleared.journal_field(), "name");
     }
 
     /// A typed path is stored POSIX and relative, or refused with the reason.

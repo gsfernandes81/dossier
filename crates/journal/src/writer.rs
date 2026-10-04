@@ -160,6 +160,19 @@ impl Draft {
         Self { op: OpKind::Unset, ent: ent.into(), id: id.into(), f: Some(field.into()), val: None }
     }
 
+    /// Sets one field to `val`, or removes it when there is none.
+    pub fn put(
+        ent: impl Into<String>,
+        id: impl Into<String>,
+        field: impl Into<String>,
+        val: Option<Value>,
+    ) -> Self {
+        match val {
+            Some(val) => Self::set(ent, id, field, val),
+            None => Self::unset(ent, id, field),
+        }
+    }
+
     /// Set a review/suggestion entry's state (per-key LWW).
     pub fn state(ent: impl Into<String>, id: impl Into<String>, val: impl Into<Value>) -> Self {
         Self { op: OpKind::State, ent: ent.into(), id: id.into(), f: None, val: Some(val.into()) }
