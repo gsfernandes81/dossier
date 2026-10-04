@@ -310,8 +310,6 @@ mod tests {
         r#"{"v":1,"ts":1755300000123,"w":"desk-core","op":"set","ent":"doc","id":"coc-card","f":"expiry_date","val":"2026-09-28"}"#
     }
 
-    /// A well-formed op parses into its fields, and the total order key is
-    /// `(ts, w)` — the pair every LWW decision in the store rests on.
     #[test]
     fn a_well_formed_op_parses() {
         let Line::Op(op) = parse_line(op_line()) else { panic!("should parse") };
@@ -321,9 +319,6 @@ mod tests {
         assert_eq!(op.val.as_ref().unwrap(), "2026-09-28");
     }
 
-    /// Round-tripping preserves the line, including fields from a future
-    /// version — compaction rewrites a writer's own file, so anything dropped
-    /// here is data destroyed on disk.
     #[test]
     fn unknown_fields_survive_a_round_trip() {
         let raw = r#"{"v":1,"ts":1,"w":"a","op":"set","ent":"doc","id":"x","f":"n","val":1,"future":{"k":[1,2]}}"#;
@@ -333,7 +328,6 @@ mod tests {
         assert_eq!(again, Line::Op(op));
     }
 
-    /// A newer format version or an unheard-of verb is *opaque*, not broken.
     #[test]
     fn lines_from_the_future_are_opaque_not_malformed() {
         let newer = r#"{"v":2,"ts":1,"w":"a","op":"set","ent":"doc","id":"x"}"#;
@@ -345,8 +339,6 @@ mod tests {
         assert!(matches!(parse_line(verb), Line::Opaque { reason: OpaqueReason::UnknownOp, .. }));
     }
 
-    /// Broken bytes are classified, kept and explained — never an `Err` that
-    /// would abort the load of every other line in the file.
     #[test]
     fn broken_lines_are_malformed_and_keep_their_bytes() {
         for raw in ["{not json", "[1,2,3]", r#"{"ts":1}"#, r#"{"v":1,"ts":1,"w":"a"}"#] {
@@ -375,7 +367,6 @@ mod tests {
         assert!(torn.is_none(), "a complete file has no torn tail");
     }
 
-    /// Blank lines are neither data nor damage.
     #[test]
     fn blank_lines_are_ignored() {
         let (lines, _) = parse_body(&format!("{}\n\n{}\n", op_line(), op_line()));
@@ -383,8 +374,6 @@ mod tests {
         assert!(lines.iter().all(|l| l.as_op().is_some()));
     }
 
-    /// The namespace split is a property of the verb, so nothing can put a
-    /// transcript in the file the hot startup path reads.
     #[test]
     fn enrich_verbs_are_identifiable() {
         assert!(OpKind::Reading.is_enrich() && OpKind::Proposal.is_enrich());

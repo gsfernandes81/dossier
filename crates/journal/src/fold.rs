@@ -66,8 +66,8 @@ pub struct FoldStats {
     /// Broken lines: counted here, reported loudly, never discarded.
     pub malformed: usize,
     /// `set`/`unset` ops for an entity that does not exist (never created, or
-    /// tombstoned since). Ignored by rule 2 — a non-zero count means either a
-    /// lost `create` or a buggy writer, and either deserves saying out loud.
+    /// tombstoned since). Ignored; a non-zero count means either a lost
+    /// `create` or a buggy writer, and either deserves saying out loud.
     pub orphaned: usize,
     /// Ops sharing a `(ts, w)` key. Impossible if writers obey the HLC rule, so
     /// a non-zero count means two processes wrote one writer id — exactly what
@@ -201,7 +201,7 @@ pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
         }
     }
 
-    // Rule 1: one global order, `(ts, w)`. Sorting the whole set rather than
+    // One global order, `(ts, w)`. Sorting the whole set rather than
     // merging per-file streams is deliberate — it makes the input order of the
     // files structurally irrelevant instead of accidentally irrelevant.
     ops.sort_unstable_by_key(|op| op.order_key());
@@ -249,7 +249,7 @@ pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
                     entity.remove(field);
                 }
             }
-            // Rule 3: per-key LWW, independent of create/delete. Sorted
+            // Per-key LWW, independent of create/delete. Sorted
             // iteration means "last write" is simply "last one applied".
             OpKind::State => {
                 states.insert(entity_key, op.val.as_ref().unwrap_or(NULL));
@@ -297,9 +297,6 @@ mod tests {
         assert!(!state.stats.has_anomalies());
     }
 
-    /// A tombstone beats everything older, and a later `set` cannot bring back
-    /// half a document. This is rule 2, and it is why a stray op from a device
-    /// that missed the delete is harmless.
     #[test]
     fn a_tombstone_is_not_undone_by_a_later_set() {
         let ops: Vec<Line> = vec![
@@ -314,8 +311,6 @@ mod tests {
         assert_eq!(state.stats.orphaned, 1, "the stray set is counted, not applied");
     }
 
-    /// …but a `create` newer than the tombstone *is* a legitimate recreate, and
-    /// it starts empty rather than inheriting the dead entity's fields.
     #[test]
     fn a_create_after_a_tombstone_recreates_from_empty() {
         let ops: Vec<Line> = vec![
@@ -346,7 +341,6 @@ mod tests {
         assert_eq!(state.states[&("review".into(), "other".into())], "dismissed");
     }
 
-    /// `unset` removes a field without touching the rest.
     #[test]
     fn unset_removes_one_field() {
         let ops: Vec<Line> = vec![
@@ -359,9 +353,6 @@ mod tests {
         assert!(entity.fields.contains_key("name") && !entity.fields.contains_key("expiry"));
     }
 
-    /// The fold is order-independent by construction: shuffling the input
-    /// changes nothing. (The general claim is property-tested; this is the
-    /// cheap unit-level guard.)
     #[test]
     fn input_order_does_not_matter() {
         let ops: Vec<Line> = vec![
@@ -399,8 +390,6 @@ mod tests {
         assert_eq!(stats.max_ts, 90);
     }
 
-    /// Two ops sharing `(ts, w)` are impossible under the HLC rule, so they are
-    /// counted — that is the fold noticing two processes shared a writer id.
     #[test]
     fn duplicate_order_keys_are_counted() {
         let ops: Vec<Line> = vec![
@@ -410,8 +399,7 @@ mod tests {
         assert_eq!(fold(&ops).stats.duplicate_keys, 1);
     }
 
-    /// The canonical form is sorted, compact, and free of health counters (the
-    /// two implementations legitimately see different files).
+    /// The canonical form also leaves out the health counters.
     #[test]
     fn canonical_json_is_sorted_and_compact() {
         let ops: Vec<Line> = vec![

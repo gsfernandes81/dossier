@@ -346,8 +346,6 @@ mod tests {
         (dir, journal)
     }
 
-    /// Every writer's file is read and their ops fold together — the ordinary
-    /// two-device case.
     #[test]
     fn every_writer_file_contributes() {
         let (_dir, journal) = journal_with(
@@ -366,8 +364,6 @@ mod tests {
         assert!(state.get("doc", "a").is_some() && state.get("doc", "b").is_some());
     }
 
-    /// A fresh device has no journal yet. That is not damage, and it must not
-    /// be reported as any.
     #[test]
     fn a_missing_directory_is_not_an_error() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -376,9 +372,6 @@ mod tests {
         assert!(load.lines.is_empty() && load.anomalies.is_empty());
     }
 
-    /// Only files matching the frozen grammar are folded. A conflict copy is
-    /// *reported* rather than read — the loud exception that keeps "conflicts
-    /// are structurally impossible" an honest claim.
     #[test]
     fn conflict_copies_are_reported_and_never_read() {
         let (_dir, journal) = journal_with(
@@ -402,8 +395,6 @@ mod tests {
         assert!(state.get("doc", "temp").is_none(), "the compaction temp was not read");
     }
 
-    /// One damaged file costs that writer's tail, not the whole store — and
-    /// both the torn tail and the garbage line are reported.
     #[test]
     fn damage_is_contained_to_its_file_and_reported() {
         let good =
@@ -429,7 +420,6 @@ mod tests {
         assert!(state.get("doc", "torn").is_none(), "the torn op was never durable");
     }
 
-    /// An invalid UTF-8 byte costs the line it sits in, not the whole file.
     #[test]
     fn an_invalid_byte_costs_one_line() {
         let (_dir, journal) = journal_with(Namespace::Meta, &[]);
@@ -506,7 +496,6 @@ mod tests {
         assert_eq!(writers, ["desk-core", "desk-lab", "phone-core"]);
     }
 
-    /// A stamp changes when a file grows or appears, and not otherwise.
     #[test]
     fn a_stamp_changes_only_with_the_files() {
         let (_dir, journal) = journal_with(

@@ -185,7 +185,6 @@ mod tests {
         plan.keep.iter().map(|&i| lines[i].clone()).collect()
     }
 
-    /// The headline invariant: compaction changes the file, never the fold.
     #[test]
     fn compaction_preserves_the_fold() {
         let lines = vec![
@@ -200,8 +199,6 @@ mod tests {
         assert_eq!(fold(&kept(&lines, &plan)).canonical_json(), fold(&lines).canonical_json());
     }
 
-    /// Tombstones are retained forever — dropping one would let a `set` from a
-    /// device that missed the delete resurrect the document.
     #[test]
     fn tombstones_are_never_dropped() {
         let lines = vec![
@@ -216,10 +213,6 @@ mod tests {
         assert_eq!(plan.dropped(), 1, "the set behind the tombstone is dead and goes");
     }
 
-    /// **The rule that looks wrong until you think about the other device.** An
-    /// `unset` survives even though the `set` it cancelled is dropped: the other
-    /// writer may have set that field earlier, and this op is what keeps it
-    /// removed.
     #[test]
     fn an_unset_survives_the_set_it_cancelled() {
         let lines = vec![
@@ -255,8 +248,6 @@ mod tests {
         assert!(!plan.worth_doing());
     }
 
-    /// Lines from the future and broken lines are preserved verbatim: it is not
-    /// compaction's place to discard what it could not read.
     #[test]
     fn unreadable_and_future_lines_survive() {
         let lines = vec![
@@ -271,8 +262,6 @@ mod tests {
         assert!(survivors.iter().any(|l| matches!(l, Line::Malformed { .. })));
     }
 
-    /// Compaction can never lower a file's highest timestamp — which is exactly
-    /// what makes a `max_ts` regression a trustworthy damage signal.
     #[test]
     fn the_highest_timestamp_always_survives() {
         let lines = vec![
@@ -306,8 +295,6 @@ mod tests {
         plan(lines, NOW).worth_doing()
     }
 
-    /// A recreate after a tombstone keeps its own history; the pre-tombstone
-    /// fields are dead and go.
     #[test]
     fn a_recreate_keeps_only_its_own_history() {
         let lines = vec![

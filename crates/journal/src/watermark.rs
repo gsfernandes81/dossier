@@ -179,7 +179,6 @@ mod tests {
             .collect()
     }
 
-    /// Ordinary appends: both numbers grow, nothing to report.
     #[test]
     fn growth_is_not_damage() {
         let mut water = HighWater::default();
@@ -188,9 +187,6 @@ mod tests {
         assert!(damage.is_empty(), "{damage:?}");
     }
 
-    /// **The row that must not cry wolf.** Compaction can shrink a file by any
-    /// amount — that is its job — and as long as the newest op is still there,
-    /// it is not damage.
     #[test]
     fn compaction_shrinks_the_file_without_alarming() {
         let mut water = HighWater::default();
@@ -217,8 +213,6 @@ mod tests {
         );
     }
 
-    /// A writer's file disappearing takes its entire contribution with it, so
-    /// it is reported even though nothing regressed.
     #[test]
     fn a_vanished_file_is_damage() {
         let mut water = HighWater::default();
@@ -227,7 +221,6 @@ mod tests {
         assert_eq!(damage, vec![Damage::Vanished { file: "phone-core".into(), was: 800 }]);
     }
 
-    /// A new writer (a device just set up) is not damage.
     #[test]
     fn a_new_writer_is_not_damage() {
         let mut water = HighWater::default();
@@ -249,8 +242,6 @@ mod tests {
         assert!(!water.check(&marks(&[("desk-core", 400, 150_000)])).is_empty(), "still reported");
     }
 
-    /// …and `accept` is the deliberate way to stop, for a loss that cannot be
-    /// recovered.
     #[test]
     fn accept_is_the_only_way_a_mark_goes_down() {
         let mut water = HighWater::default();
@@ -260,7 +251,6 @@ mod tests {
         assert!(damage.is_empty(), "{damage:?}");
     }
 
-    /// Marks round-trip through the local state file.
     #[test]
     fn marks_round_trip_as_json() {
         let mut water = HighWater::default();

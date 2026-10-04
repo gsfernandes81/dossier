@@ -112,10 +112,6 @@ fn parse(vector: &Vector) -> (Vec<Line>, Vec<String>) {
 }
 
 /// Compacting the named file leaves the fold of the whole store unchanged.
-///
-/// The invariant compaction exists to not break, checked the way the Python
-/// satellite will check it: plan the compaction, keep only the surviving lines,
-/// and fold the store again.
 #[test]
 fn compaction_preserves_the_fold() {
     let mut ran = 0;
@@ -153,10 +149,6 @@ fn compaction_preserves_the_fold() {
     assert!(ran > 0, "no compaction vector was exercised");
 }
 
-/// Every fixture folds to exactly its recorded canonical JSON.
-///
-/// This is the contract with the Python satellite: same bytes in, same bytes
-/// out. A diff here is either a bug or a format change.
 #[test]
 fn every_vector_folds_to_its_canonical_json() {
     for vector in load_vectors() {
@@ -171,8 +163,6 @@ fn every_vector_folds_to_its_canonical_json() {
     }
 }
 
-/// Reversing the files changes nothing — `fold(A ∪ B) ≡ fold(B ∪ A)` checked on
-/// every fixture, not just the one named for it.
 #[test]
 fn folding_is_independent_of_file_order() {
     for vector in load_vectors() {

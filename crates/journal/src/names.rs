@@ -86,7 +86,6 @@ pub fn compaction_temp_file(writer: &str, pid: u32) -> String {
 mod tests {
     use super::*;
 
-    /// The names a healthy journal directory contains.
     #[test]
     fn ordinary_writer_files_are_accepted() {
         for name in ["desk-core.jsonl", "phone-core.jsonl", "desk-lab.jsonl", "a1.jsonl"] {
@@ -94,9 +93,6 @@ mod tests {
         }
     }
 
-    /// Everything the contract excludes, and why each one matters:
-    /// a conflict copy would break the "no conflicts" guarantee, a temp file
-    /// would fold a half-written history, and the rest are simply not ours.
     #[test]
     fn everything_else_is_excluded() {
         for name in [
@@ -115,8 +111,6 @@ mod tests {
         }
     }
 
-    /// A compaction temp must not look like a journal file — that is the whole
-    /// reason for its shape.
     #[test]
     fn compaction_temps_are_invisible_to_the_fold() {
         let temp = compaction_temp_file("desk-core", 4231);

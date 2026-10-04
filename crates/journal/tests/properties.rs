@@ -20,12 +20,10 @@
 //! "conflicts are structurally impossible", since that is a statement about all
 //! possible sync orders, not about eight fixtures.
 //!
-//! One precondition runs through all of them: **`(ts, w)` is unique**. That is
-//! not an assumption about luck, it is the hybrid logical clock's guarantee (a
-//! writer never repeats a `ts`) enforced by the single-writer lock. Where
-//! it is violated the fold stops being a function of the op *set* — so the
-//! generator below enforces it, and `FoldStats::duplicate_keys` is how a real
-//! store notices the guarantee was broken.
+//! One precondition runs through all of them: **`(ts, w)` is unique**, the
+//! hybrid logical clock's guarantee enforced by the single-writer lock. Where
+//! it is violated the fold stops being a function of the op *set*;
+//! `FoldStats::duplicate_keys` is how a real store notices.
 
 use journal::{compaction_plan, fold, Draft, Line, Op};
 use proptest::prelude::*;
@@ -79,11 +77,8 @@ fn disjoint(a: &[Op], b: Vec<Op>) -> Vec<Op> {
 }
 
 proptest! {
-    /// **The fold is a function of the op set, not of its order.**
-    ///
-    /// `fold(A ∪ B) ≡ fold(B ∪ A)` — this is the claim that makes conflicts
-    /// structurally impossible: two devices that have seen the same ops agree,
-    /// whatever order Syncthing delivered them in.
+    /// Two devices that have seen the same ops agree, whatever order Syncthing
+    /// delivered them in.
     #[test]
     fn union_is_commutative(a in stream(), b in stream()) {
         let b = disjoint(&a, b);
@@ -96,9 +91,6 @@ proptest! {
         prop_assert_eq!(fold(&ab).canonical_json(), fold(&ba).canonical_json());
     }
 
-    /// **Any permutation folds the same.** Commutativity of two files is the
-    /// case that matters operationally; this is the general statement, and it
-    /// also catches a fold that accidentally depends on insertion order.
     #[test]
     fn any_permutation_folds_the_same(specs in stream(), rotation in 0usize..60) {
         let forward = lines(&specs);
@@ -115,9 +107,6 @@ proptest! {
         prop_assert_eq!(fold(&reversed).canonical_json(), expected);
     }
 
-    /// **Tombstone supremacy.** Append a delete newer than everything, then any
-    /// number of newer `set`s from another writer: the entity stays gone. No
-    /// stream of stray field writes can resurrect a document, whole or partial.
     #[test]
     fn a_final_tombstone_cannot_be_undone_by_sets(
         specs in stream(),
@@ -135,9 +124,6 @@ proptest! {
         prop_assert!(state.tombstones.contains_key(&("doc".to_string(), "passport".to_string())));
     }
 
-    /// **A recreate after a tombstone starts empty.** The legitimate other half
-    /// of the rule above: `create` newer than the tombstone brings the id back,
-    /// but never the dead entity's fields.
     #[test]
     fn a_recreate_after_a_tombstone_inherits_nothing(specs in stream()) {
         let mut all = lines(&specs);
@@ -150,11 +136,8 @@ proptest! {
         prop_assert_eq!(&entity.fields["slot"], &json!(3));
     }
 
-    /// **Compaction preserves the fold.** Compacting one writer's file — at any
-    /// point on the clock, so the retention window sometimes covers everything
-    /// and sometimes nothing — cannot change the state the whole store folds to.
-    /// This is the claim the golden vector demonstrates on one example and this
-    /// makes about every op stream.
+    /// `now` ranges over the whole clock, so the retention window sometimes
+    /// covers everything and sometimes nothing.
     #[test]
     fn compaction_preserves_the_fold(a in stream(), b in stream(), now in 0i64..2_000i64) {
         let b = disjoint(&a, b);
@@ -171,10 +154,8 @@ proptest! {
         prop_assert!(plan.keep.len() <= mine.len());
     }
 
-    /// **Compaction never lowers a file's highest timestamp.** The truncation
-    /// defense treats a `max_ts` regression as damage, so this has to hold for
-    /// every possible file — otherwise a routine compaction would raise a false
-    /// alarm about data loss.
+    /// The truncation defense treats a `max_ts` regression as damage, so a
+    /// compaction that lowered it would raise a false alarm.
     #[test]
     fn compaction_never_lowers_the_high_water_mark(specs in stream(), now in 0i64..2_000i64) {
         let all = lines(&specs);
@@ -184,19 +165,12 @@ proptest! {
         prop_assert_eq!(max(&kept), max(&all));
     }
 
-    /// **Folding is deterministic and free of hidden state**: the same input
-    /// twice gives the same bytes. Cheap, and it is what lets a golden vector
-    /// mean anything at all.
     #[test]
     fn folding_is_deterministic(specs in stream()) {
         let all = lines(&specs);
         prop_assert_eq!(fold(&all).canonical_json(), fold(&all).canonical_json());
     }
 
-    /// **A legal stream produces no anomalies.** Every generated op is
-    /// well-formed with a unique `(ts, w)`, so `malformed` and `duplicate_keys`
-    /// must stay at zero — if they don't, the *counters* are lying, and they are
-    /// what `ds status` reports to the user.
     #[test]
     fn a_legal_stream_reports_no_damage(specs in stream()) {
         let stats = fold(&lines(&specs)).stats;

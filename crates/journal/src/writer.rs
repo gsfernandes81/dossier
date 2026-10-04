@@ -527,8 +527,6 @@ mod tests {
         Writer::open(&fixture.journal, Namespace::Meta, writer, &fixture.locks, 0).expect("opens")
     }
 
-    /// An appended op round-trips: it parses back, folds to the expected state,
-    /// and carries the writer's own id and a stamped version.
     #[test]
     fn appended_ops_round_trip_through_the_fold() {
         let fixture = fixture();
@@ -545,9 +543,6 @@ mod tests {
         assert_eq!(load.lines[0].as_op().unwrap().v, FORMAT_VERSION);
     }
 
-    /// The clock is strictly monotonic per writer even when the wall clock
-    /// jumps backwards — an NTP correction between sessions must never let one
-    /// writer reorder against itself.
     #[test]
     fn the_clock_never_goes_backwards() {
         let mut clock = Hlc::seeded(0);
@@ -557,17 +552,12 @@ mod tests {
         assert_eq!(clock.tick_at(5_000), 5_000, "and it rejoins wall time when it can");
     }
 
-    /// The clock seeds from the highest `ts` in the *whole store*, so a writer
-    /// on a slow-clocked device cannot lose every LWW comparison to the other
-    /// device until wall time catches up.
     #[test]
     fn the_clock_seeds_from_the_whole_store() {
         let mut clock = Hlc::seeded(9_999_999_999_999);
         assert_eq!(clock.tick_at(1_000), 10_000_000_000_000);
     }
 
-    /// Two ops from one writer never share a timestamp, which is the property
-    /// the fold's total order depends on.
     #[test]
     fn a_writer_never_repeats_a_timestamp() {
         let fixture = fixture();
@@ -608,8 +598,6 @@ mod tests {
         assert!(state.get("doc", "a").is_some() && state.get("doc", "new").is_some());
     }
 
-    /// A file that is nothing but one torn line is repaired to empty rather
-    /// than left to poison the next append.
     #[test]
     fn a_file_of_only_a_torn_line_is_emptied() {
         let fixture = fixture();
@@ -653,9 +641,6 @@ mod tests {
         assert!(lines.iter().all(|line| line.as_op().is_some()), "nothing was glued together");
     }
 
-    /// One process per writer id. The second is refused with a *recoverable*
-    /// error, because the answer is "run read-only", not "exit" — `ds status`
-    /// from cron has to keep working while the TUI is open.
     #[test]
     fn a_second_writer_on_the_same_id_is_refused() {
         let fixture = fixture();
@@ -670,8 +655,6 @@ mod tests {
             .is_ok());
     }
 
-    /// Dropping a writer releases the lock, so a crashed process does not lock
-    /// the user out of their own store until reboot.
     #[test]
     fn dropping_a_writer_releases_the_lock() {
         let fixture = fixture();
@@ -681,8 +664,6 @@ mod tests {
         );
     }
 
-    /// The lock never lives in the synced tree: it would replicate to the other
-    /// device and lock it out of its own journal.
     #[test]
     fn locks_live_outside_the_synced_tree() {
         let fixture = fixture();
@@ -695,8 +676,7 @@ mod tests {
         assert!(!fixture.locks.starts_with(fixture.journal.path()));
     }
 
-    /// Compaction shrinks the file and leaves the fold identical — checked
-    /// through a real rewrite, not just the planner.
+    /// Checked through a real rewrite, not just the planner.
     #[test]
     fn compacting_shrinks_the_file_without_changing_the_fold() {
         let fixture = fixture();
@@ -723,8 +703,6 @@ mod tests {
         assert_eq!(fold(&load.lines).canonical_json(), before.canonical_json());
     }
 
-    /// A compaction never lowers the file's high-water mark, which is what lets
-    /// a `max_ts` regression be trusted as a damage signal.
     #[test]
     fn compaction_never_lowers_the_high_water_mark() {
         let fixture = fixture();
@@ -764,8 +742,6 @@ mod tests {
         assert_eq!(fold(&load.lines).get("doc", "x").expect("alive").fields["slot"], 7);
     }
 
-    /// The trigger is respected: a healthy file is left alone, and no temp file
-    /// is left behind either way.
     #[test]
     fn a_healthy_file_is_left_alone_and_no_temp_survives() {
         let fixture = fixture();
@@ -785,8 +761,6 @@ mod tests {
         assert!(leftovers.is_empty(), "temp files must never be left in the synced tree");
     }
 
-    /// A compaction that fails removes its temp and leaves the journal as it
-    /// was, for the next writer to append to.
     #[test]
     fn a_failed_compaction_cleans_up_after_itself() {
         let fixture = fixture();
@@ -819,8 +793,6 @@ mod tests {
         assert!(matches!(bad, Err(Error::InvalidWriterId { .. })), "{bad:?}");
     }
 
-    /// A run of ops lands adjacent in one file, which is what makes an id
-    /// rename (create + copy + fixups + delete) safe to fold at any point.
     #[test]
     fn a_run_of_ops_is_written_consecutively() {
         let fixture = fixture();

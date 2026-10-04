@@ -40,8 +40,6 @@ fn launch(journal: &Journal, water: &mut HighWater) -> (usize, Vec<journal::Dama
     (fold(&load.lines).entities.len(), damage)
 }
 
-/// A journal reverted behind Syncthing's back is caught; a compaction that
-/// shrinks the same file further is not.
 #[test]
 fn a_revert_is_caught_and_a_compaction_is_not() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -57,16 +55,14 @@ fn a_revert_is_caught_and_a_compaction_is_not() {
     assert_eq!(docs, 4);
     assert!(damage.is_empty(), "a first launch has nothing to compare against");
 
-    // Launch 2 — Proton Drive reverts the file to an older version. Valid
-    // JSONL, no conflict copy, two documents quietly gone.
+    // Launch 2 — the file is reverted to an older version.
     std::fs::write(&file, body(&[(10, "a"), (20, "b")])).expect("write");
     let (docs, damage) = launch(&journal, &mut water);
     assert_eq!(docs, 2, "the fold sees only what is on disk — it cannot know better");
     assert_eq!(damage.len(), 1, "but the high-water mark noticed: {damage:?}");
     assert!(damage[0].to_string().contains("versioning"), "and it names the recovery path");
 
-    // Launch 3 — still reverted, still reported. Silent data loss deserves a
-    // nag rather than a one-shot notice that scrolls away.
+    // Launch 3 — still reverted, still reported.
     let (_, damage) = launch(&journal, &mut water);
     assert_eq!(damage.len(), 1, "the warning persists until the data is back");
 
@@ -77,9 +73,7 @@ fn a_revert_is_caught_and_a_compaction_is_not() {
     assert_eq!(docs, 5);
     assert!(damage.is_empty(), "recovery clears the alarm");
 
-    // Launch 5 — compaction: the file shrinks to a fraction of its size while
-    // keeping the newest op. This must be silent, or every compaction would
-    // train the user to ignore the alarm that matters.
+    // Launch 5 — compaction shrinks the file but keeps the newest op.
     let compacted = body(&[(50, "e")]);
     assert!(compacted.len() < full.len() / 3);
     std::fs::write(&file, &compacted).expect("write");
@@ -87,8 +81,6 @@ fn a_revert_is_caught_and_a_compaction_is_not() {
     assert!(damage.is_empty(), "a compaction that keeps the newest op is not damage");
 }
 
-/// A writer file that disappears entirely is damage too — nothing regressed,
-/// because there is nothing left to regress.
 #[test]
 fn a_vanished_writer_file_is_caught() {
     let dir = tempfile::tempdir().expect("tempdir");
