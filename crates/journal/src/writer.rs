@@ -411,16 +411,20 @@ impl Writer {
     /// rename fails with `EXDEV`. A compaction that dies half-way leaves a temp
     /// the next fold ignores.
     ///
+    /// The writer is handed back only on success: after a failure past the
+    /// rename it could be holding the replaced file, and an append there would
+    /// be lost.
+    ///
     /// # Errors
-    /// [`Error::Io`] or [`Error::Serialize`]. On failure the original file is
-    /// untouched: nothing is replaced until the new one is complete and flushed.
-    pub fn compact(&mut self, now_ms: i64, when: When) -> Result<Option<Report>, Error> {
+    /// [`Error::Io`] or [`Error::Serialize`]. Nothing is replaced until the new
+    /// file is complete and flushed.
+    pub fn compact(mut self, now_ms: i64, when: When) -> Result<(Self, Option<Report>), Error> {
         let body =
             std::fs::read_to_string(&self.path).map_err(io("read for compaction", &self.path))?;
         let (lines, _torn) = crate::op::parse_body(&body);
         let plan = crate::compact::plan(&lines, now_ms);
         if when == When::IfWorthwhile && !plan.worth_doing() {
-            return Ok(None);
+            return Ok((self, None));
         }
 
         let directory = self.path.parent().unwrap_or_else(|| Path::new("."));
@@ -443,16 +447,22 @@ impl Writer {
             rewritten.push('\n');
         }
 
-        self.file = replace(&self.path, &temp, rewritten.as_bytes()).inspect_err(|_| {
+        replace(&self.path, &temp, rewritten.as_bytes()).inspect_err(|_| {
             let _ = std::fs::remove_file(&temp);
         })?;
+        self.file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(io("reopen after compaction", &self.path))?;
 
-        Ok(Some(Report {
+        let report = Report {
             lines_before: plan.total,
             lines_after: plan.keep.len(),
             bytes_before: body.len() as u64,
             bytes_after: rewritten.len() as u64,
-        }))
+        };
+        Ok((self, Some(report)))
     }
 }
 
@@ -481,22 +491,20 @@ pub struct Report {
 
 /// Writes `body` to a new `temp`, flushes it and renames it over `path`.
 ///
-/// Returns an append handle opened on `temp` before the rename, so nothing can
-/// fail once the old file is replaced; the handle follows the file across the
-/// rename on every platform (std opens with `FILE_SHARE_DELETE` on Windows).
-fn replace(path: &Path, temp: &Path, body: &[u8]) -> Result<File, Error> {
+/// The temp is closed before the rename: on WSL's drvfs, renaming a file
+/// still open loses it.
+fn replace(path: &Path, temp: &Path, body: &[u8]) -> Result<(), Error> {
     let mut file = OpenOptions::new()
         .create_new(true)
-        .read(true)
-        .append(true)
+        .write(true)
         .open(temp)
         .map_err(io("create temp file", temp))?;
     file.write_all(body).map_err(io("write temp file", temp))?;
     // Flushed before the rename, or a crash could leave the rename done and
     // the contents not.
     file.sync_all().map_err(io("flush temp file", temp))?;
-    std::fs::rename(temp, path).map_err(io("rename temp file over", path))?;
-    Ok(file)
+    drop(file);
+    std::fs::rename(temp, path).map_err(io("rename temp file over", path))
 }
 
 /// Maps an I/O error on `path` to [`Error::Io`].
@@ -729,8 +737,8 @@ mod tests {
         let before = fold(&fixture.journal.load(Namespace::Meta).expect("loads").lines);
         // Far in the future, so nothing is inside the 30-day retention window.
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        let report =
-            writer.compact(future, When::IfWorthwhile).expect("compacts").expect("did work");
+        let (_, report) = writer.compact(future, When::IfWorthwhile).expect("compacts");
+        let report = report.expect("did work");
 
         assert_eq!(report.lines_after, 2, "a create and the newest name write");
         assert!(report.bytes_after < report.bytes_before / 4);
@@ -754,7 +762,7 @@ mod tests {
         let before = fixture.journal.load(Namespace::Meta).expect("loads").files[0].max_ts;
 
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        writer.compact(future, When::Always).expect("compacts");
+        let _ = writer.compact(future, When::Always).expect("compacts");
 
         let after = fixture.journal.load(Namespace::Meta).expect("loads").files[0].max_ts;
         assert_eq!(before, after);
@@ -771,7 +779,7 @@ mod tests {
             writer.append(Draft::set("doc", "x", "name", format!("v{i}"))).expect("append");
         }
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        writer.compact(future, When::Always).expect("compacts");
+        let (mut writer, _) = writer.compact(future, When::Always).expect("compacts");
 
         writer.append(Draft::set("doc", "x", "slot", 7)).expect("append after compaction");
         writer.commit().expect("commit");
@@ -790,7 +798,8 @@ mod tests {
         writer.append(Draft::create("doc", "x")).expect("append");
         writer.append(Draft::set("doc", "x", "name", "only")).expect("append");
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        assert!(writer.compact(future, When::IfWorthwhile).expect("runs").is_none());
+        let (writer, report) = writer.compact(future, When::IfWorthwhile).expect("runs");
+        assert!(report.is_none());
 
         let directory = writer.path().parent().expect("has a parent");
         let leftovers: Vec<_> = std::fs::read_dir(directory)
@@ -802,7 +811,7 @@ mod tests {
     }
 
     /// A compaction that fails removes its temp and leaves the journal as it
-    /// was, still appendable.
+    /// was, for the next writer to append to.
     #[test]
     fn a_failed_compaction_cleans_up_after_itself() {
         let fixture = fixture();
@@ -815,10 +824,12 @@ mod tests {
         std::fs::write(&temp, "stale").expect("plant a stale temp");
 
         let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
+        let path = writer.path().to_path_buf();
         assert!(writer.compact(future, When::Always).is_err(), "the temp name is taken");
         assert!(!temp.exists(), "the temp is removed on failure");
-        assert_eq!(std::fs::read(writer.path()).expect("read"), before);
+        assert_eq!(std::fs::read(&path).expect("read"), before);
 
+        let mut writer = open(&fixture, "desk-core");
         writer.append(Draft::set("doc", "x", "slot", 7)).expect("append after failure");
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         assert_eq!(fold(&load.lines).get("doc", "x").expect("alive").fields["slot"], 7);
