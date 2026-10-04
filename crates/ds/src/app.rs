@@ -2840,6 +2840,32 @@ pub(crate) mod tests {
         model
     }
 
+    /// Types `text` a character at a time.
+    fn type_str(m: &mut Model, text: &str) {
+        for c in text.chars() {
+            update(m, Msg::Char(c));
+        }
+    }
+
+    /// Backspaces until the open edit's buffer is empty.
+    fn clear_buffer(m: &mut Model) {
+        let typed = m.edit.as_ref().map_or(0, |edit| edit.buffer.chars().count());
+        for _ in 0..typed {
+            update(m, Msg::Backspace);
+        }
+    }
+
+    /// Lands the save in flight, with the store as the model already holds it.
+    fn land(m: &mut Model) {
+        let store = m.store.clone();
+        land_as(m, store);
+    }
+
+    /// Lands the save in flight, with `store` as the journal read it back.
+    fn land_as(m: &mut Model, store: Store) {
+        update(m, Msg::Saved(Box::new(store)));
+    }
+
     /// The store as it would fold after `coc`'s expiry became `2027-04-01` —
     /// what the journal thread posts back.
     fn restored(from: &Model, id: &str, expiry: Option<&str>) -> Store {
@@ -2884,12 +2910,8 @@ pub(crate) mod tests {
     fn typing_in_an_edit_never_reaches_the_query() {
         let mut m = writable();
         update(&mut m, Msg::EditField(Field::Expiry));
-        for _ in 0..10 {
-            update(&mut m, Msg::Backspace);
-        }
-        for c in "2027-04-01".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        clear_buffer(&mut m);
+        type_str(&mut m, "2027-04-01");
         assert_eq!(m.edit.as_ref().unwrap().buffer, "2027-04-01");
         assert!(m.query.is_empty(), "the query was never touched");
     }
@@ -2900,12 +2922,8 @@ pub(crate) mod tests {
     fn saving_a_date_appends_a_set_op_and_waits_for_it() {
         let mut m = writable();
         update(&mut m, Msg::EditField(Field::Expiry));
-        for _ in 0..10 {
-            update(&mut m, Msg::Backspace);
-        }
-        for c in "2027-04-01".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        clear_buffer(&mut m);
+        type_str(&mut m, "2027-04-01");
         let effect = update(&mut m, Msg::Enter);
         assert_eq!(
             effect,
@@ -2915,7 +2933,7 @@ pub(crate) mod tests {
         assert_eq!(m.store.docs[0].expiry_date.as_deref(), Some("2026-01-01"), "unchanged so far");
 
         let store = restored(&m, "coc", Some("2027-04-01"));
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         assert!(m.edit.is_none(), "the journal answered, so the editor closed");
         assert_eq!(m.current().unwrap().expiry_date.as_deref(), Some("2027-04-01"));
         assert_eq!(m.flash.as_deref(), Some("saved"));
@@ -2985,9 +3003,7 @@ pub(crate) mod tests {
     fn tags_are_typed_with_spaces_and_stored_as_a_list() {
         let mut m = writable();
         update(&mut m, Msg::EditField(Field::Tags));
-        for c in "marine  ticket".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "marine  ticket");
         assert_eq!(
             update(&mut m, Msg::Enter),
             Effect::Append(vec![journal::Draft::set(
@@ -3006,18 +3022,14 @@ pub(crate) mod tests {
     fn a_name_cannot_be_cleared_but_the_others_can() {
         let mut m = writable();
         update(&mut m, Msg::EditField(Field::Name));
-        for _ in 0.."COC Certificate".len() {
-            update(&mut m, Msg::Backspace);
-        }
+        clear_buffer(&mut m);
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "nothing was appended");
         assert!(m.flash.is_some(), "and it said why");
         assert!(m.edit.is_some(), "with the editor still open on the empty buffer");
 
         let mut m = writable();
         update(&mut m, Msg::EditField(Field::Expiry));
-        for _ in 0..10 {
-            update(&mut m, Msg::Backspace);
-        }
+        clear_buffer(&mut m);
         assert_eq!(
             update(&mut m, Msg::Enter),
             Effect::Append(vec![journal::Draft::unset("doc", "coc", "expiry_date")])
@@ -3043,9 +3055,7 @@ pub(crate) mod tests {
 
     /// Types `name` into the search and presses `Enter` on `+ new`.
     fn create(m: &mut Model, name: &str) -> Effect {
-        for c in name.chars() {
-            update(m, Msg::Char(c));
-        }
+        type_str(m, name);
         while !m.on_new {
             update(m, Msg::Move(Motion::Up));
         }
@@ -3067,9 +3077,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Move(Motion::Down));
         assert!(!m.on_new);
         assert_eq!(m.cursor, 0, "and back down lands on the first match");
-        for c in "zzzz".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "zzzz");
         assert!(m.on_new, "nothing matches, so + new is selected");
     }
 
@@ -3085,7 +3093,7 @@ pub(crate) mod tests {
         fresh.name = "Seaman Book".into();
         fresh.haystack = crate::search::fold(&fresh.name);
         store.docs.push(fresh);
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         assert!(m.detail());
         update(&mut m, Msg::Esc);
         assert!(!m.detail(), "Esc closes the record first");
@@ -3135,7 +3143,7 @@ pub(crate) mod tests {
         fresh.files.clear();
         fresh.haystack = crate::search::fold(&fresh.name);
         store.docs.push(fresh);
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
 
         assert!(m.edit.is_none(), "the journal answered, so the editor closed");
         assert!(m.detail(), "and the record is open");
@@ -3184,7 +3192,7 @@ pub(crate) mod tests {
         fresh.files.clear();
         store.docs[0].superseded = true;
         store.docs.push(fresh);
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
 
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("coc-certificate-desk"));
         assert_eq!(m.views.len(), 1, "it replaced the old version's view");
@@ -3214,14 +3222,10 @@ pub(crate) mod tests {
     fn a_refused_save_leaves_nothing_to_undo() {
         let mut m = writable();
         update(&mut m, Msg::EditField(Field::Expiry));
-        for c in "-x".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "-x");
         update(&mut m, Msg::Backspace);
         update(&mut m, Msg::Backspace);
-        for c in "2027-04-01".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "2027-04-01");
         update(&mut m, Msg::Enter);
         update(&mut m, Msg::SaveFailed { reason: "the disk said no".into(), permanent: false });
         assert!(m.undo.is_empty(), "nothing was written, so there is nothing to take back");
@@ -3235,12 +3239,9 @@ pub(crate) mod tests {
         let mut m = writable();
         m.store.docs[0].tags = vec!["marine".into(), "ticket".into()];
         update(&mut m, Msg::EditField(Field::Tags));
-        for c in " extra".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, " extra");
         update(&mut m, Msg::Enter);
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
 
         assert_eq!(
             m.undo.last().map(|change| change.back.clone()),
@@ -3260,8 +3261,7 @@ pub(crate) mod tests {
     fn creating_a_document_inverts_to_a_delete() {
         let mut m = writable();
         create(&mut m, "Seaman Book");
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert_eq!(
             m.undo.last().map(|change| change.back.clone()),
             Some(vec![journal::Draft::delete("doc", "seaman-book-desk")])
@@ -3279,14 +3279,12 @@ pub(crate) mod tests {
         update(&mut m, Msg::Backspace);
         update(&mut m, Msg::Char('2'));
         update(&mut m, Msg::Enter);
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert_eq!(m.undo.len(), 1);
 
         update(&mut m, Msg::Char(' '));
         update(&mut m, Msg::Char('u'));
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert!(m.undo.is_empty(), "the undo consumed the entry and added none");
         assert_eq!(m.flash.as_deref(), Some("undone"));
     }
@@ -3299,14 +3297,12 @@ pub(crate) mod tests {
         let forward = m.undo.last().expect("something to undo").forward.clone();
 
         update(&mut m, Msg::Char('u'));
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert!(m.undo.is_empty(), "the change left the undo stack");
         assert_eq!(m.redo.len(), 1, "and joined the redo stack");
 
         assert_eq!(update(&mut m, Msg::Char('r')), Effect::Append(forward));
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert_eq!(m.flash.as_deref(), Some("redone"));
         assert!(m.redo.is_empty(), "and it went back where it came from");
         assert_eq!(m.undo.len(), 1, "so it can be undone again");
@@ -3321,8 +3317,7 @@ pub(crate) mod tests {
         let Effect::Append(_) = m.toggle_digital_only() else { panic!("the first write") };
         assert_eq!(m.toggle_digital_only(), Effect::Redraw);
         assert_eq!(m.flash.as_deref(), Some("saving — one moment"));
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert_eq!(m.undo.len(), 1, "the first write, and only it");
         assert!(matches!(m.toggle_digital_only(), Effect::Append(_)), "free again");
     }
@@ -3348,7 +3343,7 @@ pub(crate) mod tests {
         );
         let mut store = m.store.clone();
         store.docs[0].location = Some("none".into());
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         assert_eq!(m.flash.as_deref(), Some("digital only"));
         assert!(
             !crate::detail::rows(m.current().unwrap()).contains(&crate::detail::Row::Location),
@@ -3412,8 +3407,7 @@ pub(crate) mod tests {
             m.pending.as_ref().map(|pending| pending.change.back.clone()),
             Some(vec![set("cert-file")])
         );
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert_eq!(m.flash.as_deref(), Some("filed in drawer"));
     }
 
@@ -3425,9 +3419,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
         update(&mut m, Msg::Leader);
         update(&mut m, Msg::Char('l'));
-        for c in "box".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "box");
         assert_eq!(m.locpick.as_ref().unwrap().cursor, crate::locpick::Target::New);
         let Effect::Append(drafts) = update(&mut m, Msg::Enter) else { panic!("an append") };
         let id = match &drafts[0] {
@@ -3463,9 +3455,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Leader);
         update(&mut m, Msg::Char('l'));
         update(&mut m, Msg::Move(Motion::Up));
-        for c in "Cert-File".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "Cert-File");
         update(&mut m, Msg::Move(Motion::Up));
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
         assert_eq!(m.flash.as_deref(), Some("shelf already has a Cert-File"));
@@ -3496,12 +3486,8 @@ pub(crate) mod tests {
         let edit = m.edit.as_ref().expect("the bottom line is open");
         assert_eq!(edit.target, Target::Location("cert-file".into()));
         assert_eq!(edit.buffer, "cert-file");
-        for _ in 0.."cert-file".len() {
-            update(&mut m, Msg::Backspace);
-        }
-        for c in "drawer".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        clear_buffer(&mut m);
+        type_str(&mut m, "drawer");
         assert_eq!(
             update(&mut m, Msg::Enter),
             Effect::Append(vec![journal::Draft::set(
@@ -3519,12 +3505,8 @@ pub(crate) mod tests {
         update(&mut m, Msg::Move(Motion::Up));
         update(&mut m, Msg::Char(' '));
         update(&mut m, Msg::Char('r'));
-        for _ in 0.."shelf".len() {
-            update(&mut m, Msg::Backspace);
-        }
-        for c in "Drawer".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        clear_buffer(&mut m);
+        type_str(&mut m, "Drawer");
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
         assert_eq!(m.flash.as_deref(), Some("the top level already has a Drawer"));
     }
@@ -3655,8 +3637,7 @@ pub(crate) mod tests {
         assert!(!m.detail(), "back on the Find view");
 
         assert!(matches!(update(&mut m, Msg::Undo), Effect::Append(_)));
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert_eq!(update(&mut m, Msg::Redo), Effect::Append(forward));
     }
 
@@ -3667,17 +3648,13 @@ pub(crate) mod tests {
     fn writing_something_new_drops_what_could_have_been_redone() {
         let mut m = saved_edit("2027-04-01");
         update(&mut m, Msg::Char('u'));
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert_eq!(m.redo.len(), 1);
 
         update(&mut m, Msg::EditField(Field::Notes));
-        for c in "elsewhere".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "elsewhere");
         update(&mut m, Msg::Enter);
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert!(m.redo.is_empty(), "the branch that was not taken is gone");
         assert_eq!(m.undo.len(), 1, "and the new write is the thing to take back");
     }
@@ -3695,15 +3672,10 @@ pub(crate) mod tests {
     fn saved_edit(value: &str) -> Model {
         let mut m = writable();
         update(&mut m, Msg::EditField(Field::Expiry));
-        for _ in 0..10 {
-            update(&mut m, Msg::Backspace);
-        }
-        for c in value.chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        clear_buffer(&mut m);
+        type_str(&mut m, value);
         update(&mut m, Msg::Enter);
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         m
     }
 
@@ -3754,7 +3726,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Char('d'));
         let mut store = m.store.clone();
         store.docs.retain(|doc| doc.id != "coc");
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         assert_eq!(m.flash.as_deref(), Some("deleted — u to undo"));
         assert!(!m.detail(), "there is nothing left to look at");
 
@@ -3793,9 +3765,7 @@ pub(crate) mod tests {
     fn clearing_the_field_appends_an_unset_op() {
         let mut m = writable();
         update(&mut m, Msg::EditField(Field::Expiry));
-        for _ in 0..10 {
-            update(&mut m, Msg::Backspace);
-        }
+        clear_buffer(&mut m);
         assert_eq!(
             update(&mut m, Msg::Enter),
             Effect::Append(vec![journal::Draft::unset("doc", "coc", "expiry_date")])
@@ -3808,9 +3778,7 @@ pub(crate) mod tests {
     fn an_unparseable_date_is_refused_and_the_typing_survives() {
         let mut m = writable();
         update(&mut m, Msg::EditField(Field::Expiry));
-        for c in "-ish".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "-ish");
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "no append");
         assert_eq!(m.edit.as_ref().unwrap().buffer, "2026-01-01-ish");
         assert!(m.flash.as_deref().unwrap().contains("YYYY-MM-DD"));
@@ -3885,7 +3853,7 @@ pub(crate) mod tests {
         // Now the soonest of all — earlier than `coc`'s 2026-01-01 — so the row
         // moves to the top of the filter, which is the whole point of the test.
         let store = restored(&m, &edited, Some("2025-12-01"));
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         assert_eq!(m.current().unwrap().id, edited, "the cursor followed the document");
         assert_eq!(m.cursor, 0, "which is now the first row");
     }
@@ -3903,7 +3871,7 @@ pub(crate) mod tests {
 
         // Cleared: no expiry means it is not in the watch at all.
         let store = restored(&m, &edited, None);
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some(edited.as_str()));
         assert_eq!(m.flash.as_deref(), Some("saved"));
         assert!(m.rows.iter().all(|&i| m.store.docs[i].id != edited));
@@ -3947,7 +3915,7 @@ pub(crate) mod tests {
         assert!(!m.mouse_on);
 
         let store = restored(&m, "coc", Some("2027-04-01"));
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         assert!(m.esc_armed, "a worker message did not disarm the quit");
         assert!(!m.mouse_on, "nor did it restore mouse reporting");
     }
@@ -3994,9 +3962,7 @@ pub(crate) mod tests {
     #[test]
     fn enter_on_a_record_without_a_file_says_so() {
         let mut m = model();
-        for c in "passport".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "passport");
         update(&mut m, Msg::Enter);
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "no open effect, and no panic");
         assert!(m.detail());
@@ -4043,9 +4009,7 @@ pub(crate) mod tests {
     #[test]
     fn the_query_cursor_counts_characters_not_bytes() {
         let mut m = model();
-        for c in "né".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "né");
         update(&mut m, Msg::Left);
         update(&mut m, Msg::Char('x'));
         assert_eq!(m.query, "nxé");
@@ -4061,9 +4025,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Move(Motion::End));
         assert_eq!(m.cursor, m.rows.len() - 1, "an empty query leaves them to the list");
 
-        for c in "co".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "co");
         let cursor = m.cursor;
         update(&mut m, Msg::Move(Motion::Home));
         assert_eq!(m.query_cursor, 0);
@@ -4196,15 +4158,12 @@ pub(crate) mod tests {
         let rows = crate::detail::rows(m.current().unwrap());
         m.set_record_cursor(rows.iter().position(|r| *r == crate::detail::Row::Renews).unwrap());
         update(&mut m, Msg::Char('e'));
-        for c in "testim".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "testim");
         assert_eq!(
             update(&mut m, Msg::Enter),
             Effect::Append(vec![journal::Draft::set("doc", "coc", "supersedes", "testimonial")])
         );
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert_eq!(
             m.undo.last().map(|change| change.back.clone()),
             Some(vec![journal::Draft::unset("doc", "coc", "supersedes")])
@@ -4245,9 +4204,7 @@ pub(crate) mod tests {
     #[test]
     fn the_bundles_view_has_its_own_search() {
         let mut m = with_bundles();
-        for c in "eng".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "eng");
         m.run(crate::sheet::Act::Bundles);
         assert!(matches!(
             m.views.last(),
@@ -4255,9 +4212,7 @@ pub(crate) mod tests {
         ));
         assert!(m.query.is_empty(), "the Bundles view starts with nothing typed");
 
-        for c in "visa".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "visa");
         let entries = crate::bundles::entries(&m.store, &m.query);
         let visa = crate::bundles::Entry::Bundle("visa".into());
         assert_eq!(entries, [crate::bundles::Entry::New, visa.clone()]);
@@ -4285,7 +4240,7 @@ pub(crate) mod tests {
 
         let mut store = m.store.clone();
         store.bundles.reverse();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         let visa = crate::bundles::Entry::Bundle("visa".into());
         assert!(matches!(&m.views[0], View::Bundles { selected, .. } if *selected == visa));
     }
@@ -4295,9 +4250,7 @@ pub(crate) mod tests {
     fn a_bundle_is_created_from_the_search() {
         let mut m = with_bundles();
         m.run(crate::sheet::Act::Bundles);
-        for c in "Panama".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "Panama");
         let id = "panama-desk";
         assert_eq!(
             update(&mut m, Msg::Enter),
@@ -4312,7 +4265,7 @@ pub(crate) mod tests {
             name: "Panama".into(),
             ..crate::Bundle::default()
         });
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         assert!(matches!(m.views.last(), Some(View::Bundle { id, .. }) if id == "panama-desk"));
         assert_eq!(m.flash.as_deref(), Some("created"));
         assert_eq!(m.query, "Panama", "the search is still there");
@@ -4326,9 +4279,7 @@ pub(crate) mod tests {
         m.run(crate::sheet::Act::Bundles);
         update(&mut m, Msg::Enter);
         assert!(m.edit.as_ref().is_some_and(|edit| edit.target == Target::NewBundle));
-        for c in "Joining".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "Joining");
         let Effect::Append(drafts) = update(&mut m, Msg::Enter) else { panic!("no append") };
         assert_eq!(drafts[0], journal::Draft::create("bundle", "joining-desk"));
         assert!(m.edit.as_ref().is_some_and(|edit| edit.saving));
@@ -4345,12 +4296,8 @@ pub(crate) mod tests {
 
         update(&mut m, Msg::Move(Motion::Down));
         update(&mut m, Msg::Char('e'));
-        for _ in 0..10 {
-            update(&mut m, Msg::Backspace);
-        }
-        for c in "2026-12-01".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        clear_buffer(&mut m);
+        type_str(&mut m, "2026-12-01");
         assert_eq!(
             update(&mut m, Msg::Enter),
             Effect::Append(vec![journal::Draft::set("bundle", "joining", "date", "2026-12-01")])
@@ -4359,8 +4306,7 @@ pub(crate) mod tests {
             m.pending.as_ref().map(|pending| pending.change.back.clone()),
             Some(vec![journal::Draft::set("bundle", "joining", "date", "2026-11-01")])
         );
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert_eq!(m.flash.as_deref(), Some("saved"));
 
         update(&mut m, Msg::Move(Motion::End));
@@ -4385,7 +4331,7 @@ pub(crate) mod tests {
         );
         let mut store = m.store.clone();
         store.bundles.remove(0);
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land_as(&mut m, store);
         assert!(matches!(m.views.last(), Some(View::Bundles { .. })), "back on the list");
         assert_eq!(m.flash.as_deref(), Some("deleted — u to undo"));
         assert_eq!(
@@ -4427,8 +4373,7 @@ pub(crate) mod tests {
                 serde_json::json!([{"bundle": "joining"}])
             )])
         );
-        let store = m.store.clone();
-        update(&mut m, Msg::Saved(Box::new(store)));
+        land(&mut m);
         assert!(m.check.is_some(), "the list stays open");
         assert_eq!(m.flash.as_deref(), Some("added to US visa"));
 
@@ -4448,9 +4393,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
         update(&mut m, Msg::Char(' '));
         update(&mut m, Msg::Char('b'));
-        for c in "Panama".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "Panama");
         assert_eq!(m.check.as_ref().map(|check| check.cursor), Some(0), "on + new");
         let id = "panama-desk";
         assert_eq!(
@@ -4656,9 +4599,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
         select_row(&mut m, crate::detail::Row::File(0));
         update(&mut m, Msg::Char('e'));
-        for c in "detach".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "detach");
         let Effect::Append(drafts) = update(&mut m, Msg::Enter) else { panic!("no append") };
         assert_eq!(drafts, [journal::Draft::unset("doc", "coc", "files")]);
     }
@@ -4668,16 +4609,12 @@ pub(crate) mod tests {
     #[test]
     fn attaching_a_first_file_makes_it_primary() {
         let mut m = writable();
-        for c in "passport".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "passport");
         update(&mut m, Msg::Enter);
         select_row(&mut m, crate::detail::Row::Files);
         update(&mut m, Msg::Char('e'));
         assert_eq!(m.edit.as_ref().map(|edit| edit.field), Some(Field::Attach));
-        for c in "Identity\\passport.pdf".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "Identity\\passport.pdf");
         let written = files_written(&update(&mut m, Msg::Enter)).expect("a files write");
         assert_eq!(written[0]["path"], "Identity/passport.pdf", "stored POSIX");
         assert_eq!(written[0]["primary"], true);
@@ -4694,9 +4631,7 @@ pub(crate) mod tests {
         }
         let mut m = writable();
         m.root = Some(root);
-        for c in "passport".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "passport");
         update(&mut m, Msg::Enter);
         select_row(&mut m, crate::detail::Row::Files);
         update(&mut m, Msg::Char('e'));
@@ -4721,9 +4656,7 @@ pub(crate) mod tests {
         assert_eq!(m.edit.as_ref().unwrap().buffer, "Identity/");
         assert_eq!(listed(&m), ["pan.pdf", "passport.pdf"]);
 
-        for c in "pas".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "pas");
         assert_eq!(listed(&m), ["passport.pdf"]);
         update(&mut m, Msg::Tab);
         assert_eq!(m.edit.as_ref().unwrap().buffer, "Identity/passport.pdf");
@@ -4740,9 +4673,7 @@ pub(crate) mod tests {
         assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("type a path")));
         assert!(m.edit.is_some(), "the line stays open");
 
-        for c in "Identity".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "Identity");
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "nothing written");
         assert_eq!(m.edit.as_ref().unwrap().buffer, "Identity/", "the folder opened");
         assert_eq!(listed(&m), ["pan.pdf", "passport.pdf"]);
@@ -4753,9 +4684,7 @@ pub(crate) mod tests {
     #[test]
     fn only_a_tap_on_a_row_does_anything_while_attaching() {
         let (_dir, mut m) = attaching_under();
-        for c in "Identity/pas".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "Identity/pas");
         m.panel = RowGeometry { top: 5, left: 0, width: 40, items: vec![0], ..Default::default() };
         assert_eq!(update(&mut m, Msg::Tap { col: 3, row: 1 }), Effect::Idle);
         assert_eq!(m.edit.as_ref().unwrap().buffer, "Identity/pas", "nothing saved or changed");
@@ -4779,9 +4708,7 @@ pub(crate) mod tests {
     #[test]
     fn enter_on_a_chosen_file_attaches_it() {
         let (_dir, mut m) = attaching_under();
-        for c in "Identity/".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "Identity/");
         update(&mut m, Msg::Move(Motion::Up));
         assert_eq!(
             m.edit.as_ref().unwrap().list.as_ref().unwrap().chosen,
@@ -4798,13 +4725,9 @@ pub(crate) mod tests {
         let mut m = on_coc_with_two_files();
         select_row(&mut m, crate::detail::Row::File(0));
         update(&mut m, Msg::Char('e'));
-        for c in "attach".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "attach");
         update(&mut m, Msg::Enter);
-        for c in "Marine/coc.pdf".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "Marine/coc.pdf");
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "nothing appended");
         assert!(m.flash.as_deref().unwrap_or_default().contains("already attached"));
         assert_eq!(m.edit.as_ref().unwrap().buffer, "Marine/coc.pdf");
@@ -4944,9 +4867,7 @@ pub(crate) mod tests {
     #[test]
     fn the_filter_list_toggles_with_space_and_stays_open() {
         let mut m = model();
-        for c in [' ', 'f'] {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, " f");
         assert!(!m.sheet && m.check.is_some(), "the sheet gave way to the checklist");
         update(&mut m, Msg::Char(' '));
         assert!(m.filter.expiring, "Space ticked expiring only");
@@ -4961,9 +4882,7 @@ pub(crate) mod tests {
     #[test]
     fn typing_searches_the_filter_list_and_esc_peels_it() {
         let mut m = model();
-        for c in [' ', 'f', 'o', 'l', 'd'] {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, " fold");
         assert_eq!(m.check.as_ref().map(|c| c.filter.as_str()), Some("old"));
         update(&mut m, Msg::Enter);
         assert!(m.filter.old_versions);
@@ -5190,9 +5109,7 @@ pub(crate) mod tests {
     #[test]
     fn an_empty_result_is_a_valid_state() {
         let mut m = model();
-        for c in "zzzz".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "zzzz");
         assert!(m.rows.is_empty(), "{:?}", m.rows);
         assert!(m.current().is_none());
         assert!(m.on_new);
@@ -5243,9 +5160,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::ScansLoaded(scans));
         assert_eq!(m.scan_search, ScanSearch::On);
 
-        for c in "mariner".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "mariner");
         assert_eq!(m.rows.len(), 1, "found by what the page says, not by its name");
         assert_eq!(m.current().unwrap().id, "coc");
 
@@ -5267,9 +5182,7 @@ pub(crate) mod tests {
         });
         update(&mut m, Msg::ToggleScans);
         update(&mut m, Msg::ScansLoaded(scans));
-        for c in "coc".chars() {
-            update(&mut m, Msg::Char(c));
-        }
+        type_str(&mut m, "coc");
         let ids: Vec<&str> = m.rows.iter().map(|&i| m.store.docs[i].id.as_str()).collect();
         assert_eq!(ids, ["coc", "eng1"], "the name match first, in list order");
     }

@@ -132,6 +132,13 @@ fn writable(cols: u16, rows: u16) -> Model {
     model
 }
 
+/// Types `text` a character at a time.
+fn type_str(model: &mut Model, text: &str) {
+    for c in text.chars() {
+        update(model, Msg::Char(c));
+    }
+}
+
 /// Which cells of one screen row carry a modifier — the way to check that a
 /// *texture* landed where it was meant to, since text alone cannot show it.
 fn modifier_columns(
@@ -422,9 +429,7 @@ fn the_status_line_is_a_band_and_the_entry_line_is_not() {
     }
 
     // Typing changes the count on the band, never the band.
-    for c in "coc".chars() {
-        update(&mut m, Msg::Char(c));
-    }
+    type_str(&mut m, "coc");
     assert_eq!(banded_columns(&mut m, 45, 28, 26, Theme { color: true }), band);
 
     // The leader chip closes the entry line, reversed against the plain
@@ -507,9 +512,7 @@ fn the_touch_layout_has_one_button_and_it_explains_itself() {
 #[test]
 fn typing_narrows_the_list_and_the_count() {
     let mut m = model(45, 28);
-    for c in "coc".chars() {
-        update(&mut m, Msg::Char(c));
-    }
+    type_str(&mut m, "coc");
     let lines = screen(&mut m, 45, 28);
     assert!(lines[1].contains("+ new \"coc\""), "pinned above the matches: {:?}", lines[1]);
     assert!(lines[2].starts_with("▸ COC Certificate"), "the cursor on the match: {:?}", lines[2]);
@@ -522,9 +525,7 @@ fn typing_narrows_the_list_and_the_count() {
 #[test]
 fn a_mid_query_cursor_leaves_the_text_in_place() {
     let mut m = model(45, 28);
-    for c in "coc".chars() {
-        update(&mut m, Msg::Char(c));
-    }
+    type_str(&mut m, "coc");
     update(&mut m, Msg::Left);
     let lines = screen(&mut m, 45, 28);
     assert!(lines[27].contains(" coc "), "the text is unbroken: {:?}", lines[27]);
@@ -692,9 +693,7 @@ fn the_attach_line_has_a_live_list() {
     let rows = ds::detail::rows(m.current().unwrap());
     m.set_record_cursor(rows.iter().position(|r| *r == ds::detail::Row::Files).unwrap());
     update(&mut m, Msg::Char('e'));
-    for c in "Identity/p".chars() {
-        update(&mut m, Msg::Char(c));
-    }
+    type_str(&mut m, "Identity/p");
     let lines = screen(&mut m, 47, 24);
     let text = lines.join("\n");
     let heading = lines.iter().position(|line| line.contains("in Identity/")).expect(&text);
@@ -977,9 +976,7 @@ fn the_location_picker_searches_by_path() {
     update(&mut m, Msg::Enter);
     update(&mut m, Msg::Leader);
     update(&mut m, Msg::Char('l'));
-    for c in "slot 2".chars() {
-        update(&mut m, Msg::Char(c));
-    }
+    type_str(&mut m, "slot 2");
     let lines = screen(&mut m, 47, 24);
     for line in &lines {
         println!("|{line}|");

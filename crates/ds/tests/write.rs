@@ -25,32 +25,40 @@
 //! Nothing here touches `docs/dev/demo`, and nothing touches a real store: every
 //! test builds its own journal in a temp directory and folds it from disk.
 
+use std::io::Write as _;
 use std::path::PathBuf;
 
 use ds::app::{update, Effect, Model, Msg, WriteState};
 use ds::edit::Field;
-use journal::{Draft, Journal, Namespace, Writer};
+use journal::{Draft, Journal, Namespace, Op, Writer};
 use serde_json::json;
 use tempfile::TempDir;
 
-/// Returns `desk-core` journal lines for `drafts`, stamped a millisecond apart from `ts`.
-fn desk_lines(ts: i64, drafts: Vec<Draft>) -> String {
-    (ts..).zip(drafts).map(|(ts, d)| d.stamp(ts, "desk-core").to_line().unwrap() + "\n").collect()
-}
-
-/// A journal directory of this test's own, with one document in it.
-fn journal_with_a_document() -> (TempDir, Journal) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let meta = dir.path().join("meta");
-    std::fs::create_dir_all(&meta).expect("mkdir");
-    let drafts = vec![
+/// The document most tests start from.
+fn coc() -> Vec<Draft> {
+    vec![
         Draft::create("doc", "coc"),
         Draft::set("doc", "coc", "name", "COC Certificate"),
         Draft::set("doc", "coc", "expiry_date", "2026-09-28"),
-    ];
-    std::fs::write(meta.join("desk-core.jsonl"), desk_lines(1_700_000_000_001, drafts))
-        .expect("write");
+    ]
+}
+
+/// Returns `desk-core`'s ops for `drafts`, stamped a millisecond apart.
+fn desk(drafts: Vec<Draft>) -> Vec<Op> {
+    (1_700_000_000_001..).zip(drafts).map(|(ts, d)| d.stamp(ts, "desk-core")).collect()
+}
+
+/// A journal directory of this test's own, holding `ops` in their writers' files.
+fn journal_with(ops: &[Op]) -> (TempDir, Journal) {
+    let dir = tempfile::tempdir().expect("tempdir");
     let journal = Journal::new(dir.path());
+    for op in ops {
+        let path = journal.file_path(Namespace::Meta, &op.w);
+        std::fs::create_dir_all(path.parent().expect("a namespace dir")).expect("mkdir");
+        let mut file =
+            std::fs::OpenOptions::new().create(true).append(true).open(&path).expect("open");
+        writeln!(file, "{}", op.to_line().expect("serializes")).expect("write");
+    }
     (dir, journal)
 }
 
@@ -64,12 +72,26 @@ fn lock_dir(dir: &std::path::Path) -> PathBuf {
 }
 
 /// Build the model the TUI would have, from a journal on disk.
-fn load_model(journal: &Journal) -> (Model, journal::Load) {
+fn load_model(journal: &Journal) -> Model {
     let loaded = ds::load::load(journal).expect("load");
-    let lines = loaded.load;
     let mut model = Model::new(loaded.store, loaded.today, loaded.warn_until, 47, 24);
     model.write = WriteState::Ready { device: "desk".into() };
-    (model, lines)
+    model
+}
+
+/// Types `text` a character at a time.
+fn type_str(model: &mut Model, text: &str) {
+    for c in text.chars() {
+        update(model, Msg::Char(c));
+    }
+}
+
+/// Backspaces until the open edit's buffer is empty.
+fn clear_buffer(model: &mut Model) {
+    let typed = model.edit.as_ref().map_or(0, |edit| edit.buffer.chars().count());
+    for _ in 0..typed {
+        update(model, Msg::Backspace);
+    }
 }
 
 /// **An edit made in the model reaches the journal, and reading the journal back
@@ -77,33 +99,19 @@ fn load_model(journal: &Journal) -> (Model, journal::Load) {
 /// disk, and a store folded from that disk that agrees with the screen.
 #[test]
 fn an_edit_becomes_an_op_and_survives_a_reload() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, loaded) = load_model(&journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
 
     update(&mut model, Msg::EditField(Field::Expiry));
-    for _ in 0..10 {
-        update(&mut model, Msg::Backspace);
-    }
-    for c in "2031-05-31".chars() {
-        update(&mut model, Msg::Char(c));
-    }
+    clear_buffer(&mut model);
+    type_str(&mut model, "2031-05-31");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
         panic!("a valid date must ask for an append");
     };
-
-    // What the journal thread's writer does with it.
-    let mut writer = Writer::open(
-        &journal,
-        Namespace::Meta,
-        "phone-core",
-        &lock_dir(dir.path()),
-        loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0),
-    )
-    .expect("open the writer");
-    let ops = writer.append_all(drafts).expect("append");
-    writer.commit().expect("fsync");
-    assert_eq!(ops.len(), 1);
-    assert_eq!(ops[0].w, "phone-core", "this device wrote it, under its own id");
+    write_and_reload(&mut follower(dir.path(), &journal, "phone"), drafts, &mut model);
+    let load = journal.load(Namespace::Meta).expect("load");
+    let phone = load.files.iter().find(|file| file.writer == "phone-core");
+    assert_eq!(phone.map(|file| file.ops), Some(1), "this device wrote it, under its own id");
 
     // A second device's file, never an edit to the first one's — which is what
     // makes Syncthing conflicts structurally impossible.
@@ -112,7 +120,6 @@ fn an_edit_becomes_an_op_and_survives_a_reload() {
         std::fs::read_to_string(dir.path().join("meta").join("desk-core.jsonl")).expect("read");
     assert_eq!(original.lines().count(), 3, "the other writer's file was not touched");
 
-    drop(writer);
     let reloaded = ds::load::load(&journal).expect("reload");
     let doc = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("the document");
     assert_eq!(doc.expiry_date.as_deref(), Some("2031-05-31"), "the edit is in the store");
@@ -123,28 +130,15 @@ fn an_edit_becomes_an_op_and_survives_a_reload() {
 /// half that a stored empty string would have quietly broken instead.
 #[test]
 fn clearing_the_field_removes_it_from_the_folded_store() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, _) = load_model(&journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
 
     update(&mut model, Msg::EditField(Field::Expiry));
-    for _ in 0..10 {
-        update(&mut model, Msg::Backspace);
-    }
+    clear_buffer(&mut model);
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
         panic!("an empty buffer must still ask for an append");
     };
-
-    let mut writer = Writer::open(
-        &journal,
-        Namespace::Meta,
-        "phone-core",
-        &lock_dir(dir.path()),
-        1_700_000_000_003,
-    )
-    .expect("open the writer");
-    writer.append_all(drafts).expect("append");
-    writer.commit().expect("fsync");
-    drop(writer);
+    write_and_reload(&mut follower(dir.path(), &journal, "phone"), drafts, &mut model);
 
     let reloaded = ds::load::load(&journal).expect("reload");
     let doc = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("the document");
@@ -159,7 +153,7 @@ fn clearing_the_field_removes_it_from_the_folded_store() {
 /// browsing, opening and `ds status` all still work.
 #[test]
 fn a_held_lock_is_a_notice_and_not_a_failure() {
-    let (dir, journal) = journal_with_a_document();
+    let (dir, journal) = journal_with(&desk(coc()));
     let locks = lock_dir(dir.path());
     let _held = Writer::open(&journal, Namespace::Meta, "phone-core", &locks, 0).expect("first");
 
@@ -172,7 +166,7 @@ fn a_held_lock_is_a_notice_and_not_a_failure() {
 
     // What the model does with that news: the reason is shown, editing stops
     // being offered, and nothing else about the session changes.
-    let (mut model, _) = load_model(&journal);
+    let mut model = load_model(&journal);
     update(&mut model, Msg::EditField(Field::Expiry));
     update(&mut model, Msg::Char('9'));
     update(&mut model, Msg::Enter);
@@ -188,21 +182,14 @@ fn a_held_lock_is_a_notice_and_not_a_failure() {
 /// checked here through the app's own loader rather than the crate's tests.
 #[test]
 fn two_devices_write_two_files_and_fold_to_one_store() {
-    let (dir, journal) = journal_with_a_document();
-    let locks = lock_dir(dir.path());
-
-    let mut phone =
-        Writer::open(&journal, Namespace::Meta, "phone-core", &locks, 1_700_000_000_003)
-            .expect("phone");
-    phone.append_all(vec![Draft::set("doc", "coc", "expiry_date", "2030-01-01")]).expect("append");
-    phone.commit().expect("fsync");
-    drop(phone);
-
-    let mut desk = Writer::open(&journal, Namespace::Meta, "desk-core", &locks, 1_700_000_000_003)
-        .expect("desk");
-    desk.append_all(vec![Draft::set("doc", "coc", "notes", "renewed in Mumbai")]).expect("append");
-    desk.commit().expect("fsync");
-    drop(desk);
+    let (dir, journal) = journal_with(&desk(coc()));
+    for (device, draft) in [
+        ("phone", Draft::set("doc", "coc", "expiry_date", "2030-01-01")),
+        ("desk", Draft::set("doc", "coc", "notes", "renewed in Mumbai")),
+    ] {
+        let saved = follower(dir.path(), &journal, device).save(vec![draft]);
+        assert!(matches!(saved, Msg::Saved(_)), "{saved:?}");
+    }
 
     let reloaded = ds::load::load(&journal).expect("reload");
     let doc = reloaded.store.docs.iter().find(|d| d.id == "coc").expect("the document");
@@ -218,29 +205,16 @@ fn two_devices_write_two_files_and_fold_to_one_store() {
 /// `create` would be orphaned, and the new document would simply not be there.
 #[test]
 fn a_created_document_survives_a_reload() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, loaded) = load_model(&journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
     let before = model.store.docs.len();
 
-    for c in "Seaman Book".chars() {
-        update(&mut model, Msg::Char(c));
-    }
+    type_str(&mut model, "Seaman Book");
     assert!(model.on_new, "nothing matches, so + new is selected");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
         panic!("naming a new document must ask for an append");
     };
-
-    let mut writer = Writer::open(
-        &journal,
-        Namespace::Meta,
-        "desk-core",
-        &lock_dir(dir.path()),
-        loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0),
-    )
-    .expect("open the writer");
-    writer.append_all(drafts).expect("append");
-    writer.commit().expect("fsync");
-    drop(writer);
+    write_and_reload(&mut follower(dir.path(), &journal, "desk"), drafts, &mut model);
 
     let reloaded = ds::load::load(&journal).expect("reload");
     assert_eq!(reloaded.store.docs.len(), before + 1);
@@ -260,17 +234,13 @@ fn a_created_document_survives_a_reload() {
 /// still hold both the edit and its inverse afterwards.
 #[test]
 fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, _) = load_model(&journal);
-    let mut follower = follower(dir.path(), &journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
+    let mut follower = follower(dir.path(), &journal, "desk");
 
     update(&mut model, Msg::EditField(Field::Expiry));
-    for _ in 0..10 {
-        update(&mut model, Msg::Backspace);
-    }
-    for c in "2031-05-31".chars() {
-        update(&mut model, Msg::Char(c));
-    }
+    clear_buffer(&mut model);
+    type_str(&mut model, "2031-05-31");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
     write_and_reload(&mut follower, drafts, &mut model);
     assert_eq!(model.current().and_then(|d| d.expiry_date.clone()).as_deref(), Some("2031-05-31"));
@@ -302,18 +272,14 @@ fn an_undo_restores_the_field_and_leaves_both_ops_in_the_journal() {
 /// different verb and is not built.
 #[test]
 fn undo_walks_back_more_than_one_write() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, _) = load_model(&journal);
-    let mut follower = follower(dir.path(), &journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
+    let mut follower = follower(dir.path(), &journal, "desk");
 
     for value in ["2031-05-31", "2032-06-30"] {
         update(&mut model, Msg::EditField(Field::Expiry));
-        for _ in 0..10 {
-            update(&mut model, Msg::Backspace);
-        }
-        for c in value.chars() {
-            update(&mut model, Msg::Char(c));
-        }
+        clear_buffer(&mut model);
+        type_str(&mut model, value);
         let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
         write_and_reload(&mut follower, drafts, &mut model);
     }
@@ -351,17 +317,13 @@ fn write_and_reload(follower: &mut ds::follow::Follower, drafts: Vec<Draft>, mod
 /// and put again leaves three lines behind — not one line edited twice.
 #[test]
 fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, _) = load_model(&journal);
-    let mut follower = follower(dir.path(), &journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
+    let mut follower = follower(dir.path(), &journal, "desk");
 
     update(&mut model, Msg::EditField(Field::Expiry));
-    for _ in 0..10 {
-        update(&mut model, Msg::Backspace);
-    }
-    for c in "2031-05-31".chars() {
-        update(&mut model, Msg::Char(c));
-    }
+    clear_buffer(&mut model);
+    type_str(&mut model, "2031-05-31");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
     write_and_reload(&mut follower, drafts, &mut model);
 
@@ -392,13 +354,11 @@ fn a_redo_reapplies_the_write_and_the_journal_holds_every_step() {
 /// it does, because redo appends the ops that were written the first time.
 #[test]
 fn a_created_document_can_be_taken_back_and_put_again() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, _) = load_model(&journal);
-    let mut follower = follower(dir.path(), &journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
+    let mut follower = follower(dir.path(), &journal, "desk");
 
-    for c in "Seaman Book".chars() {
-        update(&mut model, Msg::Char(c));
-    }
+    type_str(&mut model, "Seaman Book");
     assert!(model.on_new, "nothing matches, so + new is selected");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
     write_and_reload(&mut follower, drafts, &mut model);
@@ -433,13 +393,8 @@ fn a_created_document_can_be_taken_back_and_put_again() {
 /// want their data back.
 #[test]
 fn undoing_a_delete_restores_every_field() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let meta = dir.path().join("meta");
-    std::fs::create_dir_all(&meta).expect("mkdir");
-    let drafts = vec![
-        Draft::create("doc", "coc"),
-        Draft::set("doc", "coc", "name", "COC Certificate"),
-        Draft::set("doc", "coc", "expiry_date", "2026-09-28"),
+    let mut drafts = coc();
+    drafts.extend([
         Draft::set("doc", "coc", "tags", json!(["marine", "ticket"])),
         Draft::set("doc", "coc", "location", "cert-file"),
         Draft::set("doc", "coc", "notes", "the one with the stamp"),
@@ -449,13 +404,11 @@ fn undoing_a_delete_restores_every_field() {
             "files",
             json!([{"label": "complete", "path": "Marine/coc.pdf", "primary": true}]),
         ),
-    ];
-    std::fs::write(meta.join("desk-core.jsonl"), desk_lines(1_700_000_000_001, drafts))
-        .expect("write");
-    let journal = Journal::new(dir.path());
+    ]);
+    let (dir, journal) = journal_with(&desk(drafts));
 
-    let (mut model, _) = load_model(&journal);
-    let mut follower = follower(dir.path(), &journal);
+    let mut model = load_model(&journal);
+    let mut follower = follower(dir.path(), &journal, "desk");
     let before = model.store.docs.iter().find(|d| d.id == "coc").expect("the document").clone();
 
     update(&mut model, Msg::Enter);
@@ -483,16 +436,14 @@ fn undoing_a_delete_restores_every_field() {
 /// is unfiled again, with nothing left half-done in between.
 #[test]
 fn a_location_created_while_filing_is_taken_back_whole() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, _) = load_model(&journal);
-    let mut follower = follower(dir.path(), &journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
+    let mut follower = follower(dir.path(), &journal, "desk");
 
     update(&mut model, Msg::Enter);
     update(&mut model, Msg::Leader);
     update(&mut model, Msg::Char('l'));
-    for c in "grey box".chars() {
-        update(&mut model, Msg::Char(c));
-    }
+    type_str(&mut model, "grey box");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else {
         panic!("+ new must ask for an append");
     };
@@ -515,22 +466,19 @@ fn a_location_created_while_filing_is_taken_back_whole() {
 /// while the locations are gone, and as filed again once undo recreates them.
 #[test]
 fn a_deleted_location_comes_back_with_everything_inside() {
-    let (dir, journal) = journal_with_a_document();
-    let drafts = vec![
+    let mut drafts = coc();
+    drafts.extend([
         Draft::create("location", "desk"),
         Draft::set("location", "desk", "name", "desk"),
         Draft::create("location", "folder"),
         Draft::set("location", "folder", "name", "leather folder"),
         Draft::set("location", "folder", "parent", "desk"),
         Draft::set("doc", "coc", "location", "folder"),
-    ];
-    let file = dir.path().join("meta").join("desk-core.jsonl");
-    let mut text = std::fs::read_to_string(&file).expect("read");
-    text.push_str(&desk_lines(1_700_000_000_004, drafts));
-    std::fs::write(&file, text).expect("write");
+    ]);
+    let (dir, journal) = journal_with(&desk(drafts));
 
-    let (mut model, _) = load_model(&journal);
-    let mut follower = follower(dir.path(), &journal);
+    let mut model = load_model(&journal);
+    let mut follower = follower(dir.path(), &journal, "desk");
     let place = |model: &Model| {
         let doc = model.store.docs.iter().find(|d| d.id == "coc").expect("the document");
         model.store.place(doc)
@@ -561,9 +509,9 @@ fn a_deleted_location_comes_back_with_everything_inside() {
 /// replaced and keeping its own expiry date.
 #[test]
 fn a_new_version_replaces_the_old_one_in_the_fold() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, _) = load_model(&journal);
-    let mut follower = follower(dir.path(), &journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
+    let mut follower = follower(dir.path(), &journal, "desk");
 
     update(&mut model, Msg::Enter);
     update(&mut model, Msg::Char(' '));
@@ -585,15 +533,13 @@ fn a_new_version_replaces_the_old_one_in_the_fold() {
 /// document.
 #[test]
 fn a_created_bundle_folds_as_its_own_record() {
-    let (dir, journal) = journal_with_a_document();
-    let (mut model, _) = load_model(&journal);
-    let mut follower = follower(dir.path(), &journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut model = load_model(&journal);
+    let mut follower = follower(dir.path(), &journal, "desk");
 
     update(&mut model, Msg::Char(' '));
     update(&mut model, Msg::Char('b'));
-    for c in "Joining".chars() {
-        update(&mut model, Msg::Char(c));
-    }
+    type_str(&mut model, "Joining");
     let Effect::Append(drafts) = update(&mut model, Msg::Enter) else { panic!("no append") };
     write_and_reload(&mut follower, drafts, &mut model);
 
@@ -608,10 +554,10 @@ fn line(ts: i64, writer: &str, field: &str, value: &str) -> String {
     Draft::set("doc", "coc", field, value).stamp(ts, writer).to_line().unwrap()
 }
 
-/// The follower a session on this journal would start with.
-fn follower(dir: &std::path::Path, journal: &Journal) -> ds::follow::Follower {
+/// The follower a session on this journal would start with, writing as `device`.
+fn follower(dir: &std::path::Path, journal: &Journal, device: &str) -> ds::follow::Follower {
     let loaded = ds::load::load(journal).expect("load");
-    let owner = ds::follow::Owner::new("desk", dir, &lock_dir(dir));
+    let owner = ds::follow::Owner::new(device, dir, &lock_dir(dir));
     ds::follow::Follower::new(journal.clone(), Some(owner), loaded.stamp, loaded.stats.max_ts())
 }
 
@@ -624,8 +570,8 @@ fn name_in(msg: &Msg) -> String {
 /// until a file changes, then hands over the store re-read with it.
 #[test]
 fn a_poll_brings_in_another_writers_op() {
-    let (dir, journal) = journal_with_a_document();
-    let mut follower = follower(dir.path(), &journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut follower = follower(dir.path(), &journal, "desk");
     assert!(follower.poll().is_none(), "nothing changed");
 
     let phone = dir.path().join("meta").join("phone-core.jsonl");
@@ -642,8 +588,8 @@ fn a_poll_brings_in_another_writers_op() {
 /// everything it has read.
 #[test]
 fn a_save_sorts_after_what_it_read() {
-    let (dir, journal) = journal_with_a_document();
-    let mut follower = follower(dir.path(), &journal);
+    let (dir, journal) = journal_with(&desk(coc()));
+    let mut follower = follower(dir.path(), &journal, "desk");
     let ahead = journal::Hlc::seeded(0).tick() + 86_400_000;
     let phone = dir.path().join("meta").join("phone-core.jsonl");
     std::fs::write(&phone, line(ahead, "phone-core", "name", "COC PHONE") + "\n").expect("write");
