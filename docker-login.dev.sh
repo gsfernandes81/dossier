@@ -106,12 +106,12 @@ fi
 
 bold "Done."
 if claude auth status >/dev/null 2>&1; then
-  ok "Work in it over ssh: 'ssh ds-dev' lands on the claude-sessions menu (n starts a session)."
+  ok "Work in it over ssh: 'ssh ds-dev' lands on the claude-sessions menu."
 fi
 cat <<'EOF'
 
   Attach a shell:   docker exec -it ds-dev fish
-  Work in it:       ssh ds-dev  — the claude-sessions menu (? lists its keys)
+  Work in it:       ssh ds-dev  — the claude-sessions menu
   Idle sessions:    offloaded and left resumable from the menu
   Re-run logins:    make dev-login
 EOF

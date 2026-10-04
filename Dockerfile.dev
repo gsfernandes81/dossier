@@ -2,10 +2,10 @@
 
 # ds-dev — a THIN CHILD of gsrpi-dev-base since 2026-08-24. Everything this container
 # shares with its three siblings on the same Pi (infra-dev, or3-dev, dd-dev) lives in
-# infra's `dev/Dockerfile.base` and is pulled, not rebuilt: python:3.13-slim-trixie
-# (bookworm until the 2026.09.21.1 base), Node + a self-updating Claude Code, `gh`,
-# abduco, claude-sessions and its door, screen, fish, openssh client and server,
-# cloudflared, the `dev` user, every dotfile, and the entrypoint that starts the lot.
+# infra's `dev/Dockerfile.base` and is pulled, not rebuilt: python:3.13-slim-trixie,
+# Node + a self-updating Claude Code, `gh`, abduco, claude-sessions, screen, fish, openssh
+# client and server, cloudflared, the `dev` user, every dotfile, and the entrypoint that
+# starts the lot.
 # What is left here is only what makes this image not one of the others — a compiler for
 # source builds, and this project's venv with its extras and the `driver` group.
 #
@@ -19,12 +19,6 @@
 # `.github/workflows/dev-base.yml` on every push to infra's main that bumps its tag, so
 # there is no cross-repo build order — the FROM pulls, and nothing here needs the infra
 # repo on disk.
-#
-# 2026.10.04.3 IS THE FIRST BASE HERE WITH claude-sessions (v0.3.8, infra#8), whose menu
-# every `ssh ds-dev` now lands on. It is also the jump across the base's move from
-# bookworm to trixie (glibc 2.41, OpenSSH 10.x, fish 4.x); infra `dev/README.md` § *Debian
-# trixie, for glibc 2.41* has what moved. Not 2026.10.04 (v0.3.6 dumps core into
-# /workspace when the link drops) nor anything earlier: see dossier#74.
 #
 # THE OFFLINE FALLBACK is `make base` in infra's `dev/`. It builds the identical image
 # locally UNDER THE SAME NAME, and docker prefers a local image over a pull — so a GitHub

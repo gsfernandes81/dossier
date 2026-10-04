@@ -51,11 +51,6 @@ services:
       # are offloaded and left resumable; DEV_IDLE_OFFLOAD: "0" here would keep them
       # resident. How either works is claude-sessions' and the base's to describe.
 
-      # DEV_TUNNEL_HOSTNAME is deliberately unset. The base can run cloudflared itself,
-      # but this container is reached through the tunnel on the HOST pointed at the
-      # published port below. Setting it here without the credentials the base wants in
-      # DEV_SECRETS_DIR/tunnel.json only earns a warning at start.
-
     volumes:
       - .:/workspace                          # bind-mount the host clone; the base image's dev uid must match this clone's owner (make dev-up checks)
       - ds-uv-cache:/home/dev/.cache/uv        # persist uv cache (fast re-syncs)
@@ -66,7 +61,7 @@ services:
       - ds-zed-server:/home/dev/.zed_server    # persist Zed's remote server binary (no re-download per rebuild)
       - ds-local-share:/home/dev/.local/share  # persist fish + bash history (HISTFILE points here) and claude-sessions' state
     ports:
-      - "${DEV_SSH_PORT:-2222}:2222"   # host ${DEV_SSH_PORT} (default 2222) -> container sshd; point a Cloudflare tunnel here for remote access
+      - "${DEV_SSH_PORT:-2222}:2222"   # host ${DEV_SSH_PORT} (default 2222) -> container sshd
     # Do NOT mount over /home/dev/venv or all of /home/dev — it would erase the
     # pre-built venv.
 volumes:
