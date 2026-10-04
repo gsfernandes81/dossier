@@ -356,30 +356,88 @@ fn files(entity: &Entity) -> Vec<FileRef> {
         .unwrap_or_default()
 }
 
+/// Which document replaces which, resolved once for one set of documents.
+struct Chains {
+    /// The document each one replaces, when it is in the set.
+    older: Vec<Option<usize>>,
+    /// The documents that replace each one, in set order.
+    newer: Vec<Vec<usize>>,
+}
+
+impl Chains {
+    fn new(docs: &[Doc]) -> Self {
+        let index: BTreeMap<&str, usize> =
+            docs.iter().enumerate().map(|(i, doc)| (doc.id.as_str(), i)).collect();
+        let older: Vec<Option<usize>> = docs
+            .iter()
+            .map(|doc| doc.supersedes.as_deref().and_then(|id| index.get(id).copied()))
+            .collect();
+        let mut newer = vec![Vec::new(); docs.len()];
+        for (i, replaced) in older.iter().enumerate() {
+            if let Some(replaced) = replaced {
+                newer[*replaced].push(i);
+            }
+        }
+        Self { older, newer }
+    }
+
+    /// The oldest version `i` leads back to; in a loop, the last one before
+    /// the walk would repeat.
+    fn root(&self, i: usize) -> usize {
+        let mut at = i;
+        let mut seen = BTreeSet::from([i]);
+        while let Some(next) = self.older[at] {
+            if !seen.insert(next) {
+                break;
+            }
+            at = next;
+        }
+        at
+    }
+
+    /// Whether `i`'s older versions lead back to `i`.
+    fn is_loop(&self, i: usize) -> bool {
+        let mut at = i;
+        let mut seen = BTreeSet::new();
+        while let Some(next) = self.older[at] {
+            if next == i {
+                return true;
+            }
+            if !seen.insert(next) {
+                return false;
+            }
+            at = next;
+        }
+        false
+    }
+
+    /// `i` and every version made from it, breadth first.
+    fn descendants(&self, i: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut queue = std::collections::VecDeque::from([i]);
+        while let Some(at) = queue.pop_front() {
+            if seen.insert(at) {
+                out.push(at);
+                queue.extend(&self.newer[at]);
+            }
+        }
+        out
+    }
+}
+
 /// Marks each latest version that shares its oldest version with another
 /// latest one issued later, the id breaking a tie.
 fn mark_conflicts(docs: &mut [Doc]) {
-    let index: BTreeMap<&str, usize> =
-        docs.iter().enumerate().map(|(i, doc)| (doc.id.as_str(), i)).collect();
-    let oldest = |start: usize| {
-        let mut at = start;
-        let mut seen = BTreeSet::from([start]);
-        while let Some(&older) = docs[at].supersedes.as_deref().and_then(|id| index.get(id)) {
-            if !seen.insert(older) {
-                break;
-            }
-            at = older;
-        }
-        at
-    };
-    let mut chains: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let chains = Chains::new(docs);
+    let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     for (i, doc) in docs.iter().enumerate() {
         if !doc.superseded {
-            chains.entry(oldest(i)).or_default().push(i);
+            groups.entry(chains.root(i)).or_default().push(i);
         }
     }
     let mut losers = Vec::new();
-    for latest in chains.into_values().filter(|latest| latest.len() > 1) {
+    for latest in groups.into_values().filter(|latest| latest.len() > 1) {
         let key = |&i: &usize| (docs[i].issue_date.clone(), docs[i].id.clone());
         let winner = latest.iter().max_by_key(|i| key(i)).copied();
         losers.extend(latest.into_iter().filter(|&i| Some(i) != winner));
@@ -525,25 +583,8 @@ impl Store {
     /// that loop is anyone's latest version.
     #[must_use]
     pub fn version_loops(&self) -> Vec<usize> {
-        let index: BTreeMap<&str, usize> =
-            self.docs.iter().enumerate().map(|(i, doc)| (doc.id.as_str(), i)).collect();
-        let older = |at: usize| self.docs[at].supersedes.as_deref().and_then(|id| index.get(id));
-        (0..self.docs.len())
-            .filter(|&start| {
-                let mut at = start;
-                let mut seen = BTreeSet::new();
-                while let Some(&next) = older(at) {
-                    if next == start {
-                        return true;
-                    }
-                    if !seen.insert(next) {
-                        return false;
-                    }
-                    at = next;
-                }
-                false
-            })
-            .collect()
+        let chains = Chains::new(&self.docs);
+        (0..self.docs.len()).filter(|&i| chains.is_loop(i)).collect()
     }
 
     /// The document with this id.
@@ -564,33 +605,20 @@ impl Store {
     /// an offline duplicate stays visible rather than hiding one of them.
     #[must_use]
     pub fn versions(&self, id: &str) -> Vec<usize> {
-        let mut oldest = id;
-        let mut seen = BTreeSet::from([id]);
-        while let Some(older) =
-            self.index_of(oldest).and_then(|i| self.docs[i].supersedes.as_deref())
-        {
-            if !seen.insert(older) || self.index_of(older).is_none() {
-                break;
-            }
-            oldest = older;
-        }
-        let mut out = Vec::new();
-        let mut queue = std::collections::VecDeque::from([oldest.to_string()]);
-        let mut visited = BTreeSet::new();
-        while let Some(next) = queue.pop_front() {
-            if !visited.insert(next.clone()) {
-                continue;
-            }
-            let Some(i) = self.index_of(&next) else { continue };
-            out.push(i);
-            queue.extend(
-                self.docs
-                    .iter()
-                    .filter(|doc| doc.supersedes.as_deref() == Some(next.as_str()))
-                    .map(|doc| doc.id.clone()),
-            );
-        }
-        out
+        let Some(i) = self.index_of(id) else { return Vec::new() };
+        let chains = Chains::new(&self.docs);
+        chains.descendants(chains.root(i))
+    }
+
+    /// The documents `id` may replace without breaking a chain: never itself
+    /// or one of its own newer versions, and never one something else replaces.
+    #[must_use]
+    pub fn renewable(&self, id: &str) -> Vec<usize> {
+        let newer = self.index_of(id).map(|i| Chains::new(&self.docs).descendants(i));
+        (0..self.docs.len())
+            .filter(|&i| !self.docs[i].superseded)
+            .filter(|i| !newer.as_ref().is_some_and(|newer| newer.contains(i)))
+            .collect()
     }
 
     /// The bundle with this id.

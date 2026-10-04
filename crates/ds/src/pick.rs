@@ -144,7 +144,7 @@ impl Picker {
                 if doc.supersedes.is_some() {
                     entries.push(entry("none", Choice::Renew(None)));
                 }
-                entries.extend(renewable(store, &doc.id).into_iter().map(|i| Entry {
+                entries.extend(store.renewable(&doc.id).into_iter().map(|i| Entry {
                     label: crate::detail::version_name(&store.docs[i]),
                     choice: Choice::Renew(Some(store.docs[i].id.clone())),
                 }));
@@ -194,30 +194,6 @@ fn member_entries(store: &Store, doc: &crate::Doc, bundle: &str) -> Vec<Entry> {
     }
     entries.push(entry("remove from this bundle", Choice::Leave));
     entries
-}
-
-/// The documents `id` may replace without breaking a chain: never itself or
-/// one of its own newer versions, and never one something else replaces.
-fn renewable(store: &Store, id: &str) -> Vec<usize> {
-    let mut newer = std::collections::BTreeSet::from([id]);
-    loop {
-        let before = newer.len();
-        for doc in &store.docs {
-            if doc.supersedes.as_deref().is_some_and(|older| newer.contains(older)) {
-                newer.insert(doc.id.as_str());
-            }
-        }
-        if newer.len() == before {
-            break;
-        }
-    }
-    store
-        .docs
-        .iter()
-        .enumerate()
-        .filter(|(_, doc)| !doc.superseded && !newer.contains(doc.id.as_str()))
-        .map(|(i, _)| i)
-        .collect()
 }
 
 fn entry(label: &str, choice: Choice) -> Entry {
