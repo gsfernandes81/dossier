@@ -38,10 +38,13 @@ pub const EXTENSION: &str = ".jsonl";
 /// happily replicate half-written temp files to the other device.
 pub const COMPACTION_TEMP_GLOB: &str = "*.jsonl.tmp-*";
 
-/// Marker Syncthing puts in the name of a conflict copy.
-const SYNC_CONFLICT: &str = ".sync-conflict-";
+/// Whether `name` is a Syncthing conflict copy.
+#[must_use]
+pub fn is_sync_conflict(name: &str) -> bool {
+    name.contains(".sync-conflict-")
+}
 
-/// Whether `name` is a journal file this build may fold.
+/// Returns the writer id of a journal file this build may fold, or `None`.
 ///
 /// Grammar: `^[a-z0-9][a-z0-9-]*\.jsonl$` — lowercase, digits and hyphens, with
 /// no dots before the extension. Every exclusion the contract lists follows
@@ -49,12 +52,11 @@ const SYNC_CONFLICT: &str = ".sync-conflict-";
 /// extra dots), but the conflict case is checked explicitly anyway: it is the
 /// one whose silent inclusion would be a correctness bug rather than noise.
 #[must_use]
-pub fn is_writer_file(name: &str) -> bool {
-    if name.contains(SYNC_CONFLICT) {
-        return false;
+pub fn writer_of(name: &str) -> Option<&str> {
+    if is_sync_conflict(name) {
+        return None;
     }
-    let Some(stem) = name.strip_suffix(EXTENSION) else { return false };
-    is_valid_writer_id(stem)
+    name.strip_suffix(EXTENSION).filter(|stem| is_valid_writer_id(stem))
 }
 
 /// Whether `id` is a usable writer id — the file stem, and the `w` field of
@@ -82,7 +84,7 @@ pub fn writer_file(writer: &str) -> String {
 
 /// The temp name compaction writes before its atomic rename.
 ///
-/// Deliberately *not* matching [`is_writer_file`]: if a compaction dies
+/// Deliberately *not* matching [`writer_of`]: if a compaction dies
 /// mid-rewrite, the leftover must be invisible to the next fold rather than
 /// contributing a truncated view of the writer's history.
 #[must_use]
@@ -98,7 +100,7 @@ mod tests {
     #[test]
     fn ordinary_writer_files_are_accepted() {
         for name in ["desk-core.jsonl", "phone-core.jsonl", "desk-lab.jsonl", "a1.jsonl"] {
-            assert!(is_writer_file(name), "{name} should be folded");
+            assert!(writer_of(name).is_some(), "{name} should be folded");
         }
     }
 
@@ -119,7 +121,7 @@ mod tests {
             "desk-core.json",
             "README.md",
         ] {
-            assert!(!is_writer_file(name), "{name} must never be folded");
+            assert!(writer_of(name).is_none(), "{name} must never be folded");
         }
     }
 
@@ -129,7 +131,7 @@ mod tests {
     fn compaction_temps_are_invisible_to_the_fold() {
         let temp = compaction_temp_file("desk-core", 4231);
         assert_eq!(temp, "desk-core.jsonl.tmp-4231");
-        assert!(!is_writer_file(&temp));
+        assert!(writer_of(&temp).is_none());
         // …and the glob that hides it from Syncthing matches it.
         assert!(temp.starts_with("desk-core.jsonl.tmp-"));
         assert!(COMPACTION_TEMP_GLOB.starts_with("*.jsonl.tmp-"));
@@ -143,6 +145,6 @@ mod tests {
         assert!(!is_valid_writer_id(""));
         assert!(!is_valid_writer_id("-lead-hyphen"));
         assert!(!is_valid_writer_id("UPPER"));
-        assert!(is_writer_file(&writer_file("phone-core")));
+        assert_eq!(writer_of(&writer_file("phone-core")), Some("phone-core"));
     }
 }

@@ -275,23 +275,21 @@ impl Journal {
         // order the filesystem feels like, and while the fold does not care
         // (that is the whole point), *reports* that reorder themselves between
         // runs are miserable to read and to test.
-        let mut names: Vec<String> = Vec::new();
+        let mut files: Vec<(String, String)> = Vec::new();
         for entry in entries {
             let Ok(entry) = entry else { continue };
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.contains(".sync-conflict-") {
+            if names::is_sync_conflict(&name) {
                 load.anomalies.push(Anomaly::SyncConflict { file: name });
-                continue;
-            }
-            if names::is_writer_file(&name) {
-                names.push(name);
+            } else if let Some(writer) = names::writer_of(&name).map(str::to_owned) {
+                files.push((name, writer));
             }
             // Everything else — temps, backups, the .stfolder marker — is not
             // ours and is not news.
         }
-        names.sort();
+        files.sort();
 
-        for name in names {
+        for (name, writer) in files {
             let path = dir.join(&name);
             let raw = match std::fs::read(&path) {
                 Ok(raw) => raw,
@@ -309,7 +307,6 @@ impl Journal {
                 load.anomalies.push(Anomaly::TornTail { file: name.clone() });
             }
 
-            let writer = name.trim_end_matches(names::EXTENSION).to_string();
             let mut report = FileReport { writer, bytes, max_ts: 0, ops: 0, malformed: 0 };
             for line in &lines {
                 match line {
