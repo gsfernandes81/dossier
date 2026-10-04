@@ -28,9 +28,10 @@ Three facts that shape what the rest of R4 costs:
   An edit becomes `Effect::Append(Vec<Draft>)`; a thread that owns the `Writer`
   performs it — lock, append, fsync — then reads the journal back and posts the
   new store as `Msg::Saved`. The same thread polls the journal's stamp every two
-  seconds and posts `Msg::Reloaded` when another writer's ops arrive. Undo is another `Vec<Draft>` down the same
-  channel, and compaction-on-clean-exit is that thread's shutdown work. Nothing
-  else in the program can reach the `Writer`.
+  seconds and posts `Msg::Reloaded` when another writer's ops arrive. Undo is
+  another `Vec<Draft>` down the same channel. Nothing else in the program can
+  reach the `Writer`. Compaction exists in the journal crate but nothing calls
+  it yet.
 - **The writer opens on the first append, never at launch.** `Writer::open`
   creates the journal directory and the writer's file if absent, and §7 forbids
   `.dossier/journal/` existing in the synced tree before cutover — so an eager
