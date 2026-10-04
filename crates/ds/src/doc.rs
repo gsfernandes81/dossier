@@ -176,24 +176,29 @@ impl Doc {
         !self.superseded
     }
 
-    /// The expiry standing, given today and the warn window.
-    ///
-    /// Dates are ISO strings and compare correctly as strings, so no date
-    /// library is needed for the comparison — only for computing the window,
-    /// which the caller passes in already resolved.
+    /// The expiry standing in the watch, given today and the warn window.
     #[must_use]
     pub fn status(&self, today: &str, warn_until: &str) -> Status {
-        if !self.is_tracked() {
-            return Status::Untracked;
+        if self.is_tracked() {
+            self.dated(today, warn_until).unwrap_or(Status::Untracked)
+        } else {
+            Status::Untracked
         }
-        let Some(expiry) = self.expiry_date.as_deref() else { return Status::Untracked };
-        if expiry < today {
+    }
+
+    /// Where the expiry date alone stands, watched or not; `None` without one.
+    ///
+    /// ISO dates compare correctly as strings.
+    #[must_use]
+    pub fn dated(&self, today: &str, warn_until: &str) -> Option<Status> {
+        let expiry = self.expiry_date.as_deref()?;
+        Some(if expiry < today {
             Status::Expired
         } else if expiry <= warn_until {
             Status::Soon
         } else {
             Status::Ok
-        }
+        })
     }
 
     /// Every journal field this document holds, in the shape the fold reads.

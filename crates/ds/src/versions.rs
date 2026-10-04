@@ -48,13 +48,9 @@ fn standing(model: &Model, doc: &Doc) -> (String, Option<Status>) {
     if !doc.superseded {
         return ("latest".into(), None);
     }
-    match doc.expiry_date.as_deref() {
-        Some(expiry) if expiry < model.today.as_str() => {
-            (format!("{} expired", Status::Expired.marker()), Some(Status::Expired))
-        }
-        Some(expiry) if expiry <= model.warn_until.as_str() => {
-            (format!("{} soon", Status::Soon.marker()), Some(Status::Soon))
-        }
+    match doc.dated(&model.today, &model.warn_until) {
+        Some(status @ Status::Expired) => (format!("{} expired", status.marker()), Some(status)),
+        Some(status @ Status::Soon) => (format!("{} soon", status.marker()), Some(status)),
         _ => (String::new(), None),
     }
 }
