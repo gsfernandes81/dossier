@@ -195,7 +195,7 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 /// The list, and the detail pane beside or instead of it (U3).
 fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     model.record = crate::app::RowGeometry::default();
-    let (list_area, detail_area) = match (model.detail, crate::layout::splits(area.width)) {
+    let (list_area, detail_area) = match (model.detail(), crate::layout::splits(area.width)) {
         (true, true) => {
             let split = Layout::default()
                 .direction(Direction::Horizontal)
@@ -1105,7 +1105,7 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
         locpick_hints(picker)
     } else if model.picker.is_some() {
         vec!["⏎ choose", "esc back"]
-    } else if model.detail {
+    } else if model.detail() {
         // The record's hints **follow the selector**: the verb is shown when the
         // row under it has one and this session can actually write. A hint for a
         // key that does nothing on *this* row is worse than no hint, and it is
@@ -1138,7 +1138,7 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
 /// The record row the selector is on, if a record is open at all.
 fn selected_row(model: &Model) -> Option<crate::detail::Row> {
     let rows = crate::detail::rows(model.current()?);
-    rows.get(model.record_cursor.min(rows.len().saturating_sub(1))).copied()
+    rows.get(model.record_cursor().min(rows.len().saturating_sub(1))).copied()
 }
 
 /// Fit as many hints as the room allows, **dropping them one at a time from the
@@ -1191,9 +1191,9 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
         "⏎ save  esc discard"
     } else if model.picker.is_some() {
         "↑↓ select  ⏎ choose  type to narrow  esc back"
-    } else if model.detail && model.write.ready() {
+    } else if model.detail() && model.write.ready() {
         "⏎ open file  e edit  esc back  space menu  ^q quit"
-    } else if model.detail {
+    } else if model.detail() {
         "⏎ open file  esc back  space menu  ^q quit"
     } else {
         "space menu  ⏎ record  ^q quit"

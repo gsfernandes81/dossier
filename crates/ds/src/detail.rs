@@ -120,7 +120,7 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) -> crate
     };
 
     let rows = rows(doc);
-    let selected = model.record_cursor.min(rows.len().saturating_sub(1));
+    let selected = model.record_cursor().min(rows.len().saturating_sub(1));
     let mut lines: Vec<Line> = Vec::new();
     // Where each row's lines start, so the pane can be scrolled to keep the
     // selection on screen without the renderer counting anything twice.

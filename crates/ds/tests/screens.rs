@@ -531,7 +531,7 @@ fn a_file_row_picker_draws_in_the_panel() {
     m.cursor = m.rows.iter().position(|&i| i == doc).expect("listed");
     update(&mut m, Msg::Enter);
     let rows = ds::detail::rows(m.current().unwrap());
-    m.record_cursor = rows.iter().position(|r| matches!(r, ds::detail::Row::File(0))).unwrap();
+    m.set_record_cursor(rows.iter().position(|r| matches!(r, ds::detail::Row::File(0))).unwrap());
     update(&mut m, Msg::Char('e'));
     let text = screen(&mut m, 45, 28).join("\n");
     assert!(text.contains("file "), "the heading names the file: {text}");
@@ -840,7 +840,7 @@ fn the_details_rows_answer_taps() {
     let tags = at("tags");
     assert_eq!(update(&mut m, Msg::Tap { col: 5, row: tags }), ds::Effect::Redraw);
     let rows = ds::detail::rows(m.current().unwrap());
-    assert_eq!(rows[m.record_cursor], ds::detail::Row::Editable(ds::edit::Field::Tags));
+    assert_eq!(rows[m.record_cursor()], ds::detail::Row::Editable(ds::edit::Field::Tags));
 
     let ds::Effect::Append(drafts) = update(&mut m, Msg::Tap { col: 5, row: at("digital only") })
     else {

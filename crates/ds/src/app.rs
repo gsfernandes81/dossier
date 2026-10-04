@@ -124,6 +124,19 @@ pub enum Msg {
     },
 }
 
+/// A view pushed over the Find view, anchored on an id so a save that
+/// reorders or filters the list never changes what it shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum View {
+    /// A document version's Details view, its selector on row `cursor`.
+    Details {
+        /// The document's id.
+        doc: String,
+        /// The selected row ([`crate::detail::rows`]).
+        cursor: usize,
+    },
+}
+
 /// Where the cursor should go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Motion {
@@ -398,9 +411,8 @@ pub struct Model {
     pub on_new: bool,
     /// The screen row the `+ new` row was last drawn on.
     pub new_row: Option<u16>,
-    /// Detail is a sticky toggle (U3): once open it follows the cursor until
-    /// closed.
-    pub detail: bool,
+    /// The views pushed over the Find view, innermost last.
+    pub views: Vec<View>,
     /// One more `Esc` and we quit.
     pub esc_armed: bool,
     /// Whether SGR mouse reporting is currently on.
@@ -411,11 +423,6 @@ pub struct Model {
     pub sheet: bool,
     /// The checkbox list, when one is open.
     pub check: Option<crate::check::CheckList>,
-    /// Which row of the open record the selector is on ([`crate::detail::rows`]).
-    ///
-    /// Zeroed whenever the record opens or changes document, so drilling in
-    /// always starts at the top rather than wherever the last record left it.
-    pub record_cursor: usize,
     /// The field being edited, when one is (R4).
     pub edit: Option<crate::edit::Edit>,
     /// **This session's own writes, newest last** — each with the way back.
@@ -515,13 +522,12 @@ impl Model {
             offset: 0,
             on_new: false,
             new_row: None,
-            detail: false,
+            views: Vec::new(),
             esc_armed: false,
             mouse_on: true,
             keyboard_hint: false,
             sheet: false,
             check: None,
-            record_cursor: 0,
             edit: None,
             write: WriteState::default(),
             undo: Vec::new(),
@@ -554,10 +560,53 @@ impl Model {
     /// The highlighted document, if anything matched.
     #[must_use]
     pub fn current(&self) -> Option<&Doc> {
-        if self.on_new {
-            return None;
+        match self.views.last() {
+            Some(View::Details { doc, .. }) => {
+                self.store.index_of(doc).map(|i| &self.store.docs[i])
+            }
+            None if self.on_new => None,
+            None => self.rows.get(self.cursor).map(|&i| &self.store.docs[i]),
         }
-        self.rows.get(self.cursor).map(|&i| &self.store.docs[i])
+    }
+
+    /// Whether the Details view is the one in front.
+    #[must_use]
+    pub fn detail(&self) -> bool {
+        matches!(self.views.last(), Some(View::Details { .. }))
+    }
+
+    /// The row the Details view's selector is on ([`crate::detail::rows`]).
+    #[must_use]
+    pub fn record_cursor(&self) -> usize {
+        match self.views.last() {
+            Some(View::Details { cursor, .. }) => *cursor,
+            None => 0,
+        }
+    }
+
+    /// Puts the Details view's selector on row `at`.
+    pub fn set_record_cursor(&mut self, at: usize) {
+        if let Some(View::Details { cursor, .. }) = self.views.last_mut() {
+            *cursor = at;
+        }
+    }
+
+    /// Opens the Details view on the list's document, unless it is in front.
+    fn show_details(&mut self) {
+        if self.detail() {
+            return;
+        }
+        if let Some(doc) = self.current().map(|doc| doc.id.clone()) {
+            self.views.push(View::Details { doc, cursor: 0 });
+        }
+    }
+
+    /// Drops every view whose record is gone from the store.
+    fn prune_views(&mut self) {
+        let store = &self.store;
+        self.views.retain(|view| match view {
+            View::Details { doc, .. } => store.index_of(doc).is_some(),
+        });
     }
 
     /// Whether the list offers `+ new`: once something is typed, or always on
@@ -686,13 +735,12 @@ impl Model {
             self.flash = Some("nothing to open".into());
             return Effect::Redraw;
         };
-        if !self.detail {
-            self.detail = true;
-            self.record_cursor = 0;
+        if !self.detail() {
+            self.show_details();
             return Effect::Redraw;
         }
         let rows = crate::detail::rows(doc);
-        let file = match rows.get(self.record_cursor.min(rows.len().saturating_sub(1))) {
+        let file = match rows.get(self.record_cursor().min(rows.len().saturating_sub(1))) {
             Some(crate::detail::Row::File(index)) => doc.files.get(*index),
             _ => doc.primary_file(),
         };
@@ -799,12 +847,12 @@ impl Model {
         let rows = crate::detail::rows(doc);
         let Some(row) = rows.get(index) else { return Effect::Idle };
         if *row == crate::detail::Row::DigitalOnly {
-            self.record_cursor = index;
+            self.set_record_cursor(index);
             self.toggle_digital_only()
-        } else if index == self.record_cursor {
+        } else if index == self.record_cursor() {
             self.drill()
         } else {
-            self.record_cursor = index;
+            self.set_record_cursor(index);
             Effect::Redraw
         }
     }
@@ -850,7 +898,7 @@ impl Model {
         let Some(doc) = self.current() else { return Effect::Idle };
         self.locpick = Some(crate::locpick::LocationPicker::file(&self.store, &doc.id));
         self.sheet = false;
-        self.detail = true;
+        self.show_details();
         self.flash = self.store.locations.loop_message();
         Effect::Redraw
     }
@@ -1130,8 +1178,8 @@ impl Model {
             self.sheet = false;
             return Effect::Redraw;
         }
-        if self.detail {
-            self.detail = false;
+        if !self.views.is_empty() {
+            self.views.pop();
         } else if !self.query.is_empty() {
             self.query.clear();
             self.query_cursor = 0;
@@ -1234,12 +1282,13 @@ impl Model {
     fn move_record(&mut self, motion: Motion) {
         let Some(doc) = self.current() else { return };
         let last = crate::detail::rows(doc).len().saturating_sub(1);
-        self.record_cursor = match motion {
-            Motion::Up => self.record_cursor.saturating_sub(1),
-            Motion::Down => (self.record_cursor + 1).min(last),
+        let at = self.record_cursor();
+        self.set_record_cursor(match motion {
+            Motion::Up => at.saturating_sub(1),
+            Motion::Down => (at + 1).min(last),
             Motion::PageUp | Motion::Home => 0,
             Motion::PageDown | Motion::End => last,
-        };
+        });
     }
 
     /// A bare letter on the record surface.
@@ -1255,7 +1304,7 @@ impl Model {
     fn record_verb(&mut self, key: char) -> Effect {
         let Some(doc) = self.current() else { return Effect::Idle };
         let rows = crate::detail::rows(doc);
-        let row = rows.get(self.record_cursor.min(rows.len().saturating_sub(1))).copied();
+        let row = rows.get(self.record_cursor().min(rows.len().saturating_sub(1))).copied();
         match (key, row) {
             ('e', Some(crate::detail::Row::Editable(field))) => self.open_edit(field),
             ('e', Some(crate::detail::Row::File(index))) => {
@@ -1336,7 +1385,7 @@ impl Model {
         };
         self.edit = Some(crate::edit::Edit::new(doc.id.clone(), field, current.as_deref()));
         self.sheet = false;
-        self.detail = true;
+        self.show_details();
         Effect::Redraw
     }
 
@@ -1658,33 +1707,23 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 .or_else(|| model.pending_anchor.take())
                 .or_else(|| model.current().map(|doc| doc.id.clone()));
             model.pending_anchor = None;
-            let kept = model.adopt(*store, anchor.as_deref().unwrap_or_default());
+            let anchor = anchor.unwrap_or_default();
+            let kept = model.adopt(*store, &anchor);
+            model.prune_views();
+            let note = model.saved_note.take();
             if direction != Direction::Forward {
-                // An undo of a create leaves nothing to look at, and either
-                // direction may move a row out of the filter. Neither is a
-                // surprise worth a different word for.
-                model.detail &= kept;
                 model.flash =
                     Some(if direction == Direction::Undo { "undone" } else { "redone" }.into());
             } else if std::mem::take(&mut model.pending_delete) {
-                // There is nothing left to look at, and the word for it is
-                // neither "saved" nor a complaint about the filter.
-                model.detail = false;
                 model.flash = Some("deleted — u to undo".into());
-            } else if kept && created {
-                // **A new document opens on its record**, which is the only
-                // place its remaining fields can be filled in — creating one and
-                // being left on the list would make the next step invisible.
-                model.detail = true;
-                model.record_cursor = 0;
+            } else if created && model.store.index_of(&anchor).is_some() {
+                // The Details view is the only place a new document's other
+                // fields can be filled in.
+                model.views.push(View::Details { doc: anchor, cursor: 0 });
                 model.flash = Some("created".into());
             } else if kept {
-                model.flash = Some(model.saved_note.take().unwrap_or_else(|| "saved".into()));
+                model.flash = Some(note.unwrap_or_else(|| "saved".into()));
             } else {
-                // The document is no longer in the list the query and filter
-                // describe, so the record above it would be showing something
-                // the list does not contain.
-                model.detail = false;
                 model.flash = Some("saved — it no longer matches the filter".into());
             }
             Effect::Redraw
@@ -1724,15 +1763,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             Effect::Redraw
         }
         Msg::Enter => model.drill(),
-        Msg::Left | Msg::Right if model.detail => Effect::Idle,
+        Msg::Left | Msg::Right if model.detail() => Effect::Idle,
         Msg::Left => model.query_cursor_to(model.query_cursor.saturating_sub(1)),
         Msg::Right => model.query_cursor_to(model.query_cursor + 1),
         // Home and End belong to the query once there is one, and to the list
         // until then — the same rule that makes Space the leader.
-        Msg::Move(Motion::Home) if !model.detail && !model.query.is_empty() => {
+        Msg::Move(Motion::Home) if !model.detail() && !model.query.is_empty() => {
             model.query_cursor_to(0)
         }
-        Msg::Move(Motion::End) if !model.detail && !model.query.is_empty() => {
+        Msg::Move(Motion::End) if !model.detail() && !model.query.is_empty() => {
             model.query_cursor_to(usize::MAX)
         }
         // **The record owns `↑`/`↓` while it is open.** They used to move the
@@ -1740,7 +1779,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         // document while you were reading it — unfollowable at 47 columns, and
         // the reason this selector exists.
         Msg::Move(motion) => {
-            if model.detail {
+            if model.detail() {
                 model.move_record(motion);
             } else {
                 model.move_cursor(motion);
@@ -1761,8 +1800,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         // **Search is a browse-surface verb** (invariant 1 scopes find-fast to
         // it), so on the record a letter is free to be a verb — which is what
         // lets this surface have keys at all without reaching for `ctrl`.
-        Msg::Char(' ') if model.detail => update(model, Msg::Leader),
-        Msg::Char(c) if model.detail => model.record_verb(c),
+        Msg::Char(' ') if model.detail() => update(model, Msg::Leader),
+        Msg::Char(c) if model.detail() => model.record_verb(c),
         Msg::Char(' ') if model.query.is_empty() => update(model, Msg::Leader),
         Msg::Char(c) => {
             model.type_char(c);
@@ -1831,7 +1870,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             // A pushed record covers the list, so the chrome under it belongs to
             // a surface you cannot see. Tapping it would mutate that surface
             // blind — the stack metaphor has to hold for touch too.
-            let pushed = model.detail && !crate::layout::splits(model.cols);
+            let pushed = model.detail() && !crate::layout::splits(model.cols);
             let (top, bottom) = search_zone(model);
             if model.sheet && !model.leader_zone.hit(col, row) {
                 // Anywhere else dismisses it, the way a menu should.
@@ -1856,7 +1895,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                     // type", so it is what drops mouse reporting for one tap.
                     model.raise_keyboard()
                 }
-            } else if let Some(index) = model.detail.then(|| model.record.at(col, row)).flatten() {
+            } else if let Some(index) = model.detail().then(|| model.record.at(col, row)).flatten()
+            {
                 model.record_tap(index)
             } else if model.new_row == Some(row) && !pushed {
                 if model.on_new {
@@ -1873,6 +1913,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 } else {
                     model.on_new = false;
                     model.cursor = index;
+                    // Beside the list, Details shows whichever row was tapped.
+                    if let [View::Details { doc, cursor }] = model.views.as_mut_slice() {
+                        doc.clone_from(&model.store.docs[model.rows[index]].id);
+                        *cursor = 0;
+                    }
                     Effect::Redraw
                 }
             } else {
@@ -2404,9 +2449,9 @@ pub(crate) mod tests {
     #[test]
     fn the_edit_verb_opens_the_record_and_seeds_the_field() {
         let mut m = writable();
-        assert!(!m.detail);
+        assert!(!m.detail());
         assert_eq!(update(&mut m, Msg::EditField(crate::edit::Field::Expiry)), Effect::Redraw);
-        assert!(m.detail, "the record came with it");
+        assert!(m.detail(), "the record came with it");
         let edit = m.edit.as_ref().expect("an edit is open");
         assert_eq!(edit.doc, "coc");
         assert_eq!(edit.buffer, "2026-01-01", "seeded with the stored value");
@@ -2543,7 +2588,7 @@ pub(crate) mod tests {
                 journal::Draft::set("doc", "seaman-book-desk", "name", "Seaman Book"),
             ])
         );
-        assert!(!m.detail, "the record waits for the journal to answer");
+        assert!(!m.detail(), "the record waits for the journal to answer");
     }
 
     /// Types `name` into the search and presses `Enter` on `+ new`.
@@ -2591,9 +2636,9 @@ pub(crate) mod tests {
         fresh.haystack = crate::search::fold(&fresh.name);
         store.docs.push(fresh);
         update(&mut m, Msg::Saved(Box::new(store)));
-        assert!(m.detail);
+        assert!(m.detail());
         update(&mut m, Msg::Esc);
-        assert!(!m.detail, "Esc closes the record first");
+        assert!(!m.detail(), "Esc closes the record first");
         assert_eq!(m.query, "Seaman Book", "and the search is still there");
     }
 
@@ -2640,8 +2685,8 @@ pub(crate) mod tests {
         update(&mut m, Msg::Saved(Box::new(store)));
 
         assert!(m.edit.is_none(), "the journal answered, so the editor closed");
-        assert!(m.detail, "and the record is open");
-        assert_eq!(m.record_cursor, 0, "on its first row");
+        assert!(m.detail(), "and the record is open");
+        assert_eq!(m.record_cursor(), 0, "on its first row");
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("seaman-book-desk"));
         assert_eq!(m.flash.as_deref(), Some("created"));
     }
@@ -2769,8 +2814,9 @@ pub(crate) mod tests {
         let mut m = writable();
         update(&mut m, Msg::Enter);
         let rows = crate::detail::rows(m.current().unwrap());
-        m.record_cursor =
-            rows.iter().position(|row| *row == crate::detail::Row::DigitalOnly).unwrap();
+        m.set_record_cursor(
+            rows.iter().position(|row| *row == crate::detail::Row::DigitalOnly).unwrap(),
+        );
 
         let set = |value: &str| {
             journal::Draft::set("doc", "coc", "location", serde_json::Value::from(value))
@@ -2789,10 +2835,12 @@ pub(crate) mod tests {
             "no hard copy location row once there is no hard copy"
         );
 
-        m.record_cursor = crate::detail::rows(m.current().unwrap())
-            .iter()
-            .position(|row| *row == crate::detail::Row::DigitalOnly)
-            .unwrap();
+        m.set_record_cursor(
+            crate::detail::rows(m.current().unwrap())
+                .iter()
+                .position(|row| *row == crate::detail::Row::DigitalOnly)
+                .unwrap(),
+        );
         assert_eq!(
             update(&mut m, Msg::Char('e')),
             Effect::Append(vec![journal::Draft::unset("doc", "coc", "location")])
@@ -3059,7 +3107,7 @@ pub(crate) mod tests {
         assert_eq!(m.flash.as_deref(), Some("pick a location"));
         update(&mut m, Msg::Esc);
         assert!(m.locpick.is_none());
-        assert!(m.detail, "Esc closed the picker, not the Details view");
+        assert!(m.detail(), "Esc closed the picker, not the Details view");
     }
 
     /// `ctrl+z` and `ctrl+y` undo and redo from the Find view too, and do
@@ -3079,7 +3127,7 @@ pub(crate) mod tests {
         }
         assert!(m.edit.is_none());
         update(&mut m, Msg::Esc);
-        assert!(!m.detail, "back on the Find view");
+        assert!(!m.detail(), "back on the Find view");
 
         assert!(matches!(update(&mut m, Msg::Undo), Effect::Append(_)));
         let store = m.store.clone();
@@ -3186,7 +3234,7 @@ pub(crate) mod tests {
         store.docs.retain(|doc| doc.id != "coc");
         update(&mut m, Msg::Saved(Box::new(store)));
         assert_eq!(m.flash.as_deref(), Some("deleted — u to undo"));
-        assert!(!m.detail, "there is nothing left to look at");
+        assert!(!m.detail(), "there is nothing left to look at");
 
         let back = m.undo.last().expect("something to undo").back.clone();
         assert_eq!(back.first(), Some(&journal::Draft::create("doc", "coc")));
@@ -3315,21 +3363,21 @@ pub(crate) mod tests {
         assert_eq!(m.cursor, 0, "which is now the first row");
     }
 
-    /// **A save that pushes the document out of the list says so, and closes the
-    /// record.** A record above a list that no longer contains it is a lie about
-    /// what is on screen.
+    /// A save that pushes the document out of the list says so, and its
+    /// Details view stays on it: the view is anchored on the document, not on
+    /// a row of the list.
     #[test]
-    fn a_save_that_leaves_the_filter_closes_the_record_and_says_so() {
+    fn a_save_that_leaves_the_filter_keeps_the_record_and_says_so() {
         let mut m = writable();
         update(&mut m, Msg::ToggleExpiring);
         let edited = m.current().unwrap().id.clone();
         update(&mut m, Msg::EditField(crate::edit::Field::Expiry));
-        assert!(m.detail);
+        assert!(m.detail());
 
         // Cleared: no expiry means it is not in the watch at all.
         let store = restored(&m, &edited, None);
         update(&mut m, Msg::Saved(Box::new(store)));
-        assert!(!m.detail, "the record closed");
+        assert_eq!(m.current().map(|doc| doc.id.as_str()), Some(edited.as_str()));
         assert!(m.flash.as_deref().unwrap().contains("no longer matches"));
         assert!(m.rows.iter().all(|&i| m.store.docs[i].id != edited));
     }
@@ -3409,9 +3457,9 @@ pub(crate) mod tests {
         let mut m = model();
         update(&mut m, Msg::Move(Motion::Down));
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
-        assert!(m.detail, "the list drills into the record, never straight to a file");
+        assert!(m.detail(), "the list drills into the record, never straight to a file");
         update(&mut m, Msg::Esc);
-        assert!(!m.detail);
+        assert!(!m.detail());
         assert_eq!(m.cursor, 1, "and the list is where it was");
     }
 
@@ -3424,7 +3472,7 @@ pub(crate) mod tests {
         }
         update(&mut m, Msg::Enter);
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "no open effect, and no panic");
-        assert!(m.detail);
+        assert!(m.detail());
         assert!(m.flash.unwrap().contains("no file linked"));
     }
 
@@ -3439,10 +3487,11 @@ pub(crate) mod tests {
         });
         update(&mut m, Msg::Enter);
         let rows = crate::detail::rows(m.current().unwrap());
-        m.record_cursor =
-            rows.iter().position(|row| *row == crate::detail::Row::File(1)).expect("a file row");
+        m.set_record_cursor(
+            rows.iter().position(|row| *row == crate::detail::Row::File(1)).expect("a file row"),
+        );
         assert_eq!(update(&mut m, Msg::Enter), Effect::Open("Marine/coc-back.pdf".into()));
-        m.record_cursor = 0;
+        m.set_record_cursor(0);
         assert_eq!(update(&mut m, Msg::Enter), Effect::Open("Marine/coc.pdf".into()));
     }
 
@@ -3514,7 +3563,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
         assert_eq!(update(&mut m, Msg::Left), Effect::Idle);
         assert_eq!(update(&mut m, Msg::Right), Effect::Idle);
-        assert!(m.detail, "`←` no longer closes the record; `Esc` does");
+        assert!(m.detail(), "`←` no longer closes the record; `Esc` does");
     }
 
     /// **Esc peels exactly one layer per press** (invariant 3), in the order
@@ -3526,7 +3575,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
 
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw);
-        assert!(!m.detail, "first press closed the record");
+        assert!(!m.detail(), "first press closed the record");
         assert_eq!(m.query, "c", "and nothing else");
         assert!(!m.esc_armed, "closing something is not arming");
 
@@ -3537,6 +3586,21 @@ pub(crate) mod tests {
         assert!(m.esc_armed, "at base state it arms");
 
         assert_eq!(update(&mut m, Msg::Esc), Effect::Quit);
+    }
+
+    /// Beside the list, tapping another row moves the Details view to it.
+    #[test]
+    fn a_tap_beside_the_details_view_moves_it_to_that_row() {
+        let mut m = model();
+        m.cols = 120;
+        m.list = ListGeometry { top: 1, height: 24, row_height: 1 };
+        update(&mut m, Msg::Enter);
+        assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("coc"));
+        m.set_record_cursor(2);
+        update(&mut m, Msg::Tap { col: 5, row: 2 });
+        assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("eng1"));
+        assert_eq!(m.record_cursor(), 0, "a different document starts at its top row");
+        assert_eq!(m.views.len(), 1, "it replaced the view rather than stacking one");
     }
 
     /// **An IME dismissal must never quit the app.** Termux sends `Esc` to close
@@ -3597,7 +3661,7 @@ pub(crate) mod tests {
 
     fn select_row(m: &mut Model, wanted: crate::detail::Row) {
         let rows = crate::detail::rows(m.current().unwrap());
-        m.record_cursor = rows.iter().position(|row| *row == wanted).expect("the row exists");
+        m.set_record_cursor(rows.iter().position(|row| *row == wanted).expect("the row exists"));
     }
 
     fn files_written(effect: &Effect) -> Option<serde_json::Value> {
@@ -3686,7 +3750,7 @@ pub(crate) mod tests {
         assert_eq!(m.picker.as_ref().map(|p| p.filter.as_str()), Some(""));
         update(&mut m, Msg::Esc);
         assert!(m.picker.is_none());
-        assert!(m.detail);
+        assert!(m.detail());
     }
 
     /// A session that cannot write is told so instead of being shown choices.
@@ -3708,9 +3772,9 @@ pub(crate) mod tests {
         // Row 1 of the list is the second document (two screen lines each).
         assert_eq!(update(&mut m, Msg::Tap { col: 5, row: 3 }), Effect::Redraw);
         assert_eq!(m.cursor, 1);
-        assert!(!m.detail);
+        assert!(!m.detail());
         assert_eq!(update(&mut m, Msg::Tap { col: 5, row: 3 }), Effect::Redraw);
-        assert!(m.detail);
+        assert!(m.detail());
     }
 
     /// A tap on empty space below the last row changes nothing at all — and
@@ -3875,11 +3939,11 @@ pub(crate) mod tests {
         let mut m = model();
         let before = m.cursor;
         update(&mut m, Msg::Enter);
-        assert_eq!(m.record_cursor, 0, "drilling in starts at the top");
+        assert_eq!(m.record_cursor(), 0, "drilling in starts at the top");
 
         update(&mut m, Msg::Move(Motion::Down));
         update(&mut m, Msg::Move(Motion::Down));
-        assert_eq!(m.record_cursor, 2);
+        assert_eq!(m.record_cursor(), 2);
         assert_eq!(m.cursor, before, "the document underneath never moved");
 
         // And back out, the list has them again.
@@ -3894,13 +3958,13 @@ pub(crate) mod tests {
         let mut m = model();
         update(&mut m, Msg::Enter);
         update(&mut m, Msg::Move(Motion::Up));
-        assert_eq!(m.record_cursor, 0);
+        assert_eq!(m.record_cursor(), 0);
 
         let rows = crate::detail::rows(m.current().unwrap()).len();
         for _ in 0..rows + 5 {
             update(&mut m, Msg::Move(Motion::Down));
         }
-        assert_eq!(m.record_cursor, rows - 1);
+        assert_eq!(m.record_cursor(), rows - 1);
     }
 
     /// **A letter is a verb on the record, not search text.** Invariant 1 scopes
@@ -3929,15 +3993,16 @@ pub(crate) mod tests {
             .expect("the record has an editable row");
 
         // A row that is not editable yet.
-        m.record_cursor = rows
-            .iter()
-            .position(|row| matches!(row, crate::detail::Row::Fact(_)))
-            .expect("and a row that is not");
+        m.set_record_cursor(
+            rows.iter()
+                .position(|row| matches!(row, crate::detail::Row::Fact(_)))
+                .expect("and a row that is not"),
+        );
         update(&mut m, Msg::Char('e'));
         assert!(m.edit.is_none(), "nothing opened");
         assert!(m.flash.is_some(), "and it explained why");
 
-        m.record_cursor = expiry;
+        m.set_record_cursor(expiry);
         update(&mut m, Msg::Char('e'));
         assert_eq!(
             m.edit.as_ref().map(|edit| edit.field),
@@ -3953,10 +4018,14 @@ pub(crate) mod tests {
         let mut m = model();
         m.write = WriteState::Ready { device: "desk".into() };
         update(&mut m, Msg::Enter);
-        m.record_cursor = crate::detail::rows(m.current().unwrap())
-            .iter()
-            .position(|row| matches!(row, crate::detail::Row::Editable(crate::edit::Field::Expiry)))
-            .unwrap();
+        m.set_record_cursor(
+            crate::detail::rows(m.current().unwrap())
+                .iter()
+                .position(|row| {
+                    matches!(row, crate::detail::Row::Editable(crate::edit::Field::Expiry))
+                })
+                .unwrap(),
+        );
 
         update(&mut m, Msg::Char(' '));
         assert!(m.sheet, "space still opens the sheet on the record");

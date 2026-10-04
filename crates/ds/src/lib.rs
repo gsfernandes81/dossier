@@ -93,7 +93,7 @@ pub mod syncthing;
 pub mod theme;
 pub mod wsl;
 
-pub use app::{update, Effect, Model, Msg};
+pub use app::{update, Effect, Model, Msg, View};
 pub use doc::{Bundle, Doc, FileRef, Member, Membership, Status, Store};
 pub use place::{HardCopy, Location, Tree};
 pub use theme::Theme;

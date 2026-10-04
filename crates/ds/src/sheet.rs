@@ -79,7 +79,7 @@ pub fn items(model: &Model) -> Vec<Item> {
             Item { accel: "^y", ..item(NO_KEY, "redo", Act::Redo) },
             item('q', "quit", Act::Quit),
         ]
-    } else if model.detail {
+    } else if model.detail() {
         vec![
             Item { accel: "e", ..item('e', "edit this row", Act::Edit) },
             item('l', "location", Act::Location),
@@ -109,7 +109,7 @@ mod tests {
         let mut model = crate::app::tests::model();
         let keys = |model: &Model| items(model).iter().map(|item| item.key).collect::<String>();
         assert_eq!(keys(&model), "furq");
-        model.detail = true;
+        model.views.push(crate::app::View::Details { doc: "coc".into(), cursor: 0 });
         assert_eq!(keys(&model), "elurdq");
     }
 }
