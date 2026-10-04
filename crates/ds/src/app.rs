@@ -559,6 +559,18 @@ impl Model {
         model
     }
 
+    /// Forgets the geometry the last frame drew, before the next one draws.
+    pub fn clear_geometry(&mut self) {
+        self.list = ListGeometry::default();
+        self.new_row = None;
+        self.record = RowGeometry::default();
+        self.bundle_list = RowGeometry::default();
+        self.tree = RowGeometry::default();
+        self.panel = RowGeometry::default();
+        self.count_zone = Zone::default();
+        self.leader_zone = Zone::default();
+    }
+
     /// The highlighted document, if anything matched.
     #[must_use]
     pub fn current(&self) -> Option<&Doc> {

@@ -44,9 +44,9 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
     let area = frame.area();
     model.cols = area.width;
     model.rows_on_screen = area.height;
+    model.clear_geometry();
 
     if crate::layout::too_small(area.width, area.height) {
-        model.list = ListGeometry::default();
         draw_too_small(frame, area, theme);
         return;
     }
@@ -173,8 +173,6 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 /// view in front beside it or instead of it.
 fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     use crate::app::View;
-    model.record = crate::app::RowGeometry::default();
-    model.bundle_list = crate::app::RowGeometry::default();
     let (list_area, detail_area) = match (model.pane(), crate::layout::splits(area.width)) {
         (true, true) => {
             let split = Layout::default()
@@ -193,16 +191,11 @@ fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     });
     match (list_area, bundles) {
         (Some(list_area), Some(selected)) => {
-            model.list = ListGeometry::default();
-            model.new_row = None;
             model.bundle_list =
                 crate::bundles::draw_list(frame, list_area, model, &selected, theme);
         }
         (Some(list_area), None) => draw_list(frame, list_area, model, theme),
-        (None, _) => {
-            model.list = ListGeometry::default();
-            model.new_row = None;
-        }
+        (None, _) => {}
     }
     if let Some(detail_area) = detail_area {
         model.record = match model.views.last() {
@@ -219,7 +212,6 @@ fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
 
 fn draw_list(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let mut area = area;
-    model.new_row = None;
     if model.offers_new() && area.height > 1 {
         let text = if model.query.trim().is_empty() {
             "+ new document".to_string()
@@ -425,8 +417,6 @@ fn two_line_row(
 /// They cover rows rather than displacing them, so closing one never reflows
 /// the list underneath.
 fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
-    model.tree = crate::app::RowGeometry::default();
-    model.panel = crate::app::RowGeometry::default();
     if let Some(picker) = &model.locpick {
         let tree = draw_locpick(frame, area, model, picker, theme);
         model.tree = tree;
@@ -910,7 +900,6 @@ fn count_text(model: &Model) -> String {
 /// too small a thing to ask a thumb to hit against the screen edge.
 fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let cols = area.width as usize;
-    model.leader_zone = Zone::default();
     if area.height <= 1 {
         frame.render_widget(Paragraph::new(keyboard_row(model, cols, theme)), area);
         return;
