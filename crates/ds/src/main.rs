@@ -205,27 +205,12 @@ fn init(args: &Args, device: Option<String>, force: bool) -> u8 {
         ds::init::run(&path, &answers, &mut prompt, &machine)
     };
     match result {
-        Ok(config) => {
-            check_syncthing(&config, machine.wsl.as_ref());
-            0
-        }
+        Ok(_) => 0,
         Err(error) => {
             eprintln!("ds: {error}");
             code::FAILED
         }
     }
-}
-
-/// Asks Syncthing, with the settings init just wrote, how the folder is doing,
-/// so a wrong key or address shows now rather than at the next `ds status`.
-fn check_syncthing(config: &ds::config::Config, wsl: Option<&ds::wsl::Wsl>) {
-    let (Some(settings), Some(root)) =
-        (ds::syncthing::Settings::from_config(&config.syncthing), &config.syncthing_root)
-    else {
-        return;
-    };
-    let sync = ds::syncthing::query(&settings, root, wsl);
-    println!("  syncthing      {}", ds::status::Report::sync_line(&sync));
 }
 
 /// `ds status`.
@@ -241,14 +226,15 @@ fn status(
         &loaded.load,
         &loaded.stats,
         &loaded.store,
-        &loaded.today,
-        &loaded.warn_until,
+        root,
     );
-    // The one network call in the whole binary, and the only one that can be
-    // slow — so it is last, after everything local has already been decided.
+    // The one network call in the binary, and the only slow one, so it is last.
     if !no_sync {
-        report.sync = ds::syncthing::Settings::from_config(&config.syncthing)
-            .map(|settings| ds::syncthing::query(&settings, root, ds::wsl::Wsl::current()));
+        report.sync = Some(
+            ds::syncthing::Settings::from_config(&config.syncthing)
+                .map(|settings| ds::syncthing::query(&settings, root, ds::wsl::Wsl::current()))
+                .unwrap_or_default(),
+        );
     }
     if quiet {
         if report.healthy() {

@@ -41,7 +41,7 @@ fn op(ts: i64, verb: &str, id: &str, field: &str, value: &str) -> String {
     format!(r#"{{"v":1,"ts":{ts},"w":"desk-core","op":"{verb}","ent":"doc","id":"{id}"{tail}}}"#)
 }
 
-/// Two documents: one expired with a file, one with no file at all.
+/// Two documents: one expired with a file on disk, one with no file at all.
 fn sample(name: &str) -> PathBuf {
     let mut lines = Vec::new();
     let mut ts = 1_700_000_000_000;
@@ -61,7 +61,10 @@ fn sample(name: &str) -> PathBuf {
             ts += 1;
         }
     }
-    journal_dir(name, &lines)
+    let root = journal_dir(name, &lines);
+    std::fs::create_dir_all(root.join("Marine")).expect("mkdir");
+    std::fs::write(root.join("Marine/coc.pdf"), "").expect("write");
+    root
 }
 
 /// Run the built binary with a config directory of its own, so the developer's
@@ -103,8 +106,8 @@ fn fresh(name: &str) -> PathBuf {
     dir
 }
 
-/// The full report names the journal, counts the documents, and says the store
-/// is healthy — the three things someone runs it to learn.
+/// The full report names the journal, counts the documents, and says nothing is
+/// wrong, though one document has expired: expiry is not a status finding.
 #[test]
 fn status_reports_the_store() {
     let root = sample("status");
@@ -113,8 +116,7 @@ fn status_reports_the_store() {
     assert!(out.status.success(), "{text}{}", String::from_utf8_lossy(&out.stderr));
     assert!(text.contains("documents 2"), "{text}");
     assert!(text.contains("desk-core — 7 ops"), "{text}");
-    assert!(text.contains("expired"), "{text}");
-    assert!(text.contains("no anomalies"), "{text}");
+    assert!(text.contains("no problems found"), "{text}");
 }
 
 /// **A healthy store makes `--quiet` say nothing and exit 0.** That silence is
@@ -136,7 +138,7 @@ fn quiet_status_reports_damage_and_exits_non_zero() {
     let out = ds(&root, &["status", "--quiet"]);
     let text = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(3), "{text}");
-    assert!(text.contains("malformed"), "{text}");
+    assert!(text.contains("unreadable line"), "{text}");
 }
 
 /// A fresh device has no journal, and that is not damage — it says so and still
@@ -178,6 +180,7 @@ fn open_refuses_to_guess() {
 #[test]
 fn open_says_when_a_file_has_not_synced() {
     let root = sample("unsynced");
+    std::fs::remove_file(root.join("Marine/coc.pdf")).expect("remove");
     let out = ds(&root, &["open", "coc"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{stderr}");

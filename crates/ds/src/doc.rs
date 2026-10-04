@@ -505,6 +505,31 @@ impl Store {
             .count()
     }
 
+    /// Documents whose older versions lead back to themselves, so none of
+    /// that loop is anyone's latest version.
+    #[must_use]
+    pub fn version_loops(&self) -> Vec<usize> {
+        let index: BTreeMap<&str, usize> =
+            self.docs.iter().enumerate().map(|(i, doc)| (doc.id.as_str(), i)).collect();
+        let older = |at: usize| self.docs[at].supersedes.as_deref().and_then(|id| index.get(id));
+        (0..self.docs.len())
+            .filter(|&start| {
+                let mut at = start;
+                let mut seen = BTreeSet::new();
+                while let Some(&next) = older(at) {
+                    if next == start {
+                        return true;
+                    }
+                    if !seen.insert(next) {
+                        return false;
+                    }
+                    at = next;
+                }
+                false
+            })
+            .collect()
+    }
+
     /// The position of the record with this id.
     #[must_use]
     pub fn index_of(&self, id: &str) -> Option<usize> {
@@ -806,6 +831,21 @@ mod tests {
         assert!(!store.docs[i].listed());
         assert!(store.docs[store.index_of("pp-2029").unwrap()].listed());
         assert_eq!(store.listed(), 1);
+    }
+
+    /// Versions that replace each other in a loop are found, and a newer
+    /// version replacing one of them is not part of the loop.
+    #[test]
+    fn a_loop_of_versions_is_found() {
+        let store = build(vec![
+            named(100, "a", "Passport", &[("supersedes", "b".into())]),
+            named(200, "b", "Passport", &[("supersedes", "a".into())]),
+            named(300, "c", "Passport", &[("supersedes", "a".into())]),
+            named(400, "d", "Visa", &[]),
+        ]);
+        let mut found = ids(&store, &store.version_loops());
+        found.sort();
+        assert_eq!(found, ["a", "b"]);
     }
 
     /// Two versions replacing one older version are both kept and both listed —

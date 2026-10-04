@@ -217,7 +217,7 @@ Daily (what `ds --help` leads with):
 | `ds` | the TUI (find → open, the urgent lookup) |
 | `ds open <query>` | shell-side find: exact-then-fuzzy match over names/tags/notes + reading text; opens the file (picker on ties). Absorbs v2 `ds ask` (the intent router is dropped; a simple ranked retrieval + one-line answer for question-shaped queries). |
 | `ds file` | the one filing flow: unfiled files (inbox drops **and** in-scope orphans are the same concept) → review card queue; consumes satellite proposals when present, manual filing when not. Prints/updates the **unfiled counter**. |
-| `ds status` | the router, git-status style: unfiled count · expiring/expired · missing files · duplicate clusters · syncthing health (reachable / folder shared / **versioning on**) · journal anomalies — each line naming the verb that fixes it. Absorbs v2 `ds doctor` + `ds reconcile` (CLI) + `ds syncthing status`. `--quiet` mode = v2 `ds expiring` contract **exactly**: exit 1 is driven by expiry/event findings *only* (other findings never flip a cron job), empty stdout when clean, exit 2 = tool broken; keeps `--days N` and `--bundle SLUG` so existing cron/Task-Scheduler jobs port with a rename. |
+| `ds status` | the store's checker, each fact said once: a summary (the journal and its writer files, documents and locations, Syncthing reachable · folder · versioning · peers), then findings (journal anomalies, duplicate keys, location loops, conflicting or looping versions, linked files not on this device, Syncthing failed · folder paused · store in no synced folder), each saying what to do. Absorbs v2 `ds doctor` + `ds reconcile` (CLI) + `ds syncthing status`. Expiry is not a finding — the app's header and expiring filter own it, and v2 `ds expiring` has no successor. `--quiet` prints the findings alone: empty stdout and exit 0 when there are none, exit 3 when there are, exit 1 when the tool fails. `--no-sync` skips the Syncthing check. |
 | `ds export <bundle> <dest>` | materialize a bundle (copies + manifest), v2 semantics. |
 
 Maintenance (listed under a separate heading): `ds init` (conversational; sets device
@@ -901,7 +901,7 @@ strictly ordered; R6 can overlap R4/R5 once the adapter exists.
 | Bundle rename (atomic member rewrite) | **Port** as a TUI command-line verb emitting per-member ops (§4.1) |
 | `ds add` | **Drop** — creation via TUI / `ds file` |
 | Undo/history | **Port, redesigned**: journal-as-history, inverse ops, 30-day horizon |
-| `ds status` router | **New** (absorbs doctor/reconcile-CLI/syncthing-status/expiring) |
+| `ds status` router | **New** (absorbs doctor/reconcile-CLI/syncthing-status) |
 | `ds file` | **New** (absorbs intake + import + orphan-adopt; D11 triage) |
 | Multi-file docs (`files` + `primary`) | **Port**; the word "rendition" is banned (D9) |
 | VLM scan/transcribe, intake proposals, dedup engine, service | **Keep in Python satellite** (D8) |

@@ -85,6 +85,12 @@ impl State {
             State::Busy => "syncing",
         }
     }
+
+    /// Whether the check failed, so nothing beyond the failure is known.
+    #[must_use]
+    pub fn failed(self) -> bool {
+        matches!(self, State::Refused | State::Unreachable | State::Unauthorized)
+    }
 }
 
 /// What `ds status` prints about Syncthing.

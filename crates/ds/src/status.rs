@@ -13,63 +13,51 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! `ds status` — what the store is, and what is wrong with it.
+//! `ds status` — what the store is, then what is wrong with it.
 //!
-//! Two audiences, one report. A person runs it to see counts; **cron runs it
-//! with `--quiet` and only wants to hear about problems** (REWRITE.md §3.1
-//! calls that mode out by name, and it is read-only by design). So the report is
-//! built as data and rendered twice, rather than printed as it is computed:
-//! the quiet form is the loud form minus everything healthy, which makes it
-//! impossible for the two to drift apart.
-//!
-//! The health counters come from the journal's own fold ([`journal::FoldStats`])
-//! and load ([`journal::Load`]) rather than being recomputed here — an anomaly
-//! this report invented would be an anomaly nothing else agrees with.
+//! The report is data rendered two ways: in full for a person, and as its
+//! findings alone for `--quiet`, which cron runs and which says nothing while
+//! the store is sound. Each fact is said once, in one half or the other.
 
 use std::fmt::Write as _;
+use std::path::Path;
 
 use journal::{FoldStats, Load};
 
 use crate::syncthing::State;
+use crate::Store;
 
-use crate::{Status, Store};
+/// How many missing files a finding names before it only counts the rest.
+const NAMED: usize = 3;
 
 /// Everything `ds status` knows, before it is turned into text.
 #[derive(Debug, Clone, Default)]
 pub struct Report {
     /// The journal directory that was read.
     pub journal: String,
-    /// Whether it existed at all. A fresh device has no journal yet, which is
-    /// normal and must never read as damage.
+    /// Whether it exists; a fresh device has none, which is not damage.
     pub present: bool,
-    /// Per-writer file summaries: `(writer, ops, bytes, malformed)`.
+    /// Each writer's file.
     pub files: Vec<FileLine>,
-    /// Documents in the store.
+    /// Documents the list shows.
     pub docs: usize,
-    /// Documents in the expiry watch.
-    pub tracked: usize,
-    /// Past their expiry date.
-    pub expired: usize,
-    /// Inside the warn window.
-    pub soon: usize,
-    /// The warn window, in days.
-    pub warn_days: i64,
     /// Locations.
     pub locations: usize,
-    /// Ops the fold ignored because they referred to nothing (§3.3).
+    /// Ops for entities that no longer exist, which a deletion leaves behind.
     pub orphaned: usize,
-    /// Keys that appeared twice with the same `(ts, w)` — a real conflict, and
-    /// the only one this format can produce.
+    /// Keys that appeared twice with the same `(ts, w)`.
     pub duplicate_keys: usize,
-    /// Lines that could not be parsed at all.
-    pub malformed: usize,
-    /// Everything the loader thought was worth reporting.
+    /// What the loader found wrong, in its own words.
     pub anomalies: Vec<String>,
     /// Locations two devices moved into each other, said as what to do.
     pub loops: Option<String>,
     /// Latest versions that conflict with another latest version.
     pub conflicts: usize,
-    /// What the local Syncthing daemon says, when there is one to ask.
+    /// Names of documents whose versions replace each other in a loop.
+    pub version_loops: Vec<String>,
+    /// Linked files that are not under the root on this device.
+    pub missing: Vec<String>,
+    /// What the local Syncthing daemon says, unless `--no-sync`.
     pub sync: Option<crate::syncthing::Status>,
 }
 
@@ -82,38 +70,41 @@ pub struct FileLine {
     pub ops: usize,
     /// Size on disk.
     pub bytes: u64,
-    /// Lines it could not parse.
-    pub malformed: usize,
+}
+
+/// Something that needs a person, under the topic it is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Finding {
+    /// The left-hand label: `journal`, `versions`, `syncthing`, …
+    pub topic: &'static str,
+    /// What is wrong, and what to do where that is not obvious.
+    pub text: String,
 }
 
 impl Report {
-    /// Assemble the report from a load, its fold's stats, and the built store.
+    /// Assembles the report from a load, its fold's stats, the built store,
+    /// and the root its file paths are relative to.
     #[must_use]
     pub fn new(
         journal: String,
         load: &Load,
         stats: &FoldStats,
         store: &Store,
-        today: &str,
-        warn_until: &str,
+        root: &Path,
     ) -> Self {
-        let mut expired = 0;
-        let mut soon = 0;
-        let mut tracked = 0;
-        for doc in &store.docs {
-            match doc.status(today, warn_until) {
-                Status::Expired => {
-                    expired += 1;
-                    tracked += 1;
-                }
-                Status::Soon => {
-                    soon += 1;
-                    tracked += 1;
-                }
-                Status::Ok => tracked += 1,
-                Status::Untracked => {}
-            }
-        }
+        let mut missing: Vec<String> = store
+            .docs
+            .iter()
+            .flat_map(|doc| &doc.files)
+            .filter(|file| !root.join(&file.path).exists())
+            .map(|file| file.path.clone())
+            .collect();
+        missing.sort();
+        missing.dedup();
+        let mut version_loops: Vec<String> =
+            store.version_loops().into_iter().map(|i| store.docs[i].name.clone()).collect();
+        version_loops.sort();
+        version_loops.dedup();
         Self {
             journal,
             present: load.present,
@@ -124,61 +115,106 @@ impl Report {
                     writer: file.writer.clone(),
                     ops: file.ops,
                     bytes: file.bytes,
-                    malformed: file.malformed,
                 })
                 .collect(),
             docs: store.listed(),
-            tracked,
-            expired,
-            soon,
-            warn_days: crate::doc::WARN_DAYS,
             locations: store.locations.len(),
             orphaned: stats.orphaned,
             duplicate_keys: stats.duplicate_keys,
-            malformed: load.files.iter().map(|file| file.malformed).sum(),
-            // The loader's own wording, verbatim: an anomaly this report
-            // reworded would be an anomaly nothing else agrees with.
             anomalies: load.anomalies.iter().map(ToString::to_string).collect(),
             loops: store.locations.loop_message(),
             conflicts: store.conflicts(),
+            version_loops,
+            missing,
             sync: None,
         }
     }
 
-    /// Whether anything here needs a human.
-    ///
-    /// An **expiring document is not a problem with the store** — it is the
-    /// store working. Only damage counts, which is what keeps a `--quiet` cron
-    /// job silent for months and believable when it finally speaks.
+    /// Whether nothing here needs a person.
     #[must_use]
     pub fn healthy(&self) -> bool {
-        self.anomalies.is_empty()
-            && self.loops.is_none()
-            && self.conflicts == 0
-            && self.malformed == 0
-            && self.duplicate_keys == 0
-            && self.sync_healthy()
+        self.findings().is_empty()
     }
 
-    /// Whether the transport is in a state that will actually move documents.
-    ///
-    /// An unconfigured daemon is not a fault — plenty of runs have no key, and a
-    /// device that was never set up should not nag. Everything else here is a
-    /// silent failure: the app looks fine, and nothing reaches the other device.
-    fn sync_healthy(&self) -> bool {
-        let Some(sync) = &self.sync else { return true };
-        match sync.state {
-            State::Unconfigured => true,
-            State::Refused | State::Unreachable | State::Unauthorized => false,
-            State::Idle | State::Busy => sync.folder.as_ref().is_some_and(|f| !f.paused),
+    /// Everything that needs a person. An expiring document is not one: that
+    /// is the store working, and the app's header already says it.
+    #[must_use]
+    pub fn findings(&self) -> Vec<Finding> {
+        let mut found = Vec::new();
+        let mut say = |topic: &'static str, text: String| found.push(Finding { topic, text });
+        for anomaly in &self.anomalies {
+            say("journal", anomaly.clone());
         }
+        if self.duplicate_keys > 0 {
+            say(
+                "journal",
+                format!(
+                    "{} duplicate (ts, writer) keys — two ops claim one instant",
+                    self.duplicate_keys
+                ),
+            );
+        }
+        if let Some(loops) = &self.loops {
+            say("locations", loops.clone());
+        }
+        if self.conflicts > 0 {
+            say(
+                "versions",
+                format!(
+                    "{} conflicting latest — two devices each made a new version; \
+                     v on its Details view shows both",
+                    self.conflicts
+                ),
+            );
+        }
+        if !self.version_loops.is_empty() {
+            say(
+                "versions",
+                format!(
+                    "versions of {} replace one another in a loop, so none is listed — include old \
+                     versions in the filter, then set one's renews to none",
+                    self.version_loops.join(", ")
+                ),
+            );
+        }
+        if !self.missing.is_empty() {
+            let mut named = self.missing.iter().take(NAMED).cloned().collect::<Vec<_>>().join(", ");
+            if self.missing.len() > NAMED {
+                let _ = write!(named, " and {} more", self.missing.len() - NAMED);
+            }
+            say(
+                "files",
+                format!("not on this device: {named} — Syncthing may still be catching up"),
+            );
+        }
+        if let Some(sync) = &self.sync {
+            if sync.state.failed() {
+                say(
+                    "syncthing",
+                    format!(
+                        "{} — {}",
+                        sync.state.label(),
+                        sync.detail.as_deref().unwrap_or("no detail")
+                    ),
+                );
+            } else if let Some(folder) = &sync.folder {
+                if folder.paused {
+                    say(
+                        "syncthing",
+                        format!(
+                            "folder {} is paused — nothing moves until it resumes",
+                            folder.label
+                        ),
+                    );
+                }
+            } else if sync.state != State::Unconfigured {
+                say("syncthing", "the store is in no synced folder".into());
+            }
+        }
+        found
     }
 
-    /// The full report.
-    ///
-    /// rust: built with `writeln!` into a `String` rather than `println!`, so
-    /// the report is a value a test can read. Writing to a `String` cannot fail,
-    /// which is why the results are discarded rather than propagated.
+    /// The full report: what the store is, then its findings.
     #[must_use]
     pub fn render(&self) -> String {
         let mut out = String::new();
@@ -187,133 +223,76 @@ impl Report {
             out.push_str("          not created yet — the first document creates it\n");
         }
         for file in &self.files {
-            let malformed = if file.malformed > 0 {
-                format!(", {} malformed", file.malformed)
-            } else {
-                String::new()
-            };
+            let _ =
+                writeln!(out, "          {} — {} ops, {} bytes", file.writer, file.ops, file.bytes);
+        }
+        if self.orphaned > 0 {
             let _ = writeln!(
                 out,
-                "          {} — {} ops, {} bytes{malformed}",
-                file.writer, file.ops, file.bytes
+                "          {} ops are for deleted entries, as a deletion leaves them",
+                self.orphaned
             );
         }
         let _ = writeln!(out, "documents {} in {} locations", self.docs, self.locations);
-        let _ = writeln!(
-            out,
-            "expiry    {} tracked · {} expired · {} within {} days",
-            self.tracked, self.expired, self.soon, self.warn_days
-        );
-        if let Some(sync) = &self.sync {
-            let _ = writeln!(out, "syncthing {}", Self::sync_line(sync));
+        if let Some(line) = self.sync.as_ref().and_then(sync_line) {
+            let _ = writeln!(out, "syncthing {line}");
+        }
+        if self.healthy() {
+            out.push_str("health    no problems found\n");
         }
         out.push_str(&self.problems());
-        if self.healthy() {
-            out.push_str("health    no anomalies\n");
-        }
         out
     }
 
-    /// The Syncthing line: state, then the facts that decide whether these
-    /// documents actually move.
-    #[must_use]
-    pub fn sync_line(sync: &crate::syncthing::Status) -> String {
-        let mut line = sync.state.label().to_string();
-        if let Some(version) = &sync.version {
-            let _ = write!(line, " · {version}");
-        }
-        if let Some(folder) = &sync.folder {
-            let _ = write!(line, " · folder {}", folder.label);
-            if folder.paused {
-                line.push_str(" (PAUSED)");
-            }
-            if folder.versioning.is_empty() {
-                // The design leans on Syncthing versioning as the undo history
-                // of last resort (§7). Off is worth saying out loud.
-                line.push_str(" · no versioning");
-            }
-        } else {
-            line.push_str(" · the store is in no synced folder");
-        }
-        let _ = write!(line, " · {}/{} peers connected", sync.connected, sync.devices);
-        line
-    }
-
-    /// Only what is wrong — the `--quiet` form, and the tail of the loud one.
+    /// The findings alone, one per line: the `--quiet` form.
     #[must_use]
     pub fn problems(&self) -> String {
         let mut out = String::new();
-        if self.malformed > 0 {
-            let _ = writeln!(out, "health    {} malformed lines", self.malformed);
-        }
-        if self.duplicate_keys > 0 {
-            let _ = writeln!(
-                out,
-                "health    {} duplicate (ts, writer) keys — two ops claim one instant",
-                self.duplicate_keys
-            );
-        }
-        if self.orphaned > 0 {
-            // Not a fault: an op for a deleted entity is exactly what a
-            // tombstone is supposed to leave behind (§3.3). Reported because a
-            // *large* number of them means something else is wrong.
-            let _ = writeln!(out, "note      {} ops referred to nothing", self.orphaned);
-        }
-        for anomaly in &self.anomalies {
-            let _ = writeln!(out, "anomaly   {anomaly}");
-        }
-        if let Some(loops) = &self.loops {
-            let _ = writeln!(out, "locations {loops}");
-        }
-        if self.conflicts > 0 {
-            let _ = writeln!(
-                out,
-                "versions  {} conflicting latest — two devices each made a new version; \
-                 v on its Details view shows both",
-                self.conflicts
-            );
-        }
-        // Syncthing problems belong in the quiet form too: a paused folder or a
-        // daemon that has been off for a week is exactly the silent failure a
-        // cron job exists to catch, and neither shows up in the journal.
-        if let Some(sync) = &self.sync {
-            match sync.state {
-                State::Unreachable | State::Unauthorized | State::Refused => {
-                    let _ = writeln!(
-                        out,
-                        "syncthing {} — {}",
-                        sync.state.label(),
-                        sync.detail.as_deref().unwrap_or("no detail")
-                    );
-                }
-                State::Unconfigured | State::Idle | State::Busy => {}
-            }
-            if let Some(folder) = &sync.folder {
-                if folder.paused {
-                    let _ = writeln!(out, "syncthing folder {} is PAUSED", folder.label);
-                }
-            } else if sync.state == State::Idle || sync.state == State::Busy {
-                let _ = writeln!(out, "syncthing the store is in no synced folder");
-            }
+        for finding in self.findings() {
+            let _ = writeln!(out, "{:<9} {}", finding.topic, finding.text);
         }
         out
     }
 }
 
+/// The summary's Syncthing line, or none when the check failed, which only
+/// the findings say.
+fn sync_line(sync: &crate::syncthing::Status) -> Option<String> {
+    match sync.state {
+        State::Unconfigured => {
+            return Some("not configured — `ds init` sets the API key".into());
+        }
+        state if state.failed() => return None,
+        _ => {}
+    }
+    let mut line = sync.state.label().to_string();
+    if let Some(version) = &sync.version {
+        let _ = write!(line, " · {version}");
+    }
+    if let Some(folder) = &sync.folder {
+        let _ = write!(line, " · folder {}", folder.label);
+        if folder.versioning.is_empty() {
+            line.push_str(" · no versioning");
+        }
+    }
+    let _ = write!(line, " · {}/{} peers connected", sync.connected, sync.devices);
+    Some(line)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Doc, Store};
+    use crate::{Doc, FileRef, Store};
     use journal::Anomaly;
 
-    fn doc(id: &str, expiry: Option<&str>) -> Doc {
+    fn doc(id: &str) -> Doc {
         Doc {
             id: id.into(),
             name: id.into(),
             tags: Vec::new(),
             bundles: Vec::new(),
             issue_date: None,
-            expiry_date: expiry.map(str::to_string),
+            expiry_date: None,
             ignore_expiry: false,
             supersedes: None,
             location: None,
@@ -325,60 +304,103 @@ mod tests {
         }
     }
 
-    fn report(load: &Load, stats: &FoldStats, docs: Vec<Doc>) -> Report {
+    fn present() -> Load {
+        Load { present: true, ..Load::default() }
+    }
+
+    fn report(load: &Load, docs: Vec<Doc>) -> Report {
         let store = Store { docs, ..Store::default() };
-        Report::new("/tmp/journal".into(), load, stats, &store, "2026-10-20", "2027-01-18")
+        Report::new(
+            "/tmp/journal".into(),
+            load,
+            &FoldStats::default(),
+            &store,
+            &std::env::temp_dir(),
+        )
     }
 
-    /// The loud form says what the store is; the counts are the ones the header
-    /// shows, so the two can never disagree.
+    /// A sound store says what it is, and that nothing is wrong.
     #[test]
-    fn the_full_report_counts_documents_and_expiry() {
-        let r = report(
-            &Load { present: true, ..Load::default() },
-            &FoldStats::default(),
-            vec![
-                doc("past", Some("2026-01-01")),
-                doc("soon", Some("2026-12-01")),
-                doc("none", None),
-            ],
-        );
+    fn a_sound_store_says_what_it_is() {
+        let r = report(&present(), vec![doc("passport"), doc("visa")]);
         let text = r.render();
-        assert!(text.contains("documents 3"));
-        assert!(text.contains("2 tracked · 1 expired · 1 within 90 days"), "{text}");
-        assert!(text.contains("no anomalies"));
+        assert!(text.contains("documents 2 in 0 locations"), "{text}");
+        assert!(text.contains("health    no problems found"), "{text}");
         assert!(r.healthy());
+        assert_eq!(r.problems(), "");
     }
 
-    /// A conflicting latest version is listed even by the quiet form, so it is
-    /// found without opening that document's Versions view.
+    /// An expired document is the store working, not a finding, so a
+    /// `--quiet` cron job stays silent about it.
     #[test]
-    fn a_conflicting_latest_version_is_a_problem() {
-        let mut conflicting = doc("pp-phone", None);
+    fn an_expired_document_is_not_a_finding() {
+        let mut past = doc("past");
+        past.expiry_date = Some("2020-01-01".into());
+        let r = report(&present(), vec![past]);
+        assert!(r.healthy());
+        assert!(!r.render().contains("expir"), "{}", r.render());
+    }
+
+    /// A conflicting latest version is a finding, so it is found without
+    /// opening that document's Versions view.
+    #[test]
+    fn a_conflicting_latest_version_is_a_finding() {
+        let mut conflicting = doc("pp-phone");
         conflicting.conflicting = true;
-        let r = report(
-            &Load { present: true, ..Load::default() },
-            &FoldStats::default(),
-            vec![doc("pp-desk", None), conflicting],
-        );
+        let r = report(&present(), vec![doc("pp-desk"), conflicting]);
         assert!(!r.healthy());
-        assert!(r.problems().contains("1 conflicting latest"), "{}", r.problems());
+        assert!(r.problems().contains("versions  1 conflicting latest"), "{}", r.problems());
     }
 
-    /// **An expiring document is not a problem with the store.** A `--quiet` run
-    /// stays silent about it, or the cron job becomes noise and gets ignored.
+    /// Versions replacing each other in a loop hide every one of them, so the
+    /// loop is a finding that says how to break it.
     #[test]
-    fn quiet_says_nothing_about_a_merely_expired_document() {
-        let r = report(
-            &Load { present: true, ..Load::default() },
-            &FoldStats::default(),
-            vec![doc("past", Some("2020-01-01"))],
-        );
-        assert!(r.healthy());
-        assert_eq!(r.problems(), "", "nothing for cron to say");
+    fn a_loop_of_versions_is_a_finding() {
+        let mut a = doc("a");
+        a.name = "Passport".into();
+        a.supersedes = Some("b".into());
+        let mut b = doc("b");
+        b.name = "Passport".into();
+        b.supersedes = Some("a".into());
+        let r = report(&present(), vec![a, b]);
+        let problems = r.problems();
+        assert!(problems.contains("versions of Passport replace one another"), "{problems}");
+        assert!(problems.contains("renews to none"), "{problems}");
     }
 
-    /// Damage does speak — and names the file, so the next step is obvious.
+    /// A linked file that is not under the root is a finding, named.
+    #[test]
+    fn a_missing_file_is_a_finding() {
+        let mut passport = doc("passport");
+        passport.files.push(FileRef {
+            label: "scan".into(),
+            path: "ds-status-test/no-such-scan.pdf".into(),
+            primary: true,
+        });
+        let r = report(&present(), vec![passport]);
+        assert!(
+            r.problems()
+                .starts_with("files     not on this device: ds-status-test/no-such-scan.pdf"),
+            "{}",
+            r.problems()
+        );
+    }
+
+    /// Malformed lines are said once, in the loader's words, which name the
+    /// file and what happened to the lines.
+    #[test]
+    fn malformed_lines_are_said_once() {
+        let load = Load {
+            present: true,
+            anomalies: vec![Anomaly::Malformed { file: "desk.jsonl".into(), count: 2 }],
+            ..Load::default()
+        };
+        let text = report(&load, Vec::new()).render();
+        assert_eq!(text.matches("unreadable").count(), 1, "{text}");
+        assert!(!text.contains("malformed"), "{text}");
+    }
+
+    /// A conflict copy names the file and what to do.
     #[test]
     fn a_conflict_copy_is_reported_as_never_read() {
         let load = Load {
@@ -388,10 +410,7 @@ mod tests {
             }],
             ..Load::default()
         };
-        let r = report(&load, &FoldStats::default(), Vec::new());
-        assert!(!r.healthy());
-        let problems = r.problems();
-        assert!(problems.contains("sync conflict copy present"), "{problems}");
+        let problems = report(&load, Vec::new()).problems();
         assert!(problems.contains("desk-core.sync-conflict"), "it names the file: {problems}");
         assert!(problems.contains("never merge by hand"), "and what to do: {problems}");
     }
@@ -399,7 +418,7 @@ mod tests {
     fn sync(state: State, folder: Option<crate::syncthing::Folder>) -> crate::syncthing::Status {
         crate::syncthing::Status {
             state,
-            detail: Some("detail".into()),
+            detail: Some("connection refused".into()),
             version: Some("v1.27.0".into()),
             folder,
             connected: 1,
@@ -417,55 +436,55 @@ mod tests {
         }
     }
 
-    /// **A paused folder is a silent failure**: everything looks fine and
-    /// nothing reaches the other device. It fails the health check, so a cron
-    /// job finds it.
+    /// A paused folder is a finding, said once: the summary line leaves it
+    /// to the findings.
     #[test]
-    fn a_paused_folder_is_unhealthy_and_says_so() {
-        let mut r =
-            report(&Load { present: true, ..Load::default() }, &FoldStats::default(), Vec::new());
+    fn a_paused_folder_is_said_once() {
+        let mut r = report(&present(), Vec::new());
         r.sync = Some(sync(State::Idle, Some(folder(true, "staggered"))));
+        let text = r.render();
+        assert!(text.contains("syncthing idle · v1.27.0 · folder Documents · 1/1"), "{text}");
+        assert_eq!(text.matches("paused").count(), 1, "{text}");
         assert!(!r.healthy());
-        assert!(r.problems().contains("PAUSED"), "{}", r.problems());
-        assert!(
-            r.render().contains("syncthing idle · v1.27.0 · folder Documents (PAUSED)"),
-            "{}",
-            r.render()
-        );
     }
 
-    /// Versioning off is reported — the design leans on it as the undo history
-    /// of last resort — but it is not damage, so cron stays quiet about it.
+    /// Versioning off is worth saying but is not a fault.
     #[test]
-    fn versioning_off_is_mentioned_but_is_not_a_fault() {
-        let mut r =
-            report(&Load { present: true, ..Load::default() }, &FoldStats::default(), Vec::new());
+    fn versioning_off_is_summary_not_a_finding() {
+        let mut r = report(&present(), Vec::new());
         r.sync = Some(sync(State::Idle, Some(folder(false, ""))));
         assert!(r.healthy());
         assert!(r.render().contains("no versioning"));
-        assert_eq!(r.problems(), "");
     }
 
-    /// A device that never configured the API is not nagged; a daemon that was
-    /// configured and is now unreachable is.
+    /// A failed check is a finding and has no summary line; never configured
+    /// is a summary line that says how, and no finding.
     #[test]
-    fn unconfigured_is_quiet_and_unreachable_is_not() {
-        let mut r =
-            report(&Load { present: true, ..Load::default() }, &FoldStats::default(), Vec::new());
-        r.sync = Some(sync(State::Unconfigured, None));
-        assert!(r.healthy(), "never set up is not a fault");
-
+    fn a_failed_check_is_a_finding_and_unconfigured_is_not() {
+        let mut r = report(&present(), Vec::new());
         r.sync = Some(sync(State::Unreachable, None));
-        assert!(!r.healthy());
-        assert!(r.problems().contains("unreachable"));
+        let text = r.render();
+        assert_eq!(text.matches("syncthing").count(), 1, "{text}");
+        assert!(text.contains("syncthing unreachable — connection refused"), "{text}");
+
+        r.sync = Some(crate::syncthing::Status::default());
+        assert!(r.healthy(), "never set up is not a fault");
+        assert!(r.render().contains("syncthing not configured — `ds init` sets the API key"));
     }
 
-    /// A device with no journal yet says so plainly, rather than reporting an
-    /// empty store as if it were the truth.
+    /// A reachable daemon with no folder holding the store is a finding.
+    #[test]
+    fn a_store_outside_every_folder_is_a_finding() {
+        let mut r = report(&present(), Vec::new());
+        r.sync = Some(sync(State::Idle, None));
+        assert!(r.problems().contains("the store is in no synced folder"), "{}", r.problems());
+    }
+
+    /// A device with no journal yet says so plainly, and is not damaged.
     #[test]
     fn a_missing_journal_is_stated_not_implied() {
-        let r = report(&Load::default(), &FoldStats::default(), Vec::new());
+        let r = report(&Load::default(), Vec::new());
         assert!(r.render().contains("not created yet"));
-        assert!(r.healthy(), "absent is not damaged");
+        assert!(r.healthy());
     }
 }

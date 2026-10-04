@@ -391,7 +391,7 @@ fn report(
     if !root.is_dir() {
         prompt.say(&format!(
             "\nnote: {} does not exist yet. That is fine if Syncthing has not set it up on this\n\
-             device — `ds status` will say so once it does.",
+             device yet.",
             root.display()
         ))?;
     }
@@ -405,6 +405,7 @@ fn report(
             }
         }
     }
+    prompt.say("\n`ds status` checks the store and Syncthing; `ds` opens it.")?;
     Ok(())
 }
 
