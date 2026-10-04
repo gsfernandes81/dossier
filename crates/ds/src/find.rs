@@ -145,7 +145,7 @@ fn draw_too_small(frame: &mut Frame, area: Rect, theme: Theme) {
 /// only thing worth keeping, so the title goes first.
 fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     let wide = area.width >= 72;
-    let attention = model.attention_count();
+    let attention = model.due().len();
     let touch = crate::layout::touch_layout(area.width);
     let left = " dossier";
     // On a touch layout the expiring count is the one verb a thumb cannot
@@ -183,7 +183,7 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
             Span::styled(
                 count,
                 if model.filter.expiring {
-                    theme.band()
+                    theme.lit()
                 } else if touch {
                     theme.pressable()
                 } else {
@@ -202,11 +202,7 @@ fn draw_body(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     use crate::app::View;
     model.record = crate::app::RowGeometry::default();
     model.bundle_list = crate::app::RowGeometry::default();
-    let pane = matches!(
-        model.views.last(),
-        Some(View::Details { .. } | View::Versions { .. } | View::Bundle { .. })
-    );
-    let (list_area, detail_area) = match (pane, crate::layout::splits(area.width)) {
+    let (list_area, detail_area) = match (model.pane(), crate::layout::splits(area.width)) {
         (true, true) => {
             let split = Layout::default()
                 .direction(Direction::Horizontal)
@@ -292,17 +288,23 @@ fn draw_list(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     }
 
     // *** The virtualization: only the visible window is built. ***
+    let shown: Vec<(usize, &Doc, String)> = (model.offset..model.rows.len())
+        .take(visible)
+        .map(|at| {
+            let doc = &model.store.docs[model.rows[at]];
+            (at, doc, model.store.place(doc))
+        })
+        .collect();
+    let columns =
+        Columns::fit(area.width, shown.iter().map(|(_, doc, place)| (*doc, place.as_str())));
     let mut lines: Vec<Line> = Vec::with_capacity(visible * row_height as usize);
-    for slot in 0..visible {
-        let Some(&index) = model.rows.get(model.offset + slot) else { break };
-        let doc = &model.store.docs[index];
-        let selected = model.offset + slot == model.cursor && !model.on_new;
+    for (at, doc, place) in &shown {
+        let selected = *at == model.cursor && !model.on_new;
         let status = model.status(doc);
-        let place = model.store.place(doc);
         if row_height == 1 {
-            lines.push(single_line_row(doc, &place, status, area.width, selected, theme));
+            lines.push(single_line_row(doc, place, status, &columns, selected, theme));
         } else {
-            let (first, second) = two_line_row(doc, &place, status, area.width, selected, theme);
+            let (first, second) = two_line_row(doc, place, status, area.width, selected, theme);
             lines.push(first);
             lines.push(second);
         }
@@ -328,26 +330,66 @@ fn cursor_cell(selected: bool) -> &'static str {
     }
 }
 
-/// Wide layout: name, tags, location, status — each in a fixed column.
+/// The wide layout's column widths, decided once per screen from the rows on
+/// it, so the columns line up and spare width goes to what needs it.
+#[derive(Clone, Copy)]
+struct Columns {
+    name: usize,
+    tags: usize,
+    place: usize,
+}
+
+impl Columns {
+    /// The gap before each column after the name, the status's included.
+    const GAP: usize = 2;
+
+    /// Widths for `rows` across `cols`. Each column asks for its widest entry;
+    /// when they do not all fit, tags give way first, then the location down to
+    /// a dozen columns, then the name down to eight.
+    fn fit<'a>(cols: u16, rows: impl Iterator<Item = (&'a Doc, &'a str)>) -> Self {
+        let mut want = Self { name: 0, tags: 0, place: 0 };
+        for (doc, place) in rows {
+            want.name = want.name.max(width(&doc.name));
+            want.tags = want.tags.max(width(&doc.tags.join(" ")));
+            want.place = want.place.max(width(place));
+        }
+        if cols < TAGS_COLS {
+            want.tags = 0;
+        }
+        let gaps = |columns: &Self| Self::GAP * (2 + usize::from(columns.tags > 0));
+        let room = (cols as usize).saturating_sub(2 + STATUS_COLS);
+        let over = |columns: &Self| {
+            (columns.name + columns.tags + columns.place + gaps(columns)).saturating_sub(room)
+        };
+        let mut columns = want;
+        columns.tags = columns.tags.saturating_sub(over(&columns));
+        columns.place = columns.place.saturating_sub(over(&columns)).max(want.place.min(12));
+        columns.name = columns.name.saturating_sub(over(&columns)).max(8);
+        columns.place = columns.place.saturating_sub(over(&columns));
+        columns.name +=
+            room.saturating_sub(columns.name + columns.tags + columns.place + gaps(&columns));
+        columns
+    }
+}
+
+/// Wide layout: name, tags, location and status, each in its own column.
 fn single_line_row(
     doc: &Doc,
     place: &str,
     status: Status,
-    cols: u16,
+    columns: &Columns,
     selected: bool,
     theme: Theme,
 ) -> Line<'static> {
-    let total = cols as usize;
-    let (tags_cols, place_cols) =
-        if cols >= TAGS_COLS { (20usize, 18usize) } else { (0usize, 12usize) };
-    let name_cols = total.saturating_sub(2 + tags_cols + place_cols + 3 + STATUS_COLS).max(8);
-
-    let mut spans = vec![Span::raw(cursor_cell(selected)), Span::raw(fit(&doc.name, name_cols))];
-    if tags_cols > 0 {
-        spans.push(Span::styled(fit(&doc.tags.join(" "), tags_cols), theme.style(Tone::Muted)));
+    let gap = " ".repeat(Columns::GAP);
+    let mut spans = vec![Span::raw(cursor_cell(selected)), Span::raw(fit(&doc.name, columns.name))];
+    if columns.tags > 0 {
+        spans.push(Span::raw(gap.clone()));
+        spans.push(Span::styled(fit(&doc.tags.join(" "), columns.tags), theme.style(Tone::Muted)));
     }
+    spans.push(Span::raw(gap));
     spans.push(Span::styled(
-        pad_left(&crate::layout::truncate_left(place, place_cols), place_cols),
+        pad_left(&crate::layout::truncate_left(place, columns.place), columns.place),
         theme.style(Tone::Muted),
     ));
     spans.push(Span::raw("  "));
@@ -477,23 +519,45 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     if !model.sheet {
         return;
     }
-    let rows = crate::sheet::items(model)
-        .iter()
-        .map(|item| {
-            let lead = if item.key == crate::sheet::NO_KEY {
-                "   ".to_string()
-            } else {
-                format!(" {} ", item.key)
-            };
-            (lead, item.label.to_string(), item.accel)
-        })
-        .collect();
+    let items = crate::sheet::items(model);
+    let lead = |item: &crate::sheet::Item| {
+        if item.key == crate::sheet::NO_KEY {
+            "   ".to_string()
+        } else {
+            format!(" {} ", item.key)
+        }
+    };
     let subject = model.locpick.as_ref().and_then(|picker| picker.chosen()).and_then(|id| {
         let location = model.store.locations.get(id)?;
         Some((location.name.clone(), "physical location", model.store.locations.path(id)))
     });
+    let heading = if subject.is_some() { 4 } else { 2 };
     let panel = Panel { crumb: "SPC".into(), filter: None, cursor: None, subject };
-    draw_panel(frame, area, &panel, rows, theme);
+    if items.len() + heading <= area.height as usize {
+        let rows =
+            items.iter().map(|item| (lead(item), item.label.to_string(), item.accel)).collect();
+        model.panel = draw_panel(frame, area, &panel, rows, theme);
+        return;
+    }
+    // Too short for one column: the verbs flow into two, without their
+    // accelerators, so none is cut off.
+    let half = items.len().div_ceil(2);
+    let column = (area.width as usize).saturating_sub(crate::layout::GUTTER as usize * 2) / 2;
+    let rows = (0..half)
+        .map(|row| {
+            let left = &items[row];
+            let mut label = fit(left.label, column.saturating_sub(width(&lead(left))));
+            if let Some(right) = items.get(row + half) {
+                label.push_str(&lead(right));
+                label.push_str(&truncate(right.label, column.saturating_sub(width(&lead(right)))));
+            }
+            (lead(left), label, "")
+        })
+        .collect();
+    let mut geometry = draw_panel(frame, area, &panel, rows, theme);
+    geometry.right = (half..items.len()).collect();
+    geometry.split = area.x + u16::try_from(column).unwrap_or(u16::MAX);
+    model.panel = geometry;
 }
 
 /// The location picker: a three-row heading, then the tree.
@@ -549,6 +613,7 @@ fn draw_locpick(
         left: rect.x,
         width: rect.width,
         items,
+        ..Default::default()
     }
 }
 
@@ -857,6 +922,7 @@ fn draw_panel(
         left: rect.x,
         width: rect.width,
         items: (skip..count).collect(),
+        ..Default::default()
     }
 }
 
@@ -879,146 +945,38 @@ fn chips(model: &Model) -> String {
     chips
 }
 
+/// The count beside the search: what the view in front holds.
+fn count_text(model: &Model) -> String {
+    use crate::app::View;
+    match model.views.last() {
+        Some(View::Versions { doc, .. }) => {
+            format!("{} versions", crate::versions::rows(&model.store, doc).len())
+        }
+        Some(View::Bundles { .. }) => {
+            let entries = crate::bundles::entries(&model.store, &model.query);
+            let shown = entries.iter().filter(|e| **e != crate::bundles::Entry::New).count();
+            format!("{shown}/{} bundles", model.store.bundles.len())
+        }
+        Some(View::Bundle { id, .. }) => {
+            let n = model.store.members(id).len();
+            format!("{n} document{}", if n == 1 { "" } else { "s" })
+        }
+        _ => format!("{}/{}", model.rows.len(), model.total()),
+    }
+}
+
 /// The docked search bar.
 ///
 /// **One row on a keyboard layout, two on a touch one.** The second row is not
 /// decoration: the whole block is the keyboard target, and one terminal row is
 /// too small a thing to ask a thumb to hit against the screen edge.
 fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
-    let count = match model.views.last() {
-        Some(crate::app::View::Versions { doc, .. }) => {
-            format!("{} versions", crate::versions::rows(&model.store, doc).len())
-        }
-        Some(crate::app::View::Bundles { .. }) => {
-            let entries = crate::bundles::entries(&model.store, &model.query);
-            let shown = entries.iter().filter(|e| **e != crate::bundles::Entry::New).count();
-            format!("{shown}/{} bundles", model.store.bundles.len())
-        }
-        Some(crate::app::View::Bundle { id, .. }) => {
-            let n = model.store.members(id).len();
-            format!("{n} document{}", if n == 1 { "" } else { "s" })
-        }
-        _ => format!("{}/{}", model.rows.len(), model.store.listed()),
-    };
     let cols = area.width as usize;
-    let gutter = crate::layout::GUTTER as usize;
-    let touch = area.height > 1;
-
-    if !touch {
-        model.leader_zone = Zone::default();
-        if let Some(edit) = &model.edit {
-            frame.render_widget(Paragraph::new(edit_row(edit, cols)), area);
-            return;
-        }
-        let tail = format!("{count} ");
-        let prompt = " > ";
-        let span = cols.saturating_sub(width(prompt) + width(&tail));
-        let chips = chips(model);
-        let mut line = vec![Span::styled(prompt, theme.style(Tone::Accent))];
-        let used =
-            push_query(&mut line, model, span.saturating_sub(width(&chips)), Style::default());
-        line.push(Span::raw(fit(&chips, span.saturating_sub(used))));
-        line.push(Span::styled(tail, theme.style(Tone::Muted)));
-        frame.render_widget(Paragraph::new(Line::from(line)), area);
+    model.leader_zone = Zone::default();
+    if area.height <= 1 {
+        frame.render_widget(Paragraph::new(keyboard_row(model, cols, theme)), area);
         return;
     }
-
-    // Row one: the query as a field. **The whole row is a lit band** — Emacs
-    // marks an editable field with a background face rather than a rule under
-    // it, and a rule is exactly what a terminal cannot place: `SGR 4` lands
-    // where the font's metric says, which on the phone is through the
-    // descenders. The band runs edge to edge, so the field's shape is identical
-    // empty, half-typed and full, and no glyph can sit on top of the marking.
-    //
-    // The `SPC` chip closes the right-hand end. It opens the leader sheet, which
-    // `Space` opens from a keyboard — and with the phone keyboard down there is
-    // no Space to press. It replaced the `⌨` affordance rather than joining it:
-    // Termux has its own keyboard key, and tapping the field already raises the
-    // IME, so a second button for it was a button for a key you already hold.
-    // An edit takes the entry line over rather than adding a row: three rows of
-    // chrome is the budget on both layouts (REWRITE-UI.md §5a), and a field you
-    // are typing into is exactly what the last row is for. The `SPC` chip goes
-    // with it — the leader sheet is not reachable from inside an edit, so a
-    // button for it would be a button that does nothing.
-    if let Some(edit) = &model.edit {
-        model.leader_zone = Zone::default();
-        let rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Length(1)])
-            .split(area);
-        let (message, tone) = status_text(model, true);
-        let band = Line::styled(
-            format!(" {}", fit(&message, cols.saturating_sub(gutter))),
-            theme.on_band(tone),
-        );
-        frame.render_widget(Paragraph::new(band).style(theme.band()), rows[0]);
-        frame.render_widget(Paragraph::new(edit_row(edit, cols)), rows[1]);
-        return;
-    }
-
-    let key = " SPC ";
-    let prompt = " >";
-    let span = cols.saturating_sub(width(prompt) + width(key) + gutter);
-    let under = Style::default();
-    let quiet = theme.style(Tone::Muted);
-
-    model.leader_zone = Zone {
-        row: area.y,
-        col: area.x + u16::try_from(cols.saturating_sub(width(key) + gutter)).unwrap_or(0),
-        width: u16::try_from(width(key)).unwrap_or(0),
-    };
-
-    let mut field: Vec<Span> = vec![Span::styled(prompt, theme.style(Tone::Accent))];
-    if model.query.is_empty() {
-        // What the empty field says. An invitation on the left, and on the right
-        // a sentence that **finishes on the button**: the prose runs out at
-        // "hit" and the reversed `SPC` is its object. One plain column separates
-        // them, because a reverse block butted against text reads as a rendering
-        // fault rather than as something you can press.
-        //
-        // Both halves are dim and both live inside the underline — dim and
-        // underline are independent attributes on the same cell — so they change
-        // what is drawn on the line, never how long it is. They go together on
-        // the first keystroke.
-        let invite = "Type to search";
-        let signpost = "For more, hit";
-        let gap = span.saturating_sub(3 + width(invite) + width(signpost) + 1);
-        field.push(Span::styled(" █ ", under));
-        field.push(Span::styled(invite, quiet));
-        if gap >= 2 {
-            field.push(Span::styled(" ".repeat(gap), under));
-            field.push(Span::styled(signpost, quiet));
-            field.push(Span::styled(" ", under));
-        } else {
-            // Too narrow to pair: the invitation outranks the signpost, and the
-            // chip is still there saying `SPC` for itself.
-            field.push(Span::styled(" ".repeat(span.saturating_sub(3 + width(invite))), under));
-        }
-    } else {
-        field.push(Span::styled(" ", under));
-        let used = 1 + push_query(&mut field, model, span.saturating_sub(1), under);
-        field.push(Span::styled(" ".repeat(span.saturating_sub(used)), under));
-    }
-    field.push(Span::styled(
-        key,
-        if model.sheet {
-            // Lit while the sheet is up, so it reads as the thing that opened it.
-            theme.style(Tone::Armed).add_modifier(Modifier::REVERSED)
-        } else {
-            theme.pressable()
-        },
-    ));
-    field.push(Span::raw(" ".repeat(gutter)));
-    let query_row = Line::from(field);
-
-    // Row two: what the search found, and what is filtering it — or, when there
-    // is something to say, the message instead. The count is worth losing for a
-    // moment; a message nobody reads is worth nothing.
-    // Tones on the band are not the tones on the terminal's own background —
-    // see [`Theme::on_band`]. A light row needs a named grey where the rest of
-    // the screen uses `DIM`, and red where it uses yellow.
-    let (message, tone) = status_text(model, true);
-    let info_row = info_row(model, &count, &message, tone, cols, theme);
 
     // **Status line above, entry line below**, and only the status line is lit.
     // Two widgets rather than one, because a `Paragraph`'s style paints its
@@ -1029,36 +987,150 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(status), Constraint::Length(1)])
         .split(area);
-    let info = if status > 1 { caution_lines(&message, cols, tone, theme) } else { vec![info_row] };
+    let info = match message(model) {
+        Some((message, tone)) => caution_lines(&message, cols, tone, theme),
+        None => vec![info_row(model, cols, theme)],
+    };
     frame.render_widget(Paragraph::new(info).style(theme.band()), rows[0]);
-    frame.render_widget(Paragraph::new(query_row), rows[1]);
+
+    // An edit takes the entry line over rather than adding a row: three rows
+    // of chrome is the budget on both layouts (REWRITE-UI.md §5a). The `SPC`
+    // chip goes with it, since the sheet is not reachable from inside an edit.
+    let entry = if let Some(edit) = &model.edit {
+        edit_row(edit, cols)
+    } else {
+        let key = " SPC ";
+        let gutter = crate::layout::GUTTER as usize;
+        model.leader_zone = Zone {
+            row: rows[1].y,
+            col: area.x + u16::try_from(cols.saturating_sub(width(key) + gutter)).unwrap_or(0),
+            width: u16::try_from(width(key)).unwrap_or(0),
+        };
+        entry_row(model, key, cols, theme)
+    };
+    frame.render_widget(Paragraph::new(entry), rows[1]);
 }
 
-/// The touch bar's status row: a message when there is one, else the count,
-/// the filter chips and the hints.
-fn info_row(
-    model: &Model,
-    count: &str,
-    message: &str,
-    tone: Tone,
-    cols: usize,
-    theme: Theme,
-) -> Line<'static> {
-    let gutter = crate::layout::GUTTER as usize;
-    if model.flash.is_some() || model.esc_armed {
-        Line::styled(format!(" {}", fit(message, cols.saturating_sub(gutter))), theme.on_band(tone))
-    } else {
-        let left = format!(" {count}{}", chips(model));
-        let room = cols.saturating_sub(width(&left) + gutter);
-        let hint = shed(&touch_hints(model), room);
-        let gap = cols.saturating_sub(width(&left) + width(&hint) + gutter);
-        Line::from(vec![
-            Span::raw(left),
-            Span::raw(" ".repeat(gap)),
-            Span::styled(hint, theme.on_band(Tone::Muted)),
-            Span::raw(" ".repeat(gutter)),
-        ])
+/// The keyboard layout's one-row bar: the edit, the query, or where the keys
+/// go, with the count on the right.
+fn keyboard_row(model: &Model, cols: usize, theme: Theme) -> Line<'static> {
+    if let Some(edit) = &model.edit {
+        return edit_row(edit, cols);
     }
+    let tail = format!("{} ", count_text(model));
+    let quiet = theme.style(Tone::Muted);
+    if !model.typing_into_query() {
+        let room = cols.saturating_sub(width(&tail) + 1);
+        return Line::from(vec![
+            Span::styled(format!(" {}", fit(&mode_line(model), room)), quiet),
+            Span::styled(tail, quiet),
+        ]);
+    }
+    let prompt = " > ";
+    let span = cols.saturating_sub(width(prompt) + width(&tail));
+    let chips = chips(model);
+    let mut line = vec![Span::styled(prompt, theme.style(Tone::Accent))];
+    let used = push_query(&mut line, model, span.saturating_sub(width(&chips)), Style::default());
+    line.push(Span::raw(fit(&chips, span.saturating_sub(used))));
+    line.push(Span::styled(tail, quiet));
+    Line::from(line)
+}
+
+/// The touch layout's last row: the query as a field, or where the keys go
+/// when they do not go into it, closed by the `SPC` chip that opens the sheet.
+///
+/// The row is a lit band, as Emacs marks an editable field with a background
+/// face: a rule under it is what a terminal cannot place, since `SGR 4` lands
+/// through the descenders on the phone.
+fn entry_row(model: &Model, key: &'static str, cols: usize, theme: Theme) -> Line<'static> {
+    let gutter = crate::layout::GUTTER as usize;
+    let prompt = " >";
+    let span = cols.saturating_sub(width(prompt) + width(key) + gutter);
+    let under = Style::default();
+    let quiet = theme.style(Tone::Muted);
+    let mut field: Vec<Span> = vec![Span::styled(prompt, theme.style(Tone::Accent))];
+    if !model.typing_into_query() {
+        // Nothing on the row may look typeable: no prompt and no cursor, only
+        // where the keys go, as Vim's command line names its mode.
+        let room = cols.saturating_sub(width(key) + gutter + 1);
+        field = vec![Span::styled(format!(" {}", fit(&mode_line(model), room)), quiet)];
+    } else if model.query.is_empty() {
+        // An invitation on the left, and on the right a sentence that
+        // **finishes on the button**: the prose runs out at "hit" and the
+        // reversed `SPC` is its object.
+        let invite = "Type to search";
+        let signpost = "For more, hit";
+        let gap = span.saturating_sub(3 + width(invite) + width(signpost) + 1);
+        field.push(Span::styled(" █ ", under));
+        field.push(Span::styled(invite, quiet));
+        if gap >= 2 {
+            field.push(Span::styled(" ".repeat(gap), under));
+            field.push(Span::styled(signpost, quiet));
+            field.push(Span::styled(" ", under));
+        } else {
+            field.push(Span::styled(" ".repeat(span.saturating_sub(3 + width(invite))), under));
+        }
+    } else {
+        field.push(Span::styled(" ", under));
+        let used = 1 + push_query(&mut field, model, span.saturating_sub(1), under);
+        field.push(Span::styled(" ".repeat(span.saturating_sub(used)), under));
+    }
+    field.push(Span::styled(key, if model.sheet { theme.lit() } else { theme.pressable() }));
+    field.push(Span::raw(" ".repeat(gutter)));
+    Line::from(field)
+}
+
+/// The last row when typing does not go into the search: where the keys go
+/// instead, or the chord half typed, as Vim's command line shows its mode and
+/// a pending operator.
+fn mode_line(model: &Model) -> String {
+    use crate::app::View;
+    let top = model.views.last();
+    if model.delete_armed {
+        return match top {
+            Some(View::Bundle { id, .. }) => {
+                let name = model.store.bundle(id).map_or("", |bundle| bundle.name.as_str());
+                format!("d · d again to delete {name}, not its documents")
+            }
+            _ => format!("d · d again to delete {}", model.current().map_or("", |doc| &doc.name)),
+        };
+    }
+    let (what, keys) = if model.sheet {
+        ("menu", "letters run verbs")
+    } else if model.locpick.is_some() {
+        ("locations", "typing searches them")
+    } else if let Some(check) = &model.check {
+        match check.purpose {
+            crate::check::Purpose::Filter => ("filters", "typing searches them"),
+            crate::check::Purpose::Bundles(_) => ("bundles", "typing searches them"),
+        }
+    } else if model.picker.is_some() {
+        ("choices", "typing narrows them")
+    } else {
+        let name = match top {
+            Some(View::Versions { .. }) => "versions",
+            Some(View::Bundle { .. }) => "bundle",
+            _ => "details",
+        };
+        (name, "letters run verbs")
+    };
+    format!("{what} · {keys}")
+}
+
+/// The touch bar's status row when there is no message: the count, the filter
+/// chips, and as many hints as fit.
+fn info_row(model: &Model, cols: usize, theme: Theme) -> Line<'static> {
+    let gutter = crate::layout::GUTTER as usize;
+    let left = format!(" {}{}", count_text(model), chips(model));
+    let room = cols.saturating_sub(width(&left) + gutter);
+    let hint = shed(&hints(model), room);
+    let gap = cols.saturating_sub(width(&left) + width(&hint) + gutter);
+    Line::from(vec![
+        Span::raw(left),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(hint, theme.on_band(Tone::Muted)),
+        Span::raw(" ".repeat(gutter)),
+    ])
 }
 
 /// How many rows the status line needs: one, or as many as an armed location
@@ -1152,78 +1224,72 @@ fn locpick_hints(picker: &crate::locpick::LocationPicker) -> Vec<&'static str> {
     }
 }
 
-/// The hints a touch layout shows, most sheddable first.
-fn touch_hints(model: &Model) -> Vec<&'static str> {
-    if model.edit.is_some() && !model.attach_matches().is_empty() {
-        vec!["tab fill", "⏎ save", "esc discard"]
-    } else if model.edit.is_some() {
-        vec!["⏎ save", "esc discard"]
-    } else if model.sheet {
-        vec!["letter runs it", "esc back"]
-    } else if model.check.is_some() {
-        vec!["⏎ toggle", "esc back"]
-    } else if let Some(picker) = &model.locpick {
-        locpick_hints(picker)
-    } else if model.picker.is_some() {
-        vec!["⏎ choose", "esc back"]
-    } else if let Some(hints) = view_hints(model) {
-        hints
-    } else if model.detail() {
-        // The record's hints **follow the selector**: the verb is shown when the
-        // row under it has one and this session can actually write. A hint for a
-        // key that does nothing on *this* row is worse than no hint, and it is
-        // what a per-field control key forced — one key advertised everywhere,
-        // working in one place.
-        let verb = model.write.ready().then(|| selected_row(model)).flatten();
-        let mut hints = vec!["esc back", "⏎ open file"];
-        hints.extend(verb.and_then(crate::detail::Row::verb));
-        // Offered only once there is something to take back, and likewise for
-        // the way forward. A hint on a session that has written nothing teaches
-        // a key that answers with an apology — the same rule the row verbs
-        // follow. They are separate hints because they are separate verbs.
-        if model.write.ready() && !model.undo.is_empty() {
-            hints.push("u undo");
-        }
-        if model.write.ready() && !model.redo.is_empty() {
-            hints.push("r redo");
-        }
-        // While a delete is armed the hint line stops teaching and starts
-        // asking: the one moment where the next keystroke is the whole point.
-        if model.delete_armed {
-            return vec!["d again to delete", "any key cancels"];
-        }
-        hints
-    } else {
-        vec!["⏎ record", "space menu"]
-    }
-}
-
-/// The hints of the views other than the Details view, which follow what is
-/// selected.
-fn view_hints(model: &Model) -> Option<Vec<&'static str>> {
+/// This surface's hints, most sheddable first. Per surface only, never
+/// another surface's verbs, and a verb appears when it works, not before.
+fn hints(model: &Model) -> Vec<&'static str> {
     use crate::app::View;
+    if model.edit.is_some() {
+        return if model.attach_matches().is_empty() {
+            vec!["⏎ save", "esc discard"]
+        } else {
+            vec!["↑↓ choose", "tab fill", "⏎ save", "esc discard"]
+        };
+    }
+    if model.sheet {
+        return vec!["letter runs it", "esc back"];
+    }
+    if model.check.is_some() {
+        return vec!["type to search", "⏎ toggle", "esc back"];
+    }
+    if let Some(picker) = &model.locpick {
+        return locpick_hints(picker);
+    }
+    if model.picker.is_some() {
+        return vec!["type to narrow", "⏎ choose", "esc back"];
+    }
     if model.delete_armed {
-        return Some(vec!["d again to delete", "any key cancels"]);
+        return vec!["any other key cancels"];
     }
-    match model.views.last()? {
-        View::Versions { .. } => Some(vec!["⏎ open", "esc back"]),
-        View::Bundles { cursor, .. } => {
+    let ready = model.write.ready();
+    let mut hints = match model.views.last() {
+        None if model.query.is_empty() => vec!["⏎ record"],
+        None => vec!["esc clear", "⏎ record"],
+        Some(View::Details { .. }) => {
+            let verb = ready.then(|| selected_row(model)).flatten();
+            let mut hints = vec!["esc back", "⏎ open file"];
+            hints.extend(verb.and_then(crate::detail::Row::verb));
+            hints
+        }
+        Some(View::Versions { .. }) => vec!["esc back", "⏎ open"],
+        Some(View::Bundles { cursor, .. }) => {
             let entries = crate::bundles::entries(&model.store, &model.query);
-            let enter = match entries.get(*cursor) {
-                Some(crate::bundles::Entry::New) => "⏎ create",
-                _ => "⏎ open",
-            };
-            Some(vec![enter, "esc back"])
+            match entries.get(*cursor) {
+                Some(crate::bundles::Entry::New) => vec!["esc back", "⏎ create"],
+                _ => vec!["esc back", "⏎ open"],
+            }
         }
-        View::Bundle { id, cursor } => {
-            let row = crate::bundles::rows(&model.store, id).get(*cursor).copied();
-            Some(match row {
-                Some(crate::bundles::Row::Member(_)) => vec!["⏎ open", "e edit", "esc back"],
-                _ => vec!["e edit", "esc back"],
-            })
+        Some(View::Bundle { id, cursor }) => {
+            match crate::bundles::rows(&model.store, id).get(*cursor) {
+                Some(crate::bundles::Row::Member(_)) => vec!["esc back", "⏎ open", "e edit"],
+                _ => vec!["esc back", "e edit"],
+            }
         }
-        View::Details { .. } => None,
+    };
+    // Offered only once there is something to take back, and likewise for the
+    // way forward: a hint on a session that has written nothing teaches a key
+    // that answers with an apology.
+    if model.pane() && ready && !model.undo.is_empty() {
+        hints.push("u undo");
     }
+    if model.pane() && ready && !model.redo.is_empty() {
+        hints.push("r redo");
+    }
+    // Space types a space once something is typed, so the menu is offered only
+    // where Space opens it.
+    if model.pane() || model.query.is_empty() {
+        hints.push("space menu");
+    }
+    hints
 }
 
 /// The record row the selector is on, if a record is open at all.
@@ -1248,60 +1314,29 @@ fn shed(hints: &[&str], room: usize) -> String {
     String::new()
 }
 
-/// What the bottom line says: a message if there is one, else this surface's
-/// hints. Per-surface only — never another surface's verbs (v2's `check_action`
-/// lesson), and a verb appears here when it works, not before.
-fn status_text(model: &Model, touch: bool) -> (String, Tone) {
+/// What the status line says instead of its hints, when there is something
+/// to say.
+fn message(model: &Model) -> Option<(String, Tone)> {
     if let Some(flash) = &model.flash {
-        return (flash.clone(), Tone::Flash);
+        return Some((flash.clone(), Tone::Flash));
     }
     if model.esc_armed {
-        return ("esc again to quit".into(), Tone::Armed);
+        return Some(("esc again to quit".into(), Tone::Armed));
     }
-    if let Some(edit) = &model.edit {
-        if edit.armed_discard {
-            return ("esc again to discard".into(), Tone::Armed);
-        }
-        if edit.saving {
-            return ("saving…".into(), Tone::Muted);
-        }
-    }
-    if touch {
-        return (touch_hints(model).join("  "), Tone::Muted);
-    }
-    if model.sheet {
-        return ("letter runs it  esc back".into(), Tone::Muted);
-    }
-    if model.check.is_some() {
-        return ("⏎ or space toggles  type to search  esc back".into(), Tone::Muted);
-    }
-    if let Some(picker) = &model.locpick {
-        return (locpick_hints(picker).join("  "), Tone::Muted);
-    }
-    if let Some(hints) =
-        view_hints(model).filter(|_| model.edit.is_none() && model.picker.is_none())
-    {
-        return (format!("{}  space menu  ^q quit", hints.join("  ")), Tone::Muted);
-    }
-    let hints = if model.edit.is_some() && !model.attach_matches().is_empty() {
-        "↑↓ choose  tab fill  ⏎ save  esc discard"
-    } else if model.edit.is_some() {
-        "⏎ save  esc discard"
-    } else if model.picker.is_some() {
-        "↑↓ select  ⏎ choose  type to narrow  esc back"
-    } else if model.detail() && model.write.ready() {
-        "⏎ open file  e edit  esc back  space menu  ^q quit"
-    } else if model.detail() {
-        "⏎ open file  esc back  space menu  ^q quit"
+    let edit = model.edit.as_ref()?;
+    if edit.armed_discard {
+        Some(("esc again to discard".into(), Tone::Armed))
+    } else if edit.saving {
+        Some(("saving…".into(), Tone::Muted))
     } else {
-        "space menu  ⏎ record  ^q quit"
-    };
-    (hints.into(), Tone::Muted)
+        None
+    }
 }
 
 /// The keyboard layout's hint line.
 fn draw_footer(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
-    let (message, tone) = status_text(model, false);
+    let (message, tone) = message(model)
+        .unwrap_or_else(|| (format!("{}  ^q quit", hints(model).join("  ")), Tone::Muted));
     // Lit, like the touch layout's — a keyboard layout has the same two rows in
     // the same order, and the same rule dividing the list from the entry line.
     let lines = if area.height > 1 {

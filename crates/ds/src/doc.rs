@@ -597,18 +597,22 @@ impl Store {
             .collect()
     }
 
-    /// Documents in the expiry watch, soonest first — the `:expiring` filter.
+    /// Documents expired or due inside the warn window, soonest first: the
+    /// header's count and the expiring filter both, so they always agree.
     ///
-    /// Superseded and ignored documents are hidden, which is the whole point of
-    /// an opt-out watch: a renewal removes the old document from the list
+    /// Superseded and ignored documents are out of the watch, which is the
+    /// whole point of an opt-out watch: a renewal removes the old document
     /// without anyone re-starring anything.
     #[must_use]
-    pub fn expiring(&self) -> Vec<usize> {
+    pub fn due(&self, today: &str, warn_until: &str) -> Vec<usize> {
         let mut rows: Vec<usize> = self
             .docs
             .iter()
             .enumerate()
-            .filter_map(|(i, doc)| doc.is_tracked().then_some(i))
+            .filter(|(_, doc)| {
+                matches!(doc.status(today, warn_until), Status::Expired | Status::Soon)
+            })
+            .map(|(i, _)| i)
             .collect();
         rows.sort_by(|&a, &b| {
             self.docs[a]
@@ -916,7 +920,7 @@ mod tests {
                 &[("supersedes", "pp-2019".into()), ("expiry_date", "2039-01-01".into())],
             ),
         ]);
-        assert_eq!(ids(&store, &store.expiring()), ["pp-2029"]);
+        assert_eq!(ids(&store, &store.due("2026-10-20", "2040-01-01")), ["pp-2029"]);
         let old = &store.docs[store.index_of("pp-2019").unwrap()];
         assert_eq!(old.expiry_date.as_deref(), Some("2029-01-01"));
     }
@@ -1075,8 +1079,9 @@ mod tests {
             ),
             doc(400, "eng1", &[("name", "ENG-1".into()), ("expiry_date", "2027-01-13".into())]),
         ]);
-        let tracked: Vec<&str> = s.expiring().into_iter().map(|i| s.docs[i].id.as_str()).collect();
-        assert_eq!(tracked, ["eng1", "coc-2025"], "soonest first; superseded and ignored are gone");
+        let due: Vec<&str> =
+            s.due("2026-10-20", "2027-01-18").into_iter().map(|i| s.docs[i].id.as_str()).collect();
+        assert_eq!(due, ["eng1"], "superseded, ignored and not-yet-due are all out");
 
         let by_id = |id: &str| s.docs.iter().find(|d| d.id == id).unwrap();
         assert!(by_id("coc-2019").superseded);

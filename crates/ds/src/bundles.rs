@@ -149,6 +149,7 @@ pub fn draw_list(
         left: area.x,
         width: area.width,
         items: (skip..entries.len()).take(height).collect(),
+        ..Default::default()
     }
 }
 
@@ -244,5 +245,6 @@ pub fn draw_bundle(
         left: area.x,
         width: area.width,
         items: owners.into_iter().skip(skip).take(height).collect(),
+        ..Default::default()
     }
 }

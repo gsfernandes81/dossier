@@ -282,9 +282,22 @@ fn the_desktop_screen_is_single_line_rows() {
     let lines = screen(&mut m, 100, 26);
     assert!(lines[1].starts_with("▸ Motorcycle Insurance"));
     assert!(lines[1].contains("motorcycle"), "tags column: {:?}", lines[1]);
-    assert!(lines[1].contains("…e folder › slot 1"), "the path, cut from the left: {:?}", lines[1]);
+    assert!(lines[1].contains("  blue folder › slot 1"), "the whole path fits: {:?}", lines[1]);
     assert!(lines[2].starts_with("  RC Book"), "no under-line at this width: {:?}", lines[2]);
     assert!(!lines[23].contains("⏎ Open"), "no touch action bar on the desktop");
+}
+
+/// Where a row does not fit, tags give way before the location, and a gap
+/// always parts the two.
+#[test]
+fn tags_give_way_before_the_location() {
+    let mut m = model(92, 26);
+    let i = m.store.index_of("insurance").unwrap();
+    m.store.docs[i].tags =
+        vec!["motorcycle".into(), "longtagone".into(), "longtagtwo".into(), "longtagthree".into()];
+    let lines = screen(&mut m, 92, 26);
+    assert!(lines[1].contains("motorcycle longtagone lon…  "), "tags cut: {:?}", lines[1]);
+    assert!(lines[1].contains("  blue folder › slot 1"), "location whole: {:?}", lines[1]);
 }
 
 /// **Detail splits beside the list only when there is room** (U3): a right pane
@@ -373,7 +386,8 @@ fn the_leader_sheet_opens_over_the_list() {
     assert!(open.iter().any(|l| l.trim() == "SPC"), "the heading is SPC alone: {open:?}");
     assert!(open.iter().any(|l| l.contains("f filter")), "and the verbs: {open:?}");
     assert!(!open.iter().any(|l| l.contains("type to search")), "nothing searches it: {open:?}");
-    assert_eq!(open[27], before[27], "the entry line is untouched underneath");
+    assert!(open[27].starts_with(" menu · letters run verbs"), "{:?}", open[27]);
+    assert!(before[27].starts_with(" > "), "the search came back after: {:?}", before[27]);
 
     update(&mut m, Msg::Char('f'));
     let list = screen(&mut m, 45, 28);
@@ -696,6 +710,82 @@ fn the_attach_line_has_a_live_list() {
     assert!(lines[23].contains("attach: Identity/p"), "{text}");
 }
 
+/// While a pane is in front, letters are verbs, so the last row offers no
+/// field: it names the pane, Vim-style, and after one `d` says what a second
+/// one deletes.
+#[test]
+fn a_pane_names_its_mode_on_the_last_row() {
+    let mut m = writable(47, 24);
+    update(&mut m, Msg::Enter);
+    let lines = screen(&mut m, 47, 24);
+    assert!(lines[23].starts_with(" details · letters run verbs"), "{:?}", lines[23]);
+    assert!(!lines[23].contains('>') && !lines[23].contains('█'), "{:?}", lines[23]);
+    assert!(lines[23].trim_end().ends_with("SPC"), "the chip stays: {:?}", lines[23]);
+
+    update(&mut m, Msg::Char('d'));
+    let lines = screen(&mut m, 47, 24);
+    let name = m.current().unwrap().name.clone();
+    assert!(lines[23].contains("d · d again to delete"), "{:?}", lines[23]);
+    assert!(lines[23].contains(&name[..10]), "it names the document: {:?}", lines[23]);
+}
+
+/// The `SPC` chip opens the sheet where it is drawn, on the last row.
+#[test]
+fn the_spc_chip_opens_the_sheet_where_it_is_drawn() {
+    let mut m = model(47, 24);
+    let lines = screen(&mut m, 47, 24);
+    let col = lines[23].find("SPC").expect("the chip");
+    let col = u16::try_from(lines[23][..col].chars().count()).unwrap();
+    update(&mut m, Msg::Tap { col, row: 23 });
+    assert!(m.sheet, "a tap on the chip opens the sheet");
+}
+
+/// With a query typed, Space types a space, so the hints stop offering the
+/// menu.
+#[test]
+fn the_menu_hint_goes_once_something_is_typed() {
+    let mut m = model(47, 24);
+    let lines = screen(&mut m, 47, 24);
+    assert!(lines[22].contains("space menu"), "{:?}", lines[22]);
+    update(&mut m, Msg::Char('p'));
+    let lines = screen(&mut m, 47, 24);
+    assert!(!lines[22].contains("space menu"), "{:?}", lines[22]);
+    assert!(lines[22].contains("esc clear"), "{:?}", lines[22]);
+}
+
+/// A tap on a row of the Space sheet runs its verb, as its letter does.
+#[test]
+fn a_tap_on_a_sheet_row_runs_it() {
+    let mut m = model(47, 45);
+    update(&mut m, Msg::Char(' '));
+    let lines = screen(&mut m, 47, 45);
+    let row = lines.iter().position(|line| line.contains("f filter")).expect("the filter row");
+    update(&mut m, Msg::Tap { col: 5, row: u16::try_from(row).unwrap() });
+    assert!(!m.sheet, "the sheet gave way");
+    assert!(m.check.is_some(), "to the filter list");
+}
+
+/// At the smallest size the Details sheet flows into two columns, so no verb
+/// is cut off, and a tap on the second column runs the verb drawn there.
+#[test]
+fn the_sheet_fits_the_floor_in_two_columns() {
+    let mut m = writable(38, 12);
+    update(&mut m, Msg::Enter);
+    update(&mut m, Msg::Char(' '));
+    let lines = screen(&mut m, 38, 12);
+    let text = lines.join("\n");
+    for verb in ["e edit", "n new version", "d delete", "q quit"] {
+        assert!(text.contains(verb), "{verb} is on screen: {text}");
+    }
+    let row = lines.iter().position(|line| line.contains("q quit")).expect(&text);
+    let col = lines[row].find(" q quit").expect(&text) + 1;
+    let col = u16::try_from(lines[row][..col].chars().count()).unwrap();
+    assert_eq!(
+        update(&mut m, Msg::Tap { col, row: u16::try_from(row).unwrap() }),
+        ds::Effect::Quit
+    );
+}
+
 /// An empty store offers its first document, with nothing typed.
 #[test]
 fn an_empty_store_explains_itself() {
@@ -934,12 +1024,9 @@ fn the_location_sheet_and_its_caution_fit_the_phone() {
 
     update(&mut m, Msg::Char('d'));
     let lines = screen(&mut m, 47, 24);
-    for line in &lines {
-        println!("|{line}|");
-    }
     assert_eq!(lines[20].trim(), "Caution: blue folder holds 3 locations and 3", "{lines:?}");
     assert_eq!(lines[22].trim(), "remove their location attributes", "{lines:?}");
-    assert!(lines[23].starts_with(" >"), "the entry line stays last: {lines:?}");
+    assert!(lines[23].starts_with(" locations · "), "the last row stays last: {lines:?}");
 }
 
 /// Taps on the tree: the chevron opens and closes, a first tap selects, and a

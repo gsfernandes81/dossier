@@ -150,7 +150,13 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) -> crate
     // width, and letting the widget wrap as well would put a continuation line
     // at the left margin, where it reads as a new field.
     frame.render_widget(Paragraph::new(lines), area);
-    crate::app::RowGeometry { top: area.y, left: area.x, width: area.width, items }
+    crate::app::RowGeometry {
+        top: area.y,
+        left: area.x,
+        width: area.width,
+        items,
+        ..Default::default()
+    }
 }
 
 /// The lines one row occupies.

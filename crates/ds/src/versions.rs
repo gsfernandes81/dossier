@@ -146,5 +146,6 @@ pub fn draw(
         left: area.x,
         width: area.width,
         items: owners.into_iter().skip(skip).take(room).collect(),
+        ..Default::default()
     }
 }

@@ -384,6 +384,10 @@ pub struct RowGeometry {
     pub width: u16,
     /// Which item each drawn row belongs to, top to bottom.
     pub items: Vec<usize>,
+    /// The items of a second column, when the rows were drawn in two.
+    pub right: Vec<usize>,
+    /// The terminal column the second column starts at.
+    pub split: u16,
 }
 
 impl RowGeometry {
@@ -393,8 +397,10 @@ impl RowGeometry {
         if col < self.left || col >= self.left + self.width {
             return None;
         }
-        let offset = row.checked_sub(self.top)?;
-        self.items.get(usize::from(offset)).copied()
+        let offset = usize::from(row.checked_sub(self.top)?);
+        let column =
+            if !self.right.is_empty() && col >= self.split { &self.right } else { &self.items };
+        column.get(offset).copied()
     }
 }
 
@@ -612,6 +618,28 @@ impl Model {
             None if self.on_new => None,
             None => self.rows.get(self.cursor).map(|&i| &self.store.docs[i]),
         }
+    }
+
+    /// Whether a pane is in front — the Details, Versions or a bundle's Details
+    /// view — where bare letters are verbs rather than search text.
+    #[must_use]
+    pub fn pane(&self) -> bool {
+        matches!(
+            self.views.last(),
+            Some(View::Details { .. } | View::Versions { .. } | View::Bundle { .. })
+        )
+    }
+
+    /// Whether typing goes into the search on the last row: only when no pane,
+    /// panel or edit has taken the keys.
+    #[must_use]
+    pub fn typing_into_query(&self) -> bool {
+        !self.pane()
+            && self.edit.is_none()
+            && !self.sheet
+            && self.check.is_none()
+            && self.picker.is_none()
+            && self.locpick.is_none()
     }
 
     /// Whether the Details view is the one in front.
@@ -981,8 +1009,6 @@ impl Model {
         let Some(bundle) = self.store.bundle(&id) else { return Effect::Idle };
         if !self.delete_armed {
             self.delete_armed = true;
-            self.flash =
-                Some(format!("delete {:?}? press d again — its documents stay", bundle.name));
             return Effect::Redraw;
         }
         let set = |field: &str, value: &str| {
@@ -1038,15 +1064,21 @@ impl Model {
         doc.status(&self.today, &self.warn_until)
     }
 
-    /// How many documents are in the expiry watch and want attention — the
-    /// header count that names `:expiring`.
+    /// Documents expired or due inside the warn window, soonest first.
     #[must_use]
-    pub fn attention_count(&self) -> usize {
-        self.store
-            .docs
-            .iter()
-            .filter(|doc| matches!(self.status(doc), Status::Expired | Status::Soon))
-            .count()
+    pub fn due(&self) -> Vec<usize> {
+        self.store.due(&self.today, &self.warn_until)
+    }
+
+    /// How many documents the list holds with nothing typed and no filter but
+    /// old versions: the denominator of the count beside the search.
+    #[must_use]
+    pub fn total(&self) -> usize {
+        if self.filter.old_versions {
+            self.store.docs.len()
+        } else {
+            self.store.listed()
+        }
     }
 
     /// Rows that fit on screen right now.
@@ -1062,7 +1094,7 @@ impl Model {
     /// haystacks — R0.2 measured 0.33 ms for filter-plus-repaint at store scale
     /// on the phone, which is why there is no index and no debounce.
     fn requery(&mut self) {
-        let base = self.filter.expiring.then(|| self.store.expiring());
+        let base = self.filter.expiring.then(|| self.due());
         let mut matched = self.store.search(&self.query);
         // Scan text widens the haystack rather than replacing it: a document
         // whose *name* matches must never drop out of the list because its scan
@@ -2072,12 +2104,7 @@ impl Model {
             return Effect::Redraw;
         };
         if !self.delete_armed {
-            // Named, because on a 47-column screen the record above may have
-            // scrolled and "delete this?" would be a question about nothing in
-            // particular.
-            let asking = format!("delete {:?}? press d again", doc.name);
             self.delete_armed = true;
-            self.flash = Some(asking);
             return Effect::Redraw;
         }
         let id = doc.id.clone();
@@ -2479,18 +2506,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             // A pushed record covers the list, so the chrome under it belongs to
             // a surface you cannot see. Tapping it would mutate that surface
             // blind — the stack metaphor has to hold for touch too.
-            let covering = matches!(
-                model.views.last(),
-                Some(View::Details { .. } | View::Versions { .. } | View::Bundle { .. })
-            );
-            let pushed = covering && !crate::layout::splits(model.cols);
+            let pushed = model.pane() && !crate::layout::splits(model.cols);
             let bundles = model.views.iter().any(|view| matches!(view, View::Bundles { .. }));
             let (top, bottom) = search_zone(model);
-            if model.sheet && !model.leader_zone.hit(col, row) {
-                // Anywhere else dismisses it, the way a menu should.
-                model.sheet = false;
-                Effect::Redraw
-            } else if model.leader_zone.hit(col, row) {
+            if model.leader_zone.hit(col, row) {
                 if model.sheet {
                     model.sheet = false;
                     Effect::Redraw
@@ -2789,6 +2808,18 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
                 return Some(model.run(item.act));
             }
             model.flash = Some(format!("no verb on `{c}` here"));
+            Some(Effect::Redraw)
+        }
+        Msg::Tap { col, row } => {
+            let tapped = model.panel.at(*col, *row);
+            if let Some(item) = tapped.and_then(|at| crate::sheet::items(model).get(at).copied()) {
+                return Some(model.run(item.act));
+            }
+            // The chip that opened the sheet closes it in the shared handler.
+            if model.leader_zone.hit(*col, *row) {
+                return None;
+            }
+            model.sheet = false;
             Some(Effect::Redraw)
         }
         Msg::Backspace | Msg::Enter | Msg::Move(_) | Msg::Left | Msg::Right => Some(Effect::Idle),
@@ -4058,17 +4089,14 @@ pub(crate) mod tests {
     }
 
     /// **The first `d` asks, the second does it.** The same arming idiom `Esc`
-    /// and quit already use — on a phone the thumb that meant `e` is one row
-    /// from the key that means this.
+    /// and quit already use; the bottom row names what would go.
     #[test]
-    fn delete_takes_two_presses_and_names_what_it_would_remove() {
+    fn delete_takes_two_presses() {
         let mut m = writable();
         update(&mut m, Msg::Enter);
 
         assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw, "the first press only asks");
         assert!(m.delete_armed);
-        let asking = m.flash.clone().expect("it asked");
-        assert!(asking.contains("COC Certificate"), "and named the document: {asking:?}");
 
         assert_eq!(
             update(&mut m, Msg::Char('d')),
@@ -4223,6 +4251,7 @@ pub(crate) mod tests {
     #[test]
     fn a_save_keeps_the_cursor_on_the_document_it_edited() {
         let mut m = writable();
+        m.warn_until = "2031-12-31".into();
         update(&mut m, Msg::ToggleExpiring);
         update(&mut m, Msg::Move(Motion::Down));
         let edited = m.current().unwrap().id.clone();
@@ -4703,7 +4732,7 @@ pub(crate) mod tests {
         m.run(crate::sheet::Act::Bundles);
         update(&mut m, Msg::Enter);
         assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw);
-        assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("its documents stay")));
+        assert!(m.delete_armed);
         assert_eq!(
             update(&mut m, Msg::Char('d')),
             Effect::Append(vec![journal::Draft::delete("bundle", "joining")])
@@ -5431,6 +5460,7 @@ pub(crate) mod tests {
     #[test]
     fn the_expiring_filter_narrows_and_peels() {
         let mut m = model();
+        m.warn_until = "2031-12-31".into();
         update(&mut m, Msg::ToggleExpiring);
         let ids: Vec<&str> = m.rows.iter().map(|&i| m.store.docs[i].id.as_str()).collect();
         assert_eq!(ids, ["coc", "eng1", "passport"], "soonest first, untracked gone");
@@ -5585,6 +5615,6 @@ pub(crate) mod tests {
     #[test]
     fn the_attention_count_is_expired_plus_soon() {
         let m = model();
-        assert_eq!(m.attention_count(), 1, "COC is expired; ENG-1 is outside the window");
+        assert_eq!(m.due().len(), 1, "COC is expired; ENG-1 is outside the window");
     }
 }

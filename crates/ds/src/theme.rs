@@ -216,6 +216,18 @@ impl Theme {
         Style::default().add_modifier(Modifier::REVERSED)
     }
 
+    /// Something pressable that is on: the sheet's chip while the sheet is up,
+    /// the expiring count while its filter is. Marked more than
+    /// [`Theme::pressable`] in either mode, so on never reads as off.
+    #[must_use]
+    pub fn lit(self) -> Style {
+        if self.color {
+            self.style(Tone::Armed).add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        }
+    }
+
     /// The style for a document's expiry standing.
     #[must_use]
     pub fn status(self, status: crate::Status) -> Style {
@@ -293,5 +305,18 @@ mod tests {
         assert!(expired.is_some() && soon.is_some());
         assert_ne!(expired, soon);
         assert_eq!(theme.status(crate::Status::Ok).fg, None, "healthy is not coloured at all");
+    }
+
+    /// On is marked more than off in both modes, so a lit toggle never reads
+    /// as an unlit one.
+    #[test]
+    fn lit_is_more_than_pressable() {
+        let mono = Theme { color: false };
+        let off = mono.pressable().add_modifier;
+        let on = mono.lit().add_modifier;
+        assert!(on.contains(off) && on != off, "{on:?} over {off:?}");
+        let colour = Theme { color: true };
+        assert!(colour.lit().fg.is_some(), "lit carries a colour as well as reverse video");
+        assert!(colour.lit().add_modifier.contains(Modifier::REVERSED));
     }
 }
