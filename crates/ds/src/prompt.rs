@@ -76,11 +76,34 @@ pub enum Error {
 /// Something that can ask questions and say things.
 pub trait Prompt {
     /// The reply, or the default when it is empty; `None` when an optional
-    /// question is skipped.
+    /// question is skipped. A reply that settles nothing is asked again.
     ///
     /// # Errors
     /// [`Error`] when there is nobody to ask, they cancel, or the terminal fails.
-    fn ask(&mut self, question: &Question) -> Result<Option<String>, Error>;
+    fn ask(&mut self, question: &Question) -> Result<Option<String>, Error> {
+        if !self.interactive() {
+            return match (question.default, question.required) {
+                (Some(default), _) => Ok(Some(default.to_string())),
+                (None, true) => Err(Error::NotATerminal { flag: question.flag }),
+                (None, false) => Ok(None),
+            };
+        }
+        loop {
+            self.say(&format!("{}{}", question.prompt, hint(question)))?;
+            let reply = self.read_line(question)?;
+            match settle(question, &reply) {
+                Ok(answer) => return Ok(answer),
+                Err(()) if question.kind == Kind::YesNo => self.say("  (y or n)")?,
+                Err(()) => self.say("  (that one has no sensible default — please answer)")?,
+            }
+        }
+    }
+
+    /// One line typed in answer to `question`.
+    ///
+    /// # Errors
+    /// [`Error`] when the input ends, they cancel, or the terminal fails.
+    fn read_line(&mut self, question: &Question) -> Result<String, Error>;
 
     /// Writes a line of output.
     ///
@@ -148,29 +171,14 @@ pub struct Lines<'a, R: BufRead, W: Write> {
 }
 
 impl<R: BufRead, W: Write> Prompt for Lines<'_, R, W> {
-    fn ask(&mut self, question: &Question) -> Result<Option<String>, Error> {
-        if !self.interactive {
-            return match (question.default, question.required) {
-                (Some(default), _) => Ok(Some(default.to_string())),
-                (None, true) => Err(Error::NotATerminal { flag: question.flag }),
-                (None, false) => Ok(None),
-            };
+    fn read_line(&mut self, question: &Question) -> Result<String, Error> {
+        write!(self.output, "> ")?;
+        self.output.flush()?;
+        let mut line = String::new();
+        if self.input.read_line(&mut line)? == 0 {
+            return Err(Error::NotATerminal { flag: question.flag });
         }
-        loop {
-            write!(self.output, "{}{}\n> ", question.prompt, hint(question))?;
-            self.output.flush()?;
-            let mut line = String::new();
-            if self.input.read_line(&mut line)? == 0 {
-                return Err(Error::NotATerminal { flag: question.flag });
-            }
-            match settle(question, &line) {
-                Ok(answer) => return Ok(answer),
-                Err(()) if question.kind == Kind::YesNo => writeln!(self.output, "  (y or n)")?,
-                Err(()) => {
-                    writeln!(self.output, "  (that one has no sensible default — please answer)")?;
-                }
-            }
-        }
+        Ok(line)
     }
 
     fn say(&mut self, line: &str) -> std::io::Result<()> {
@@ -356,16 +364,8 @@ impl Terminal {
 }
 
 impl Prompt for Terminal {
-    fn ask(&mut self, question: &Question) -> Result<Option<String>, Error> {
-        loop {
-            println!("{}{}", question.prompt, hint(question));
-            let reply = self.edit(question)?;
-            match settle(question, &reply) {
-                Ok(answer) => return Ok(answer),
-                Err(()) if question.kind == Kind::YesNo => println!("  (y or n)"),
-                Err(()) => println!("  (that one has no sensible default — please answer)"),
-            }
-        }
+    fn read_line(&mut self, question: &Question) -> Result<String, Error> {
+        self.edit(question)
     }
 
     fn say(&mut self, line: &str) -> std::io::Result<()> {
