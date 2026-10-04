@@ -4684,9 +4684,9 @@ pub(crate) mod tests {
     }
 
     /// A model on `passport`'s empty files row, attaching under a real folder.
-    fn attaching_under(name: &str) -> Model {
-        let root = std::env::temp_dir().join(format!("ds-attach-{name}"));
-        let _ = std::fs::remove_dir_all(&root);
+    fn attaching_under() -> (tempfile::TempDir, Model) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join("Identity")).expect("mkdir");
         std::fs::create_dir_all(root.join("Marine")).expect("mkdir");
         for file in ["Identity/passport.pdf", "Identity/pan.pdf"] {
@@ -4700,7 +4700,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
         select_row(&mut m, crate::detail::Row::Files);
         update(&mut m, Msg::Char('e'));
-        m
+        (dir, m)
     }
 
     fn listed(m: &Model) -> Vec<String> {
@@ -4714,7 +4714,7 @@ pub(crate) mod tests {
     /// `Tab` fills the top match, and `Enter` with nothing chosen saves the line.
     #[test]
     fn the_attach_list_opens_folders_and_tab_fills() {
-        let mut m = attaching_under("walk");
+        let (_dir, mut m) = attaching_under();
         assert_eq!(listed(&m), ["Identity/", "Marine/"]);
         update(&mut m, Msg::Move(Motion::Down));
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "a folder opens; nothing is saved");
@@ -4735,7 +4735,7 @@ pub(crate) mod tests {
     /// whole opens rather than becoming a soft copy.
     #[test]
     fn an_empty_line_or_a_folder_is_never_attached() {
-        let mut m = attaching_under("refuse");
+        let (_dir, mut m) = attaching_under();
         assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw);
         assert!(m.flash.as_deref().is_some_and(|flash| flash.contains("type a path")));
         assert!(m.edit.is_some(), "the line stays open");
@@ -4752,7 +4752,7 @@ pub(crate) mod tests {
     /// picks it and saves it.
     #[test]
     fn only_a_tap_on_a_row_does_anything_while_attaching() {
-        let mut m = attaching_under("taps");
+        let (_dir, mut m) = attaching_under();
         for c in "Identity/pas".chars() {
             update(&mut m, Msg::Char(c));
         }
@@ -4778,7 +4778,7 @@ pub(crate) mod tests {
     /// `Enter` on a chosen file fills the line and saves it at once.
     #[test]
     fn enter_on_a_chosen_file_attaches_it() {
-        let mut m = attaching_under("pick");
+        let (_dir, mut m) = attaching_under();
         for c in "Identity/".chars() {
             update(&mut m, Msg::Char(c));
         }

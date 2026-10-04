@@ -27,19 +27,10 @@ use std::process::{Command, Output, Stdio};
 
 use journal::Draft;
 use serde_json::json;
-
-/// A journal directory holding one writer file.
-fn journal_dir(name: &str, lines: &[String]) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("ds-cli-{name}"));
-    let _ = std::fs::remove_dir_all(&dir);
-    let meta = dir.join(".dossier").join("journal").join("meta");
-    std::fs::create_dir_all(&meta).expect("mkdir");
-    std::fs::write(meta.join("desk-core.jsonl"), format!("{}\n", lines.join("\n"))).expect("write");
-    dir
-}
+use tempfile::TempDir;
 
 /// Two documents: one expired with a file on disk, one with no file at all.
-fn sample(name: &str) -> PathBuf {
+fn sample() -> (TempDir, PathBuf) {
     let mut drafts = Vec::new();
     for (id, doc_name, expiry, file) in [
         ("coc", "COC Certificate", "2026-01-01", Some("Marine/coc.pdf")),
@@ -53,14 +44,17 @@ fn sample(name: &str) -> PathBuf {
             drafts.push(Draft::set("doc", id, "files", files));
         }
     }
-    let lines: Vec<String> = (1_700_000_000_000..)
+    let body: String = (1_700_000_000_000..)
         .zip(drafts)
-        .map(|(ts, draft)| draft.stamp(ts, "desk-core").to_line().unwrap())
+        .map(|(ts, draft)| draft.stamp(ts, "desk-core").to_line().unwrap() + "\n")
         .collect();
-    let root = journal_dir(name, &lines);
+    let (dir, root) = fresh();
+    let meta = root.join(".dossier").join("journal").join("meta");
+    std::fs::create_dir_all(&meta).expect("mkdir");
+    std::fs::write(meta.join("desk-core.jsonl"), body).expect("write");
     std::fs::create_dir_all(root.join("Marine")).expect("mkdir");
     std::fs::write(root.join("Marine/coc.pdf"), "").expect("write");
-    root
+    (dir, root)
 }
 
 /// Run the built binary with a config directory of its own, so the developer's
@@ -98,18 +92,19 @@ fn config_path(root: &Path) -> PathBuf {
 }
 
 /// An empty root, with no journal and no config — a device on its first day.
-fn fresh(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("ds-cli-{name}"));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("mkdir");
-    dir
+///
+/// The `TempDir` must outlive every `ds` run against the path.
+fn fresh() -> (TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().to_path_buf();
+    (dir, root)
 }
 
 /// The full report names the journal, counts the documents, and says nothing is
 /// wrong, though one document has expired: expiry is not a status finding.
 #[test]
 fn status_reports_the_store() {
-    let root = sample("status");
+    let (_dir, root) = sample();
     let out = ds(&root, &["status"]);
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{text}{}", String::from_utf8_lossy(&out.stderr));
@@ -122,7 +117,7 @@ fn status_reports_the_store() {
 /// the entire value of running it from cron.
 #[test]
 fn quiet_status_is_silent_when_healthy() {
-    let root = sample("quiet");
+    let (_dir, root) = sample();
     let out = ds(&root, &["status", "--quiet"]);
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout), "", "nothing to say");
@@ -131,7 +126,7 @@ fn quiet_status_is_silent_when_healthy() {
 /// A damaged store makes it speak, and exit non-zero so cron notices.
 #[test]
 fn quiet_status_reports_damage_and_exits_non_zero() {
-    let root = sample("damaged");
+    let (_dir, root) = sample();
     let meta = root.join(".dossier").join("journal").join("meta");
     std::fs::write(meta.join("desk-core.jsonl"), "{ this is not json\n").expect("write");
     let out = ds(&root, &["status", "--quiet"]);
@@ -144,9 +139,7 @@ fn quiet_status_reports_damage_and_exits_non_zero() {
 /// exits 0.
 #[test]
 fn a_device_with_no_journal_is_not_damaged() {
-    let root = std::env::temp_dir().join("ds-cli-fresh");
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).expect("mkdir");
+    let (_dir, root) = fresh();
     let out = ds(&root, &["status"]);
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{text}");
@@ -158,7 +151,7 @@ fn a_device_with_no_journal_is_not_damaged() {
 /// exit 2, with the candidates listed so the next attempt can be exact.
 #[test]
 fn open_refuses_to_guess() {
-    let root = sample("open");
+    let (_dir, root) = sample();
 
     let out = ds(&root, &["open", "definitely-not-here"]);
     assert_eq!(out.status.code(), Some(2));
@@ -178,7 +171,7 @@ fn open_refuses_to_guess() {
 /// exactly that — the difference between "wait" and "something is broken".
 #[test]
 fn open_says_when_a_file_has_not_synced() {
-    let root = sample("unsynced");
+    let (_dir, root) = sample();
     std::fs::remove_file(root.join("Marine/coc.pdf")).expect("remove");
     let out = ds(&root, &["open", "coc"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -190,7 +183,7 @@ fn open_says_when_a_file_has_not_synced() {
 /// writer id this device will append as.
 #[test]
 fn init_names_the_device() {
-    let root = fresh("init");
+    let (_dir, root) = fresh();
     let out = ds(&root, &["init", "--device", "phone"]);
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{text}{}", String::from_utf8_lossy(&out.stderr));
@@ -207,7 +200,7 @@ fn init_names_the_device() {
 /// device before its store was exported is the one thing the plan cannot take.
 #[test]
 fn init_does_not_create_the_journal() {
-    let root = fresh("init-nojournal");
+    let (_dir, root) = fresh();
     let out = ds(&root, &["init", "--device", "phone"]);
     assert!(out.status.success());
     assert!(!root.join(".dossier").exists(), "the journal must not exist yet");
@@ -218,7 +211,7 @@ fn init_does_not_create_the_journal() {
 /// identity, and changing it strands every op written under the old one.
 #[test]
 fn init_refuses_to_overwrite_without_force() {
-    let root = fresh("init-exists");
+    let (_dir, root) = fresh();
     assert!(ds(&root, &["init", "--device", "phone"]).status.success());
 
     let again = ds(&root, &["init", "--device", "desk"]);
@@ -238,7 +231,7 @@ fn init_refuses_to_overwrite_without_force() {
 /// says what the grammar is rather than only that the name was wrong.
 #[test]
 fn init_refuses_a_device_name_the_grammar_rejects() {
-    let root = fresh("init-grammar");
+    let (_dir, root) = fresh();
     let out = ds(&root, &["init", "--device", "My_Phone"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{stderr}");
@@ -252,7 +245,7 @@ fn init_refuses_a_device_name_the_grammar_rejects() {
 /// waits forever for an answer that cannot come is the worse failure.
 #[test]
 fn init_without_a_terminal_or_a_flag_fails_fast() {
-    let root = fresh("init-notty");
+    let (_dir, root) = fresh();
     let out = sandboxed(&root, &["init", "--root"])
         .arg(&root)
         .stdin(Stdio::null())
@@ -267,7 +260,7 @@ fn init_without_a_terminal_or_a_flag_fails_fast() {
 /// whatever folder it was started in.
 #[test]
 fn a_device_not_set_up_points_at_init() {
-    let root = fresh("not-set-up");
+    let (_dir, root) = fresh();
     for args in [&[][..], &["status"]] {
         let out = sandboxed(&root, args).current_dir(&root).output().expect("run ds");
         let stderr = String::from_utf8_lossy(&out.stderr);

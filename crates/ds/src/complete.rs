@@ -241,14 +241,13 @@ pub fn step(chosen: Option<usize>, count: usize, down: bool) -> Option<usize> {
 mod tests {
     use super::*;
 
-    fn sandbox(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ds-complete-{name}"));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn sandbox() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
         for folder in ["Scans/2024", "Scans/2025", "Marine", ".hidden"] {
-            std::fs::create_dir_all(dir.join(folder)).expect("mkdir");
+            std::fs::create_dir_all(dir.path().join(folder)).expect("mkdir");
         }
         for file in ["Scans/passport.pdf", "Scans/pan.pdf", "notes.txt", ".dotfile"] {
-            std::fs::write(dir.join(file), "").expect("write");
+            std::fs::write(dir.path().join(file), "").expect("write");
         }
         dir
     }
@@ -260,8 +259,8 @@ mod tests {
     /// Folders come first, then files; hidden ones only once a `.` is typed.
     #[test]
     fn a_folder_lists_folders_first_and_hides_dotfiles() {
-        let base = sandbox("order");
-        let folder = read(&base, "", false, None);
+        let base = sandbox();
+        let folder = read(base.path(), "", false, None);
         assert_eq!(labels(&folder, ""), ["Marine/", "Scans/", "notes.txt"]);
         assert_eq!(labels(&folder, "."), [".hidden/", ".dotfile"]);
     }
@@ -270,20 +269,20 @@ mod tests {
     /// a folder can be kept to folders.
     #[test]
     fn typing_narrows_the_folder_the_head_names() {
-        let base = sandbox("narrow");
-        let folder = read(&base, "Scans/p", false, None);
+        let base = sandbox();
+        let folder = read(base.path(), "Scans/p", false, None);
         assert_eq!(folder.head, "Scans/");
         assert_eq!(labels(&folder, "Scans/P"), ["pan.pdf", "passport.pdf"]);
         assert!(folder.holds("Scans/pass") && !folder.holds("Scans/2024/"));
-        let dirs = read(&base, "Scans/", true, None);
+        let dirs = read(base.path(), "Scans/", true, None);
         assert_eq!(labels(&dirs, "Scans/"), ["2024/", "2025/"]);
     }
 
     /// Filling a folder ends in its separator, a backslash where one is typed.
     #[test]
     fn filling_a_folder_ends_in_its_separator() {
-        let base = sandbox("fill");
-        let folder = read(&base, "Sc", false, None);
+        let base = sandbox();
+        let folder = read(base.path(), "Sc", false, None);
         let scans = folder.matching("Sc")[0].clone();
         assert_eq!(folder.fill(&scans), "Scans/");
         let windows = Folder { head: "C:\\Users\\".into(), entries: vec![] };

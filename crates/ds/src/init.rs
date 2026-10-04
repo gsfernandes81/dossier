@@ -465,14 +465,11 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
-    /// A directory of this test's own, holding the config it writes. No
-    /// environment variable is involved, so these run in parallel like every
-    /// other test in the crate.
-    fn sandbox(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ds-init-{name}"));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("mkdir");
-        dir
+    /// Returns a fresh directory of this test's own, with its path.
+    fn sandbox() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().to_path_buf();
+        (dir, path)
     }
 
     fn talk(
@@ -503,7 +500,7 @@ mod tests {
     /// the fallback, never the requirement — which is what lets CI drive it.
     #[test]
     fn it_asks_only_for_what_the_flags_left_out() {
-        let dir = sandbox("asks");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let answers = Answers { root: Some(dir.join("Sync")), ..Answers::default() };
         let (result, transcript) = talk(&path, &answers, "phone\n\n", true);
@@ -518,7 +515,7 @@ mod tests {
     /// ask again than to fail at the end of the conversation.
     #[test]
     fn a_blank_reply_is_asked_again() {
-        let dir = sandbox("blank");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let answers = Answers { root: Some(dir.join("Sync")), ..Answers::default() };
         let (result, transcript) = talk(&path, &answers, "\n\ndesk\n\n", true);
@@ -532,7 +529,7 @@ mod tests {
     /// never disagree about what a legal id is.
     #[test]
     fn a_device_name_outside_the_grammar_is_refused() {
-        let dir = sandbox("grammar");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         for bad in ["Phone", "my_device", "phone!", ""] {
             let answers = Answers {
@@ -554,7 +551,7 @@ mod tests {
     /// because anything inside a Syncthing folder syncs by default.
     #[test]
     fn it_does_not_create_the_journal() {
-        let dir = sandbox("nojournal");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let root = dir.join("Sync");
         std::fs::create_dir_all(&root).expect("mkdir");
@@ -574,7 +571,7 @@ mod tests {
     /// finished off later.
     #[test]
     fn re_running_keeps_what_is_not_changed() {
-        let dir = sandbox("rerun");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let root = dir.join("Sync");
         std::fs::write(
@@ -602,7 +599,7 @@ mod tests {
     /// old name; with nobody to confirm it, it takes `--force`.
     #[test]
     fn a_rename_is_confirmed_or_forced() {
-        let dir = sandbox("rename");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let answers = Answers {
             device: Some("phone".into()),
@@ -629,7 +626,7 @@ mod tests {
     /// Syncthing's own config supplies the API key when the person agrees.
     #[test]
     fn the_api_key_comes_from_syncthings_own_config() {
-        let dir = sandbox("discover");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let xml = dir.join("config.xml");
         std::fs::write(
@@ -655,7 +652,7 @@ mod tests {
     /// address defaults to Syncthing's usual one.
     #[test]
     fn the_api_key_is_asked_for_and_skippable() {
-        let dir = sandbox("askkey");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let answers = Answers {
             device: Some("phone".into()),
@@ -676,7 +673,7 @@ mod tests {
     /// A kept key can still be cleared: no to keeping it, then Enter.
     #[test]
     fn a_kept_api_key_can_be_cleared() {
-        let dir = sandbox("clearkey");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let answers = Answers {
             device: Some("phone".into()),
@@ -692,7 +689,7 @@ mod tests {
     /// An address that is not `host:port` is asked again.
     #[test]
     fn a_malformed_address_is_asked_again() {
-        let dir = sandbox("address");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let answers = Answers {
             device: Some("phone".into()),
@@ -709,7 +706,7 @@ mod tests {
     /// fails without writing.
     #[test]
     fn a_file_is_not_a_root() {
-        let dir = sandbox("fileroot");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let file = dir.join("notes.txt");
         std::fs::write(&file, "").expect("write");
@@ -729,7 +726,7 @@ mod tests {
     /// Termux needs `termux-open` on the path and `~/storage` set up.
     #[test]
     fn termux_problems_name_their_fix() {
-        let dir = sandbox("termux");
+        let (_tmp, dir) = sandbox();
         let problems = termux_problems(&dir, None);
         assert_eq!(problems.len(), 2, "{problems:?}");
         assert!(problems[0].contains("pkg install termux-api"));
@@ -777,7 +774,7 @@ mod tests {
     /// the config holds a path Linux can open, not backslashes.
     #[test]
     fn under_wsl_a_windows_root_is_stored_as_its_mount() {
-        let dir = sandbox("wsl-root");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let wsl = fake_wsl(&dir);
         let answers = Answers { device: Some("desk-wsl".into()), ..Answers::default() };
@@ -792,7 +789,7 @@ mod tests {
     /// would work. The same name on a different store is fine.
     #[test]
     fn under_wsl_a_windows_twin_is_refused() {
-        let dir = sandbox("wsl-twin");
+        let (_tmp, dir) = sandbox();
         let path = dir.join("config.toml");
         let wsl = fake_wsl(&dir);
         let windows = dir.join("mnt/c/Users/g/AppData/Local/dossier");
@@ -831,7 +828,7 @@ mod tests {
     /// have answered it.
     #[test]
     fn without_a_terminal_a_missing_answer_names_its_flag() {
-        let dir = sandbox("notty");
+        let (_tmp, dir) = sandbox();
         let (result, _) = talk(&dir.join("config.toml"), &Answers::default(), "", false);
         match result {
             Err(Error::Prompt(crate::prompt::Error::NotATerminal { flag })) => {

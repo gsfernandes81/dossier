@@ -60,3 +60,4 @@ ureq = { version = "3", default-features = false, features = ["json", "rustls"] 
 
 [dev-dependencies]
 proptest = "1"
+tempfile = "3"

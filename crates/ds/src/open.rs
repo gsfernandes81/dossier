@@ -262,8 +262,8 @@ mod tests {
         if Wsl::current().is_some() {
             return;
         }
-        let base = std::env::temp_dir().join(format!("ds-open-wsl-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path();
         let system = base.join("mnt/c/Windows/System32");
         std::fs::create_dir_all(&system).expect("mkdir");
         let log = base.join("argv");
@@ -289,7 +289,6 @@ mod tests {
             lines,
             [drive.to_str().unwrap(), "url.dll,FileProtocolHandler", r"C:\Users\g\a b,c.pdf"]
         );
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The Termux hint names both halves of the install, because having only one

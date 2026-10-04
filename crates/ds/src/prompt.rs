@@ -391,13 +391,12 @@ mod tests {
         }
     }
 
-    fn sandbox(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ds-prompt-{name}"));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn sandbox() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
         for folder in ["Sync/Documents", "Sync/Music", "Other"] {
-            std::fs::create_dir_all(dir.join(folder)).expect("mkdir");
+            std::fs::create_dir_all(dir.path().join(folder)).expect("mkdir");
         }
-        std::fs::write(dir.join("Sync/notes.txt"), "").expect("write");
+        std::fs::write(dir.path().join("Sync/notes.txt"), "").expect("write");
         dir
     }
 
@@ -405,8 +404,8 @@ mod tests {
     /// chosen row opens on `Enter` rather than finishing the line.
     #[test]
     fn a_folder_line_lists_folders_and_opens_the_chosen_one() {
-        let base = sandbox("folder");
-        let mut editor = LineEditor::new(Kind::Folder, base, None);
+        let base = sandbox();
+        let mut editor = LineEditor::new(Kind::Folder, base.path().to_path_buf(), None);
         typed(&mut editor, "Sy");
         press(&mut editor, KeyCode::Tab);
         assert_eq!(editor.buffer, "Sync/");

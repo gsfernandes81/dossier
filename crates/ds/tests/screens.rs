@@ -680,8 +680,8 @@ fn a_bundle_lists_its_documents() {
 /// view, folders first, with the line still at the bottom.
 #[test]
 fn the_attach_line_has_a_live_list() {
-    let root = std::env::temp_dir().join("ds-screens-attach");
-    let _ = std::fs::remove_dir_all(&root);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().to_path_buf();
     std::fs::create_dir_all(root.join("Identity")).expect("mkdir");
     std::fs::write(root.join("Identity/passport.pdf"), "").expect("write");
     std::fs::write(root.join("Identity/pan.pdf"), "").expect("write");

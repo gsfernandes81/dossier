@@ -241,20 +241,13 @@ mod tests {
         path
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ds-config-{name}"));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("mkdir");
-        dir
-    }
-
     /// The whole file is three keys and a table — anything more belongs in the
     /// journal, and this test is where that rule is visible.
     #[test]
     fn a_full_config_reads_back() {
-        let dir = temp_dir("full");
+        let dir = tempfile::tempdir().expect("tempdir");
         let path = write(
-            &dir,
+            dir.path(),
             r#"
                 syncthing_root = "/storage/emulated/0/Sync"
                 device = "phone"
@@ -274,8 +267,8 @@ mod tests {
     /// A device with no config is a normal state, not a failure.
     #[test]
     fn an_empty_config_is_valid() {
-        let dir = temp_dir("empty");
-        let path = write(&dir, "");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write(dir.path(), "");
         let config = Config::read(&path).expect("read");
         assert!(config.syncthing_root.is_none());
         assert!(config.syncthing.address.is_none());
@@ -285,8 +278,8 @@ mod tests {
     /// never silently treated as absent, which would look like a lost store.
     #[test]
     fn a_broken_config_names_itself() {
-        let dir = temp_dir("broken");
-        let path = write(&dir, "syncthing_root = [oops");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write(dir.path(), "syncthing_root = [oops");
         let error = Config::read(&path).unwrap_err();
         assert!(matches!(error, Error::Parse { .. }));
         assert!(error.to_string().contains("config.toml"));
@@ -295,8 +288,8 @@ mod tests {
     /// `~` is expanded, because config files get hand-written.
     #[test]
     fn a_tilde_root_expands() {
-        let dir = temp_dir("tilde");
-        let path = write(&dir, "syncthing_root = \"~/Sync\"");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write(dir.path(), "syncthing_root = \"~/Sync\"");
         let config = Config::read(&path).expect("read");
         let root = config.syncthing_root.unwrap();
         assert!(!root.starts_with("~"), "still a tilde: {}", root.display());

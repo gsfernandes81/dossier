@@ -532,8 +532,8 @@ mod tests {
     /// root, with one config that collides and one that does not.
     #[test]
     fn the_scan_finds_a_twin_in_any_windows_profile() {
-        let base = std::env::temp_dir().join(format!("ds-wsl-twin-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path();
         let profile = |user: &str, body: &str| {
             let dir = base.join("c/Users").join(user).join("AppData/Local/dossier");
             std::fs::create_dir_all(&dir).expect("mkdir");
@@ -548,6 +548,5 @@ mod tests {
         assert_eq!(twin.writer, "desk-core");
         assert!(twin.config.ends_with("c/Users/g/AppData/Local/dossier/config.toml"));
         assert_eq!(windows_twin(&wsl, "desk-wsl", Some(&ours)), None);
-        let _ = std::fs::remove_dir_all(&base);
     }
 }
