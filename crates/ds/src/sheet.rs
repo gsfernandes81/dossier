@@ -36,6 +36,8 @@ pub enum Act {
     Delete,
     /// Choose where the record's hard copy is filed.
     Location,
+    /// Make a newer version of the record's document.
+    NewVersion,
     /// Rename the selected physical location.
     Rename,
     /// Move the selected physical location into another.
@@ -83,6 +85,7 @@ pub fn items(model: &Model) -> Vec<Item> {
         vec![
             Item { accel: "e", ..item('e', "edit this row", Act::Edit) },
             item('l', "location", Act::Location),
+            item('n', "new version", Act::NewVersion),
             Item { accel: "u ^z", ..item('u', "undo last change", Act::Undo) },
             Item { accel: "r ^y", ..item('r', "redo", Act::Redo) },
             Item { accel: "d d", ..item('d', "delete this document", Act::Delete) },
@@ -110,6 +113,6 @@ mod tests {
         let keys = |model: &Model| items(model).iter().map(|item| item.key).collect::<String>();
         assert_eq!(keys(&model), "furq");
         model.views.push(crate::app::View::Details { doc: "coc".into(), cursor: 0 });
-        assert_eq!(keys(&model), "elurdq");
+        assert_eq!(keys(&model), "elnurdq");
     }
 }

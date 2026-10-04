@@ -460,6 +460,9 @@ pub struct Model {
     /// Whether the forward append in flight is a deletion — the one write that
     /// leaves nothing to look at afterwards, and so needs its own word for it.
     pending_delete: bool,
+    /// Whether the forward append in flight makes a new version, which opens
+    /// in place of the old one's Details view once it lands.
+    pending_version: bool,
     /// What the status line says when the append in flight lands, instead of
     /// "saved".
     saved_note: Option<String>,
@@ -536,6 +539,7 @@ impl Model {
             pending_anchor: None,
             direction: Direction::Forward,
             pending_delete: false,
+            pending_version: false,
             saved_note: None,
             remove_armed: None,
             delete_armed: false,
@@ -1273,6 +1277,10 @@ impl Model {
                 self.sheet = false;
                 self.delete()
             }
+            crate::sheet::Act::NewVersion => {
+                self.sheet = false;
+                self.new_version()
+            }
             crate::sheet::Act::Quit => Effect::Quit,
         }
     }
@@ -1439,6 +1447,36 @@ impl Model {
             ..crate::edit::Edit::creating()
         });
         Effect::Append(drafts)
+    }
+
+    /// Makes a new version of the current document: its name, tags and
+    /// hard copy location carry over, and it replaces the current one.
+    fn new_version(&mut self) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some(old) = self.current() else { return Effect::Idle };
+        let id = self.mint_id(&old.name);
+        let set =
+            |field: &str, value: serde_json::Value| journal::Draft::set("doc", &id, field, value);
+        let mut forward =
+            vec![journal::Draft::create("doc", &id), set("name", old.name.clone().into())];
+        if !old.tags.is_empty() {
+            forward.push(set("tags", old.tags.clone().into()));
+        }
+        if let Some(location) = &old.location {
+            forward.push(set("location", location.clone().into()));
+        }
+        forward.push(set("supersedes", old.id.clone().into()));
+        self.pending = Some(Change {
+            forward: forward.clone(),
+            back: vec![journal::Draft::delete("doc", &id)],
+        });
+        self.direction = Direction::Forward;
+        self.pending_anchor = Some(id);
+        self.pending_version = true;
+        Effect::Append(forward)
     }
 
     /// Put the last write this session made back the way it was.
@@ -1684,6 +1722,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             // the journal has answered, the value on screen is a hope.
             let closed = model.edit.take();
             let created = closed.as_ref().is_some_and(|edit| edit.creating);
+            let version = std::mem::take(&mut model.pending_version);
             let direction = std::mem::replace(&mut model.direction, Direction::Forward);
             model.delete_armed = false;
             // The write landed, so the change is real and belongs on the stack
@@ -1716,11 +1755,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                     Some(if direction == Direction::Undo { "undone" } else { "redone" }.into());
             } else if std::mem::take(&mut model.pending_delete) {
                 model.flash = Some("deleted — u to undo".into());
-            } else if created && model.store.index_of(&anchor).is_some() {
+            } else if (created || version) && model.store.index_of(&anchor).is_some() {
                 // The Details view is the only place a new document's other
                 // fields can be filled in.
+                if version && model.detail() {
+                    model.views.pop();
+                }
                 model.views.push(View::Details { doc: anchor, cursor: 0 });
-                model.flash = Some("created".into());
+                model.flash = Some(if version { "new version" } else { "created" }.into());
             } else if kept {
                 model.flash = Some(note.unwrap_or_else(|| "saved".into()));
             } else {
@@ -1747,6 +1789,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.pending_anchor = None;
             model.direction = Direction::Forward;
             model.pending_delete = false;
+            model.pending_version = false;
             model.saved_note = None;
             model.delete_armed = false;
             model.flash = Some(reason.clone());
@@ -2689,6 +2732,58 @@ pub(crate) mod tests {
         assert_eq!(m.record_cursor(), 0, "on its first row");
         assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("seaman-book-desk"));
         assert_eq!(m.flash.as_deref(), Some("created"));
+    }
+
+    /// A new version carries the name, tags and hard copy location over and
+    /// replaces the old one; dates, soft copies and notes start empty.
+    #[test]
+    fn a_new_version_copies_the_name_tags_and_location() {
+        let mut m = writable();
+        m.store.docs[0].tags = vec!["marine".into()];
+        m.store.docs[0].location = Some("cert-file".into());
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::Char(' '));
+        let id = "coc-certificate-desk";
+        assert_eq!(
+            update(&mut m, Msg::Char('n')),
+            Effect::Append(vec![
+                journal::Draft::create("doc", id),
+                journal::Draft::set("doc", id, "name", "COC Certificate"),
+                journal::Draft::set("doc", id, "tags", serde_json::json!(["marine"])),
+                journal::Draft::set("doc", id, "location", "cert-file"),
+                journal::Draft::set("doc", id, "supersedes", "coc"),
+            ])
+        );
+    }
+
+    /// The new version opens on its name, in place of the old version's
+    /// Details view, and undo takes it back.
+    #[test]
+    fn a_new_version_opens_in_place_of_the_old_one() {
+        let mut m = writable();
+        update(&mut m, Msg::Enter);
+        m.set_record_cursor(3);
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('n'));
+
+        let mut store = m.store.clone();
+        let mut fresh = store.docs[0].clone();
+        fresh.id = "coc-certificate-desk".into();
+        fresh.supersedes = Some("coc".into());
+        fresh.expiry_date = None;
+        fresh.files.clear();
+        store.docs[0].superseded = true;
+        store.docs.push(fresh);
+        update(&mut m, Msg::Saved(Box::new(store)));
+
+        assert_eq!(m.current().map(|doc| doc.id.as_str()), Some("coc-certificate-desk"));
+        assert_eq!(m.views.len(), 1, "it replaced the old version's view");
+        assert_eq!(m.record_cursor(), 0, "on its name");
+        assert_eq!(m.flash.as_deref(), Some("new version"));
+        assert_eq!(
+            m.undo.last().map(|change| change.back.clone()),
+            Some(vec![journal::Draft::delete("doc", "coc-certificate-desk")])
+        );
     }
 
     /// A session that cannot write cannot create either, and says the same thing

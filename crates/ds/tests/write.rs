@@ -550,3 +550,27 @@ fn a_deleted_location_comes_back_with_everything_inside() {
     write_and_reload(&journal, &dir, drafts, ts, &mut model);
     assert_eq!(place(&model), "desk › leather folder", "filed again, where it was");
 }
+
+/// A new version folds as the latest one and leaves the old version in place,
+/// replaced and keeping its own expiry date.
+#[test]
+fn a_new_version_replaces_the_old_one_in_the_fold() {
+    let (dir, journal) = journal_with_a_document("version");
+    let (mut model, loaded) = load_model(&journal);
+    let ts = loaded.marks().values().map(|mark| mark.max_ts).max().unwrap_or(0);
+
+    update(&mut model, Msg::Enter);
+    update(&mut model, Msg::Char(' '));
+    let Effect::Append(drafts) = update(&mut model, Msg::Char('n')) else { panic!("no append") };
+    write_and_reload(&journal, &dir, drafts, ts, &mut model);
+
+    let store = ds::load::load(&journal).expect("reload").store;
+    let ids: Vec<&str> = store.versions("coc").iter().map(|&i| store.docs[i].id.as_str()).collect();
+    assert_eq!(ids, ["coc", "coc-certificate-desk"]);
+    let old = &store.docs[store.index_of("coc").unwrap()];
+    assert!(old.superseded);
+    assert_eq!(old.expiry_date.as_deref(), Some("2026-09-28"));
+    let new = &store.docs[store.index_of("coc-certificate-desk").unwrap()];
+    assert_eq!(new.name, "COC Certificate");
+    assert_eq!(new.expiry_date, None, "dates start empty");
+}
