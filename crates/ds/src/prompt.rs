@@ -207,12 +207,14 @@ pub struct LineEditor {
 }
 
 impl LineEditor {
-    /// Starts a line of `kind` holding `start`; relative folders are read from
-    /// `base`.
+    /// Starts an empty line of `kind`; relative folders are read from `base`.
+    ///
+    /// Empty even when the question has a current answer: the hint names it
+    /// and Enter keeps it, while typing replaces it rather than appending.
     #[must_use]
-    pub fn new(kind: Kind, start: &str, base: PathBuf, wsl: Option<crate::wsl::Wsl>) -> Self {
+    pub fn new(kind: Kind, base: PathBuf, wsl: Option<crate::wsl::Wsl>) -> Self {
         let mut editor =
-            Self { buffer: start.to_string(), chosen: None, kind, base, wsl, folder: None };
+            Self { buffer: String::new(), chosen: None, kind, base, wsl, folder: None };
         editor.refresh();
         editor
     }
@@ -316,12 +318,8 @@ pub struct Terminal {
 impl Terminal {
     fn edit(&self, question: &Question) -> Result<String, Error> {
         use ratatui::crossterm::{cursor, event, queue, style, terminal};
-        let start = match question.kind {
-            Kind::Text | Kind::Folder => question.default.unwrap_or_default(),
-            Kind::Secret | Kind::YesNo => "",
-        };
         let base = std::env::current_dir().unwrap_or_default();
-        let mut editor = LineEditor::new(question.kind, start, base, self.wsl.clone());
+        let mut editor = LineEditor::new(question.kind, base, self.wsl.clone());
         let mut out = std::io::stdout();
         terminal::enable_raw_mode()?;
         let result = (|| -> Result<String, Error> {
@@ -426,7 +424,7 @@ mod tests {
     #[test]
     fn a_folder_line_lists_folders_and_opens_the_chosen_one() {
         let base = sandbox("folder");
-        let mut editor = LineEditor::new(Kind::Folder, "", base, None);
+        let mut editor = LineEditor::new(Kind::Folder, base, None);
         typed(&mut editor, "Sy");
         press(&mut editor, KeyCode::Tab);
         assert_eq!(editor.buffer, "Sync/");
@@ -441,7 +439,7 @@ mod tests {
     /// `Esc` leaves, and a secret is shown as dots.
     #[test]
     fn esc_cancels_and_a_secret_stays_hidden() {
-        let mut editor = LineEditor::new(Kind::Secret, "", PathBuf::new(), None);
+        let mut editor = LineEditor::new(Kind::Secret, PathBuf::new(), None);
         typed(&mut editor, "abc");
         assert_eq!(editor.shown(), "•••");
         assert_eq!(press(&mut editor, KeyCode::Esc), Step::Cancel);

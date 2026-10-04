@@ -415,7 +415,9 @@ for — **a live list of the folder being typed in** shows under the line,
 folders first, narrowed by what follows the last separator. Nothing is selected
 until `↑`/`↓` chooses a row; `Enter` or a tap on a row picks it, opening a
 folder or taking a file, and `Enter` with nothing chosen takes the line as
-typed, which is how a default is kept. `Tab` fills the chosen or top row.
+typed. `Tab` fills the chosen or top row. A question with a current answer
+names it and starts with an empty line, so typing replaces it and `Enter` on
+the empty line keeps it.
 
 ### Search-first creation
 

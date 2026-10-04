@@ -59,6 +59,12 @@ pub enum Error {
         /// The name asked for.
         to: String,
     },
+    /// The root named is a file.
+    #[error("{} is a file, not a folder", root.display())]
+    NotAFolder {
+        /// The root that was refused.
+        root: PathBuf,
+    },
     /// A question went unanswered.
     #[error(transparent)]
     Prompt(#[from] crate::prompt::Error),
@@ -171,23 +177,8 @@ pub fn run(
     let was = existing.clone().unwrap_or_default();
 
     let device = ask_device(answers, prompt, was.device.as_deref())?;
-    let root = if let Some(root) = answers.root.clone() {
-        root
-    } else {
-        let default = was.syncthing_root.as_ref().map(|root| root.display().to_string());
-        let typed = prompt
-            .ask(&Question {
-                prompt: "Where is the Syncthing folder? (the root your documents live under)",
-                default: default.as_deref(),
-                kind: Kind::Folder,
-                required: true,
-                flag: "--root",
-            })?
-            .unwrap_or_default();
-        PathBuf::from(trim_separator(&typed))
-    };
+    let root = ask_root(answers, prompt, was.syncthing_root.as_deref(), machine.wsl.as_ref())?;
     let wsl = machine.wsl.as_ref();
-    let root = absolute(crate::wsl::native_root(wsl, root));
     if let Some(twin) = wsl.and_then(|wsl| crate::wsl::windows_twin(wsl, &device, Some(&root))) {
         return Err(Error::WindowsTwin { device, twin });
     }
@@ -198,6 +189,43 @@ pub fn run(
     config.save(path)?;
     report(prompt, path, &device, &root, machine.termux)?;
     Ok(config)
+}
+
+/// The Syncthing root: the flag's, or asked with the current one as the
+/// default, made absolute. A file is refused, and asked again when it was
+/// typed.
+fn ask_root(
+    answers: &Answers,
+    prompt: &mut dyn Prompt,
+    was: Option<&Path>,
+    wsl: Option<&crate::wsl::Wsl>,
+) -> Result<PathBuf, Error> {
+    let default = was.map(|root| root.display().to_string());
+    loop {
+        let typed = if let Some(root) = answers.root.clone() {
+            root
+        } else {
+            let typed = prompt
+                .ask(&Question {
+                    prompt: "Where is the Syncthing folder? (the root your documents live under)",
+                    default: default.as_deref(),
+                    kind: Kind::Folder,
+                    required: true,
+                    flag: "--root",
+                })?
+                .unwrap_or_default();
+            PathBuf::from(trim_separator(&typed))
+        };
+        let root = absolute(crate::wsl::native_root(wsl, typed));
+        if !root.is_file() {
+            return Ok(root);
+        }
+        let error = Error::NotAFolder { root };
+        if answers.root.is_some() || !prompt.interactive() {
+            return Err(error);
+        }
+        prompt.say(&error.to_string())?;
+    }
 }
 
 /// A root as stored: `~` expanded and a relative path made absolute, so it
@@ -315,25 +343,53 @@ fn ask_syncthing(
     } else {
         "in Syncthing's GUI, Actions → Settings → General"
     };
-    let apikey = prompt.ask(&Question {
-        prompt: &format!(
-            "Syncthing API key, so `ds status` can ask Syncthing how the folder is doing \
-             ({where_})"
-        ),
-        default: was.apikey.as_deref(),
-        kind: Kind::Secret,
-        required: false,
-        flag: "--device",
-    })?;
-    let Some(apikey) = apikey else { return Ok(was) };
-    let address = prompt.ask(&Question {
-        prompt: "Syncthing's GUI address",
-        default: Some(was.address.as_deref().unwrap_or(DEFAULT_ADDRESS)),
-        kind: Kind::Text,
-        required: true,
-        flag: "--device",
-    })?;
-    Ok(crate::config::Syncthing { address, apikey: Some(apikey), ..was })
+    let kept = match &was.apikey {
+        Some(apikey) => prompt.ask(&Question {
+            prompt: &format!("Keep the Syncthing API key {}?", crate::prompt::masked(apikey)),
+            default: Some("yes"),
+            kind: Kind::YesNo,
+            required: true,
+            flag: "--device",
+        })?,
+        None => None,
+    };
+    let apikey = if kept.as_deref() == Some("yes") {
+        was.apikey.clone()
+    } else {
+        prompt.ask(&Question {
+            prompt: &format!(
+                "Syncthing API key, so `ds status` can ask Syncthing how the folder is doing \
+                 ({where_})"
+            ),
+            default: None,
+            kind: Kind::Secret,
+            required: false,
+            flag: "--device",
+        })?
+    };
+    let Some(apikey) = apikey else {
+        return Ok(crate::config::Syncthing { apikey: None, ..was });
+    };
+    let default = was.address.clone().unwrap_or_else(|| DEFAULT_ADDRESS.into());
+    loop {
+        let address = prompt
+            .ask(&Question {
+                prompt: "Syncthing's GUI address",
+                default: Some(&default),
+                kind: Kind::Text,
+                required: true,
+                flag: "--device",
+            })?
+            .unwrap_or_default();
+        if crate::syncthing::is_address(&address) {
+            return Ok(crate::config::Syncthing {
+                address: Some(address),
+                apikey: Some(apikey),
+                ..was
+            });
+        }
+        prompt.say(&format!("`{address}` is not an address like {DEFAULT_ADDRESS}"))?;
+    }
 }
 
 /// What a Termux install still needs for `ds` to open files and reach shared
@@ -626,6 +682,59 @@ mod tests {
         let config = result.expect("init");
         assert_eq!(config.syncthing.apikey.as_deref(), Some("k3y"));
         assert_eq!(config.syncthing.address.as_deref(), Some(DEFAULT_ADDRESS));
+    }
+
+    /// A kept key can still be cleared: no to keeping it, then Enter.
+    #[test]
+    fn a_kept_api_key_can_be_cleared() {
+        let dir = sandbox("clearkey");
+        let path = dir.join("config.toml");
+        let answers = Answers {
+            device: Some("phone".into()),
+            root: Some(dir.join("Sync")),
+            ..Answers::default()
+        };
+        talk(&path, &answers, "secretkey123\n\n", true).0.expect("first init");
+        let (result, transcript) = talk(&path, &answers, "n\n\n", true);
+        assert!(transcript.contains("Keep the Syncthing API key secr…y123?"), "{transcript}");
+        assert_eq!(result.expect("init").syncthing.apikey, None);
+    }
+
+    /// An address that is not `host:port` is asked again.
+    #[test]
+    fn a_malformed_address_is_asked_again() {
+        let dir = sandbox("address");
+        let path = dir.join("config.toml");
+        let answers = Answers {
+            device: Some("phone".into()),
+            root: Some(dir.join("Sync")),
+            ..Answers::default()
+        };
+        let (result, transcript) =
+            talk(&path, &answers, "k3y\n127.0.0.1:8384127.0.0.1:9999\n127.0.0.1:9999\n", true);
+        assert!(transcript.contains("is not an address like"), "{transcript}");
+        assert_eq!(result.expect("init").syncthing.address.as_deref(), Some("127.0.0.1:9999"));
+    }
+
+    /// A file is not a root: typed, it is asked again; given as a flag, init
+    /// fails without writing.
+    #[test]
+    fn a_file_is_not_a_root() {
+        let dir = sandbox("fileroot");
+        let path = dir.join("config.toml");
+        let file = dir.join("notes.txt");
+        std::fs::write(&file, "").expect("write");
+        let answers = Answers { device: Some("phone".into()), ..Answers::default() };
+        let replies = format!("{}\n{}\n\n", file.display(), dir.display());
+        let (result, transcript) = talk(&path, &answers, &replies, true);
+        assert!(transcript.contains("notes.txt is a file, not a folder"), "{transcript}");
+        assert_eq!(result.expect("init").syncthing_root, Some(dir.clone()));
+
+        std::fs::remove_file(&path).expect("remove");
+        let flagged = Answers { root: Some(file), ..answers };
+        let (result, _) = talk(&path, &flagged, "", false);
+        assert!(matches!(result, Err(Error::NotAFolder { .. })), "got {result:?}");
+        assert!(!path.exists(), "nothing was written");
     }
 
     /// Termux needs `termux-open` on the path and `~/storage` set up.

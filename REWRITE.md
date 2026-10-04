@@ -224,7 +224,9 @@ Maintenance (listed under a separate heading): `ds init` (conversational; sets d
 id, root, termux checks, syncthing API key — absorbs v2 `ds syncthing key/address`;
 the key is read from Syncthing's own `config.xml` where this machine can see it, and
 typed hidden on Termux, where it cannot; re-running it walks the same questions with
-the current answers as defaults, and a device rename is confirmed or `--force`d)
+the current answers as defaults — a root that is a file and an address that is not
+`host:port` are asked again, and a kept API key can be declined to clear it — and a
+device rename is confirmed or `--force`d)
 and `ds organize` (canonical renames, plan → `--apply`). There is no `ds reset`: it
 existed to wipe a store between test runs, and wiping a synced journal deletes it on
 every device; tests use throwaway journals. A bundle is renamed by editing its name on

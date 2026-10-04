@@ -237,6 +237,28 @@ impl Settings {
     }
 }
 
+/// Whether `address` has the shape of a GUI address: `host:port`, with an
+/// optional `http://` or `https://` in front and IPv6 hosts in brackets.
+#[must_use]
+pub fn is_address(address: &str) -> bool {
+    let rest = match address.split_once("://") {
+        Some(("http" | "https", rest)) => rest,
+        Some(_) => return false,
+        None => address,
+    };
+    let Some((host, port)) = rest.trim_end_matches('/').rsplit_once(':') else { return false };
+    let host_ok = match host.strip_prefix('[').and_then(|host| host.strip_suffix(']')) {
+        Some(inside) => {
+            !inside.is_empty() && inside.chars().all(|c| c.is_ascii_hexdigit() || c == ':')
+        }
+        None => {
+            !host.is_empty()
+                && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        }
+    };
+    host_ok && port.parse::<u16>().is_ok_and(|port| port > 0)
+}
+
 /// Add a scheme if the config gave a bare `host:port`, and drop a trailing slash.
 fn normalize(address: &str) -> String {
     let with_scheme = if address.contains("://") {
@@ -708,5 +730,25 @@ mod tests {
         assert_eq!(status.folder.as_ref().unwrap().label, "Docs");
         assert_eq!(status.folder.unwrap().folder_state.as_deref(), Some("syncing"));
         assert_eq!((status.connected, status.devices), (1, 1), "self is not a peer");
+    }
+
+    /// An address is `host:port`, and two pasted together is not one.
+    #[test]
+    fn an_address_has_a_host_and_a_port() {
+        for good in
+            ["127.0.0.1:8384", "https://localhost:8384/", "http://[::1]:8384", "nas.lan:443"]
+        {
+            assert!(is_address(good), "{good}");
+        }
+        for bad in [
+            "127.0.0.1:8384127.0.0.1:9999",
+            "127.0.0.1",
+            "ftp://host:21",
+            "host:0",
+            "a b:1",
+            ":8384",
+        ] {
+            assert!(!is_address(bad), "{bad}");
+        }
     }
 }
