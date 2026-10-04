@@ -40,7 +40,7 @@
 //! writing under another writer's id is not a mistake this API can make.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -555,34 +555,13 @@ fn repair_torn_tail(file: &mut File, path: &Path) -> Result<(), Error> {
     let io = |action: &'static str| {
         move |source: std::io::Error| Error::Io { action, path: path.to_path_buf(), source }
     };
-    let length = file.metadata().map_err(io("stat"))?.len();
-    if length == 0 {
-        return Ok(());
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(io("read"))?;
+    if bytes.last().is_some_and(|byte| *byte != b'\n') {
+        let keep =
+            bytes.iter().rposition(|byte| *byte == b'\n').map_or(0, |index| index as u64 + 1);
+        file.set_len(keep).map_err(io("truncate torn tail of"))?;
     }
-
-    // Read only the tail: journals reach megabytes, and this runs on every
-    // launch that opens a writer. 64 KiB is far more than any single op.
-    let window = length.min(64 * 1024);
-    let start = length - window;
-    let mut tail = vec![0u8; usize::try_from(window).unwrap_or(usize::MAX)];
-    file.seek(SeekFrom::Start(start)).map_err(io("seek"))?;
-    std::io::Read::read_exact(file, &mut tail).map_err(io("read tail of"))?;
-
-    if tail.last() == Some(&b'\n') {
-        return Ok(());
-    }
-    // Everything after the last newline is the torn line. If there is no
-    // newline in the whole window the file is one long unterminated line, and
-    // truncating to `start` would be wrong — but a 64 KiB op cannot exist, so
-    // that means the file is a single torn line: truncate it entirely.
-    let keep = match tail.iter().rposition(|byte| *byte == b'\n') {
-        Some(index) => start + index as u64 + 1,
-        None if window == length => 0,
-        None => return Ok(()),
-    };
-    file.set_len(keep).map_err(io("truncate torn tail of"))?;
-    // No seek-to-end needed: the caller drops this handle and reopens the file
-    // for appending, which starts at the (now correct) end by definition.
     Ok(())
 }
 
@@ -705,6 +684,36 @@ mod tests {
         writer.append(Draft::create("doc", "new")).expect("append");
         let (lines, torn) = parse_body(&std::fs::read_to_string(&path).expect("read"));
         assert!(torn.is_none() && lines.len() == 1);
+    }
+
+    /// A torn line of any length is repaired: an `enrich` op can carry a whole
+    /// transcript.
+    #[test]
+    fn a_torn_line_longer_than_any_read_window_is_repaired() {
+        let fixture = fixture();
+        let path = fixture.journal.file_path(Namespace::Meta, "desk-core");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create");
+        let torn = format!(
+            "{{\"v\":1,\"ts\":11,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"a\",\
+             \"f\":\"transcript\",\"val\":\"{}",
+            "x".repeat(200 * 1024)
+        );
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"v\":1,\"ts\":10,\"w\":\"desk-core\",\"op\":\"create\",\"ent\":\"doc\",\
+                 \"id\":\"a\"}}\n{torn}"
+            ),
+        )
+        .expect("write");
+
+        let mut writer = open(&fixture, "desk-core");
+        writer.append(Draft::create("doc", "new")).expect("append");
+
+        let (lines, torn) = parse_body(&std::fs::read_to_string(&path).expect("read"));
+        assert!(torn.is_none(), "the file ends cleanly");
+        assert_eq!(lines.len(), 2, "the torn line is gone, the new op is intact");
+        assert!(lines.iter().all(|line| line.as_op().is_some()), "nothing was glued together");
     }
 
     /// One process per writer id. The second is refused with a *recoverable*
