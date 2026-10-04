@@ -235,7 +235,7 @@ fn the_phone_screen_matches_the_approved_mockup() {
     // Status line above, entry line last — Vim's arrangement, and fzf's.
     assert!(lines[26].trim_start().starts_with("14/14"), "matched/total: {:?}", lines[26]);
     assert!(lines[26].contains("⏎ record"), "the hint line teaches the verbs");
-    assert!(lines[26].contains("^x expiry") && lines[26].contains("^t scans"));
+    assert!(lines[26].contains("space menu"), "{:?}", lines[26]);
     assert!(lines[27].starts_with(" > █"), "the query row is last: {:?}", lines[27]);
     assert!(lines[27].contains("SPC"), "and carries the leader chip: {:?}", lines[27]);
     assert!(!lines[27].contains('⌨'), "which replaced the keyboard chip: {:?}", lines[27]);
@@ -360,9 +360,8 @@ fn the_header_count_is_a_filled_cell_on_a_touch_layout() {
     assert!(none.is_empty(), "no touch affordance where there is a keyboard");
 }
 
-/// **The leader sheet covers the list rather than shrinking it**, and its
-/// toggles draw their off state — which is the whole reason the filters live
-/// there instead of as pressable status chips.
+/// **The Space sheet covers the list rather than shrinking it**, and `f` opens
+/// the filter checklist, whose boxes draw their off state as well as on.
 #[test]
 fn the_leader_sheet_opens_over_the_list() {
     let mut m = model(45, 28);
@@ -371,22 +370,22 @@ fn the_leader_sheet_opens_over_the_list() {
     update(&mut m, Msg::Char(' '));
     let open = screen(&mut m, 45, 28);
     assert_eq!(open.len(), before.len(), "the pane did not change size");
-    assert!(open.iter().any(|l| l.contains("SPC")), "the breadcrumb is up");
-    assert!(open.iter().any(|l| l.contains("filter")), "and the groups: {open:?}");
+    assert!(open.iter().any(|l| l.trim() == "SPC"), "the heading is SPC alone: {open:?}");
+    assert!(open.iter().any(|l| l.contains("f filter")), "and the verbs: {open:?}");
+    assert!(!open.iter().any(|l| l.contains("type to search")), "nothing searches it: {open:?}");
     assert_eq!(open[27], before[27], "the entry line is untouched underneath");
-    assert_eq!(open[26], before[26], "and so is the status line");
 
     update(&mut m, Msg::Char('f'));
-    let group = screen(&mut m, 45, 28);
-    let boxes: Vec<&String> = group.iter().filter(|l| l.contains('[')).collect();
-    assert_eq!(boxes.len(), 2, "two toggles, both drawn: {group:?}");
-    assert!(boxes.iter().all(|l| l.contains("[ ]")), "and both showing off: {boxes:?}");
+    let list = screen(&mut m, 45, 28);
+    let boxes: Vec<&String> = list.iter().filter(|l| l.contains("[ ]")).collect();
+    assert_eq!(boxes.len(), 3, "three filters, all off: {list:?}");
+    assert!(list.iter().any(|l| l.contains("clear all")), "{list:?}");
+    assert!(list.iter().any(|l| l.contains("SPC f  filter")), "{list:?}");
 
-    update(&mut m, Msg::Char('x'));
     update(&mut m, Msg::Char(' '));
-    update(&mut m, Msg::Char('f'));
     let on = screen(&mut m, 45, 28);
-    assert!(on.iter().any(|l| l.contains("[x]")), "and on, in the same place: {on:?}");
+    assert!(on.iter().any(|l| l.contains("[x] expiring only")), "ticked in place: {on:?}");
+    assert!(on[26].contains("[expiring]"), "and its chip is up: {:?}", on[26]);
 }
 
 /// **The status line is a lit rule between the list and the entry line**, and
@@ -492,7 +491,7 @@ fn the_touch_layout_has_one_button_and_it_explains_itself() {
     assert!(!lines[25].contains("For more"), "nothing to point at: {:?}", lines[25]);
     assert!(lines[25].starts_with(" > "), "the entry line is last here too");
     assert!(lines[24].contains("space menu"), "the hint names the key: {:?}", lines[24]);
-    assert!(lines[24].contains("^t scans"), "and teaches every verb it has");
+    assert!(!lines[24].contains("^t"), "no ctrl key for a filter: {:?}", lines[24]);
 }
 
 /// Typing narrows the list and the count says so — the fzf-style feedback the

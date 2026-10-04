@@ -62,8 +62,6 @@ fn key_msg(key: KeyEvent) -> Option<Msg> {
     match key.code {
         // Never bound over: `ctrl+c` must always quit cleanly.
         KeyCode::Char('c' | 'q') if ctrl => Some(Msg::Quit),
-        KeyCode::Char('t') if ctrl => Some(Msg::ToggleScans),
-        KeyCode::Char('x') if ctrl => Some(Msg::ToggleExpiring),
         KeyCode::Char('z') if ctrl => Some(Msg::Undo),
         KeyCode::Char('y') if ctrl => Some(Msg::Redo),
         KeyCode::Esc => Some(Msg::Esc),
@@ -77,9 +75,8 @@ fn key_msg(key: KeyEvent) -> Option<Msg> {
         KeyCode::Home => Some(Msg::Move(Motion::Home)),
         KeyCode::End => Some(Msg::Move(Motion::End)),
         KeyCode::Backspace => Some(Msg::Backspace),
-        // Find-fast: every bare printable is search text. The modifier check is
-        // what keeps `ctrl+t` from typing a `t` — and nothing else on this
-        // surface may claim a letter.
+        // Find-fast: every bare printable is search text. The modifier check
+        // keeps a `ctrl` key from typing its letter.
         KeyCode::Char(c) if !ctrl && !alt => Some(Msg::Char(c)),
         _ => None,
     }
@@ -138,7 +135,7 @@ mod tests {
         }
     }
 
-    /// `ctrl+alt+x` is deliberately the same verb as `ctrl+x`.
+    /// `ctrl+alt+z` is deliberately the same verb as `ctrl+z`.
     ///
     /// The guard asks whether CONTROL is present, not whether it is the *only*
     /// modifier — and it stays that way on purpose. Exact-modifier matching is
@@ -147,14 +144,10 @@ mod tests {
     #[test]
     fn a_bound_control_letter_ignores_extra_modifiers() {
         let both = KeyModifiers::CONTROL | KeyModifiers::ALT;
-        assert_eq!(to_msg(&press(KeyCode::Char('x'), both)), Some(Msg::ToggleExpiring));
+        assert_eq!(to_msg(&press(KeyCode::Char('z'), both)), Some(Msg::Undo));
         assert_eq!(to_msg(&press(KeyCode::Char('q'), both)), Some(Msg::Quit));
     }
 
-    /// **`ctrl+e` is the edit verb**, and it is a control letter rather than a
-    /// bare one because a bare letter is search text everywhere the list has
-    /// focus — which, on a wide terminal, includes the moment the record is
-    /// open beside it.
     /// **Editing is a bare letter on the record, never a control key.**
     ///
     /// `ctrl+e` existed for one slice and was retired. Termux latches `CTRL` in
@@ -180,12 +173,10 @@ mod tests {
         assert_eq!(to_msg(&press(KeyCode::Char('q'), KeyModifiers::CONTROL)), Some(Msg::Quit));
         assert_eq!(
             to_msg(&press(KeyCode::Char('t'), KeyModifiers::CONTROL)),
-            Some(Msg::ToggleScans)
+            None,
+            "filters live in SPC f"
         );
-        assert_eq!(
-            to_msg(&press(KeyCode::Char('x'), KeyModifiers::CONTROL)),
-            Some(Msg::ToggleExpiring)
-        );
+        assert_eq!(to_msg(&press(KeyCode::Char('x'), KeyModifiers::CONTROL)), None);
         assert_eq!(to_msg(&press(KeyCode::Char('z'), KeyModifiers::CONTROL)), Some(Msg::Undo));
         assert_eq!(to_msg(&press(KeyCode::Char('y'), KeyModifiers::CONTROL)), Some(Msg::Redo));
     }

@@ -55,7 +55,7 @@
 //! - [`syncthing`] — asking the local daemon how the sync is going, status only,
 //!   with the loopback-scoped TLS exception Termux forces.
 //! - [`scans`] — what the documents *say*, loaded lazily on a worker the first
-//!   time `ctrl+t` asks for it.
+//!   time scan-text search asks for it.
 //! - [`wsl`] — the Linux build on a Windows machine: path translation across
 //!   the boundary, and the one device-name collision only WSL can see.
 //!
@@ -70,6 +70,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod check;
 pub mod config;
 pub mod detail;
 pub mod doc;

@@ -39,7 +39,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{Filter, ListGeometry, Model, ScanSearch, Zone};
+use crate::app::{ListGeometry, Model, ScanSearch, Zone};
 use crate::layout::{fit, pad_left, short_date, truncate, width, wrap};
 use crate::theme::{Theme, Tone};
 use crate::{Doc, Status};
@@ -176,7 +176,16 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         Paragraph::new(Line::from(vec![
             Span::styled(left, theme.style(Tone::Title)),
             Span::raw(" ".repeat(gap)),
-            Span::styled(count, if touch { theme.pressable() } else { theme.style(Tone::Accent) }),
+            Span::styled(
+                count,
+                if model.filter.expiring {
+                    theme.band()
+                } else if touch {
+                    theme.pressable()
+                } else {
+                    theme.style(Tone::Accent)
+                },
+            ),
             Span::raw(" ".repeat(tail)),
         ])),
         area,
@@ -350,24 +359,18 @@ fn two_line_row(
     (first, second)
 }
 
-/// The leader sheet, drawn over the bottom of the list.
+/// The panels drawn over the view: the location picker, a picker, a
+/// checklist, and the Space sheet, which can sit over the location picker.
 ///
-/// A which-key panel: a rule, a breadcrumb, then what the next key can be. It
-/// **covers** rows rather than displacing them, so opening it never reflows the
-/// list underneath — the thing you were looking at is still where you left it
-/// when the sheet closes.
-///
-/// Toggles are drawn as checkboxes, not keys. That is the point of putting them
-/// here: a filter is state, and a checkbox is the only shape that shows **off**
-/// as well as on. The status chips below could never do it, because a chip is
-/// not rendered until its filter is already on — so it could turn one off and
-/// never on.
+/// They cover rows rather than displacing them, so closing one never reflows
+/// the list underneath.
 fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     model.tree = crate::app::RowGeometry::default();
+    model.panel = crate::app::RowGeometry::default();
     if let Some(picker) = &model.locpick {
         let tree = draw_locpick(frame, area, model, picker, theme);
         model.tree = tree;
-        if model.sheet.is_none() {
+        if !model.sheet {
             return;
         }
     }
@@ -376,42 +379,58 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         let rows = hits.iter().map(|entry| ("   ".to_string(), entry.label.clone(), "")).collect();
         let panel = Panel {
             crumb: picker.crumb(&model.store),
-            filter: &picker.filter,
+            filter: Some(&picker.filter),
             cursor: Some(picker.cursor),
             subject: None,
         };
         draw_panel(frame, area, &panel, rows, theme);
         return;
     }
-    let Some(sheet) = &model.sheet else { return };
-    let items = crate::sheet::items(sheet.group, model);
-    let hits = crate::sheet::matching(&items, &sheet.filter);
-    let rows = hits
+    if let Some(check) = &model.check {
+        let hits = check.matching(model);
+        let rows = hits
+            .iter()
+            .map(|entry| {
+                // The box is reserved whether or not it is ticked, so a row never
+                // changes width when it is toggled.
+                let lead = match entry.on {
+                    Some(on) => format!(" [{}] ", if on { "x" } else { " " }),
+                    None => "     ".to_string(),
+                };
+                (lead, entry.label.clone(), "")
+            })
+            .collect();
+        let typed =
+            if check.filter.is_empty() { String::new() } else { format!("  {}█", check.filter) };
+        let panel = Panel {
+            crumb: format!("{}{typed}", check.crumb()),
+            filter: Some(&check.filter),
+            cursor: Some(check.cursor),
+            subject: None,
+        };
+        let geometry = draw_panel(frame, area, &panel, rows, theme);
+        model.panel = geometry;
+        return;
+    }
+    if !model.sheet {
+        return;
+    }
+    let rows = crate::sheet::items(model)
         .iter()
         .map(|item| {
-            let lead = match item.on {
-                // The box is reserved whether or not it is ticked, so an item never
-                // changes width when it is toggled — a row that reflows on a press
-                // is a row whose next press lands somewhere else.
-                Some(on) => format!(" [{}] ", if on { "x" } else { " " }),
-                None if item.key == crate::sheet::NO_KEY => "   ".to_string(),
-                None => format!(" {} ", item.key),
+            let lead = if item.key == crate::sheet::NO_KEY {
+                "   ".to_string()
+            } else {
+                format!(" {} ", item.key)
             };
             (lead, item.label.to_string(), item.accel)
         })
         .collect();
-    // Only a typed filter gives the sheet a cursor: with nothing typed, the keys
-    // are the selection and a highlight would be a second, competing one.
     let subject = model.locpick.as_ref().and_then(|picker| picker.chosen()).and_then(|id| {
         let location = model.store.locations.get(id)?;
         Some((location.name.clone(), "physical location", model.store.locations.path(id)))
     });
-    let panel = Panel {
-        crumb: crate::sheet::crumb(sheet.group, &sheet.filter),
-        filter: &sheet.filter,
-        cursor: (!sheet.filter.is_empty()).then_some(sheet.cursor),
-        subject,
-    };
+    let panel = Panel { crumb: "SPC".into(), filter: None, cursor: None, subject };
     draw_panel(frame, area, &panel, rows, theme);
 }
 
@@ -694,7 +713,8 @@ fn count(
 /// The heading and selection of a panel drawn over the list.
 struct Panel<'a> {
     crumb: String,
-    filter: &'a str,
+    /// The typed search, or `None` for a panel nothing searches.
+    filter: Option<&'a str>,
     cursor: Option<usize>,
     /// What it acts on, its kind, and where it is now.
     subject: Option<(String, &'static str, String)>,
@@ -708,7 +728,7 @@ fn draw_panel(
     panel: &Panel,
     rows: Vec<(String, String, &str)>,
     theme: Theme,
-) {
+) -> crate::app::RowGeometry {
     let cols = area.width as usize;
     let gutter = crate::layout::GUTTER as usize;
     let extra = if panel.subject.is_some() { 2 } else { 0 };
@@ -719,10 +739,10 @@ fn draw_panel(
         width: area.width,
         height,
     };
-    let note = if panel.filter.is_empty() {
-        "type to search".to_string()
-    } else {
-        format!("{} match{}", rows.len(), if rows.len() == 1 { "" } else { "es" })
+    let note = match panel.filter {
+        None => String::new(),
+        Some("") => "type to search".to_string(),
+        Some(_) => format!("{} match{}", rows.len(), if rows.len() == 1 { "" } else { "es" }),
     };
     let head_gap = cols.saturating_sub(width(&panel.crumb) + width(&note) + gutter * 2);
     let mut lines = vec![
@@ -750,6 +770,7 @@ fn draw_panel(
             theme.style(Tone::Muted),
         ));
     }
+    let count = rows.len();
     for (index, (lead, label, right)) in rows.into_iter().enumerate() {
         let gap = cols.saturating_sub(width(&lead) + width(&label) + width(right) + gutter);
         let mut line = Line::from(vec![
@@ -764,20 +785,29 @@ fn draw_panel(
         }
         lines.push(line);
     }
+    let heading = lines.len().saturating_sub(count);
     frame.render_widget(ratatui::widgets::Clear, rect);
     frame.render_widget(Paragraph::new(lines), rect);
+    crate::app::RowGeometry {
+        top: rect.y + u16::try_from(heading).unwrap_or(u16::MAX),
+        left: rect.x,
+        width: rect.width,
+        items: (0..count).collect(),
+    }
 }
 
 /// The filter chips: what is narrowing the list beyond the query itself.
 fn chips(model: &Model) -> String {
     let mut chips = String::new();
-    if model.filter == Filter::EXPIRING {
+    if model.filter.expiring {
         chips.push_str("  [expiring]");
     }
+    if model.filter.old_versions {
+        chips.push_str("  [old versions]");
+    }
     match model.scan_search {
-        // The chip says which of the two searches is running, and admits when it
-        // is still waiting — a query that quietly ignores `ctrl+t` for two
-        // seconds reads as the toggle not working.
+        // It admits when the scan text is still loading: a search that quietly
+        // ignores the toggle for two seconds reads as the toggle not working.
         ScanSearch::On => chips.push_str("  [scans]"),
         ScanSearch::Loading => chips.push_str("  [scans…]"),
         ScanSearch::Off => {}
@@ -893,7 +923,7 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     }
     field.push(Span::styled(
         key,
-        if model.sheet.is_some() {
+        if model.sheet {
             // Lit while the sheet is up, so it reads as the thing that opened it.
             theme.style(Tone::Armed).add_modifier(Modifier::REVERSED)
         } else {
@@ -1048,8 +1078,10 @@ fn locpick_hints(picker: &crate::locpick::LocationPicker) -> Vec<&'static str> {
 fn touch_hints(model: &Model) -> Vec<&'static str> {
     if model.edit.is_some() {
         vec!["⏎ save", "esc discard"]
-    } else if model.locpick.is_some() && model.sheet.is_some() {
+    } else if model.sheet {
         vec!["letter runs it", "esc back"]
+    } else if model.check.is_some() {
+        vec!["⏎ toggle", "esc back"]
     } else if let Some(picker) = &model.locpick {
         locpick_hints(picker)
     } else if model.picker.is_some() {
@@ -1080,7 +1112,7 @@ fn touch_hints(model: &Model) -> Vec<&'static str> {
         }
         hints
     } else {
-        vec!["⏎ record", "^x expiry", "^t scans"]
+        vec!["⏎ record", "space menu"]
     }
 }
 
@@ -1127,16 +1159,14 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     if touch {
         return (touch_hints(model).join("  "), Tone::Muted);
     }
-    // The keyboard layout teaches every verb it has. `^t scans` used to appear
-    // in no desktop hint at all, which made content search reachable only by
-    // prior knowledge.
+    if model.sheet {
+        return ("letter runs it  esc back".into(), Tone::Muted);
+    }
+    if model.check.is_some() {
+        return ("⏎ or space toggles  type to search  esc back".into(), Tone::Muted);
+    }
     if let Some(picker) = &model.locpick {
-        let hints = if model.sheet.is_some() {
-            vec!["letter runs it", "esc back"]
-        } else {
-            locpick_hints(picker)
-        };
-        return (hints.join("  "), Tone::Muted);
+        return (locpick_hints(picker).join("  "), Tone::Muted);
     }
     let hints = if model.edit.is_some() {
         "⏎ save  esc discard"
@@ -1147,7 +1177,7 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     } else if model.detail {
         "⏎ open file  esc back  space menu  ^q quit"
     } else {
-        "space menu  ⏎ record  ^x expiring  ^t scans  ^q quit"
+        "space menu  ⏎ record  ^q quit"
     };
     (hints.into(), Tone::Muted)
 }

@@ -48,7 +48,7 @@ use crate::{Doc, Status, Store};
 /// handler — the state-machine tool Rust gives us that Python does not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
-    /// A worker finished reading the `enrich` namespace (`ctrl+t`).
+    /// A worker finished reading the `enrich` namespace for scan-text search.
     ///
     /// rust: an `Arc`, so handing the result to the model costs a pointer copy
     /// rather than cloning a store's worth of transcripts across the thread
@@ -94,9 +94,9 @@ pub enum Msg {
     Esc,
     /// `ctrl+q` / `ctrl+c` — leave now, from anywhere.
     Quit,
-    /// `ctrl+t` — include scan text in the search.
+    /// Include scan text in the search.
     ToggleScans,
-    /// `ctrl+x` — the expiring filter (a filter, never a mode).
+    /// The expiring filter: from the filter list, or a tap on the header's count.
     ToggleExpiring,
     /// `ctrl+z` — undo the last change this session wrote.
     Undo,
@@ -272,18 +272,16 @@ pub struct Filter {
     pub expiring: bool,
     /// Older versions as well as the latest.
     pub old_versions: bool,
-    /// Bundles as well as documents.
-    pub bundles: bool,
 }
 
 impl Filter {
     /// No toggle on: the latest version of every document, in shelf order.
-    pub const ALL: Self = Self { expiring: false, old_versions: false, bundles: false };
+    pub const ALL: Self = Self { expiring: false, old_versions: false };
     /// Only what the expiry watch is tracking.
     pub const EXPIRING: Self = Self { expiring: true, ..Self::ALL };
 }
 
-/// Whether `ctrl+t` is on, and whether the text it needs has arrived.
+/// Whether scan-text search is on, and whether the text it needs has arrived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScanSearch {
     /// Names, notes, tags and bundles only.
@@ -319,19 +317,6 @@ impl Zone {
     pub const fn hit(self, col: u16, row: u16) -> bool {
         self.width > 0 && row == self.row && col >= self.col && col < self.col + self.width
     }
-}
-
-/// Where the leader sheet is, and what has been typed into it.
-///
-/// See [`crate::sheet`] for what it contains and why it exists at all.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SheetState {
-    /// The group entered so far — `None` is the top level.
-    pub group: Option<char>,
-    /// Text typed into the sheet, which turns it into a command picker.
-    pub filter: String,
-    /// Which of the matching items is selected.
-    pub cursor: usize,
 }
 
 /// The rectangle the renderer last drew document rows into.
@@ -394,11 +379,10 @@ pub struct Model {
     pub warn_until: String,
     /// The search text. A bare printable anywhere on the list lands here.
     pub query: String,
-    /// `ctrl+t`: whether scan text is part of the haystack, and whether it has
-    /// arrived yet.
+    /// Whether scan text is part of the haystack, and whether it has arrived.
     pub scan_search: ScanSearch,
     /// The scan text, once a worker has read it. Kept even when the toggle is
-    /// off, so a second `ctrl+t` is instant.
+    /// off, so turning it on again is instant.
     pub scans: Option<std::sync::Arc<crate::scans::Scans>>,
     /// Which documents the list shows.
     pub filter: Filter,
@@ -420,7 +404,9 @@ pub struct Model {
     /// Reporting was dropped on purpose so the next tap raises the keyboard.
     pub keyboard_hint: bool,
     /// The leader sheet, when it is open.
-    pub sheet: Option<SheetState>,
+    pub sheet: bool,
+    /// The checkbox list, when one is open.
+    pub check: Option<crate::check::CheckList>,
     /// Which row of the open record the selector is on ([`crate::detail::rows`]).
     ///
     /// Zeroed whenever the record opens or changes document, so drilling in
@@ -504,6 +490,8 @@ pub struct Model {
     pub tree: RowGeometry,
     /// Where the Details view's rows were drawn.
     pub record: RowGeometry,
+    /// Where an open checklist's rows were drawn.
+    pub panel: RowGeometry,
 }
 
 impl Model {
@@ -525,7 +513,8 @@ impl Model {
             esc_armed: false,
             mouse_on: true,
             keyboard_hint: false,
-            sheet: None,
+            sheet: false,
+            check: None,
             record_cursor: 0,
             edit: None,
             write: WriteState::default(),
@@ -550,6 +539,7 @@ impl Model {
             list: ListGeometry::default(),
             tree: RowGeometry::default(),
             record: RowGeometry::default(),
+            panel: RowGeometry::default(),
         };
         model.requery();
         model
@@ -592,7 +582,7 @@ impl Model {
     fn requery(&mut self) {
         let base = self.filter.expiring.then(|| self.store.expiring());
         let mut matched = self.store.search(&self.query);
-        // `ctrl+t` widens the haystack rather than replacing it: a document
+        // Scan text widens the haystack rather than replacing it: a document
         // whose *name* matches must never drop out of the list because its scan
         // text does not mention the word.
         if self.scan_search == ScanSearch::On && !self.query.is_empty() {
@@ -619,8 +609,7 @@ impl Model {
         let filter = self.filter;
         matched.retain(|&i| {
             let doc = &self.store.docs[i];
-            (filter.old_versions || !doc.superseded)
-                && (filter.bundles || doc.kind == crate::doc::Kind::Document)
+            (filter.old_versions || !doc.superseded) && doc.kind == crate::doc::Kind::Document
         });
         self.rows = match base {
             None => matched,
@@ -722,7 +711,7 @@ impl Model {
         }
         let Some(doc) = self.current() else { return Effect::Idle };
         self.picker = Some(crate::pick::Picker::new(&doc.id, purpose));
-        self.sheet = None;
+        self.sheet = false;
         Effect::Redraw
     }
 
@@ -832,7 +821,7 @@ impl Model {
             return Effect::Redraw;
         }
         self.locpick = Some(crate::locpick::LocationPicker::file(&self.store, &doc.id));
-        self.sheet = None;
+        self.sheet = false;
         self.detail = true;
         self.flash = self.store.locations.loop_message();
         Effect::Redraw
@@ -1100,16 +1089,17 @@ impl Model {
         }
         // The sheet peels the same way everything else does — one layer per
         // press, outermost first — so `Esc` never needs a second meaning.
-        if let Some(sheet) = &mut self.sheet {
-            if !sheet.filter.is_empty() {
-                sheet.filter.clear();
-                sheet.cursor = 0;
-            } else if sheet.group.is_some() {
-                sheet.group = None;
-                sheet.cursor = 0;
+        if let Some(check) = &mut self.check {
+            if check.filter.is_empty() {
+                self.check = None;
             } else {
-                self.sheet = None;
+                check.filter.clear();
+                check.cursor = 0;
             }
+            return Effect::Redraw;
+        }
+        if self.sheet {
+            self.sheet = false;
             return Effect::Redraw;
         }
         if !self.query.is_empty() {
@@ -1166,68 +1156,49 @@ impl Model {
         (index < self.rows.len()).then_some(index)
     }
 
-    /// Run one item of the leader sheet.
-    ///
-    /// A chord is a shortcut for a verb, never a second implementation of it:
-    /// every arm here goes through the same [`update`] the keyboard reaches, so
-    /// `SPC f x` and `ctrl+x` cannot drift apart.
+    /// Runs one verb of the Space sheet, through the same paths the keyboard
+    /// reaches, so a letter and its `ctrl` key cannot drift apart.
     fn run(&mut self, act: crate::sheet::Act) -> Effect {
         match act {
-            crate::sheet::Act::Enter(group) => {
-                self.sheet = Some(SheetState { group: Some(group), ..SheetState::default() });
-                Effect::Redraw
-            }
-            crate::sheet::Act::Expiring => {
-                self.sheet = None;
-                update(self, Msg::ToggleExpiring)
-            }
-            crate::sheet::Act::Scans => {
-                self.sheet = None;
-                update(self, Msg::ToggleScans)
-            }
-            crate::sheet::Act::Clear => {
-                self.sheet = None;
-                self.filter = Filter::ALL;
-                self.scan_search = ScanSearch::Off;
-                self.cursor = 0;
-                self.offset = 0;
-                self.requery();
+            crate::sheet::Act::Filter => {
+                self.sheet = false;
+                self.check = Some(crate::check::CheckList::new(crate::check::Purpose::Filter));
                 Effect::Redraw
             }
             crate::sheet::Act::Edit => {
-                self.sheet = None;
+                self.sheet = false;
                 self.record_verb('e')
             }
             crate::sheet::Act::New => {
-                self.sheet = None;
+                self.sheet = false;
                 self.open_new()
             }
             crate::sheet::Act::Undo => {
-                self.sheet = None;
+                self.sheet = false;
                 self.undo()
             }
             crate::sheet::Act::Redo => {
-                self.sheet = None;
+                self.sheet = false;
                 self.redo()
             }
             crate::sheet::Act::Rename => {
-                self.sheet = None;
+                self.sheet = false;
                 self.open_rename()
             }
             crate::sheet::Act::Move => {
-                self.sheet = None;
+                self.sheet = false;
                 self.open_move()
             }
             crate::sheet::Act::Remove => {
-                self.sheet = None;
+                self.sheet = false;
                 self.remove_location()
             }
             crate::sheet::Act::Location => {
-                self.sheet = None;
+                self.sheet = false;
                 self.open_locations()
             }
             crate::sheet::Act::Delete => {
-                self.sheet = None;
+                self.sheet = false;
                 self.delete()
             }
             crate::sheet::Act::Quit => Effect::Quit,
@@ -1340,7 +1311,7 @@ impl Model {
             crate::edit::Field::Attach | crate::edit::Field::Rename => None,
         };
         self.edit = Some(crate::edit::Edit::new(doc.id.clone(), field, current.as_deref()));
-        self.sheet = None;
+        self.sheet = false;
         self.detail = true;
         Effect::Redraw
     }
@@ -1363,7 +1334,7 @@ impl Model {
             return Effect::Redraw;
         }
         self.edit = Some(crate::edit::Edit::creating());
-        self.sheet = None;
+        self.sheet = false;
         Effect::Redraw
     }
 
@@ -1436,7 +1407,7 @@ impl Model {
         self.direction = Direction::Forward;
         self.pending_anchor = Some(id.clone());
         self.pending_delete = true;
-        self.sheet = None;
+        self.sheet = false;
         Effect::Append(vec![journal::Draft::delete("doc", &id)])
     }
 
@@ -1471,7 +1442,7 @@ impl Model {
         self.pending_anchor = drafts.first().map(|draft| draft.id.clone());
         self.pending = Some(change);
         self.direction = direction;
-        self.sheet = None;
+        self.sheet = false;
         Effect::Append(drafts)
     }
 
@@ -1588,7 +1559,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
     // While the sheet is open it owns the keyboard, because its whole purpose is
     // to be somewhere letters mean something. `Esc` still peels (see
     // `Model::peel`) and `ctrl+`-anything still fires, so nothing is trapped.
-    if model.sheet.is_some() {
+    if model.check.is_some() {
+        if let Some(effect) = check_key(model, &msg) {
+            return effect;
+        }
+    }
+
+    if model.sheet {
         if let Some(effect) = sheet_key(model, &msg) {
             return effect;
         }
@@ -1688,7 +1665,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             Effect::Redraw
         }
         Msg::Leader => {
-            model.sheet = Some(SheetState::default());
+            model.sheet = true;
             Effect::Redraw
         }
         Msg::Enter => model.drill(),
@@ -1736,9 +1713,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.type_char(c);
             Effect::Redraw
         }
-        // `ctrl+t` on the browse surface. The modifier combination Termux's
-        // keyboard variants are least reliable at delivering, which is why R0.2
-        // probed it on the real device before anything depended on it.
         Msg::ToggleScans => match model.scan_search {
             ScanSearch::On | ScanSearch::Loading => {
                 model.scan_search = ScanSearch::Off;
@@ -1758,7 +1732,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         },
         Msg::ScansLoaded(scans) => {
             // A load that finished after the user changed their mind is kept,
-            // not applied: the work is done, and the next `ctrl+t` is instant.
+            // not applied: the work is done, and turning it on again is instant.
             let count = scans.len();
             model.scans = Some(scans);
             if model.scan_search == ScanSearch::Loading {
@@ -1780,11 +1754,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             Effect::Redraw
         }
         Msg::Undo => {
-            model.sheet = None;
+            model.sheet = false;
             model.undo()
         }
         Msg::Redo => {
-            model.sheet = None;
+            model.sheet = false;
             model.redo()
         }
         Msg::RaiseKeyboard => model.raise_keyboard(),
@@ -1804,22 +1778,20 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             // blind — the stack metaphor has to hold for touch too.
             let pushed = model.detail && !crate::layout::splits(model.cols);
             let (top, bottom) = search_zone(model);
-            if model.sheet.is_some() && !model.leader_zone.hit(col, row) {
+            if model.sheet && !model.leader_zone.hit(col, row) {
                 // Anywhere else dismisses it, the way a menu should.
-                model.sheet = None;
+                model.sheet = false;
                 Effect::Redraw
             } else if model.leader_zone.hit(col, row) {
-                if model.sheet.is_some() {
-                    model.sheet = None;
+                if model.sheet {
+                    model.sheet = false;
                     Effect::Redraw
                 } else {
                     update(model, Msg::Leader)
                 }
             } else if model.count_zone.hit(col, row) && !pushed {
-                // You tap the number that told you there were three. The count
-                // names its command (REWRITE-UI §1), and it toggles rather than
-                // jumps so a second tap peels it off — the same verb `ctrl+x`
-                // has, reached the way a thumb reaches things.
+                // You tap the number that told you there were three; a second
+                // tap turns the filter off again.
                 update(model, Msg::ToggleExpiring)
             } else if row >= top && row <= bottom {
                 if pushed {
@@ -1997,56 +1969,102 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     Some(effect)
 }
 
-/// Keys while the leader sheet is open. `None` means "the sheet does not want
-/// this one" — it falls through to the surface underneath.
-///
-/// The rule that makes typing and chording coexist: **a printable runs an item
-/// while nothing has been typed yet; after that every printable is filter
-/// text.** So `SPC f x` is three keys, and `SPC exp` then `Enter` is a search —
-/// and neither can be mistaken for the other halfway through.
+/// Keys while the Space sheet is open: a letter runs its verb, and nothing
+/// searches it. `None` falls through, so `Esc` and `ctrl` keys keep their meaning.
 fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
-    let sheet = model.sheet.clone()?;
-    let all = crate::sheet::items(sheet.group, model);
-    let hits = crate::sheet::matching(&all, &sheet.filter);
     match msg {
         Msg::Char(c) => {
-            if sheet.filter.is_empty() {
-                if let Some(item) = all.iter().find(|item| item.key == *c) {
-                    return Some(model.run(item.act));
-                }
+            if let Some(item) = crate::sheet::items(model).into_iter().find(|item| item.key == *c) {
+                return Some(model.run(item.act));
             }
-            let state = model.sheet.as_mut()?;
-            state.filter.push(*c);
-            state.cursor = 0;
+            model.flash = Some(format!("no verb on `{c}` here"));
             Some(Effect::Redraw)
+        }
+        Msg::Backspace | Msg::Enter | Msg::Move(_) | Msg::Left | Msg::Right => Some(Effect::Idle),
+        _ => None,
+    }
+}
+
+/// Keys while a checklist is open: typing searches it, and with nothing typed
+/// `Space` toggles the selected row, as `Enter` always does.
+fn check_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    let mut check = model.check.clone()?;
+    let hits = check.matching(model);
+    let effect = match msg {
+        Msg::Char(' ') | Msg::Leader if check.filter.is_empty() => {
+            return Some(toggle(model, hits.get(check.cursor).map(|entry| entry.toggle)));
+        }
+        Msg::Enter => return Some(toggle(model, hits.get(check.cursor).map(|entry| entry.toggle))),
+        Msg::Char(c) => {
+            check.filter.push(*c);
+            check.cursor = 0;
+            Effect::Redraw
         }
         Msg::Backspace => {
-            let state = model.sheet.as_mut()?;
-            if state.filter.pop().is_none() {
-                model.sheet = None;
-            }
-            Some(Effect::Redraw)
+            check.filter.pop();
+            check.cursor = 0;
+            Effect::Redraw
         }
-        Msg::Enter => hits.get(sheet.cursor).map(|item| model.run(item.act)),
-        Msg::Move(Motion::Up | Motion::Down) => {
-            let last = hits.len().saturating_sub(1);
-            let state = model.sheet.as_mut()?;
-            state.cursor = match msg {
-                Msg::Move(Motion::Up) => state.cursor.saturating_sub(1),
-                _ => (state.cursor + 1).min(last),
+        Msg::Move(Motion::Up) => {
+            check.cursor = check.cursor.saturating_sub(1);
+            Effect::Redraw
+        }
+        Msg::Move(Motion::Down) => {
+            check.cursor = (check.cursor + 1).min(hits.len().saturating_sub(1));
+            Effect::Redraw
+        }
+        Msg::Tap { col, row } => {
+            let Some(index) = model.panel.at(*col, *row) else {
+                model.check = None;
+                return Some(Effect::Redraw);
             };
-            Some(Effect::Redraw)
+            check.cursor = index;
+            model.check = Some(check);
+            return Some(toggle(model, hits.get(index).map(|entry| entry.toggle)));
         }
-        _ => None,
+        Msg::Move(_) | Msg::Left | Msg::Right | Msg::Scroll(_) => Effect::Idle,
+        _ => return None,
+    };
+    model.check = Some(check);
+    Some(effect)
+}
+
+/// Flips one checklist row; the list stays open, and the change shows at once.
+fn toggle(model: &mut Model, which: Option<crate::check::Toggle>) -> Effect {
+    use crate::check::Toggle;
+    let effect = match which {
+        Some(Toggle::Expiring) => update(model, Msg::ToggleExpiring),
+        Some(Toggle::Scans) => update(model, Msg::ToggleScans),
+        Some(Toggle::OldVersions) => {
+            model.filter.old_versions = !model.filter.old_versions;
+            model.cursor = 0;
+            model.offset = 0;
+            model.requery();
+            Effect::Redraw
+        }
+        Some(Toggle::ClearAll) => {
+            model.filter = Filter::ALL;
+            model.scan_search = ScanSearch::Off;
+            model.cursor = 0;
+            model.offset = 0;
+            model.requery();
+            Effect::Redraw
+        }
+        None => Effect::Idle,
+    };
+    if effect == Effect::Idle {
+        Effect::Redraw
+    } else {
+        effect
     }
 }
 
 /// Keys while the location picker is open. `None` falls through, so `ctrl+q`,
 /// `ctrl+z` and worker messages keep their meaning.
 fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
-    if model.sheet.is_some() {
+    if model.sheet {
         if *msg == Msg::Esc {
-            model.sheet = None;
+            model.sheet = false;
             return Some(Effect::Redraw);
         }
         return None;
@@ -2089,7 +2107,7 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         }
         Msg::Char(' ') | Msg::Leader if picker.filter.is_empty() => {
             if picker.chosen().is_some() {
-                model.sheet = Some(SheetState::default());
+                model.sheet = true;
             } else {
                 model.flash = Some("pick a location".into());
             }
@@ -2799,7 +2817,7 @@ pub(crate) mod tests {
         let mut m = with_locations(writable());
         picking(&mut m);
         update(&mut m, Msg::Char(' '));
-        let keys: Vec<char> = crate::sheet::items(None, &m).iter().map(|item| item.key).collect();
+        let keys: Vec<char> = crate::sheet::items(&m).iter().map(|item| item.key).collect();
         assert_eq!(keys, ['r', 'm', 'd', 'u', crate::sheet::NO_KEY, 'q']);
         update(&mut m, Msg::Char('r'));
         let edit = m.edit.as_ref().expect("the bottom line is open");
@@ -3433,7 +3451,7 @@ pub(crate) mod tests {
     }
 
     /// The default list is the latest version of each document: an older
-    /// version and a bundle stay out until their toggle brings them in.
+    /// version stays out until its toggle brings it in, and a bundle never shows.
     #[test]
     fn the_list_shows_latest_documents_unless_a_toggle_widens_it() {
         let mut m = model();
@@ -3447,9 +3465,7 @@ pub(crate) mod tests {
         m.filter.old_versions = true;
         m.requery();
         assert!(shown(&m).contains(&"passport".to_string()));
-        m.filter.bundles = true;
-        m.requery();
-        assert_eq!(m.rows.len(), 4);
+        assert!(!shown(&m).contains(&"testimonial".to_string()), "bundles live elsewhere");
 
         update(&mut m, Msg::Esc);
         assert_eq!(m.filter, Filter::ALL, "Esc clears every toggle in one peel");
@@ -3637,8 +3653,7 @@ pub(crate) mod tests {
             crate::find::draw_for_test(&mut m, 45, 28);
             update(&mut m, Msg::Tap { col, row: 0 });
             assert_eq!(m.filter, Filter::EXPIRING, "col {col} filters");
-            // A toggle, not a jump: the second tap peels it off, exactly as
-            // `ctrl+x` does.
+            // A toggle, not a jump: the second tap peels it off.
             update(&mut m, Msg::Tap { col, row: 0 });
             assert_eq!(m.filter, Filter::ALL, "col {col} toggles back");
         }
@@ -3666,16 +3681,16 @@ pub(crate) mod tests {
     fn space_leads_when_the_query_is_empty_and_types_when_it_is_not() {
         let mut m = model();
         update(&mut m, Msg::Char(' '));
-        assert!(m.sheet.is_some(), "the sheet opened");
+        assert!(m.sheet, "the sheet opened");
         assert!(m.query.is_empty(), "and nothing was typed");
 
         update(&mut m, Msg::Esc);
-        assert!(m.sheet.is_none(), "esc peels the sheet first");
+        assert!(!m.sheet, "esc peels the sheet first");
 
         update(&mut m, Msg::Char('c'));
         update(&mut m, Msg::Char(' '));
         assert_eq!(m.query, "c ", "mid-query it is just a space");
-        assert!(m.sheet.is_none());
+        assert!(!m.sheet);
     }
 
     /// A live filter does not make an empty query "typing" — the query decides,
@@ -3685,48 +3700,55 @@ pub(crate) mod tests {
         let mut m = model();
         update(&mut m, Msg::ToggleExpiring);
         update(&mut m, Msg::Char(' '));
-        assert!(m.sheet.is_some());
+        assert!(m.sheet);
     }
 
-    /// **A chord is a shortcut for a verb, never a second implementation.**
-    /// `SPC f x` goes through the same `update` that `ctrl+x` reaches.
+    /// `SPC f` opens the filter checklist; with nothing typed, Space toggles
+    /// the selected box, and the list stays open so toggles compose.
     #[test]
-    fn the_sheet_reaches_the_same_verbs_the_keyboard_does() {
+    fn the_filter_list_toggles_with_space_and_stays_open() {
         let mut m = model();
-        for c in [' ', 'f', 'x'] {
+        for c in [' ', 'f'] {
             update(&mut m, Msg::Char(c));
         }
-        assert_eq!(m.filter, Filter::EXPIRING);
-        assert!(m.sheet.is_none(), "running an item closes the sheet");
-    }
-
-    /// Typing turns the sheet into a picker, and `Enter` runs what is left.
-    #[test]
-    fn typing_in_the_sheet_finds_a_verb_by_name() {
-        let mut m = model();
-        for c in [' ', 'f', 'e', 'x', 'p'] {
-            update(&mut m, Msg::Char(c));
-        }
-        let sheet = m.sheet.clone().expect("still open while filtering");
-        assert_eq!(sheet.filter, "exp", "the letters became a search, not keys");
+        assert!(!m.sheet && m.check.is_some(), "the sheet gave way to the checklist");
+        update(&mut m, Msg::Char(' '));
+        assert!(m.filter.expiring, "Space ticked expiring only");
+        update(&mut m, Msg::Move(Motion::Down));
         update(&mut m, Msg::Enter);
-        assert_eq!(m.filter, Filter::EXPIRING);
+        assert!(m.filter.expiring && m.filter.old_versions, "Enter ticked the next one");
+        assert!(m.check.is_some(), "and the list is still open");
     }
 
-    /// The sheet peels one layer per `Esc`, like everything else on the surface.
+    /// Typing searches the checklist, so Space then types a space; Esc clears
+    /// the typing before it closes the list.
     #[test]
-    fn esc_peels_the_sheet_one_layer_at_a_time() {
+    fn typing_searches_the_filter_list_and_esc_peels_it() {
         let mut m = model();
-        for c in [' ', 'f', 'e'] {
+        for c in [' ', 'f', 'o', 'l', 'd'] {
             update(&mut m, Msg::Char(c));
         }
+        assert_eq!(m.check.as_ref().map(|c| c.filter.as_str()), Some("old"));
+        update(&mut m, Msg::Enter);
+        assert!(m.filter.old_versions);
         update(&mut m, Msg::Esc);
-        assert_eq!(m.sheet.as_ref().map(|s| s.filter.clone()), Some(String::new()));
+        assert_eq!(m.check.as_ref().map(|c| c.filter.as_str()), Some(""), "the typing went first");
         update(&mut m, Msg::Esc);
-        assert_eq!(m.sheet.as_ref().map(|s| s.group), Some(None), "up a level");
+        assert!(m.check.is_none());
+        assert!(!m.esc_armed, "closing it did not arm the quit");
+    }
+
+    /// The Space sheet runs letters and nothing searches it: a letter with no
+    /// verb says so and leaves the sheet as it was.
+    #[test]
+    fn a_letter_with_no_verb_says_so() {
+        let mut m = model();
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('x'));
+        assert!(m.sheet, "still open");
+        assert_eq!(m.flash.as_deref(), Some("no verb on `x` here"));
         update(&mut m, Msg::Esc);
-        assert!(m.sheet.is_none());
-        assert!(!m.esc_armed, "and closing the sheet did not arm the quit");
+        assert!(!m.sheet, "one Esc closes it");
     }
 
     /// **The chrome goes inert under a pushed record.** Tapping where a filter
@@ -3837,8 +3859,8 @@ pub(crate) mod tests {
             .unwrap();
 
         update(&mut m, Msg::Char(' '));
-        assert!(m.sheet.is_some(), "space still opens the sheet on the record");
-        let listed = crate::sheet::items(None, &m);
+        assert!(m.sheet, "space still opens the sheet on the record");
+        let listed = crate::sheet::items(&m);
         assert!(
             listed.iter().any(|item| item.act == crate::sheet::Act::Edit),
             "and it lists the record's verb: {listed:?}"
@@ -3846,7 +3868,7 @@ pub(crate) mod tests {
 
         update(&mut m, Msg::Char('e'));
         assert_eq!(m.edit.as_ref().map(|edit| edit.field), Some(crate::edit::Field::Expiry));
-        assert!(m.sheet.is_none(), "running an item closes the sheet");
+        assert!(!m.sheet, "running an item closes the sheet");
     }
 
     /// **`Enter` has no button**, and does not need one: a thumb opens the
@@ -3973,7 +3995,7 @@ pub(crate) mod tests {
         assert_eq!(m.offset, 0);
     }
 
-    /// **`ctrl+t` never blocks the render loop** (invariant 7). The first press
+    /// **Scan-text search never blocks the render loop** (invariant 7). The first press
     /// asks for a load and shows that it is waiting; the answer arrives as a
     /// message like any other.
     #[test]
@@ -4021,7 +4043,7 @@ pub(crate) mod tests {
         assert_eq!(ids, ["coc", "eng1"], "the name match first, in list order");
     }
 
-    /// A second `ctrl+t` costs nothing: the text is kept even while the toggle
+    /// Turning it on a second time costs nothing: the text is kept even while the toggle
     /// is off, so only the first press ever waits.
     #[test]
     fn the_second_toggle_needs_no_second_load() {

@@ -61,11 +61,11 @@ impl Row {
     #[must_use]
     pub fn verb(self) -> Option<&'static str> {
         match self {
-            Row::Editable(_) => Some("e edit"),
-            Row::File(_) => Some("e change"),
-            Row::Fact("files") => Some("e attach"),
-            Row::DigitalOnly => Some("e toggle"),
-            Row::Location => Some("e choose"),
+            Row::Editable(_)
+            | Row::File(_)
+            | Row::Fact("files")
+            | Row::DigitalOnly
+            | Row::Location => Some("e edit"),
             Row::Fact(_) => None,
         }
     }
@@ -378,14 +378,13 @@ mod tests {
         }
     }
 
-    /// The hint follows the row: rows `e` can change offer it, and the ones
-    /// this build cannot change say nothing rather than offer a key that would
-    /// refuse.
+    /// Every row `e` can change says `e edit`, the letter's own verb; a row it
+    /// cannot change says nothing.
     #[test]
     fn only_changeable_rows_carry_the_verb() {
-        assert_eq!(Row::Editable(Field::Notes).verb(), Some("e edit"));
-        assert_eq!(Row::File(0).verb(), Some("e change"));
-        assert_eq!(Row::Fact("files").verb(), Some("e attach"));
-        assert_eq!(Row::Fact("location").verb(), None);
+        for row in [Row::Editable(Field::Notes), Row::File(0), Row::Fact("files"), Row::Location] {
+            assert_eq!(row.verb(), Some("e edit"), "{row:?}");
+        }
+        assert_eq!(Row::Fact("bundles").verb(), None);
     }
 }

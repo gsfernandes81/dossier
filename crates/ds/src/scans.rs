@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Searching what the documents *say* — `ctrl+t`.
+//! Searching what the documents *say*: the filter list's search scan text.
 //!
 //! The desktop satellite reads scans and writes what it found into the journal's
 //! **`enrich`** namespace: a transcript, keywords, an issuer, a document number.
@@ -21,8 +21,8 @@
 //! forgotten — "the certificate with 4096 on it" — and it is also bulky, which
 //! is exactly why §3.1 puts it in a second namespace.
 //!
-//! So it is **loaded lazily, on a worker thread, the first time `ctrl+t` is
-//! pressed** (invariant 7: nothing blocks the render loop). Until then the app
+//! So it is **loaded lazily, on a worker thread, the first time scan-text search is
+//! turned on** (invariant 7: nothing blocks the render loop). Until then the app
 //! has not paid a byte for it, which is what keeps the phone's cold start in
 //! single-digit milliseconds.
 //!
