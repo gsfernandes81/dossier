@@ -235,15 +235,26 @@ pub fn native_root(wsl: Option<&Wsl>, typed: PathBuf) -> PathBuf {
     translated.unwrap_or(typed)
 }
 
-/// Whether two paths name the same place, with Windows' case rules on a
-/// Windows drive and Linux's everywhere else.
+/// Returns a path as text that is equal for any two spellings of one place.
+///
+/// Symlinks are resolved when the path exists, separators become `/`, a
+/// trailing slash goes, and case is folded on a Windows drive, where Windows
+/// decides what a name means.
+#[must_use]
+pub fn comparable(path: &Path, wsl: Option<&Wsl>) -> String {
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let text = resolved.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_string();
+    if wsl.is_some_and(|wsl| wsl.on_windows_drive(Path::new(&text))) {
+        text.to_ascii_lowercase()
+    } else {
+        text
+    }
+}
+
+/// Whether two paths name the same place.
 #[must_use]
 pub fn same_place(wsl: &Wsl, a: &Path, b: &Path) -> bool {
-    if wsl.on_windows_drive(a) && wsl.on_windows_drive(b) {
-        let fold = |p: &Path| p.to_string_lossy().trim_end_matches('/').to_ascii_lowercase();
-        return fold(a) == fold(b);
-    }
-    a == b
+    comparable(a, Some(wsl)) == comparable(b, Some(wsl))
 }
 
 /// A `ds.exe` on the Windows side of this machine that calls itself `device`
@@ -316,10 +327,7 @@ pub fn twin_of(
     if theirs.device.as_deref() != Some(device) {
         return false;
     }
-    let their_root = theirs
-        .syncthing_root
-        .as_ref()
-        .map(|r| r.to_str().and_then(|text| wsl.to_linux(text)).unwrap_or_else(|| r.clone()));
+    let their_root = theirs.syncthing_root.clone().map(|r| native_root(Some(wsl), r));
     match (root, their_root) {
         (Some(ours), Some(theirs)) => same_place(wsl, ours, &theirs),
         _ => true,
@@ -469,6 +477,18 @@ mod tests {
         assert!(same("/mnt/c/Users/G/Sync", "/mnt/c/users/g/sync/"));
         assert!(!same("/home/g/Sync", "/home/g/sync"));
         assert!(!same("/mnt/c/Users/g/Sync", "/mnt/c/Users/g/Sync2"));
+    }
+
+    /// A store root reached through a symlink is the place it points at.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_root_is_the_place_it_names() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let real = dir.path().join("real");
+        let link = dir.path().join("link");
+        std::fs::create_dir(&real).expect("mkdir");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        assert!(same_place(&wsl(), &link, &real));
     }
 
     /// **On a real WSL, this module agrees with WSL's own `wslpath`.**

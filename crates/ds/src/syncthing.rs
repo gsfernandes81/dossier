@@ -46,7 +46,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::wsl::Wsl;
+use crate::wsl::{comparable, native_root, Wsl};
 
 /// Per-request timeout. Loopback answers in milliseconds; anything slower is a
 /// daemon that is not going to answer at all, and `ds status` must not hang.
@@ -399,22 +399,17 @@ fn get(agent: &ureq::Agent, settings: &Settings, path: &str) -> Result<Value, Fa
     }
 }
 
-/// The folder whose path is an ancestor of the store root.
+/// Returns the folder whose path is an ancestor of the store root.
 ///
-/// Compared as text after both sides are canonicalized, because Termux's view of
-/// shared storage (`~/storage/shared/…`) is a symlink to the path Syncthing
-/// reports (`/storage/emulated/0/…`). Under WSL a Windows daemon's `C:\…` is
-/// first translated to its `/mnt/c/…`, and on a Windows drive case is folded,
-/// because Windows' own spelling and the one typed into `ds init` need not
-/// agree.
+/// Termux's `~/storage/shared/…` is a symlink to the `/storage/emulated/0/…`
+/// Syncthing reports, and a Windows daemon reports `C:\…`, so both sides go
+/// through [`comparable`] first.
 #[must_use]
 pub fn folder_containing(doc: &Value, root: &Path, wsl: Option<&Wsl>) -> Option<Folder> {
     let root = comparable(root, wsl);
     doc.as_array()?.iter().find_map(|entry| {
         let reported = entry.get("path")?.as_str()?;
-        let local =
-            wsl.and_then(|wsl| wsl.to_linux(reported)).unwrap_or_else(|| PathBuf::from(reported));
-        let path = comparable(&local, wsl);
+        let path = comparable(&native_root(wsl, PathBuf::from(reported)), wsl);
         (root == path || root.starts_with(&format!("{path}/"))).then(|| Folder {
             id: string(entry, "id").unwrap_or_default(),
             label: string(entry, "label")
@@ -431,23 +426,6 @@ pub fn folder_containing(doc: &Value, root: &Path, wsl: Option<&Wsl>) -> Option<
             folder_state: None,
         })
     })
-}
-
-/// A path as comparable text: symlinks resolved when possible, separators
-/// normalized, no trailing slash.
-fn canonical(path: &Path) -> String {
-    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    resolved.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_string()
-}
-
-/// [`canonical`], with case folded where Windows decides what a name means.
-fn comparable(path: &Path, wsl: Option<&Wsl>) -> String {
-    let text = canonical(path);
-    if wsl.is_some_and(|wsl| wsl.on_windows_drive(Path::new(&text))) {
-        text.to_ascii_lowercase()
-    } else {
-        text
-    }
 }
 
 /// Connected and configured device counts, this device excluded.
