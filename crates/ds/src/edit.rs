@@ -121,42 +121,10 @@ pub fn relative_path(typed: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 
-/// Whether a string is a calendar date in ISO form.
-///
-/// Hand-checked rather than parsed with `jiff`, for the same reason the rest of
-/// the crate compares dates as strings: the stored format *is* ISO, and every
-/// comparison in `doc.rs` depends on that being true. Parsing to a date type and
-/// formatting back would accept `2026-9-3` and silently rewrite it, which is a
-/// store that no longer sorts.
-///
-/// The day is checked against the month's real length, leap years included: a
-/// `2026-02-30` that folded would be an expiry that never arrives.
+/// Whether a string is an ISO `YYYY-MM-DD` naming a real day.
 #[must_use]
 pub fn is_iso_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
-        return false;
-    }
-    let digits = |range: std::ops::Range<usize>| {
-        value[range.clone()]
-            .bytes()
-            .all(|b| b.is_ascii_digit())
-            .then(|| value[range].parse::<u32>().unwrap_or(0))
-    };
-    let (Some(year), Some(month), Some(day)) = (digits(0..4), digits(5..7), digits(8..10)) else {
-        return false;
-    };
-    if !(1..=12).contains(&month) {
-        return false;
-    }
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let length = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        _ if leap => 29,
-        _ => 28,
-    };
-    (1..=length).contains(&day)
+    value.len() == 10 && value.parse::<jiff::civil::Date>().is_ok()
 }
 
 /// An edit in progress.
@@ -280,8 +248,16 @@ mod tests {
     /// door rather than normalized behind the user's back.
     #[test]
     fn a_date_that_would_not_sort_is_refused() {
-        for bad in ["2026-9-28", "28/09/2026", "26-09-28", "2026-09-28T00:00", "soon", "2026-13-01"]
-        {
+        for bad in [
+            "2026-9-28",
+            "28/09/2026",
+            "26-09-28",
+            "2026-09-28T00:00",
+            "20260928",
+            "+002026-09-28",
+            "soon",
+            "2026-13-01",
+        ] {
             assert!(Field::Expiry.validate(bad).is_err(), "{bad} must be refused");
         }
     }
