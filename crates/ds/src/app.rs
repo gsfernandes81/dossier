@@ -875,7 +875,17 @@ impl Model {
                 Effect::Redraw
             }
             ('e', None) => {
-                self.flash = Some("that row cannot be edited yet".into());
+                if let Some(reason) = self.write.reason() {
+                    self.flash = Some(reason.to_string());
+                    return Effect::Redraw;
+                }
+                let Some(crate::bundles::Row::Member(k)) = row else { return Effect::Idle };
+                let Some(member) = self.store.members(&id).get(k).cloned() else {
+                    return Effect::Idle;
+                };
+                let doc = self.store.docs[member.doc].id.clone();
+                self.picker =
+                    Some(crate::pick::Picker::new(&doc, crate::pick::Purpose::Member(id)));
                 Effect::Redraw
             }
             ('d', _) => self.delete_bundle(),
@@ -1199,7 +1209,8 @@ impl Model {
         let Some(doc) = self.store.index_of(&picker.doc).map(|i| &self.store.docs[i]) else {
             return Effect::Redraw;
         };
-        match (picker.purpose, choice) {
+        match (picker.purpose.clone(), choice) {
+            (Purpose::Member(bundle), choice) => self.change_member(&picker.doc, &bundle, choice),
             (Purpose::File(index), Choice::MakePrimary) => {
                 let files = doc
                     .files
@@ -1239,6 +1250,54 @@ impl Model {
             }
             (_, _) => Effect::Redraw,
         }
+    }
+
+    /// Changes how version `doc` is in `bundle`: another version in its
+    /// place, one soft copy or all, or out of it altogether.
+    fn change_member(&mut self, doc: &str, bundle: &str, choice: crate::pick::Choice) -> Effect {
+        use crate::pick::Choice;
+        let entries = |id: &str| {
+            self.store.index_of(id).map(|i| self.store.docs[i].bundles.clone()).unwrap_or_default()
+        };
+        let mut lists = vec![(doc.to_string(), entries(doc))];
+        let at = lists[0].1.iter().position(|entry| entry.bundle == bundle);
+        let Some(at) = at else { return Effect::Redraw };
+        let name = self.store.bundle(bundle).map_or(bundle, |b| b.name.as_str()).to_string();
+        let note = match choice {
+            Choice::UseVersion(other) => {
+                lists[0].1.remove(at);
+                let mut theirs = entries(&other);
+                if !theirs.iter().any(|entry| entry.bundle == bundle) {
+                    theirs.push(crate::Membership { bundle: bundle.to_string(), file: None });
+                }
+                lists.push((other, theirs));
+                format!("{name} now holds that version")
+            }
+            Choice::UseFile(file) => {
+                lists[0].1[at].file = file;
+                "saved".to_string()
+            }
+            Choice::Leave => {
+                lists[0].1.remove(at);
+                format!("taken out of {name}")
+            }
+            Choice::MakePrimary | Choice::Detach | Choice::Attach | Choice::Renew(_) => {
+                return Effect::Redraw;
+            }
+        };
+        let field = |id: &str, list: &[crate::Membership]| {
+            if list.is_empty() {
+                journal::Draft::unset("doc", id, "bundles")
+            } else {
+                journal::Draft::set("doc", id, "bundles", crate::doc::memberships_value(list))
+            }
+        };
+        let forward: Vec<journal::Draft> = lists.iter().map(|(id, list)| field(id, list)).collect();
+        let back = lists.iter().map(|(id, _)| field(id, &entries(id))).collect();
+        self.pending = Some(Change { forward: forward.clone(), back });
+        self.direction = Direction::Forward;
+        self.saved_note = Some(note);
+        Effect::Append(forward)
     }
 
     /// Replaces a document's files list, recording the way back.
@@ -4640,6 +4699,92 @@ pub(crate) mod tests {
                 ),
                 journal::Draft::delete("bundle", id),
             ])
+        );
+    }
+
+    /// `e` on a document in a bundle offers its other versions (the latest
+    /// first), its soft copies when it has several, and taking it out.
+    #[test]
+    fn e_on_a_bundled_document_offers_versions_copies_and_removal() {
+        let mut m = with_bundles();
+        let mut newer = m.store.docs[0].clone();
+        newer.id = "coc-2".into();
+        newer.supersedes = Some("coc".into());
+        newer.bundles.clear();
+        m.store.docs[0].superseded = true;
+        m.store.docs[0].files.push(crate::FileRef {
+            label: String::new(),
+            path: "Marine/coc-back.pdf".into(),
+            primary: false,
+        });
+        m.store.docs.push(newer);
+        m.run(crate::sheet::Act::Bundles);
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::Move(Motion::End));
+        update(&mut m, Msg::Move(Motion::Up));
+        update(&mut m, Msg::Char('e'));
+        let picker = m.picker.clone().expect("the picker opened");
+        let labels: Vec<String> =
+            picker.entries(&m.store).into_iter().map(|entry| entry.label).collect();
+        assert_eq!(
+            labels,
+            [
+                "use COC Certificate  (latest)",
+                "use only Marine/coc.pdf",
+                "use only Marine/coc-back.pdf",
+                "remove from this bundle"
+            ]
+        );
+        let subject = picker.subject(&m.store).expect("a heading");
+        assert_eq!(subject.2, "issue date unknown · all soft copies");
+
+        let set =
+            |id: &str, value: serde_json::Value| journal::Draft::set("doc", id, "bundles", value);
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![
+                journal::Draft::unset("doc", "coc", "bundles"),
+                set("coc-2", serde_json::json!([{"bundle": "joining"}])),
+            ]),
+            "the newer version takes the old one's place"
+        );
+        assert_eq!(
+            m.pending.as_ref().map(|change| change.back.clone()),
+            Some(vec![
+                set("coc", serde_json::json!([{"bundle": "joining"}])),
+                journal::Draft::unset("doc", "coc-2", "bundles"),
+            ])
+        );
+    }
+
+    /// Choosing one soft copy records it on the entry; removing the document
+    /// leaves the bundle without it.
+    #[test]
+    fn a_bundled_document_can_use_one_soft_copy_or_leave() {
+        let mut m = with_bundles();
+        m.store.docs[0].files.push(crate::FileRef {
+            label: String::new(),
+            path: "Marine/coc-back.pdf".into(),
+            primary: false,
+        });
+        let pick = |m: &mut Model, choice: crate::pick::Choice| {
+            let picker =
+                crate::pick::Picker::new("coc", crate::pick::Purpose::Member("joining".into()));
+            m.choose(&picker, choice)
+        };
+        assert_eq!(
+            pick(&mut m, crate::pick::Choice::UseFile(Some("Marine/coc-back.pdf".into()))),
+            Effect::Append(vec![journal::Draft::set(
+                "doc",
+                "coc",
+                "bundles",
+                serde_json::json!([{"bundle": "joining", "file": "Marine/coc-back.pdf"}])
+            )])
+        );
+        m.pending = None;
+        assert_eq!(
+            pick(&mut m, crate::pick::Choice::Leave),
+            Effect::Append(vec![journal::Draft::unset("doc", "coc", "bundles")])
         );
     }
 

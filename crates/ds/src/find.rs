@@ -1202,7 +1202,7 @@ fn view_hints(model: &Model) -> Option<Vec<&'static str>> {
         View::Bundle { id, cursor } => {
             let row = crate::bundles::rows(&model.store, id).get(*cursor).copied();
             Some(match row {
-                Some(crate::bundles::Row::Member(_)) => vec!["⏎ open", "esc back"],
+                Some(crate::bundles::Row::Member(_)) => vec!["⏎ open", "e edit", "esc back"],
                 _ => vec!["e edit", "esc back"],
             })
         }

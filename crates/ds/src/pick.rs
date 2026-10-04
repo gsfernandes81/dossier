@@ -32,12 +32,14 @@ pub struct Picker {
 }
 
 /// What a picker is choosing for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Purpose {
     /// What to do with one linked file, by index into `Doc::files`.
     File(usize),
     /// Which older document this one replaces.
     Renews,
+    /// How the document is in this bundle, by the bundle's id.
+    Member(String),
 }
 
 /// What choosing an entry does.
@@ -51,6 +53,12 @@ pub enum Choice {
     Attach,
     /// Replace this older document, or none.
     Renew(Option<String>),
+    /// Put this version in the bundle in place of the one there now.
+    UseVersion(String),
+    /// Have the bundle use this one soft copy, or every soft copy.
+    UseFile(Option<String>),
+    /// Take the document out of the bundle.
+    Leave,
 }
 
 /// One line of a picker.
@@ -79,7 +87,7 @@ impl Picker {
                 let name = path.rsplit('/').next().unwrap_or(path);
                 format!("file {name}")
             }
-            Purpose::Renews => "e  edit".into(),
+            Purpose::Renews | Purpose::Member(_) => "e  edit".into(),
         }
     }
 
@@ -88,8 +96,18 @@ impl Picker {
     #[must_use]
     pub fn subject(&self, store: &Store) -> Option<(String, &'static str, String)> {
         let doc = store.index_of(&self.doc).map(|i| &store.docs[i])?;
-        match self.purpose {
+        match &self.purpose {
             Purpose::File(_) => None,
+            Purpose::Member(bundle) => {
+                let file = doc.bundles.iter().find(|entry| entry.bundle == *bundle)?.file.clone();
+                let issued = doc
+                    .issue_date
+                    .as_deref()
+                    .map_or("issue date unknown".into(), |date| format!("issued {date}"));
+                let copies = file
+                    .map_or_else(|| "all soft copies".into(), |file| format!("soft copy {file}"));
+                Some((doc.name.clone(), "document", format!("{issued} · {copies}")))
+            }
             Purpose::Renews => {
                 let now = crate::detail::renews(store, doc);
                 let now =
@@ -105,8 +123,9 @@ impl Picker {
         let Some(doc) = store.index_of(&self.doc).map(|i| &store.docs[i]) else {
             return Vec::new();
         };
-        match self.purpose {
+        match &self.purpose {
             Purpose::File(index) => {
+                let index = *index;
                 let mut entries = Vec::new();
                 let is_primary = doc
                     .primary_file()
@@ -119,6 +138,7 @@ impl Picker {
                 entries.push(entry("attach another file", Choice::Attach));
                 entries
             }
+            Purpose::Member(bundle) => member_entries(store, doc, bundle),
             Purpose::Renews => {
                 let mut entries = Vec::new();
                 if doc.supersedes.is_some() {
@@ -142,6 +162,38 @@ impl Picker {
             .filter(|entry| crate::search::fold(&entry.label).contains(&needle))
             .collect()
     }
+}
+
+/// What can be done with a document version in a bundle: another version of
+/// it in its place (the newer one first), which soft copy the bundle uses, or
+/// taking it out.
+fn member_entries(store: &Store, doc: &crate::Doc, bundle: &str) -> Vec<Entry> {
+    let mut entries: Vec<Entry> = crate::versions::rows(store, &doc.id)
+        .into_iter()
+        .filter(|&i| store.docs[i].id != doc.id)
+        .map(|i| {
+            let version = &store.docs[i];
+            let latest = if version.superseded { "" } else { "  (latest)" };
+            Entry {
+                label: format!("use {}{latest}", crate::detail::version_name(version)),
+                choice: Choice::UseVersion(version.id.clone()),
+            }
+        })
+        .collect();
+    let file = doc.bundles.iter().find(|entry| entry.bundle == bundle).and_then(|e| e.file.clone());
+    if file.is_some() && doc.files.len() > 1 {
+        entries.push(entry("use all soft copies", Choice::UseFile(None)));
+    }
+    if doc.files.len() > 1 {
+        entries.extend(doc.files.iter().filter(|f| Some(&f.path) != file.as_ref()).map(|f| {
+            Entry {
+                label: format!("use only {}", f.path),
+                choice: Choice::UseFile(Some(f.path.clone())),
+            }
+        }));
+    }
+    entries.push(entry("remove from this bundle", Choice::Leave));
+    entries
 }
 
 /// The documents `id` may replace without breaking a chain: never itself or
