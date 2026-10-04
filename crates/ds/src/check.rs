@@ -17,14 +17,16 @@
 //! `Enter`, searched by typing. The rules are REWRITE-UI.md §5c.
 
 /// What a checklist is choosing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Purpose {
     /// The Find view's filters.
     Filter,
+    /// The bundles a document version is in, by the version's id.
+    Bundles(String),
 }
 
 /// What toggling a row does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Toggle {
     /// Expiring only.
     Expiring,
@@ -34,6 +36,10 @@ pub enum Toggle {
     Scans,
     /// Turn every filter off.
     ClearAll,
+    /// Add the version to this bundle, or take it out.
+    Bundle(String),
+    /// Create the bundle the typed text names, with the version in it.
+    NewBundle,
 }
 
 /// One row of a checklist.
@@ -70,6 +76,7 @@ impl CheckList {
     pub fn crumb(&self) -> &'static str {
         match self.purpose {
             Purpose::Filter => "SPC f  filter",
+            Purpose::Bundles(_) => "SPC b  bundles",
         }
     }
 
@@ -77,16 +84,51 @@ impl CheckList {
     #[must_use]
     pub fn matching(&self, model: &crate::Model) -> Vec<Entry> {
         let needle = crate::search::fold(&self.filter);
-        entries(self.purpose, model)
+        let mut hits: Vec<Entry> = entries(&self.purpose, model)
             .into_iter()
             .filter(|entry| crate::search::fold(&entry.label).contains(&needle))
-            .collect()
+            .collect();
+        if matches!(self.purpose, Purpose::Bundles(_)) {
+            let typed = self.filter.trim();
+            let label = if !typed.is_empty() {
+                format!("+ new \"{typed}\"")
+            } else if model.store.bundles.is_empty() {
+                "type a name to make a bundle".into()
+            } else {
+                return hits;
+            };
+            hits.insert(0, Entry { label, on: None, toggle: Toggle::NewBundle });
+        }
+        hits
+    }
+
+    /// Where the cursor starts once something is typed: on the first match,
+    /// or on `+ new` when nothing matches.
+    #[must_use]
+    pub fn first(&self, model: &crate::Model) -> usize {
+        let hits = self.matching(model);
+        usize::from(hits.len() > 1 && hits[0].toggle == Toggle::NewBundle)
     }
 }
 
-fn entries(purpose: Purpose, model: &crate::Model) -> Vec<Entry> {
+fn entries(purpose: &Purpose, model: &crate::Model) -> Vec<Entry> {
     let row = |label: &str, on: Option<bool>, toggle| Entry { label: label.into(), on, toggle };
     match purpose {
+        Purpose::Bundles(doc) => {
+            let Some(doc) = model.store.index_of(doc).map(|i| &model.store.docs[i]) else {
+                return Vec::new();
+            };
+            model
+                .store
+                .bundles
+                .iter()
+                .map(|bundle| Entry {
+                    label: bundle.name.clone(),
+                    on: Some(doc.bundles.iter().any(|entry| entry.bundle == bundle.id)),
+                    toggle: Toggle::Bundle(bundle.id.clone()),
+                })
+                .collect()
+        }
         Purpose::Filter => vec![
             row("expiring only", Some(model.filter.expiring), Toggle::Expiring),
             row("include old versions", Some(model.filter.old_versions), Toggle::OldVersions),

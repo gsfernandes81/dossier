@@ -65,7 +65,7 @@ impl Row {
         match self {
             Row::Editable(_)
             | Row::File(_)
-            | Row::Fact("files")
+            | Row::Fact("files" | "bundles")
             | Row::DigitalOnly
             | Row::Location
             | Row::Renews => Some("e edit"),
@@ -399,6 +399,6 @@ mod tests {
         for row in [Row::Editable(Field::Notes), Row::File(0), Row::Fact("files"), Row::Location] {
             assert_eq!(row.verb(), Some("e edit"), "{row:?}");
         }
-        assert_eq!(Row::Fact("bundles").verb(), None);
+        assert_eq!(Row::Fact("bundles").verb(), Some("e edit"));
     }
 }

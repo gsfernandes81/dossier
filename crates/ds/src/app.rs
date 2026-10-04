@@ -736,6 +736,92 @@ impl Model {
         Effect::Redraw
     }
 
+    /// Opens the checklist of bundles the current version is in.
+    fn open_bundle_checklist(&mut self) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        let Some(doc) = self.current().map(|doc| doc.id.clone()) else { return Effect::Idle };
+        self.check = Some(crate::check::CheckList::new(crate::check::Purpose::Bundles(doc)));
+        Effect::Redraw
+    }
+
+    /// The document version the open bundles checklist is about.
+    fn check_doc(&self) -> String {
+        match self.check.as_ref().map(|check| &check.purpose) {
+            Some(crate::check::Purpose::Bundles(doc)) => doc.clone(),
+            _ => String::new(),
+        }
+    }
+
+    /// Adds version `doc` to `bundle`, or takes it out; with `None`, creates
+    /// the bundle the checklist's typing names with the version in it. One
+    /// change either way.
+    fn tick_bundle(&mut self, doc: &str, bundle: Option<&str>) -> Effect {
+        if let Some(reason) = self.write.reason() {
+            self.flash = Some(reason.to_string());
+            return Effect::Redraw;
+        }
+        if self.pending.is_some() {
+            self.flash = Some("saving — one moment".into());
+            return Effect::Redraw;
+        }
+        let Some(version) = self.store.index_of(doc).map(|i| &self.store.docs[i]) else {
+            return Effect::Idle;
+        };
+        let was = version.bundles.clone();
+        let mut now = was.clone();
+        let mut forward = Vec::new();
+        let mut back = Vec::new();
+        let note = if let Some(id) = bundle {
+            let name = self.store.bundle(id).map_or(id, |bundle| bundle.name.as_str());
+            if let Some(at) = now.iter().position(|entry| entry.bundle == id) {
+                now.remove(at);
+                format!("taken out of {name}")
+            } else {
+                now.push(crate::Membership { bundle: id.to_string(), file: None });
+                format!("added to {name}")
+            }
+        } else {
+            let name = self.check.as_ref().map(|check| check.filter.trim().to_string());
+            let Some(name) = name.filter(|name| !name.is_empty()) else {
+                self.flash = Some("type the new bundle's name".into());
+                return Effect::Redraw;
+            };
+            let taken = self.store.bundles.iter().map(|bundle| bundle.id.as_str()).collect();
+            let id = crate::id::mint(&name, self.write.device().unwrap_or_default(), &taken);
+            forward.push(journal::Draft::create("bundle", &id));
+            forward.push(journal::Draft::set(
+                "bundle",
+                &id,
+                "name",
+                serde_json::Value::from(name.as_str()),
+            ));
+            back.push(journal::Draft::delete("bundle", &id));
+            now.push(crate::Membership { bundle: id, file: None });
+            if let Some(check) = &mut self.check {
+                check.filter.clear();
+                check.cursor = 0;
+            }
+            format!("added to {name}")
+        };
+        let field = |list: &[crate::Membership]| {
+            if list.is_empty() {
+                journal::Draft::unset("doc", doc, "bundles")
+            } else {
+                journal::Draft::set("doc", doc, "bundles", crate::doc::memberships_value(list))
+            }
+        };
+        forward.push(field(&now));
+        back.insert(0, field(&was));
+        self.pending = Some(Change { forward: forward.clone(), back });
+        self.direction = Direction::Forward;
+        self.pending_anchor = Some(doc.to_string());
+        self.saved_note = Some(note);
+        Effect::Append(forward)
+    }
+
     /// Creates a bundle named `name` and opens it once it lands.
     fn create_bundle(&mut self, name: &str) -> Effect {
         if let Some(reason) = self.write.reason() {
@@ -1594,7 +1680,11 @@ impl Model {
             }
             crate::sheet::Act::Bundles => {
                 self.sheet = false;
-                self.open_bundles()
+                if self.detail() {
+                    self.open_bundle_checklist()
+                } else {
+                    self.open_bundles()
+                }
             }
             crate::sheet::Act::Undo => {
                 self.sheet = false;
@@ -1681,6 +1771,7 @@ impl Model {
             ('e', Some(crate::detail::Row::Renews)) => {
                 self.open_picker(crate::pick::Purpose::Renews)
             }
+            ('e', Some(crate::detail::Row::Fact("bundles"))) => self.open_bundle_checklist(),
             ('e', Some(_)) => {
                 self.flash = Some("that row cannot be edited yet".into());
                 Effect::Redraw
@@ -2649,17 +2740,19 @@ fn check_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     let hits = check.matching(model);
     let effect = match msg {
         Msg::Char(' ') | Msg::Leader if check.filter.is_empty() => {
-            return Some(toggle(model, hits.get(check.cursor).map(|entry| entry.toggle)));
+            return Some(toggle(model, hits.get(check.cursor).map(|entry| entry.toggle.clone())));
         }
-        Msg::Enter => return Some(toggle(model, hits.get(check.cursor).map(|entry| entry.toggle))),
+        Msg::Enter => {
+            return Some(toggle(model, hits.get(check.cursor).map(|entry| entry.toggle.clone())))
+        }
         Msg::Char(c) => {
             check.filter.push(*c);
-            check.cursor = 0;
+            check.cursor = check.first(model);
             Effect::Redraw
         }
         Msg::Backspace => {
             check.filter.pop();
-            check.cursor = 0;
+            check.cursor = check.first(model);
             Effect::Redraw
         }
         Msg::Move(Motion::Up) => {
@@ -2677,7 +2770,7 @@ fn check_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             };
             check.cursor = index;
             model.check = Some(check);
-            return Some(toggle(model, hits.get(index).map(|entry| entry.toggle)));
+            return Some(toggle(model, hits.get(index).map(|entry| entry.toggle.clone())));
         }
         Msg::Move(_) | Msg::Left | Msg::Right | Msg::Scroll(_) => Effect::Idle,
         _ => return None,
@@ -2706,6 +2799,14 @@ fn toggle(model: &mut Model, which: Option<crate::check::Toggle>) -> Effect {
             model.offset = 0;
             model.requery();
             Effect::Redraw
+        }
+        Some(Toggle::Bundle(id)) => {
+            let doc = model.check_doc();
+            model.tick_bundle(&doc, Some(&id))
+        }
+        Some(Toggle::NewBundle) => {
+            let doc = model.check_doc();
+            model.tick_bundle(&doc, None)
         }
         None => Effect::Idle,
     };
@@ -4461,6 +4562,87 @@ pub(crate) mod tests {
         );
     }
 
+    /// `b` on the Details view lists every bundle with a box; ticking one
+    /// adds this exact version to it, and ticking it again takes it out.
+    #[test]
+    fn the_bundles_checklist_adds_and_removes_this_version() {
+        let mut m = with_bundles();
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('b'));
+        let check = m.check.clone().expect("the checklist opened");
+        let ons: Vec<Option<bool>> = check.matching(&m).iter().map(|entry| entry.on).collect();
+        assert_eq!(ons, [Some(true), Some(false)], "coc is in joining, not in visa");
+
+        update(&mut m, Msg::Move(Motion::Down));
+        let both = serde_json::json!([{"bundle": "joining"}, {"bundle": "visa"}]);
+        assert_eq!(
+            update(&mut m, Msg::Char(' ')),
+            Effect::Append(vec![journal::Draft::set("doc", "coc", "bundles", both)]),
+            "Space with nothing typed toggles"
+        );
+        assert_eq!(
+            m.pending.as_ref().map(|change| change.back.clone()),
+            Some(vec![journal::Draft::set(
+                "doc",
+                "coc",
+                "bundles",
+                serde_json::json!([{"bundle": "joining"}])
+            )])
+        );
+        let store = m.store.clone();
+        update(&mut m, Msg::Saved(Box::new(store)));
+        assert!(m.check.is_some(), "the list stays open");
+        assert_eq!(m.flash.as_deref(), Some("added to US visa"));
+
+        update(&mut m, Msg::Move(Motion::Up));
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![journal::Draft::unset("doc", "coc", "bundles")]),
+            "taking out the last entry clears the field"
+        );
+    }
+
+    /// `+ new` in the checklist creates the bundle and puts this version in
+    /// it, as one change.
+    #[test]
+    fn a_new_bundle_from_the_checklist_holds_this_version() {
+        let mut m = with_bundles();
+        update(&mut m, Msg::Enter);
+        update(&mut m, Msg::Char(' '));
+        update(&mut m, Msg::Char('b'));
+        for c in "Panama".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(m.check.as_ref().map(|check| check.cursor), Some(0), "on + new");
+        let id = "panama-desk";
+        assert_eq!(
+            update(&mut m, Msg::Enter),
+            Effect::Append(vec![
+                journal::Draft::create("bundle", id),
+                journal::Draft::set("bundle", id, "name", "Panama"),
+                journal::Draft::set(
+                    "doc",
+                    "coc",
+                    "bundles",
+                    serde_json::json!([{"bundle": "joining"}, {"bundle": id}])
+                ),
+            ])
+        );
+        assert_eq!(
+            m.pending.as_ref().map(|change| change.back.clone()),
+            Some(vec![
+                journal::Draft::set(
+                    "doc",
+                    "coc",
+                    "bundles",
+                    serde_json::json!([{"bundle": "joining"}])
+                ),
+                journal::Draft::delete("bundle", id),
+            ])
+        );
+    }
+
     /// **An IME dismissal must never quit the app.** Termux sends `Esc` to close
     /// the soft keyboard; any other key in between disarms, so a stray press
     /// cannot compound into an exit.
@@ -4840,7 +5022,7 @@ pub(crate) mod tests {
     /// `e` edits **the row the selector is on** — one verb over every field,
     /// which is the whole reason a per-field control key was the wrong shape.
     #[test]
-    fn e_edits_the_selected_row_and_says_so_when_it_cannot() {
+    fn e_edits_the_selected_row() {
         let mut m = model();
         m.write = WriteState::Ready { device: "desk".into() };
         update(&mut m, Msg::Enter);
@@ -4849,16 +5031,7 @@ pub(crate) mod tests {
             .iter()
             .position(|row| matches!(row, crate::detail::Row::Editable(crate::edit::Field::Expiry)))
             .expect("the record has an editable row");
-
-        // A row that is not editable yet.
-        m.set_record_cursor(
-            rows.iter()
-                .position(|row| matches!(row, crate::detail::Row::Fact(_)))
-                .expect("and a row that is not"),
-        );
-        update(&mut m, Msg::Char('e'));
-        assert!(m.edit.is_none(), "nothing opened");
-        assert!(m.flash.is_some(), "and it explained why");
+        assert!(rows.iter().all(|row| row.verb().is_some()), "every row has a verb: {rows:?}");
 
         m.set_record_cursor(expiry);
         update(&mut m, Msg::Char('e'));
