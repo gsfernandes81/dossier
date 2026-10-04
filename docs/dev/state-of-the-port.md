@@ -8,19 +8,19 @@ restate them — it exists to say *where the port is*, *what the phone actually
 is*, *what is still open*, and *which mistakes have already been paid for*.
 If something here contradicts a spec, the spec wins and this file is stale.
 
-Last true as of **2026-08-21**, branch `rust-rewrite`.
+Last true as of **2026-10-04**, branch `rust-rewrite`.
 
 ---
 
 ## 1 · Where the port stands
 
-**R3 is feature-complete, and R4's verb set is complete.** `crates/journal`
-implements §3's format — op model, fold, compaction, torn tails, watermark
-defence — and `crates/ds` is a finder on top of it: browse, fuzzy search,
-`ctrl+t` content search, the detail surface, `ds status` with the Syncthing REST
-check, `ds open`, and now `ds init`, **creating a document**, **every simple
-field of a record editable through one verb**, **undo/redo** and **delete**. The phase list and each slice's notes are in
-REWRITE.md; don't duplicate them here.
+**R3 is feature-complete, and R4 is built as REWRITE-UI §5c designs it.**
+`crates/journal` implements §3's format — op model, fold, compaction, torn
+tails, watermark defence — and `crates/ds` is a finder and editor on top of it:
+browse, fuzzy search, scan-text search from the filter list, `ds status` with
+the Syncthing REST check, `ds open`, `ds init`, and the views and panels below.
+The phase list and each slice's notes are in REWRITE.md; don't duplicate them
+here.
 
 Three facts that shape what the rest of R4 costs:
 
@@ -93,7 +93,7 @@ Each is recorded where it belongs; the link is the point of the row.
 | The selected row is an ANSI 8 background, reverse video only under `NO_COLOR`; chosen on the phone from `tools/probe-attrs.fish` §4 | `Theme::selected`, REWRITE-UI §6 |
 | Tones on the band differ from tones off it | `Theme::on_band` |
 | Three verb tiers: a key / a leader chord / a command | REWRITE-UI §5a |
-| **No `ctrl`-only verbs.** Every `ctrl` key (`^x`, `^t`, `^z`, `^y`) is an accelerator the Space sheet shows beside its verb. A which-key panel for `ctrl` is *impossible*, not unbuilt: Termux latches `CTRL` in its own UI, so the app sees one finished `ctrl+e` event and never a moment between modifier and letter. That tier can only be memorised. | `detail.rs` module docs, `input.rs`, REWRITE-UI §5c |
+| **No `ctrl`-only verbs.** Every `ctrl` key (`^z`, `^y`) is an accelerator the Space sheet shows beside its verb. A which-key panel for `ctrl` is *impossible*, not unbuilt: Termux latches `CTRL` in its own UI, so the app sees one finished `ctrl+e` event and never a moment between modifier and letter. That tier can only be memorised. | `detail.rs` module docs, `input.rs`, REWRITE-UI §5c |
 | The record is a surface with its own verbs: search locked out, bare letters free, `e` edits the selected row | `detail.rs`, `Model::record_verb` |
 | The record has a selector; `↑`/`↓` drive it and never the list underneath | `Model::move_record` |
 | Twelve-documents-at-45×28 is superseded by the measured sizes | swept through `layout.rs`, `find.rs`, `screens.rs`, REWRITE-UI |
@@ -122,16 +122,16 @@ Each is recorded where it belongs; the link is the point of the row.
   run: the glyph row and dim-on-band — still assumptions.)*
 - **The succession reversal** on the filing card — deferred until the user
   confirms it is a real pain point. Do not build it speculatively.
-- **The R4 verbs are named and lettered** (REWRITE-UI §5c; the model is
-  REWRITE.md §4.7). Built: the soft-copy editor (`pick.rs`), `ctrl+z`/`ctrl+y`,
-  the location tree (`place.rs`), digital only, and the location picker
-  (`locpick.rs`) with search, `+ new`, and rename, move and delete from its
-  Space sheet, all answering taps. The rest of R4 is designed (REWRITE-UI
-  §5c): sheet letters and `e edit` hints, dropping `^x`/`^t`, `+ new` in the
-  Find view, the filter checkbox list, new version, the Versions view and the
-  `renews` picker, bundles holding exact versions with the Bundles view and a
-  bundle's Details view, and the warn window as a constant. No settings view
-  and no `ds reset`. Deferred by the user: marking several documents at once,
+- **R4 is built** (REWRITE-UI §5c; the model is REWRITE.md §4.7). Views are a
+  stack anchored on ids (`app::View`): the Find view with `+ new` from the
+  search, a document's Details view, the Versions view (`versions.rs`), the
+  Bundles view and a bundle's Details view (`bundles.rs`). Panels: the Space
+  sheet running each view's letters, the filter and bundles checklists
+  (`check.rs`), the soft-copy, `renews` and bundle-member pickers (`pick.rs`),
+  and the location picker (`locpick.rs`), all answering taps. A bundle is its
+  own `bundle` record holding exact versions; a conflicting latest version is
+  counted in the header and by `ds status`. The warn window is a constant;
+  there is no settings view and no `ds reset`. Deferred by the user: marking several documents at once,
   flipping the Find view fzf-style (best match at the bottom), matching fzf's
   colours (with it, structure for the Details views, which read as a wall of
   text: dividers or tinted rows), and a locations view that flags looped

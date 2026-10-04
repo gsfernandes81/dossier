@@ -359,13 +359,15 @@ list, no journal format change.
 | **Soft copies** | `files: [{label, path, primary}]`, paths relative to the root | `Enter` opens the selected file row's file, else the primary; `e` on a file row picks *make primary* / *detach* / *attach another file*, and on an empty files row asks for a path — POSIX, relative, never leaving the root |
 | **Tags** | `tags: [word]` — free words, chiefly areas like `marine` | searched |
 
-- **The Find view shows latest documents only.** Older versions and bundles join it
-  only through their filter toggles, which compose with the expiring toggle.
+- **The Find view shows latest documents only.** Older versions join it only
+  through their filter toggle, which composes with expiring only. Bundles are
+  never in it; they have their own view.
 - **Expiry is per version.** Each version keeps its own dates and shows its own
   validity; the **watch, the header count and the expiring filter follow the
   latest version only**, never a bundle.
 - **Two latest versions of one document** can only come from an offline
-  duplicate. Both stay listed; merging them is the merge verb's job.
+  duplicate. Both stay listed; the earlier-issued one is marked conflicting
+  latest, and merging them is the merge verb's job.
 - **A bundle** is its own record, never a document: name, optional date, notes.
   It is short-lived or historical, which is why it holds exact versions. The
   Bundles view lists bundles and the Find view lists documents, and neither
@@ -818,6 +820,16 @@ until the cutover step the user personally green-lights.
       of deleting this one is the kind of thing an undo could not honestly
       reverse. Dangling references are `ds status`'s business, and the record
       shows a dangling target in the warning tone.
+  - **The rest of R4 is built as REWRITE-UI §5c designs it.** The Space sheet
+    runs each view's letters; filters are a checklist with chips on the status
+    line; documents are created from the Find view's search; views are a stack
+    anchored on ids, so a view can show a version the list does not hold; `n`
+    makes a new version, `v` lists the versions, and `e` on `renews` relinks
+    one; a conflicting latest version is flagged in the header and by
+    `ds status`; bundles are their own record holding exact versions, with the
+    Bundles view, a bundle's Details view, the `b` checklist on a document, and
+    `e` on a document in a bundle. Content search lost `ctrl+t` to the filter
+    list, and `SPC n` is new version, not new document.
 - **R5 — Review + file + export**: `walkdir` tree walk; **no review surface**
   (amended 2026-09-29 — the five v2 tabs route per docs/dev/model-rethink.md
   "Checked against v2's code"): missing / duplicates / suggested **list filters**
