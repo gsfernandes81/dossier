@@ -65,9 +65,9 @@ pub struct FoldStats {
     pub opaque: usize,
     /// Broken lines: counted here, reported loudly, never discarded.
     pub malformed: usize,
-    /// `set`/`unset` ops for an entity that does not exist (never created, or
-    /// tombstoned since). Ignored; a non-zero count means either a lost
-    /// `create` or a buggy writer, and either deserves saying out loud.
+    /// Set/unset ops for an entity that is not alive: never created, or
+    /// deleted since. Ignored. A delete on one device while another sets a
+    /// field leaves these normally.
     pub orphaned: usize,
     /// Ops sharing a `(ts, w)` key. Impossible if writers obey the HLC rule, so
     /// a non-zero count means two processes wrote one writer id — exactly what
@@ -81,7 +81,7 @@ impl FoldStats {
     /// Whether anything here is worth a `ds status` line.
     #[must_use]
     pub fn has_anomalies(&self) -> bool {
-        self.malformed > 0 || self.orphaned > 0 || self.duplicate_keys > 0
+        self.malformed > 0 || self.duplicate_keys > 0
     }
 }
 

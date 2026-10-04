@@ -44,7 +44,8 @@ pub struct Report {
     pub docs: usize,
     /// Locations.
     pub locations: usize,
-    /// Ops for entities that no longer exist, which a deletion leaves behind.
+    /// Set/unset ops for an entity that is not alive, which a concurrent or
+    /// later-synced delete leaves behind.
     pub orphaned: usize,
     /// Keys that appeared twice with the same `(ts, w)`.
     pub duplicate_keys: usize,
