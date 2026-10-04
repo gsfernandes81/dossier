@@ -21,16 +21,6 @@
 //! that reproduces its contribution — and **only its own file**, which is why it
 //! needs no coordination with the other device at all.
 //!
-//! # What is kept, and why each rule exists
-//!
-//! | Kept | Why |
-//! |---|---|
-//! | every `create` and `delete` | tombstones are retained forever, or a late `set` from a device that missed the delete would resurrect the document |
-//! | the newest `set`/`unset` per `(ent, id, field)` | it is the only one that can still win a last-writer-wins comparison |
-//! | the newest `state`/`reading`/`proposal` per `(ent, id)` | same, per key |
-//! | **everything newer than 30 days** | the journal *is* the undo history, with a durable 30-day horizon |
-//! | every line this build did not understand | opaque and malformed lines are preserved verbatim — compaction must never be the thing that discards them |
-//!
 //! # The two rules that are easy to get wrong
 //!
 //! **An `unset` is kept even when the `set` it cancelled is dropped.** Within
@@ -52,22 +42,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::op::{Line, OpKind};
 
-/// How long every op is retained regardless of whether the fold still needs it.
-///
-/// This is the undo horizon: undo is "append the inverse op", and the
-/// previous value has to still be readable for that to work. 30 days of edits
-/// costs a few hundred kilobytes.
+/// How long every op is kept regardless of whether the fold still needs it, so
+/// recent history stays readable in the file; 30 days of edits costs a few
+/// hundred kilobytes.
 pub const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
-/// Compact when fewer than one op in this many is still live — i.e. below 25%.
-///
-/// A quarter is deliberately lazy: compaction rewrites a synced file, so every
-/// run costs the other device a full re-transfer. Waiting until three quarters
-/// of the file is dead makes that transfer worth it.
-///
-/// Expressed as a divisor rather than a `0.25` so the whole crate stays free of
-/// floating point — the same reason the op format bans floats: integer
-/// comparisons are exact and mean the same thing in both implementations.
+/// Compact when fewer than 1 in this many ops is live; lazy because every
+/// compaction makes the other device re-transfer the file.
 pub const LIVE_RATIO_TRIGGER: usize = 4;
 
 /// Which lines survive a compaction.
@@ -261,8 +242,6 @@ mod tests {
         );
     }
 
-    /// Recent ops are kept whatever the fold thinks of them — the journal is the
-    /// undo history, with a 30-day horizon.
     #[test]
     fn everything_inside_the_retention_window_is_kept() {
         let lines = vec![
@@ -308,8 +287,6 @@ mod tests {
         assert_eq!(before, after);
     }
 
-    /// The trigger is lazy on purpose: rewriting a synced file costs the other
-    /// device a full re-transfer, so it waits until most of the file is dead.
     #[test]
     fn the_trigger_waits_until_most_of_the_file_is_dead() {
         let mut lines = vec![line(OLD, Draft::create("doc", "x"))];

@@ -222,10 +222,6 @@ pub fn parse_line(raw: &str) -> Line {
 }
 
 /// The slow path: work out why a line did not deserialize into an [`Op`].
-///
-/// Split out so the cost — a second parse into a generic `Value` — is paid only
-/// by lines that are genuinely unusual, and so the fast path above stays a
-/// single `match`.
 fn classify_failure(raw: &str) -> Line {
     let malformed = |reason: &str| Line::Malformed { raw: raw.to_string(), reason: reason.into() };
 
@@ -256,9 +252,6 @@ fn classify_failure(raw: &str) -> Line {
         Some(_) => return malformed("`op` is not a string"),
     }
 
-    // The format is integers-only by construction — a float would make
-    // the canonical JSON comparison against the Python fold unimplementable, so
-    // it is malformed data, not a value to round-trip.
     if contains_float(&value) {
         return malformed("contains a floating-point number (the format is integers-only)");
     }
@@ -273,6 +266,10 @@ fn classify_failure(raw: &str) -> Line {
 }
 
 /// Whether any number anywhere in `value` is a float.
+///
+/// The format is integers-only: no two languages agree on float formatting, so
+/// a float would make the canonical JSON comparison against the Python fold
+/// unimplementable.
 fn contains_float(value: &Value) -> bool {
     match value {
         Value::Number(n) => n.is_f64(),
@@ -282,11 +279,8 @@ fn contains_float(value: &Value) -> bool {
     }
 }
 
-/// Parse a whole file body into lines, dropping a torn final line.
-///
-/// A final line with no trailing newline was torn by a process dying
-/// mid-`write`; it was never durable, so it is returned separately rather than
-/// reported as corruption.
+/// Parse a whole file body into lines, returning a torn final line (one with
+/// no trailing newline) separately rather than as damage.
 pub fn parse_body(body: &str) -> (Vec<Line>, Option<String>) {
     if body.is_empty() {
         return (Vec::new(), None);
@@ -339,8 +333,7 @@ mod tests {
         assert_eq!(again, Line::Op(op));
     }
 
-    /// A newer format version or an unheard-of verb is *opaque*, not broken:
-    /// preserved verbatim, never folded. This is the whole migration story.
+    /// A newer format version or an unheard-of verb is *opaque*, not broken.
     #[test]
     fn lines_from_the_future_are_opaque_not_malformed() {
         let newer = r#"{"v":2,"ts":1,"w":"a","op":"set","ent":"doc","id":"x"}"#;
@@ -364,18 +357,12 @@ mod tests {
         }
     }
 
-    /// The format is integers-only by construction, because the golden vectors
-    /// compare canonical JSON byte-for-byte against Python's and no two
-    /// languages agree on float formatting.
     #[test]
     fn floats_are_rejected() {
         let raw = r#"{"v":1,"ts":1,"w":"a","op":"set","ent":"doc","id":"x","f":"n","val":1.5}"#;
         assert!(matches!(parse_line(raw), Line::Malformed { .. }));
     }
 
-    /// A torn final line — a process that died mid-write — was never durable,
-    /// so it is separated out rather than counted as damage. Everything before
-    /// it still loads.
     #[test]
     fn a_torn_final_line_is_split_off() {
         let body = format!("{}\n{}", op_line(), r#"{"v":1,"ts":2,"w":"desk-c"#);

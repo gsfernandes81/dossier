@@ -91,8 +91,7 @@ pub enum Anomaly {
         /// How many lines.
         count: usize,
     },
-    /// A final line with no trailing newline: a process died mid-append. The
-    /// op was never durable, and the writer must truncate it before appending.
+    /// A final line with no trailing newline: a process died mid-append.
     TornTail {
         /// Which writer file.
         file: String,

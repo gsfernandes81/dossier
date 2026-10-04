@@ -30,10 +30,7 @@
 //!    never on FUSE. A second process that cannot take the lock is not an
 //!    error to swallow: it runs read-only with a visible notice, which is how
 //!    `ds status --quiet` from cron keeps working while the TUI is open.
-//! 3. **A torn tail is repaired before the first append.** A line with no
-//!    trailing newline was never durable, and appending after it would glue two
-//!    ops into one unparseable line — destroying the *new* op, which is the
-//!    worse outcome. So the writer truncates it first, every time.
+//! 3. **A torn tail is repaired before the first append.**
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -451,10 +448,9 @@ impl Writer {
 /// Whether [`Writer::compact`] should respect the trigger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum When {
-    /// Only if the file is mostly dead ops. What a clean
-    /// exit uses.
+    /// Only if the file is mostly dead ops.
     IfWorthwhile,
-    /// Regardless — for a maintenance verb the user asked for.
+    /// Regardless.
     Always,
 }
 
@@ -586,9 +582,6 @@ mod tests {
         assert!(stamps.windows(2).all(|w| w[0] < w[1]), "and strictly increasing");
     }
 
-    /// **The repair that matters.** A process died mid-append, leaving a torn
-    /// line. Without truncating it first, the next append is glued onto it and
-    /// the *new* op — the one the user just made — is destroyed.
     #[test]
     fn a_torn_tail_is_repaired_before_appending() {
         let fixture = fixture();

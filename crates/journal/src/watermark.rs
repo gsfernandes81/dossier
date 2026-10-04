@@ -34,9 +34,6 @@
 //! | bytes fell, `max_ts` held | ordinary compaction — say nothing |
 //! | both grew | ordinary appends |
 //!
-//! Getting that table backwards would either cry wolf after every compaction or
-//! stay silent through real data loss, so each row has a test.
-//!
 //! The marks live in the device's **local** data directory, never in the synced
 //! tree — a high-water mark that syncs would be reverted along with the file it
 //! is supposed to be checking.
@@ -205,9 +202,6 @@ mod tests {
         );
     }
 
-    /// **The row that must catch the revert.** A shorter file whose newest ops
-    /// are gone is the Proton-revert signature: valid JSONL, no conflict copy,
-    /// silently missing history.
     #[test]
     fn a_max_ts_regression_is_damage() {
         let mut water = HighWater::default();
@@ -242,8 +236,6 @@ mod tests {
         assert!(damage.is_empty(), "{damage:?}");
     }
 
-    /// The mark only climbs, so a revert keeps being reported until the data
-    /// really comes back — silent data loss deserves a nag, not a one-shot.
     #[test]
     fn the_mark_never_falls_on_its_own() {
         let mut water = HighWater::default();
