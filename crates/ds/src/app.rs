@@ -422,6 +422,12 @@ pub struct RowGeometry {
 }
 
 impl RowGeometry {
+    /// Rows of `items` drawn across `area` from terminal row `top` down.
+    #[must_use]
+    pub fn rows(area: ratatui::layout::Rect, top: u16, items: Vec<usize>) -> Self {
+        Self { top, left: area.x, width: area.width, items, ..Self::default() }
+    }
+
     /// The item drawn at a terminal cell, if any.
     #[must_use]
     pub fn at(&self, col: u16, row: u16) -> Option<usize> {

@@ -104,12 +104,8 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) -> crate
     let rows = rows(doc);
     let selected = model.record_cursor().min(rows.len().saturating_sub(1));
     let mut lines: Vec<Line> = Vec::new();
-    // Where each row's lines start, so the pane can be scrolled to keep the
-    // selection on screen without the renderer counting anything twice.
-    let mut starts = Vec::with_capacity(rows.len());
     let mut owners = Vec::new();
     for (index, row) in rows.iter().enumerate() {
-        starts.push(lines.len());
         let mut drawn = render_row(*row, doc, model, inner, theme);
         if index == selected {
             drawn = drawn.into_iter().map(|line| line.style(theme.selected())).collect();
@@ -122,8 +118,7 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) -> crate
     // on the phone in every ordinary case; this is for the document with eight
     // files, where a selector you cannot see is worse than no selector.
     let height = area.height as usize;
-    let end = starts.get(selected + 1).copied().unwrap_or(lines.len());
-    let skip = end.saturating_sub(height);
+    let skip = crate::layout::scroll(&owners, selected, height);
     let lines: Vec<Line> = lines.into_iter().skip(skip).collect();
     let items = owners.into_iter().skip(skip).take(height).collect();
 
@@ -131,13 +126,7 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) -> crate
     // width, and letting the widget wrap as well would put a continuation line
     // at the left margin, where it reads as a new field.
     frame.render_widget(Paragraph::new(lines), area);
-    crate::app::RowGeometry {
-        top: area.y,
-        left: area.x,
-        width: area.width,
-        items,
-        ..Default::default()
-    }
+    crate::app::RowGeometry::rows(area, area.y, items)
 }
 
 /// The lines one row occupies.

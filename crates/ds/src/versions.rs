@@ -22,7 +22,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::{Model, RowGeometry};
-use crate::layout::{truncate, truncate_left, width, wrap};
+use crate::layout::{cursor_cell, scroll, spread, truncate, truncate_left, width, wrap};
 use crate::theme::{Theme, Tone};
 use crate::{Doc, Status, Store};
 
@@ -66,21 +66,18 @@ fn version_lines(
     let date = |value: &Option<String>| value.clone().unwrap_or_else(|| "—".into());
     let dates = format!("{} → {}", date(&doc.issue_date), date(&doc.expiry_date));
     let (right, status) = standing(model, doc);
-    let lead = if selected { "▸ " } else { "  " };
+    let lead = cursor_cell(selected);
     let gutter = crate::layout::GUTTER as usize;
     let room = cols.saturating_sub(width(lead) + width(&right) + 1 + gutter);
-    let dates = truncate(&dates, room);
-    let gap = cols.saturating_sub(width(lead) + width(&dates) + width(&right) + gutter);
     let right_style = match status {
         Some(status) => theme.status(status),
         None => theme.style(Tone::Accent),
     };
-    let first = Line::from(vec![
-        Span::raw(lead),
-        Span::raw(dates),
-        Span::raw(" ".repeat(gap)),
+    let first = spread(
+        vec![Span::raw(lead), Span::raw(truncate(&dates, room))],
         Span::styled(right, right_style),
-    ]);
+        cols,
+    );
     let place = model.store.hard_copy_text(doc);
     let second = Line::styled(
         format!("    {}", truncate_left(&place, cols.saturating_sub(4 + gutter))),
@@ -123,15 +120,9 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, id: &str, theme: Theme
         owners.extend([index, index]);
     }
     let room = (area.height as usize).saturating_sub(heading.len());
-    let skip = (2 * (cursor + 1)).saturating_sub(room);
+    let skip = scroll(&owners, cursor, room);
     let top = area.y + u16::try_from(heading.len()).unwrap_or(u16::MAX);
     heading.extend(lines.into_iter().skip(skip));
     frame.render_widget(Paragraph::new(heading), area);
-    RowGeometry {
-        top,
-        left: area.x,
-        width: area.width,
-        items: owners.into_iter().skip(skip).take(room).collect(),
-        ..Default::default()
-    }
+    RowGeometry::rows(area, top, owners.into_iter().skip(skip).take(room).collect())
 }

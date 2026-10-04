@@ -27,7 +27,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{ListGeometry, Model, ScanSearch, Zone};
-use crate::layout::{fit, pad_left, short_date, truncate, width, wrap};
+use crate::layout::{cursor_cell, fit, pad_left, short_date, spread, truncate, width, wrap};
 use crate::theme::{Theme, Tone};
 use crate::{Doc, Status};
 
@@ -288,14 +288,6 @@ fn status_cell(doc: &Doc, status: Status) -> String {
 
 /// The cursor column. Selection is reverse video and the marker never shifts the
 /// row: an indent shift makes the whole list twitch as the cursor moves.
-fn cursor_cell(selected: bool) -> &'static str {
-    if selected {
-        "▸ "
-    } else {
-        "  "
-    }
-}
-
 /// The wide layout's column widths, decided once per screen from the rows on
 /// it, so the columns line up and spare width goes to what needs it.
 #[derive(Clone, Copy)]
@@ -565,13 +557,7 @@ fn draw_locpick(
     };
     frame.render_widget(ratatui::widgets::Clear, rect);
     frame.render_widget(Paragraph::new(head), rect);
-    crate::app::RowGeometry {
-        top: rect.y + u16::try_from(heading).unwrap_or(u16::MAX),
-        left: rect.x,
-        width: rect.width,
-        items,
-        ..Default::default()
-    }
+    crate::app::RowGeometry::rows(rect, rect.y + u16::try_from(heading).unwrap_or(u16::MAX), items)
 }
 
 /// The location picker's heading, closed by a rule, and the location the
@@ -653,24 +639,21 @@ fn panel_heading(panel: &Panel, matches: usize, cols: usize, theme: Theme) -> Ve
     };
     let crumb =
         truncate(&format!(" {}", panel.crumb), cols.saturating_sub(width(&note) + gutter + 1));
-    let gap = cols.saturating_sub(width(&crumb) + width(&note) + gutter);
     let mut lines = vec![
         rule(cols, theme),
-        Line::from(vec![
-            Span::styled(crumb, theme.style(Tone::Accent)),
-            Span::raw(" ".repeat(gap)),
+        spread(
+            vec![Span::styled(crumb, theme.style(Tone::Accent))],
             Span::styled(note, theme.style(Tone::Muted)),
-            Span::raw(" ".repeat(gutter)),
-        ]),
+            cols,
+        ),
     ];
     if let Some((name, kind, now)) = &panel.subject {
         let name = truncate(name, cols.saturating_sub(width(kind) + gutter + 2));
-        let gap = cols.saturating_sub(1 + width(&name) + width(kind) + gutter);
-        lines.push(Line::from(vec![
-            Span::styled(format!(" {name}"), theme.style(Tone::Title)),
-            Span::raw(" ".repeat(gap)),
+        lines.push(spread(
+            vec![Span::styled(format!(" {name}"), theme.style(Tone::Title))],
             Span::styled(kind.to_string(), theme.style(Tone::Muted)),
-        ]));
+            cols,
+        ));
         lines.push(Line::styled(
             format!(" now: {}", crate::layout::truncate_left(now, cols.saturating_sub(7))),
             theme.style(Tone::Muted),
@@ -717,17 +700,15 @@ fn tree_line(
                 count(store, picker, id, cols.saturating_sub(used))
             };
             let room = cols.saturating_sub(1 + width(lead) + 2 + width(&right) + 1 + gutter);
-            let name = truncate(name, room);
-            let gap =
-                cols.saturating_sub(1 + width(lead) + 2 + width(&name) + width(&right) + gutter);
-            Line::from(vec![
-                Span::styled(format!(" {lead}"), theme.style(Tone::Muted)),
-                Span::styled(chevron, theme.style(Tone::Accent)),
-                Span::raw(name),
-                Span::raw(" ".repeat(gap)),
+            spread(
+                vec![
+                    Span::styled(format!(" {lead}"), theme.style(Tone::Muted)),
+                    Span::styled(chevron, theme.style(Tone::Accent)),
+                    Span::raw(truncate(name, room)),
+                ],
                 Span::styled(right, theme.style(Tone::Muted)),
-                Span::raw(" ".repeat(gutter)),
-            ])
+                cols,
+            )
         }
         Row::Doc { index, lead } => Line::from(vec![
             Span::styled(format!(" {lead}"), theme.style(Tone::Muted)),
@@ -755,13 +736,11 @@ fn tree_line(
             };
             let room = cols.saturating_sub(1 + width(&right) + 1 + gutter);
             let path = crate::layout::truncate_left(&store.locations.path(id), room);
-            let gap = cols.saturating_sub(1 + width(&path) + width(&right) + gutter);
-            Line::from(vec![
-                Span::raw(format!(" {path}")),
-                Span::raw(" ".repeat(gap)),
+            spread(
+                vec![Span::raw(format!(" {path}"))],
                 Span::styled(right, theme.style(Tone::Muted)),
-                Span::raw(" ".repeat(gutter)),
-            ])
+                cols,
+            )
         }
     }
 }
@@ -815,7 +794,6 @@ fn draw_panel(
     theme: Theme,
 ) -> crate::app::RowGeometry {
     let cols = area.width as usize;
-    let gutter = crate::layout::GUTTER as usize;
     let extra = if panel.subject.is_some() { 2 } else { 0 };
     let height = u16::try_from(rows.len() + 2 + extra).unwrap_or(u16::MAX).min(area.height);
     let rect = Rect {
@@ -829,14 +807,11 @@ fn draw_panel(
     let room = (height as usize).saturating_sub(lines.len());
     let skip = panel.cursor.map_or(0, |cursor| (cursor + 1).saturating_sub(room));
     for (index, (lead, label, right)) in rows.into_iter().enumerate().skip(skip) {
-        let gap = cols.saturating_sub(width(&lead) + width(&label) + width(right) + gutter);
-        let mut line = Line::from(vec![
-            Span::styled(lead, theme.style(Tone::Accent)),
-            Span::raw(label),
-            Span::raw(" ".repeat(gap)),
+        let mut line = spread(
+            vec![Span::styled(lead, theme.style(Tone::Accent)), Span::raw(label)],
             Span::styled(right.to_string(), theme.style(Tone::Muted)),
-            Span::raw(" ".repeat(gutter)),
-        ]);
+            cols,
+        );
         if panel.cursor == Some(index) {
             line = line.style(theme.selected());
         }
@@ -845,13 +820,8 @@ fn draw_panel(
     let heading = lines.len().saturating_sub(count);
     frame.render_widget(ratatui::widgets::Clear, rect);
     frame.render_widget(Paragraph::new(lines), rect);
-    crate::app::RowGeometry {
-        top: rect.y + u16::try_from(heading).unwrap_or(u16::MAX),
-        left: rect.x,
-        width: rect.width,
-        items: (skip..count).collect(),
-        ..Default::default()
-    }
+    let top = rect.y + u16::try_from(heading).unwrap_or(u16::MAX);
+    crate::app::RowGeometry::rows(rect, top, (skip..count).collect())
 }
 
 /// The filter chips: what is narrowing the list beyond the query itself.
@@ -1050,13 +1020,7 @@ fn info_row(model: &Model, cols: usize, theme: Theme) -> Line<'static> {
     let left = format!(" {}{}", count_text(model), chips(model));
     let room = cols.saturating_sub(width(&left) + gutter);
     let hint = shed(&hints(model), room);
-    let gap = cols.saturating_sub(width(&left) + width(&hint) + gutter);
-    Line::from(vec![
-        Span::raw(left),
-        Span::raw(" ".repeat(gap)),
-        Span::styled(hint, theme.on_band(Tone::Muted)),
-        Span::raw(" ".repeat(gutter)),
-    ])
+    spread(vec![Span::raw(left)], Span::styled(hint, theme.on_band(Tone::Muted)), cols)
 }
 
 /// How many rows the status line needs: one, or as many as an armed location

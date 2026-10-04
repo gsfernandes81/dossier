@@ -24,7 +24,7 @@ use ratatui::Frame;
 use crate::app::{Model, RowGeometry};
 use crate::detail;
 use crate::edit::Field;
-use crate::layout::{fit, short_date, truncate, width};
+use crate::layout::{cursor_cell, fit, scroll, short_date, spread, truncate, width};
 use crate::theme::{Theme, Tone};
 use crate::{Bundle, Store};
 
@@ -110,7 +110,7 @@ pub fn draw_list(
     let skip = (cursor + 1).saturating_sub(height);
     let mut lines = Vec::new();
     for (index, entry) in entries.iter().enumerate().skip(skip).take(height) {
-        let lead = if index == cursor { "▸ " } else { "  " };
+        let lead = cursor_cell(index == cursor);
         let line = match entry {
             Entry::New => {
                 let typed = model.query.trim();
@@ -132,14 +132,11 @@ pub fn draw_list(
                     bundle.date.as_deref().map_or_else(|| "     ".into(), short_date)
                 );
                 let room = cols.saturating_sub(width(lead) + width(&right) + 2 + gutter);
-                let name = truncate(&bundle.name, room);
-                let gap = cols.saturating_sub(width(lead) + width(&name) + width(&right) + gutter);
-                Line::from(vec![
-                    Span::raw(lead),
-                    Span::raw(name),
-                    Span::raw(" ".repeat(gap)),
+                spread(
+                    vec![Span::raw(lead), Span::raw(truncate(&bundle.name, room))],
                     Span::styled(right, theme.style(Tone::Muted)),
-                ])
+                    cols,
+                )
             }
         };
         lines.push(if index == cursor { line.style(theme.selected()) } else { line });
@@ -148,13 +145,7 @@ pub fn draw_list(
         lines.push(Line::styled("  nothing matches", theme.style(Tone::Muted)));
     }
     frame.render_widget(Paragraph::new(lines), area);
-    RowGeometry {
-        top: area.y,
-        left: area.x,
-        width: area.width,
-        items: (skip..entries.len()).take(height).collect(),
-        ..Default::default()
-    }
+    RowGeometry::rows(area, area.y, (skip..entries.len()).take(height).collect())
 }
 
 /// Draws bundle `id`'s Details view with row `selected` selected, and returns
@@ -208,19 +199,16 @@ pub fn draw_bundle(
                 let right = if doc.superseded { "newer exists" } else { "" };
                 let name = crate::detail::version_name(doc);
                 let room = cols.saturating_sub(3 + width(right) + 1 + gutter);
-                let name = truncate(&name, room);
-                let gap = cols.saturating_sub(3 + width(&name) + width(right) + gutter);
                 let mut drawn = Vec::new();
                 if rows[index - 1] == Row::Notes {
                     drawn.push(Line::raw(""));
                     drawn.push(Line::styled(" documents", theme.style(Tone::Muted)));
                 }
-                drawn.push(Line::from(vec![
-                    Span::raw("   "),
-                    Span::raw(name),
-                    Span::raw(" ".repeat(gap)),
+                drawn.push(spread(
+                    vec![Span::raw("   "), Span::raw(truncate(&name, room))],
                     Span::styled(right, theme.status(crate::Status::Soon)),
-                ]));
+                    cols,
+                ));
                 drawn
             }
         };
@@ -237,15 +225,8 @@ pub fn draw_bundle(
         lines.push(Line::styled(" no documents yet", theme.style(Tone::Muted)));
     }
     let height = area.height as usize;
-    let end = owners.iter().rposition(|&owner| owner == cursor).map_or(0, |at| at + 1);
-    let skip = end.saturating_sub(height);
+    let skip = scroll(&owners, cursor, height);
     let lines: Vec<Line> = lines.into_iter().skip(skip).collect();
     frame.render_widget(Paragraph::new(lines), area);
-    RowGeometry {
-        top: area.y,
-        left: area.x,
-        width: area.width,
-        items: owners.into_iter().skip(skip).take(height).collect(),
-        ..Default::default()
-    }
+    RowGeometry::rows(area, area.y, owners.into_iter().skip(skip).take(height).collect())
 }

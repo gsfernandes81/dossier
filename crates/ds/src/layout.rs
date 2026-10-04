@@ -18,6 +18,7 @@
 //! characters — a CJK name is two cells per character — so nothing here uses
 //! `len()`.
 
+use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Below this list width, rows go two-line: name and status, then location
@@ -106,6 +107,37 @@ pub fn truncate(text: &str, max: usize) -> String {
     }
     out.push('…');
     out
+}
+
+/// Returns `left`, then `right` flush against the gutter of a `cols`-wide row.
+///
+/// Only pads: the caller cuts `left` to leave room for `right` first.
+#[must_use]
+pub fn spread(mut left: Vec<Span<'static>>, right: Span<'static>, cols: usize) -> Line<'static> {
+    let used: usize = left.iter().chain([&right]).map(|span| width(&span.content)).sum();
+    left.push(Span::raw(" ".repeat(cols.saturating_sub(used + GUTTER as usize))));
+    left.push(right);
+    left.push(Span::raw(" ".repeat(GUTTER as usize)));
+    Line::from(left)
+}
+
+/// Returns how many lines to skip so the cursor's last line fits in `room`.
+///
+/// `owners` names the item each line belongs to.
+#[must_use]
+pub fn scroll(owners: &[usize], cursor: usize, room: usize) -> usize {
+    let end = owners.iter().rposition(|&owner| owner == cursor).map_or(0, |at| at + 1);
+    end.saturating_sub(room)
+}
+
+/// The two cells in front of a row that mark it as the cursor's.
+#[must_use]
+pub fn cursor_cell(selected: bool) -> &'static str {
+    if selected {
+        "▸ "
+    } else {
+        "  "
+    }
 }
 
 /// Truncate from the left, starting with `…` when it had to cut, so the end of
