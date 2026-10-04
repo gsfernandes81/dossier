@@ -16,11 +16,10 @@
 //! What the screen actually says, at the two sizes that matter.
 //!
 //! These render into a `TestBackend` and read the cells back, so they check the
-//! finished frame rather than the intent behind it — the same thing the approved
-//! mockups in `docs/dev/mockups/` show, at the same column counts (45×28 phone,
-//! 100×26 desktop). the plan requires every surface to be *fully
-//! operable* at both, and a column that runs off the edge of a phone is exactly
-//! the failure a unit test cannot see.
+//! finished frame rather than the intent behind it, at the column counts of the
+//! mockups in `docs/dev/mockups/` (45×28 phone, 100×26 desktop). Every surface
+//! must be fully operable at both, and a column that runs off the edge of a phone
+//! is exactly the failure a unit test cannot see.
 
 mod common;
 
@@ -182,14 +181,11 @@ fn render_with(model: &mut Model, cols: u16, rows: u16, theme: Theme) -> (Vec<St
     (lines, colored)
 }
 
-/// **The phone screen the user approved**: header, two-line documents, the touch
-/// action bar, the docked search bar, one hint line.
-///
-/// Drawn here at 45×28, which is the mockup size rather than the device's — the
+/// Drawn at 45×28, which is the mockup size rather than the device's — the
 /// phone reports 47×45 browsing and 47×24 typing. The assertions are about what
 /// the rows contain, so the pane size only has to be a plausible narrow one.
 #[test]
-fn the_phone_screen_matches_the_approved_mockup() {
+fn the_phone_screen_matches_the_mockup() {
     let mut m = model(45, 28);
     let lines = screen(&mut m, 45, 28);
 
@@ -204,19 +200,16 @@ fn the_phone_screen_matches_the_approved_mockup() {
     assert!(lines[3].starts_with("  RC Book"), "second row is not selected: {:?}", lines[3]);
     assert_eq!(ds::layout::visible_rows(45, 28), 12);
 
-    // No action bar: row 25 is the twelfth document's second line, not chrome.
-    // Every verb the bar carried is a key the thumb already has on Termux's own
-    // extra-keys row, and the two it did not are in the leader sheet.
+    // Row 25 is the twelfth document's second line, not a row of verb buttons.
     assert!(!lines[25].contains("Detail") && !lines[25].contains("Expiry"));
     // The search bar is docked at the bottom and is **two rows** on touch: the
-    // query, then the count and hints. Both rows are the keyboard target.
-    // Status line above, entry line last — Vim's arrangement, and fzf's.
+    // count and hints, then the query. Both rows are the keyboard target.
     assert!(lines[26].trim_start().starts_with("14/14"), "matched/total: {:?}", lines[26]);
     assert!(lines[26].contains("⏎ record"), "the hint line teaches the verbs");
     assert!(lines[26].contains("space menu"), "{:?}", lines[26]);
     assert!(lines[27].starts_with(" > █"), "the query row is last: {:?}", lines[27]);
     assert!(lines[27].contains("SPC"), "and carries the leader chip: {:?}", lines[27]);
-    assert!(!lines[27].contains('⌨'), "which replaced the keyboard chip: {:?}", lines[27]);
+    assert!(!lines[27].contains('⌨'), "and no keyboard chip: {:?}", lines[27]);
     assert!(lines[27].contains("Type to search"), "the empty field says so: {:?}", lines[27]);
     assert!(lines[27].contains("For more, hit"), "and what the chip is for");
 }
@@ -262,7 +255,7 @@ fn the_desktop_screen_is_single_line_rows() {
     assert!(lines[1].contains("motorcycle"), "tags column: {:?}", lines[1]);
     assert!(lines[1].contains("  blue folder › slot 1"), "the whole path fits: {:?}", lines[1]);
     assert!(lines[2].starts_with("  RC Book"), "no under-line at this width: {:?}", lines[2]);
-    assert!(!lines[23].contains("⏎ Open"), "no touch action bar on the desktop");
+    assert!(!lines[23].contains("⏎ Open"), "no touch buttons on the desktop");
 }
 
 /// Where a row does not fit, tags give way before the location, and a gap
@@ -380,13 +373,8 @@ fn the_leader_sheet_opens_over_the_list() {
     assert!(on[26].contains("[expiring]"), "and its chip is up: {:?}", on[26]);
 }
 
-/// **The status line is a lit rule between the list and the entry line**, and
-/// the entry line itself is plain.
-///
-/// This is Vim's arrangement — `StatusLine` highlighted, `:` on the plain final
-/// row beneath it — and it is why the band works: it divides rather than sitting
-/// behind the user's own text, where it had to pin a foreground and put dim
-/// placeholder text over a lit row.
+/// The band divides rather than sitting behind the user's own text, where it
+/// would need a pinned foreground and dim placeholder text over a lit row.
 #[test]
 fn the_status_line_is_a_band_and_the_entry_line_is_not() {
     let mut m = model(45, 28);
@@ -397,8 +385,7 @@ fn the_status_line_is_a_band_and_the_entry_line_is_not() {
         "the row being typed into keeps the terminal's own background"
     );
 
-    // Nothing is underlined either — the rule that landed through the
-    // descenders is gone and has not come back as anything else.
+    // Nothing is underlined either: an underline lands through the descenders.
     for row in [26u16, 27] {
         let underlined =
             modifier_columns(&mut m, 45, 28, row, ratatui::style::Modifier::UNDERLINED);
@@ -432,13 +419,9 @@ fn a_monochrome_run_loses_the_band_but_not_the_row() {
     assert!(lines[26].contains("⏎ record"), "and the status line still reads: {:?}", lines[26]);
 }
 
-/// **The touch layout has one button, and it says what it is for.**
-///
-/// The `⌨` chip is gone: Termux has its own keyboard key, and tapping the field
-/// already raises the IME, so a second button for it was a button for a key the
-/// thumb already holds. `SPC` took the corner — and because a bare reversed
-/// `SPC` announces only that it is pressable, the empty field's second phrase
-/// runs into it and finishes the sentence.
+/// No keyboard button: Termux has its own keyboard key, and tapping the field
+/// raises the IME. A bare reversed `SPC` says only that it is pressable, so the
+/// empty field's second phrase runs into it and finishes the sentence.
 #[test]
 fn the_touch_layout_has_one_button_and_it_explains_itself() {
     let mut m = model(45, 28);
@@ -474,7 +457,7 @@ fn the_touch_layout_has_one_button_and_it_explains_itself() {
     }
 
     // The desktop has a keyboard and a space bar, so it gets one row, no chip,
-    // and no signpost — but it does get the underline its query row was missing.
+    // and no signpost.
     let mut wide = model(100, 26);
     let lines = screen(&mut wide, 100, 26);
     assert!(!lines[25].contains("SPC"), "{:?}", lines[25]);
@@ -484,8 +467,6 @@ fn the_touch_layout_has_one_button_and_it_explains_itself() {
     assert!(!lines[24].contains("^t"), "no ctrl key for a filter: {:?}", lines[24]);
 }
 
-/// Typing narrows the list and the count says so — the fzf-style feedback the
-/// plan asks for.
 #[test]
 fn typing_narrows_the_list_and_the_count() {
     let mut m = model(45, 28);
@@ -882,8 +863,7 @@ fn the_record_marks_the_field_being_edited() {
     assert!(lit.iter().all(|&x| x <= 11), "and only the label, not the value: {lit:?}");
 }
 
-/// **A session that cannot write is not told how to.** The `e edit` hint appears
-/// when the verb works and not before — the rule that killed the action bar.
+/// The `e edit` hint appears when the verb works and not before.
 #[test]
 fn the_edit_hint_appears_only_when_this_session_can_write() {
     let mut readonly = model(100, 26);
@@ -1068,7 +1048,7 @@ fn the_record_selector_is_drawn_where_it_is() {
     let mut m = model(47, 24);
     update(&mut m, Msg::Enter);
 
-    // It opens on the name, which is the first row and now an editable one.
+    // It opens on the name, the first row and an editable one.
     let first = selected_columns(&mut m, 47, 24, 1);
     assert!(!first.is_empty(), "the top row of the record is highlighted");
 

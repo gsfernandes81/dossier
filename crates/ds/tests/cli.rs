@@ -57,15 +57,8 @@ fn sample() -> (TempDir, PathBuf) {
     (dir, root)
 }
 
-/// Run the built binary with a config directory of its own, so the developer's
-/// real config can never change what a test sees — and, now that `ds init`
-/// *writes* one, so a test can never change the developer's.
-///
-/// `DS_CONFIG_DIR` is what makes that true on Windows. The four variables below
-/// it sandbox the config directory on Linux only: `dirs` resolves the Windows
-/// path through the Known Folder API, which ignores the environment entirely.
-/// While `ds` only read config that was merely useless; a writing test would
-/// have written the CI runner's real `%LOCALAPPDATA%\dossier\config.toml`.
+/// Runs the binary with its own config directory; `DS_CONFIG_DIR` isolates it on
+/// Windows, where `dirs` ignores the environment.
 fn sandboxed(root: &Path, args: &[&str]) -> Command {
     let sandbox = root.join("config-home");
     std::fs::create_dir_all(&sandbox).expect("mkdir");
@@ -194,10 +187,8 @@ fn init_names_the_device() {
     assert!(written.contains("syncthing_root"), "{written}");
 }
 
-/// **`ds init` never creates the journal directory**. It first
-/// exists inside the synced tree at cutover, and anything created inside a
-/// Syncthing folder syncs by default — so a journal appearing on the other
-/// device before its store was exported is the one thing the plan cannot take.
+/// `ds init` must not create `.dossier/journal/`: the writer creates it on first
+/// append, and anything in a Syncthing folder syncs.
 #[test]
 fn init_does_not_create_the_journal() {
     let (_dir, root) = fresh();

@@ -19,15 +19,15 @@
 //! going to see this?" is a question about *it*, not about dossier. `ds status`
 //! answers it by reading the daemon's REST API — status only, never a write.
 //!
-//! Three rules, ported from v2 along with the behaviour:
+//! Three rules:
 //!
 //! * **Reachability problems are states, not errors.** A daemon that is off, or
 //!   an API key that is wrong, is something to *report* — the report is still
 //!   worth printing, and every caller wants the degraded value rather than an
 //!   exception.
 //! * **TLS verification is dropped only for loopback, never globally.** On
-//!   Termux the API is HTTPS-only with a *self-signed* certificate (v2 Phase 15:
-//!   plain http 307-redirects), so verification cannot succeed there. The
+//!   Termux the API is HTTPS-only with a *self-signed* certificate (plain http
+//!   307-redirects), so verification cannot succeed there. The
 //!   exception is scoped to `127.0.0.0/8`, `::1` and `localhost`; for any other
 //!   host, an unverified request is refused outright. On loopback the API key is
 //!   the real authenticator and the network is the kernel.

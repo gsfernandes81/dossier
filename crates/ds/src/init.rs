@@ -547,9 +547,8 @@ mod tests {
         assert!(!path.exists(), "nothing was written");
     }
 
-    /// **`ds init` never creates the journal directory**: it
-    /// first exists inside the synced tree at cutover and not one launch before,
-    /// because anything inside a Syncthing folder syncs by default.
+    /// `ds init` must not create `.dossier/journal/`: the writer creates it on
+    /// first append, and anything in a Syncthing folder syncs.
     #[test]
     fn it_does_not_create_the_journal() {
         let (_tmp, dir) = sandbox();

@@ -664,9 +664,8 @@ impl Store {
     /// Documents expired or due inside the warn window, soonest first: the
     /// header's count and the expiring filter both, so they always agree.
     ///
-    /// Superseded and ignored documents are out of the watch, which is the
-    /// whole point of an opt-out watch: a renewal removes the old document
-    /// without anyone re-starring anything.
+    /// The watch is opt-out: superseded and ignored documents leave it without
+    /// any action.
     #[must_use]
     pub fn due(&self, today: &str, warn_until: &str) -> Vec<usize> {
         let mut rows: Vec<usize> = self
@@ -1067,8 +1066,6 @@ mod tests {
         assert_eq!(s.place(&s.docs[s.index_of("old").unwrap()]), "desk › leather folder");
     }
 
-    /// **The watch is opt-out.** A renewal removes the old document from it
-    /// automatically — nobody re-stars anything.
     #[test]
     fn superseded_and_ignored_documents_leave_the_watch() {
         let s = build(vec![

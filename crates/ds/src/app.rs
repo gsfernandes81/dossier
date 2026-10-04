@@ -3960,7 +3960,7 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
         assert_eq!(update(&mut m, Msg::Left), Effect::Idle);
         assert_eq!(update(&mut m, Msg::Right), Effect::Idle);
-        assert!(m.detail(), "`←` no longer closes the record; `Esc` does");
+        assert!(m.detail(), "`←` leaves the record open; `Esc` closes it");
     }
 
     /// Esc peels one layer per press: search, surface, filter, arm, quit.
