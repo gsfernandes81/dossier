@@ -49,7 +49,7 @@ use serde_json::Value;
 pub enum Status {
     /// Past its expiry date, still in use.
     Expired,
-    /// Inside the warn window (default 90 days, a synced setting).
+    /// Inside the warn window ([`WARN_DAYS`]).
     Soon,
     /// Tracked, but not yet worth attention.
     Ok,
@@ -293,12 +293,10 @@ pub struct Store {
     pub docs: Vec<Doc>,
     /// The physical locations.
     pub locations: Tree,
-    /// Synced settings, as folded (`expiry_threshold_days`, scope globs, …).
-    pub settings: BTreeMap<String, Value>,
 }
 
-/// Default warn window, matching v2's `DEFAULT_EXPIRY_THRESHOLD_DAYS`.
-pub const DEFAULT_WARN_DAYS: i64 = 90;
+/// Days before expiry that count as expiring.
+pub const WARN_DAYS: i64 = 90;
 
 fn string(entity: &Entity, field: &str) -> Option<String> {
     entity.fields.get(field).and_then(Value::as_str).map(str::to_string)
@@ -461,10 +459,7 @@ impl Store {
         };
         docs.sort_by_cached_key(|doc| (rank(doc), doc.name.to_lowercase(), doc.id.clone()));
 
-        let settings =
-            fold.get("settings", "synced").map(|entity| entity.fields.clone()).unwrap_or_default();
-
-        Self { docs, locations, settings }
+        Self { docs, locations }
     }
 
     /// How many records the default list shows.
@@ -591,15 +586,6 @@ impl Store {
                 None => return false,
             }
         }
-    }
-
-    /// The warn window in days, from synced settings.
-    #[must_use]
-    pub fn warn_days(&self) -> i64 {
-        self.settings
-            .get("expiry_threshold_days")
-            .and_then(Value::as_i64)
-            .unwrap_or(DEFAULT_WARN_DAYS)
     }
 
     /// Row indices matching `query`, in list order.
@@ -1179,23 +1165,14 @@ mod tests {
         assert!(ids("zzzz").is_empty(), "{:?}", ids("zzzz"));
     }
 
-    /// Locations and synced settings come through the same fold.
+    /// Locations come through the same fold as documents.
     #[test]
-    fn locations_and_settings_are_read_from_the_fold() {
+    fn locations_are_read_from_the_fold() {
         let s = store(&[
             (10, "create", "location", "cert-file", "", Value::Null),
             (11, "set", "location", "cert-file", "name", "Cert File".into()),
-            (20, "create", "settings", "synced", "", Value::Null),
-            (21, "set", "settings", "synced", "expiry_threshold_days", 270.into()),
         ]);
         assert_eq!(s.locations.get("cert-file").map(|l| l.name.as_str()), Some("Cert File"));
-        assert_eq!(s.warn_days(), 270);
-    }
-
-    /// With no settings entity the default window applies, rather than zero.
-    #[test]
-    fn the_warn_window_defaults_when_unset() {
-        assert_eq!(Store::default().warn_days(), DEFAULT_WARN_DAYS);
     }
 
     /// A document with no name is still built — hiding it would make a

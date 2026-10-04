@@ -129,7 +129,7 @@ impl Report {
             tracked,
             expired,
             soon,
-            warn_days: store.warn_days(),
+            warn_days: crate::doc::WARN_DAYS,
             locations: store.locations.len(),
             orphaned: stats.orphaned,
             duplicate_keys: stats.duplicate_keys,

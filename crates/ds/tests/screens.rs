@@ -123,7 +123,7 @@ fn sample_store() -> Store {
             parent: Some((*location).into()),
         });
     }
-    Store { docs, locations: ds::Tree::new(locations), ..Store::default() }
+    Store { docs, locations: ds::Tree::new(locations) }
 }
 
 fn model(cols: u16, rows: u16) -> Model {
