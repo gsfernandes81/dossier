@@ -2205,12 +2205,12 @@ fn edit_step(model: &mut Model, edit: &mut crate::edit::Edit, msg: &Msg) -> (Opt
     let effect = match msg {
         Msg::Char(c) => {
             edit.buffer.push(*c);
-            edit.typed();
+            crate::complete::follow(edit.list.as_mut(), &edit.buffer);
             Effect::Redraw
         }
         Msg::Backspace => {
             edit.buffer.pop();
-            edit.typed();
+            crate::complete::follow(edit.list.as_mut(), &edit.buffer);
             Effect::Redraw
         }
         // A second append of the same op is harmless to the fold but a lie
@@ -2262,15 +2262,10 @@ fn edit_step(model: &mut Model, edit: &mut crate::edit::Edit, msg: &Msg) -> (Opt
 fn attach_key(model: &Model, edit: &mut crate::edit::Edit, msg: &Msg) -> Option<Effect> {
     let list = edit.list.as_mut()?;
     let line = &mut edit.buffer;
+    if let Some(finished) = list.key(line, msg) {
+        return (!finished).then_some(Effect::Redraw);
+    }
     match msg {
-        Msg::Move(Motion::Up) => list.step(line, false),
-        Msg::Move(Motion::Down) => list.step(line, true),
-        Msg::Tab => list.tab(line),
-        Msg::Enter if list.chosen.is_some() => {
-            if list.enter(line) {
-                return None;
-            }
-        }
         Msg::Enter => {
             // A folder typed whole opens, as a chosen one does: a folder is
             // never a soft copy.

@@ -194,13 +194,6 @@ impl Edit {
         }
     }
 
-    /// Lets the live list follow the line after it was typed into.
-    pub fn typed(&mut self) {
-        if let Some(list) = &mut self.list {
-            list.typed(&self.buffer);
-        }
-    }
-
     /// The live list's rows for the line.
     #[must_use]
     pub fn matches(&self) -> Vec<&crate::complete::Entry> {

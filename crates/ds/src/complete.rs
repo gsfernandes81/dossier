@@ -19,6 +19,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::app::{Motion, Msg};
+
 /// More entries than this in one folder are not read: a list that long is
 /// searched by typing, and reading it all would stall a keystroke.
 const READ_LIMIT: usize = 5000;
@@ -216,6 +218,29 @@ impl Completion {
             Some(at) => self.pick(line, at),
             None => true,
         }
+    }
+
+    /// Applies a list key: `↑`/`↓` choose a row, `Tab` fills it, and `Enter`
+    /// picks a chosen one.
+    ///
+    /// Returns whether the line is finished, or `None` for a key that is the
+    /// line's own.
+    pub fn key(&mut self, line: &mut String, msg: &Msg) -> Option<bool> {
+        match msg {
+            Msg::Move(Motion::Up) => self.step(line, false),
+            Msg::Move(Motion::Down) => self.step(line, true),
+            Msg::Tab => self.tab(line),
+            Msg::Enter if self.chosen.is_some() => return Some(self.enter(line)),
+            _ => return None,
+        }
+        Some(false)
+    }
+}
+
+/// Lets `list`, if there is one, follow a line that was typed into.
+pub fn follow(list: Option<&mut Completion>, line: &str) {
+    if let Some(list) = list {
+        list.typed(line);
     }
 }
 

@@ -20,9 +20,10 @@
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
-use crate::complete::{Completion, Entry};
+use crate::app::Msg;
+use crate::complete::{follow, Completion, Entry};
 
 /// Rows the live list shows under the line.
 const SHOWN: usize = 8;
@@ -230,39 +231,29 @@ impl LineEditor {
             .unwrap_or_default()
     }
 
-    /// Applies one key: `Tab` fills the chosen or top row, `Enter` on a chosen
-    /// row opens it and otherwise finishes the line, and `Esc` or `ctrl+c`
-    /// leaves.
+    /// Applies one key: the live list's, then `ctrl+u` clears, `Enter`
+    /// finishes, and `Esc` or `ctrl+c` leaves.
     pub fn key(&mut self, key: KeyEvent) -> Step {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let buffer = &mut self.buffer;
-        match (key.code, &mut self.list) {
-            (KeyCode::Esc, _) => return Step::Cancel,
-            (KeyCode::Char('c'), _) if ctrl => return Step::Cancel,
-            (KeyCode::Enter, None) => return Step::Done(buffer.clone()),
-            (KeyCode::Enter, Some(list)) => {
-                if list.enter(buffer) {
-                    return Step::Done(buffer.clone());
-                }
-            }
-            (KeyCode::Up | KeyCode::Down, Some(list)) => {
-                list.step(buffer, key.code == KeyCode::Down);
-            }
-            (KeyCode::Tab, Some(list)) => list.tab(buffer),
-            (KeyCode::Char('u'), list) if ctrl => {
-                buffer.clear();
-                typed(list.as_mut(), buffer);
-            }
-            (KeyCode::Char(c), list) if !ctrl => {
-                buffer.push(c);
-                typed(list.as_mut(), buffer);
-            }
-            (KeyCode::Backspace, list) => {
-                buffer.pop();
-                typed(list.as_mut(), buffer);
-            }
-            _ => {}
+        if key.code == KeyCode::Char('u') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.buffer.clear();
+            follow(self.list.as_mut(), &self.buffer);
+            return Step::Continue;
         }
+        let Some(msg) = crate::input::to_msg(&Event::Key(key)) else { return Step::Continue };
+        if let Some(finished) = self.list.as_mut().and_then(|list| list.key(&mut self.buffer, &msg))
+        {
+            return if finished { Step::Done(self.buffer.clone()) } else { Step::Continue };
+        }
+        match msg {
+            Msg::Esc | Msg::Quit => return Step::Cancel,
+            Msg::Enter => return Step::Done(self.buffer.clone()),
+            Msg::Char(c) => self.buffer.push(c),
+            Msg::Backspace => {
+                self.buffer.pop();
+            }
+            _ => return Step::Continue,
+        }
+        follow(self.list.as_mut(), &self.buffer);
         Step::Continue
     }
 
@@ -289,13 +280,6 @@ impl LineEditor {
             .take(SHOWN)
             .map(|(at, entry)| (chosen == Some(at), entry.label()))
             .collect()
-    }
-}
-
-/// Lets the live list follow a line that was typed into.
-fn typed(list: Option<&mut Completion>, line: &str) {
-    if let Some(list) = list {
-        list.typed(line);
     }
 }
 
@@ -344,9 +328,6 @@ impl Terminal {
                 }
                 out.flush()?;
                 if let event::Event::Key(key) = event::read()? {
-                    if key.kind != event::KeyEventKind::Press {
-                        continue;
-                    }
                     match editor.key(key) {
                         Step::Continue => {}
                         Step::Done(text) => return Ok(text),
