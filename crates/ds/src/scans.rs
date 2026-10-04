@@ -24,7 +24,7 @@
 //!
 //! Matching here is **exact substring only**, deliberately. A transcript is
 //! hundreds of words; letting a two-edit budget loose on it would match almost
-//! anything, and a search that always matches is a search nobody trusts.
+//! anything.
 
 use std::collections::BTreeMap;
 

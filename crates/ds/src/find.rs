@@ -60,10 +60,6 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
     } else {
         vec![Constraint::Min(1), Constraint::Length(status), Constraint::Length(1)]
     };
-    // **The entry line is last, on both layouts.** Emacs's minibuffer is the
-    // frame's final line, Vim's `:` is the final line below the status line, and
-    // fzf's default layout is results, info, prompt. The row above it carries
-    // the band, so the lit rule divides the list from the thing you type into.
     let split = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(1)])
@@ -253,7 +249,6 @@ fn draw_list(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         return;
     }
 
-    // *** The virtualization: only the visible window is built. ***
     let shown: Vec<(usize, &Doc, String)> = (model.offset..model.rows.len())
         .take(visible)
         .map(|at| {
@@ -934,10 +929,6 @@ fn keyboard_row(model: &Model, cols: usize, theme: Theme) -> Line<'static> {
 
 /// The touch layout's last row: the query as a field, or where the keys go
 /// when they do not go into it, closed by the `SPC` chip that opens the sheet.
-///
-/// The row is a lit band, as Emacs marks an editable field with a background
-/// face: a rule under it is what a terminal cannot place, since `SGR 4` lands
-/// through the descenders on the phone.
 fn entry_row(model: &Model, key: &'static str, cols: usize, theme: Theme) -> Line<'static> {
     let gutter = crate::layout::GUTTER as usize;
     let prompt = " >";
@@ -946,14 +937,10 @@ fn entry_row(model: &Model, key: &'static str, cols: usize, theme: Theme) -> Lin
     let quiet = theme.style(Tone::Muted);
     let mut field: Vec<Span> = vec![Span::styled(prompt, theme.style(Tone::Accent))];
     if !model.typing_into_query() {
-        // Nothing on the row may look typeable: no prompt and no cursor, only
-        // where the keys go, as Vim's command line names its mode.
+        // Nothing on the row may look typeable: no prompt and no cursor.
         let room = cols.saturating_sub(width(key) + gutter + 1);
         field = vec![Span::styled(format!(" {}", fit(&mode_line(model), room)), quiet)];
     } else if model.query.is_empty() {
-        // An invitation on the left, and on the right a sentence that
-        // **finishes on the button**: the prose runs out at "hit" and the
-        // reversed `SPC` is its object.
         let invite = "Type to search";
         let signpost = "For more, hit";
         let gap = span.saturating_sub(3 + width(invite) + width(signpost) + 1);
@@ -977,8 +964,7 @@ fn entry_row(model: &Model, key: &'static str, cols: usize, theme: Theme) -> Lin
 }
 
 /// The last row when typing does not go into the search: where the keys go
-/// instead, or the chord half typed, as Vim's command line shows its mode and
-/// a pending operator.
+/// instead, or the chord half typed.
 fn mode_line(model: &Model) -> String {
     use crate::app::View;
     let top = model.views.last();

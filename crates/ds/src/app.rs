@@ -180,16 +180,9 @@ pub enum Effect {
 
 /// One write this session made, and the ops that put it back.
 ///
-/// **Both halves are kept, and that is what makes redo possible at all.** Undo
-/// appends `back`; redo appends `forward` — the very ops that were written the
-/// first time, so redo needs no re-derivation and cannot drift from what it is
-/// putting back.
-///
-/// The `back` half is a **snapshot**, not a rule: it records what the store held
-/// when the change was made. That is the right thing for the undo/redo dance
-/// (undo, redo, undo returns to the same place), and it is deliberately not a
-/// promise about a document the *other* device has since edited — field-level
-/// LWW settles that, and the loser is still in the journal.
+/// Redo appends `forward` again, the very ops first written, so it cannot drift.
+/// `back` is a snapshot of the store at the time; another device's later edit
+/// is settled by field-level LWW, not by it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
     /// What was written.
@@ -282,15 +275,7 @@ impl Landed {
 /// Whether this session can write, and the reason to show when it cannot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteState {
-    /// Editing is available, under this device's name.
-    ///
-    /// **The device travels with the permission** rather than beside it: a
-    /// session may write exactly when it knows who it is, since the device is
-    /// the first half of the writer id every op is appended under — and, since
-    /// [`crate::id::mint`], part of the id of every document created here. A
-    /// separate `Option<String>` would let those two facts drift apart, and the
-    /// state that could then exist — allowed to write, no idea as whom — is one
-    /// nothing downstream could do anything sensible with.
+    /// Editing is available under this device's name.
     Ready { device: String },
     /// Editing is off for this session, with the reason ready to show.
     Off(String),
@@ -323,11 +308,7 @@ impl WriteState {
 }
 
 impl Default for WriteState {
-    /// A model that nobody told about a device cannot write.
-    ///
-    /// The default is the *safe* state rather than the convenient one: a `Model`
-    /// built in a test, or before `main` has read the config, must not offer an
-    /// edit it has no writer id to perform.
+    /// Read-only until a device name is known.
     fn default() -> Self {
         WriteState::Off("no device name — run `ds init` to enable editing".into())
     }
@@ -442,12 +423,6 @@ impl RowGeometry {
 }
 
 /// Everything the renderer reads and the event loop changes.
-///
-/// The flags are independent facts about the screen — detail open, quit armed,
-/// mouse reporting on, keyboard hint showing — not a state machine. Packing them
-/// into an enum would have to encode combinations that do not exist and would
-/// lose the ones that do (detail open *while* armed *while* reporting is
-/// dropped is a real state a phone reaches).
 #[derive(Default)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Model {
@@ -502,11 +477,6 @@ pub struct Model {
     /// restart only empties the shortcut.
     pub undo: Vec<Change>,
     /// Undone writes, newest last, waiting to be put back.
-    ///
-    /// **Cleared by any ordinary write**, which is what makes redo mean what it
-    /// means everywhere: once history has branched, the future this described is
-    /// one the store never took, and offering it would put back an edit against
-    /// a document that has moved on since.
     pub redo: Vec<Change>,
     /// The append in flight. Its change is promoted onto the stack its
     /// direction says when the journal confirms it and dropped when it
@@ -1501,10 +1471,10 @@ impl Model {
         Ok(self.append(change, landed))
     }
 
-    /// `Esc` peels exactly one layer per press: panels, then search, then the
-    /// pushed view, then filters, then arm, then quit. On Termux `Esc` also
-    /// dismisses the keyboard, so every press must consume something visible
-    /// before one can quit.
+    /// `Esc` peels one layer per press: a panel, the sheet, the Bundles search,
+    /// a pushed view, the query, the filters, then arms the quit. On Termux
+    /// `Esc` also dismisses the keyboard, so every press must undo something
+    /// visible before one can quit.
     fn peel(&mut self, was_armed: bool) -> Effect {
         if let Some(picker) = &mut self.picker {
             if peel_filter(&mut picker.filter, &mut picker.cursor) {
@@ -1512,8 +1482,6 @@ impl Model {
             }
             return Effect::Redraw;
         }
-        // The sheet peels the same way everything else does — one layer per
-        // press, outermost first — so `Esc` never needs a second meaning.
         if let Some(check) = &mut self.check {
             if peel_filter(&mut check.filter, &mut check.cursor) {
                 self.check = None;
@@ -1645,13 +1613,7 @@ impl Model {
         self.set_record_cursor(moved(self.record_cursor(), len, motion, len));
     }
 
-    /// A bare letter on the record surface.
-    ///
-    /// **`e` edits the row you are on**, which is why this surface needs no
-    /// control keys: one verb covers every field, and the selector says which.
-    /// A `ctrl+`combination could never be taught — Termux latches `CTRL` in its
-    /// own UI, so the app sees only the finished keystroke and has no moment to
-    /// offer what follows it.
+    /// A bare letter on the record surface; `e` edits the selected row.
     ///
     /// An unknown letter says so rather than doing nothing: on this surface a
     /// letter is a verb, and silence would read as a dropped keypress.
@@ -1903,9 +1865,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         }
     }
 
-    // While the sheet is open it owns the keyboard, because its whole purpose is
-    // to be somewhere letters mean something. `Esc` still peels (see
-    // `Model::peel`) and `ctrl+`-anything still fires, so nothing is trapped.
     if model.check.is_some() {
         if let Some(effect) = check_key(model, &msg) {
             return effect;
@@ -1939,16 +1898,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.delete_armed = false;
             let landed = match model.pending.take() {
                 Some(Pending { change, direction, landed }) => {
-                    // The write landed, so its change belongs on the stack that
-                    // can reverse it: a write becomes something to undo, an undo
-                    // something to redo, and a redo something to undo again.
                     match direction {
                         Direction::Forward | Direction::Redo => model.undo.push(change),
                         Direction::Undo => model.redo.push(change),
                     }
-                    // **An ordinary write clears the redo stack.** Once history
-                    // has branched, the future those changes described is one
-                    // the store never took.
                     if direction == Direction::Forward {
                         model.redo.clear();
                     }
@@ -2740,8 +2693,6 @@ fn search_zone(model: &Model) -> (u16, u16) {
     if crate::layout::touch_layout(model.cols) {
         (last.saturating_sub(1), last)
     } else {
-        // The entry line is the final row on a keyboard layout too — Emacs's
-        // minibuffer and Vim's `:` both live there, with the status line above.
         (last, last)
     }
 }
@@ -2815,8 +2766,7 @@ pub(crate) mod tests {
         update(m, Msg::Saved(Box::new(store)));
     }
 
-    /// The store as it would fold after `coc`'s expiry became `2027-04-01` —
-    /// what the journal thread posts back.
+    /// The store with `id`'s expiry set to `expiry`, as the journal thread posts it.
     fn restored(from: &Model, id: &str, expiry: Option<&str>) -> Store {
         let mut store = from.store.clone();
         for doc in &mut store.docs {
@@ -2985,10 +2935,8 @@ pub(crate) mod tests {
         );
     }
 
-    /// **Creating a document is `create` then `set name`, in one append.**
-    /// the fold's fold orphans a `set` on an entity that is not alive yet, so a name
-    /// arriving before its create would be silently dropped — and the two ops
-    /// cannot be separated by anything if they are one batch from one writer.
+    /// The fold drops a `set` on an entity not yet created, so a new document's
+    /// `create` and `set name` go in one append.
     #[test]
     fn creating_a_document_appends_the_create_before_the_name() {
         let mut m = writable();
@@ -3016,7 +2964,7 @@ pub(crate) mod tests {
     #[test]
     fn new_is_offered_above_the_matches_once_something_is_typed() {
         let mut m = writable();
-        assert!(!m.offers_new(), "an empty search lists every document, as fzf does");
+        assert!(!m.offers_new(), "an empty search lists every document");
         update(&mut m, Msg::Char('c'));
         assert!(m.offers_new());
         assert!(!m.on_new, "the cursor starts on the first match");

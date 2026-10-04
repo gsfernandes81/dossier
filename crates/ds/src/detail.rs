@@ -15,9 +15,7 @@
 
 //! The Details view: one document's rows, and the selector its verbs act on.
 //!
-//! The layout is in REWRITE-UI.md. `e` edits the selected row, so one
-//! bare letter covers every field; a `ctrl` combination could not be offered by
-//! the Space sheet, because Termux delivers it as one finished key.
+//! The layout is in REWRITE-UI.md. `e` edits the selected row.
 //!
 //! [`rows`] is the list the selector walks and the renderer draws, so a
 //! highlight can never land on a row the reader is not looking at.
@@ -164,9 +162,7 @@ fn render_row(
             vec![field("bundles", &nonempty(names.join(" · ")), inner, theme)]
         }
         Row::Files => vec![field("files", "none", inner, theme)],
-        // One line each, with the primary marked — the file `Enter` opens is the
-        // one with the arrow, and seeing which that is matters more than any
-        // other field on this screen.
+        // The arrow marks the primary file, the one `Enter` opens.
         Row::File(i) => {
             let primary = doc.primary_file().map(|f| f.path.clone());
             let file = &doc.files[i];
@@ -232,9 +228,7 @@ fn render_editable(
         // Typed from a picker; never a row of its own.
         Field::Attach => Vec::new(),
         Field::Name => vec![title(&doc.name, lit, inner, theme), Line::raw("")],
-        // Expiry carries its standing in words next to the date: `2026-09-28`
-        // alone makes the reader do the arithmetic, and the whole point of this
-        // app is that nobody should have to.
+        // The standing in words, so nobody does date arithmetic.
         Field::Expiry => {
             let status = model.status(doc);
             vec![Line::from(vec![
@@ -285,10 +279,8 @@ fn label(text: &str, theme: Theme) -> Span<'static> {
 
 /// The label of the field currently being edited.
 ///
-/// Reverse video, which is the same texture the selected row uses and the only
-/// one this app has that needs no colour and no new attribute — `SGR 4` lands
-/// through the descenders on the phone's font, and `SGR 2` may be ignored
-/// outright. Reverse is the one that is always exactly one cell tall.
+/// Reverse video needs no colour; underline lands in the descenders on the
+/// phone's font and dim may be ignored.
 fn marked_label(text: &str, theme: Theme) -> Span<'static> {
     Span::styled(
         format!(" {text:<LABEL_COLS$}"),
