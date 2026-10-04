@@ -67,6 +67,8 @@ pub struct Report {
     pub anomalies: Vec<String>,
     /// Locations two devices moved into each other, said as what to do.
     pub loops: Option<String>,
+    /// Latest versions that conflict with another latest version.
+    pub conflicts: usize,
     /// What the local Syncthing daemon says, when there is one to ask.
     pub sync: Option<crate::syncthing::Status>,
 }
@@ -138,6 +140,7 @@ impl Report {
             // reworded would be an anomaly nothing else agrees with.
             anomalies: load.anomalies.iter().map(ToString::to_string).collect(),
             loops: store.locations.loop_message(),
+            conflicts: store.conflicts(),
             sync: None,
         }
     }
@@ -151,6 +154,7 @@ impl Report {
     pub fn healthy(&self) -> bool {
         self.anomalies.is_empty()
             && self.loops.is_none()
+            && self.conflicts == 0
             && self.malformed == 0
             && self.duplicate_keys == 0
             && self.sync_healthy()
@@ -260,6 +264,14 @@ impl Report {
         if let Some(loops) = &self.loops {
             let _ = writeln!(out, "locations {loops}");
         }
+        if self.conflicts > 0 {
+            let _ = writeln!(
+                out,
+                "versions  {} conflicting latest — two devices each made a new version; \
+                 v on its Details view shows both",
+                self.conflicts
+            );
+        }
         // Syncthing problems belong in the quiet form too: a paused folder or a
         // daemon that has been off for a week is exactly the silent failure a
         // cron job exists to catch, and neither shows up in the journal.
@@ -307,6 +319,7 @@ mod tests {
             files: Vec::new(),
             notes: String::new(),
             superseded: false,
+            conflicting: false,
             haystack: String::new(),
         }
     }
@@ -334,6 +347,21 @@ mod tests {
         assert!(text.contains("2 tracked · 1 expired · 1 within 90 days"), "{text}");
         assert!(text.contains("no anomalies"));
         assert!(r.healthy());
+    }
+
+    /// A conflicting latest version is listed even by the quiet form, so it is
+    /// found without opening that document's Versions view.
+    #[test]
+    fn a_conflicting_latest_version_is_a_problem() {
+        let mut conflicting = doc("pp-phone", None);
+        conflicting.conflicting = true;
+        let r = report(
+            &Load { present: true, ..Load::default() },
+            &FoldStats::default(),
+            vec![doc("pp-desk", None), conflicting],
+        );
+        assert!(!r.healthy());
+        assert!(r.problems().contains("1 conflicting latest"), "{}", r.problems());
     }
 
     /// **An expiring document is not a problem with the store.** A `--quiet` run

@@ -136,6 +136,9 @@ pub struct Doc {
     pub notes: String,
     /// Whether some *other* document supersedes this one.
     pub superseded: bool,
+    /// A latest version beside a later-issued one: two devices each made a
+    /// new version of the same document.
+    pub conflicting: bool,
     /// Folded name + notes + tags + bundles, precomputed once.
     ///
     /// Search runs on every keystroke across the whole store, so the
@@ -337,6 +340,39 @@ fn files(entity: &Entity) -> Vec<FileRef> {
         .unwrap_or_default()
 }
 
+/// Marks each latest version that shares its oldest version with another
+/// latest one issued later, the id breaking a tie.
+fn mark_conflicts(docs: &mut [Doc]) {
+    let index: BTreeMap<&str, usize> =
+        docs.iter().enumerate().map(|(i, doc)| (doc.id.as_str(), i)).collect();
+    let oldest = |start: usize| {
+        let mut at = start;
+        let mut seen = BTreeSet::from([start]);
+        while let Some(&older) = docs[at].supersedes.as_deref().and_then(|id| index.get(id)) {
+            if !seen.insert(older) {
+                break;
+            }
+            at = older;
+        }
+        at
+    };
+    let mut chains: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (i, doc) in docs.iter().enumerate() {
+        if !doc.superseded {
+            chains.entry(oldest(i)).or_default().push(i);
+        }
+    }
+    let mut losers = Vec::new();
+    for latest in chains.into_values().filter(|latest| latest.len() > 1) {
+        let key = |&i: &usize| (docs[i].issue_date.clone(), docs[i].id.clone());
+        let winner = latest.iter().max_by_key(|i| key(i)).copied();
+        losers.extend(latest.into_iter().filter(|&i| Some(i) != winner));
+    }
+    for i in losers {
+        docs[i].conflicting = true;
+    }
+}
+
 impl Store {
     /// Build the browsable store from a folded journal.
     ///
@@ -396,10 +432,13 @@ impl Store {
                     files: files(entity),
                     notes,
                     superseded: superseded.contains(id),
+                    conflicting: false,
                     haystack,
                 }
             })
             .collect();
+
+        mark_conflicts(&mut docs);
 
         let locations = Tree::new(fold.kind("location").map(|(id, entity)| Location {
             id: id.to_string(),
@@ -424,6 +463,12 @@ impl Store {
         });
 
         Self { docs, locations, bundles }
+    }
+
+    /// How many latest versions conflict with another.
+    #[must_use]
+    pub fn conflicts(&self) -> usize {
+        self.docs.iter().filter(|doc| doc.conflicting).count()
     }
 
     /// How many records the default list shows.
@@ -675,6 +720,7 @@ mod tests {
             // collection and `haystack` is built from the fields above. Neither
             // bundle exists here, so their names are not in it.
             superseded: false,
+            conflicting: false,
             haystack: crate::search::fold("COC Certificate the one with the stamp marine ticket"),
         };
 
@@ -770,6 +816,33 @@ mod tests {
         let versions = ids(&store, &store.versions("pp-phone"));
         assert_eq!(versions.len(), 3);
         assert_eq!(store.listed(), 2);
+    }
+
+    /// Of two latest versions, the later-issued one is the latest and the
+    /// other conflicts, however far down the chain they branch.
+    #[test]
+    fn the_earlier_issued_of_two_latest_versions_conflicts() {
+        let store = build(vec![
+            named(100, "pp", "Passport", &[]),
+            named(110, "pp-2", "Passport", &[("supersedes", "pp".into())]),
+            named(
+                200,
+                "pp-desk",
+                "Passport",
+                &[("supersedes", "pp-2".into()), ("issue_date", "2026-02-10".into())],
+            ),
+            named(
+                300,
+                "pp-phone",
+                "Passport",
+                &[("supersedes", "pp".into()), ("issue_date", "2026-01-05".into())],
+            ),
+            named(400, "coc", "COC", &[]),
+        ]);
+        let conflicting: Vec<&str> =
+            store.docs.iter().filter(|d| d.conflicting).map(|d| d.id.as_str()).collect();
+        assert_eq!(conflicting, ["pp-phone"]);
+        assert_eq!(store.conflicts(), 1);
     }
 
     /// A cycle of versions cannot hang the walk.
@@ -879,6 +952,7 @@ mod tests {
             files: Vec::new(),
             notes: String::new(),
             superseded: false,
+            conflicting: false,
             haystack: crate::search::fold("Bare"),
         }
         .as_fields();

@@ -2448,6 +2448,7 @@ pub(crate) mod tests {
                 .unwrap_or_default(),
             notes: String::new(),
             superseded: false,
+            conflicting: false,
             haystack: crate::search::fold(name),
         }
     }

@@ -104,6 +104,7 @@ fn sample_store() -> Store {
             },
             notes: String::new(),
             superseded: false,
+            conflicting: false,
             haystack: ds::search::fold(&format!("{name} {tag}")),
         })
         .collect();
@@ -549,6 +550,17 @@ fn the_expiring_filter_is_visible_in_the_bar() {
     let lines = screen(&mut m, 45, 28);
     assert!(lines[26].contains("[expiring]"), "the chip: {:?}", lines[26]);
     assert!(lines[1].contains("Motorcycle Insurance"), "soonest first: {:?}", lines[1]);
+}
+
+/// A conflicting latest version is counted in the header beside the
+/// expiring count.
+#[test]
+fn a_conflict_is_counted_in_the_header() {
+    let mut m = model(45, 28);
+    m.store.docs[0].conflicting = true;
+    let lines = screen(&mut m, 45, 28);
+    assert!(lines[0].contains("! 1 conflict"), "{:?}", lines[0]);
+    assert!(lines[0].contains(" exp "), "the expiring count stays: {:?}", lines[0]);
 }
 
 /// An empty store offers its first document, with nothing typed.

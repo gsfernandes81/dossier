@@ -459,6 +459,7 @@ mod tests {
             files: Vec::new(),
             notes: String::new(),
             superseded: false,
+            conflicting: false,
             haystack: String::new(),
         }
     }

@@ -156,12 +156,15 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     // reverse means *you can press this* and nothing else does.
     let count =
         if wide { format!(" ! {attention} expiring ") } else { format!(" ! {attention} exp ") };
+    let conflicts = model.store.conflicts();
+    let conflict = if conflicts == 0 { String::new() } else { format!(" ! {conflicts} conflict ") };
     let tail = crate::layout::GUTTER as usize;
     let room = (area.width as usize).saturating_sub(width(left) + tail);
     let count = truncate(&count, room);
-    let gap = room.saturating_sub(width(&count));
+    let conflict = truncate(&conflict, room.saturating_sub(width(&count)));
+    let gap = room.saturating_sub(width(&count) + width(&conflict));
 
-    let start = width(left) + gap;
+    let start = width(left) + gap + width(&conflict);
     model.count_zone = if touch {
         Zone {
             row: area.y,
@@ -176,6 +179,7 @@ fn draw_header(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
         Paragraph::new(Line::from(vec![
             Span::styled(left, theme.style(Tone::Title)),
             Span::raw(" ".repeat(gap)),
+            Span::styled(conflict, theme.status(crate::Status::Expired)),
             Span::styled(
                 count,
                 if model.filter.expiring {
