@@ -422,6 +422,20 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
             return;
         }
     }
+    let matches = model.attach_matches();
+    if let (Some(edit), false) = (&model.edit, matches.is_empty()) {
+        let (head, tail) = crate::complete::split(&edit.buffer);
+        let rows = matches.iter().map(|entry| ("  ".to_string(), entry.label(), "")).collect();
+        let place = if head.is_empty() { "the Syncthing folder" } else { head };
+        let panel = Panel {
+            crumb: format!("in {place}"),
+            filter: Some(tail),
+            cursor: edit.chosen,
+            subject: None,
+        };
+        model.panel = draw_panel(frame, area, &panel, rows, theme);
+        return;
+    }
     if let Some(picker) = &model.picker {
         let hits = picker.matching(&model.store);
         let rows = hits.iter().map(|entry| ("   ".to_string(), entry.label.clone(), "")).collect();
@@ -1140,7 +1154,9 @@ fn locpick_hints(picker: &crate::locpick::LocationPicker) -> Vec<&'static str> {
 
 /// The hints a touch layout shows, most sheddable first.
 fn touch_hints(model: &Model) -> Vec<&'static str> {
-    if model.edit.is_some() {
+    if model.edit.is_some() && !model.attach_matches().is_empty() {
+        vec!["tab fill", "⏎ save", "esc discard"]
+    } else if model.edit.is_some() {
         vec!["⏎ save", "esc discard"]
     } else if model.sheet {
         vec!["letter runs it", "esc back"]
@@ -1267,7 +1283,9 @@ fn status_text(model: &Model, touch: bool) -> (String, Tone) {
     {
         return (format!("{}  space menu  ^q quit", hints.join("  ")), Tone::Muted);
     }
-    let hints = if model.edit.is_some() {
+    let hints = if model.edit.is_some() && !model.attach_matches().is_empty() {
+        "↑↓ choose  tab fill  ⏎ save  esc discard"
+    } else if model.edit.is_some() {
         "⏎ save  esc discard"
     } else if model.picker.is_some() {
         "↑↓ select  ⏎ choose  type to narrow  esc back"

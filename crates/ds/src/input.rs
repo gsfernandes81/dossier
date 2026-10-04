@@ -66,6 +66,7 @@ fn key_msg(key: KeyEvent) -> Option<Msg> {
         KeyCode::Char('y') if ctrl => Some(Msg::Redo),
         KeyCode::Esc => Some(Msg::Esc),
         KeyCode::Enter => Some(Msg::Enter),
+        KeyCode::Tab => Some(Msg::Tab),
         KeyCode::Right => Some(Msg::Right),
         KeyCode::Left => Some(Msg::Left),
         KeyCode::Up => Some(Msg::Move(Motion::Up)),

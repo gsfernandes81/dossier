@@ -668,6 +668,34 @@ fn a_bundle_lists_its_documents() {
     assert!(text.contains("2 documents"), "{text}");
 }
 
+/// Attaching a file lists the folder being typed in over the bottom of the
+/// view, folders first, with the line still at the bottom.
+#[test]
+fn the_attach_line_has_a_live_list() {
+    let root = std::env::temp_dir().join("ds-screens-attach");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("Identity")).expect("mkdir");
+    std::fs::write(root.join("Identity/passport.pdf"), "").expect("write");
+    std::fs::write(root.join("Identity/pan.pdf"), "").expect("write");
+    let mut m = writable(47, 24);
+    m.root = Some(root);
+    m.cursor = m.rows.iter().position(|&i| m.store.docs[i].files.is_empty()).expect("unfiled");
+    update(&mut m, Msg::Enter);
+    let rows = ds::detail::rows(m.current().unwrap());
+    m.set_record_cursor(rows.iter().position(|r| *r == ds::detail::Row::Fact("files")).unwrap());
+    update(&mut m, Msg::Char('e'));
+    for c in "Identity/p".chars() {
+        update(&mut m, Msg::Char(c));
+    }
+    let lines = screen(&mut m, 47, 24);
+    let text = lines.join("\n");
+    let heading = lines.iter().position(|line| line.contains("in Identity/")).expect(&text);
+    assert!(lines[heading].contains("2 matches"), "{text}");
+    assert!(lines[heading + 1].contains("pan.pdf"), "{text}");
+    assert!(lines[heading + 2].contains("passport.pdf"), "{text}");
+    assert!(lines[23].contains("attach: Identity/p"), "{text}");
+}
+
 /// An empty store offers its first document, with nothing typed.
 #[test]
 fn an_empty_store_explains_itself() {

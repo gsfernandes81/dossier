@@ -82,6 +82,8 @@ pub enum Msg {
     Char(char),
     /// Rubs out the character before the query cursor.
     Backspace,
+    /// `Tab` — fills a path being typed from its live list.
+    Tab,
     /// `Enter` — drills one layer: the list into the record, the record into a file.
     Enter,
     /// `←` — moves the query cursor one character left.
@@ -433,6 +435,10 @@ pub struct Model {
     pub on_new: bool,
     /// Where the Bundles view's entries were last drawn.
     pub bundle_list: RowGeometry,
+    /// The Syncthing folder root, which paths being attached are relative to.
+    pub root: Option<std::path::PathBuf>,
+    /// The folder the path being attached is in, read for its live list.
+    pub folder: Option<crate::complete::Folder>,
     /// The screen row the `+ new` row was last drawn on.
     pub new_row: Option<u16>,
     /// The views pushed over the Find view, innermost last.
@@ -552,6 +558,8 @@ impl Model {
             offset: 0,
             on_new: false,
             bundle_list: RowGeometry::default(),
+            root: None,
+            folder: None,
             new_row: None,
             views: Vec::new(),
             esc_armed: false,
@@ -1906,7 +1914,35 @@ impl Model {
         self.edit = Some(crate::edit::Edit::new(doc.id.clone(), field, current.as_deref()));
         self.sheet = false;
         self.show_details();
+        self.refresh_folder();
         Effect::Redraw
+    }
+
+    /// Rereads the folder an attach path is in, when the path has left it.
+    fn refresh_folder(&mut self) {
+        let Some(edit) = self.edit.as_ref().filter(|edit| edit.field == crate::edit::Field::Attach)
+        else {
+            self.folder = None;
+            return;
+        };
+        let Some(root) = &self.root else { return };
+        if !self.folder.as_ref().is_some_and(|folder| folder.holds(&edit.buffer)) {
+            self.folder = Some(crate::complete::read(root, &edit.buffer, false, None));
+        }
+    }
+
+    /// The live list's rows for the path being attached.
+    #[must_use]
+    pub fn attach_matches(&self) -> Vec<crate::complete::Entry> {
+        let Some(edit) = self.edit.as_ref().filter(|edit| edit.field == crate::edit::Field::Attach)
+        else {
+            return Vec::new();
+        };
+        self.folder
+            .as_ref()
+            .filter(|folder| folder.holds(&edit.buffer))
+            .map(|folder| folder.matching(&edit.buffer).into_iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Start a new document by asking for its name.
@@ -2237,6 +2273,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
 
     match msg {
         Msg::Quit => Effect::Quit,
+        Msg::Tab => Effect::Idle,
         Msg::Esc => model.peel(was_armed),
         Msg::EditField(field) => model.open_edit(field),
         Msg::Saved(store) => {
@@ -2547,6 +2584,18 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         edit.armed_discard = false;
     }
 
+    if edit.field == crate::edit::Field::Attach {
+        if let Some(effect) = attach_key(model, &mut edit, msg) {
+            model.edit = Some(edit);
+            model.refresh_folder();
+            return Some(effect);
+        }
+        if let Msg::Tap { .. } = msg {
+            model.edit = Some(edit);
+            return edit_key(model, &Msg::Enter);
+        }
+    }
+
     let effect = match msg {
         Msg::Char(c) => {
             edit.buffer.push(*c);
@@ -2586,63 +2635,7 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             } else if edit.saving {
                 Effect::Idle
             } else {
-                let validated = edit.field.validate(&edit.buffer).and_then(|value| match value {
-                    Some(path) if edit.field == crate::edit::Field::Attach => {
-                        model.attached(&edit.doc, &path).map(Some)
-                    }
-                    other => Ok(other),
-                });
-                match validated {
-                    Ok(value) => {
-                        // **The id is minted here, not when the edit opened**,
-                        // because it is made from the name and the name is what
-                        // was being typed. Writing it back into `edit.doc` is
-                        // what lets the save path below — and `Msg::Saved`,
-                        // which anchors on it — stay ignorant of the difference
-                        // between creating and editing.
-                        if edit.creating {
-                            edit.doc = model.mint_id(edit.buffer.trim());
-                        }
-                        // **The inverse is computed now, from the store as it
-                        // stands**, because "what was there before" is knowable
-                        // here and only by re-folding history afterwards. It is
-                        // held aside until the journal confirms the write.
-                        model.pending = None; // filled in below, once `drafts` exists
-                        let field = edit.field.journal_field();
-                        let write = match value {
-                            Some(value) => journal::Draft::set("doc", &edit.doc, field, value),
-                            // An empty buffer clears the field: `unset`, never a
-                            // stored empty string (see
-                            // [`crate::edit::Field::validate`]).
-                            None => journal::Draft::unset("doc", &edit.doc, field),
-                        };
-                        // `create` first, and in the *same* append: §3.2's fold
-                        // orphans a `set` on an entity that is not alive yet, so
-                        // a name that arrived before its create would be
-                        // silently dropped. One batch, one writer, so the two
-                        // ops cannot be separated by anything.
-                        let drafts = if edit.creating {
-                            vec![journal::Draft::create("doc", &edit.doc), write]
-                        } else {
-                            vec![write]
-                        };
-                        // **The change is recorded now, from the store as it
-                        // stands**, because "what was there before" is knowable
-                        // here and only by re-folding history afterwards. It is
-                        // held aside until the journal confirms the write.
-                        model.pending =
-                            Some(Change { forward: drafts.clone(), back: model.inverse_of(&edit) });
-                        model.direction = Direction::Forward;
-                        edit.saving = true;
-                        Effect::Append(drafts)
-                    }
-                    Err(complaint) => {
-                        // The typing is never destroyed by a refusal — it is the
-                        // thing that needs correcting.
-                        model.flash = Some(complaint);
-                        Effect::Redraw
-                    }
-                }
+                save_field(model, &mut edit)
             }
         }
         Msg::Esc => {
@@ -2669,12 +2662,122 @@ fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         | Msg::Left
         | Msg::Right
         | Msg::Leader
+        | Msg::Tab
         | Msg::Tap { .. }
         | Msg::Scroll(_) => Effect::Idle,
         _ => return None,
     };
     model.edit = Some(edit);
+    model.refresh_folder();
     Some(effect)
+}
+
+/// Validates a document field's typing and asks for the append that saves it.
+fn save_field(model: &mut Model, edit: &mut crate::edit::Edit) -> Effect {
+    let validated = edit.field.validate(&edit.buffer).and_then(|value| match value {
+        Some(path) if edit.field == crate::edit::Field::Attach => {
+            model.attached(&edit.doc, &path).map(Some)
+        }
+        other => Ok(other),
+    });
+    match validated {
+        Ok(value) => {
+            // **The id is minted here, not when the edit opened**,
+            // because it is made from the name and the name is what
+            // was being typed. Writing it back into `edit.doc` is
+            // what lets the save path below — and `Msg::Saved`,
+            // which anchors on it — stay ignorant of the difference
+            // between creating and editing.
+            if edit.creating {
+                edit.doc = model.mint_id(edit.buffer.trim());
+            }
+            // **The inverse is computed now, from the store as it
+            // stands**, because "what was there before" is knowable
+            // here and only by re-folding history afterwards. It is
+            // held aside until the journal confirms the write.
+            model.pending = None; // filled in below, once `drafts` exists
+            let field = edit.field.journal_field();
+            let write = match value {
+                Some(value) => journal::Draft::set("doc", &edit.doc, field, value),
+                // An empty buffer clears the field: `unset`, never a
+                // stored empty string (see
+                // [`crate::edit::Field::validate`]).
+                None => journal::Draft::unset("doc", &edit.doc, field),
+            };
+            // `create` first, and in the *same* append: §3.2's fold
+            // orphans a `set` on an entity that is not alive yet, so
+            // a name that arrived before its create would be
+            // silently dropped. One batch, one writer, so the two
+            // ops cannot be separated by anything.
+            let drafts = if edit.creating {
+                vec![journal::Draft::create("doc", &edit.doc), write]
+            } else {
+                vec![write]
+            };
+            // **The change is recorded now, from the store as it
+            // stands**, because "what was there before" is knowable
+            // here and only by re-folding history afterwards. It is
+            // held aside until the journal confirms the write.
+            model.pending = Some(Change { forward: drafts.clone(), back: model.inverse_of(edit) });
+            model.direction = Direction::Forward;
+            edit.saving = true;
+            Effect::Append(drafts)
+        }
+        Err(complaint) => {
+            // The typing is never destroyed by a refusal — it is the
+            // thing that needs correcting.
+            model.flash = Some(complaint);
+            Effect::Redraw
+        }
+    }
+}
+
+/// Keys for the live list over a path being attached: `↑`/`↓` choose a row,
+/// `Tab` fills the chosen or top one, and `Enter` or a tap on a row picks it —
+/// a folder opens, a file fills the line and is saved. `None` leaves the key to
+/// the line: typing, and `Enter` with nothing chosen.
+fn attach_key(model: &mut Model, edit: &mut crate::edit::Edit, msg: &Msg) -> Option<Effect> {
+    let folder = model.folder.clone().filter(|folder| folder.holds(&edit.buffer))?;
+    let hits: Vec<crate::complete::Entry> =
+        folder.matching(&edit.buffer).into_iter().cloned().collect();
+    let pick = |edit: &mut crate::edit::Edit, entry: &crate::complete::Entry| {
+        edit.buffer = folder.fill(entry);
+        edit.chosen = None;
+    };
+    match msg {
+        Msg::Move(Motion::Up) => {
+            edit.chosen = crate::complete::step(edit.chosen, hits.len(), false);
+        }
+        Msg::Move(Motion::Down) => {
+            edit.chosen = crate::complete::step(edit.chosen, hits.len(), true);
+        }
+        Msg::Tab => {
+            if let Some(entry) = edit.chosen.and_then(|at| hits.get(at)).or(hits.first()) {
+                pick(edit, entry);
+            }
+        }
+        Msg::Enter => {
+            let entry = edit.chosen.and_then(|at| hits.get(at))?;
+            pick(edit, entry);
+            if !entry.dir {
+                return None;
+            }
+        }
+        Msg::Tap { col, row } => {
+            let at = model.panel.at(*col, *row).filter(|&at| at < hits.len())?;
+            let entry = &hits[at];
+            pick(edit, entry);
+            if !entry.dir {
+                return None;
+            }
+        }
+        Msg::Char(_) | Msg::Backspace => {
+            edit.chosen = None;
+            return None;
+        }
+        _ => return None,
+    }
+    Some(Effect::Redraw)
 }
 
 /// Keys while the Space sheet is open: a letter runs its verb, and nothing
@@ -4903,6 +5006,64 @@ pub(crate) mod tests {
         let written = files_written(&update(&mut m, Msg::Enter)).expect("a files write");
         assert_eq!(written[0]["path"], "Identity/passport.pdf", "stored POSIX");
         assert_eq!(written[0]["primary"], true);
+    }
+
+    /// A model on `passport`'s empty files row, attaching under a real folder.
+    fn attaching_under(name: &str) -> Model {
+        let root = std::env::temp_dir().join(format!("ds-attach-{name}"));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Identity")).expect("mkdir");
+        std::fs::create_dir_all(root.join("Marine")).expect("mkdir");
+        for file in ["Identity/passport.pdf", "Identity/pan.pdf"] {
+            std::fs::write(root.join(file), "").expect("write");
+        }
+        let mut m = writable();
+        m.root = Some(root);
+        for c in "passport".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Enter);
+        select_row(&mut m, crate::detail::Row::Fact("files"));
+        update(&mut m, Msg::Char('e'));
+        m
+    }
+
+    fn listed(m: &Model) -> Vec<String> {
+        m.attach_matches().iter().map(crate::complete::Entry::label).collect()
+    }
+
+    /// The live list shows the folder being typed in; a chosen folder opens,
+    /// `Tab` fills the top match, and `Enter` with nothing chosen saves the line.
+    #[test]
+    fn the_attach_list_opens_folders_and_tab_fills() {
+        let mut m = attaching_under("walk");
+        assert_eq!(listed(&m), ["Identity/", "Marine/"]);
+        update(&mut m, Msg::Move(Motion::Down));
+        assert_eq!(update(&mut m, Msg::Enter), Effect::Redraw, "a folder opens; nothing is saved");
+        assert_eq!(m.edit.as_ref().unwrap().buffer, "Identity/");
+        assert_eq!(listed(&m), ["pan.pdf", "passport.pdf"]);
+
+        for c in "pas".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        assert_eq!(listed(&m), ["passport.pdf"]);
+        update(&mut m, Msg::Tab);
+        assert_eq!(m.edit.as_ref().unwrap().buffer, "Identity/passport.pdf");
+        let written = files_written(&update(&mut m, Msg::Enter)).expect("a files write");
+        assert_eq!(written[0]["path"], "Identity/passport.pdf");
+    }
+
+    /// `Enter` on a chosen file fills the line and saves it at once.
+    #[test]
+    fn enter_on_a_chosen_file_attaches_it() {
+        let mut m = attaching_under("pick");
+        for c in "Identity/".chars() {
+            update(&mut m, Msg::Char(c));
+        }
+        update(&mut m, Msg::Move(Motion::Up));
+        assert_eq!(m.edit.as_ref().unwrap().chosen, Some(1), "↑ from the line is the last row");
+        let written = files_written(&update(&mut m, Msg::Enter)).expect("a files write");
+        assert_eq!(written[0]["path"], "Identity/passport.pdf");
     }
 
     /// A path already linked is refused, and the typing survives.

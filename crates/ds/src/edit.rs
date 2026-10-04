@@ -266,6 +266,8 @@ pub struct Edit {
     /// is what lets everything downstream stay ignorant of the difference: the
     /// save path anchors on `doc`, and by the time it looks there is one.
     pub creating: bool,
+    /// The row of a live list under the line that `↑`/`↓` chose, if any.
+    pub chosen: Option<usize>,
 }
 
 impl Edit {
@@ -281,6 +283,7 @@ impl Edit {
             armed_discard: false,
             saving: false,
             creating: false,
+            chosen: None,
         }
     }
 

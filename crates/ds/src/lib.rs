@@ -72,6 +72,7 @@
 pub mod app;
 pub mod bundles;
 pub mod check;
+pub mod complete;
 pub mod config;
 pub mod detail;
 pub mod doc;
