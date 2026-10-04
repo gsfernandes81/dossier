@@ -29,7 +29,13 @@ use std::path::PathBuf;
 
 use ds::app::{update, Effect, Model, Msg, WriteState};
 use ds::edit::Field;
-use journal::{Journal, Namespace, Writer};
+use journal::{Draft, Journal, Namespace, Writer};
+use serde_json::json;
+
+/// Returns `desk-core` journal lines for `drafts`, stamped a millisecond apart from `ts`.
+fn desk_lines(ts: i64, drafts: Vec<Draft>) -> String {
+    (ts..).zip(drafts).map(|(ts, d)| d.stamp(ts, "desk-core").to_line().unwrap() + "\n").collect()
+}
 
 /// A journal directory of this test's own, with one document in it.
 fn journal_with_a_document(name: &str) -> (PathBuf, Journal) {
@@ -37,12 +43,13 @@ fn journal_with_a_document(name: &str) -> (PathBuf, Journal) {
     let _ = std::fs::remove_dir_all(&dir);
     let meta = dir.join("meta");
     std::fs::create_dir_all(&meta).expect("mkdir");
-    let lines = [
-        r#"{"v":1,"ts":1700000000001,"w":"desk-core","op":"create","ent":"doc","id":"coc"}"#,
-        r#"{"v":1,"ts":1700000000002,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"name","val":"COC Certificate"}"#,
-        r#"{"v":1,"ts":1700000000003,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"expiry_date","val":"2026-09-28"}"#,
+    let drafts = vec![
+        Draft::create("doc", "coc"),
+        Draft::set("doc", "coc", "name", "COC Certificate"),
+        Draft::set("doc", "coc", "expiry_date", "2026-09-28"),
     ];
-    std::fs::write(meta.join("desk-core.jsonl"), format!("{}\n", lines.join("\n"))).expect("write");
+    std::fs::write(meta.join("desk-core.jsonl"), desk_lines(1_700_000_000_001, drafts))
+        .expect("write");
     let journal = Journal::new(&dir);
     (dir, journal)
 }
@@ -181,16 +188,13 @@ fn two_devices_write_two_files_and_fold_to_one_store() {
     let mut phone =
         Writer::open(&journal, Namespace::Meta, "phone-core", &locks, 1_700_000_000_003)
             .expect("phone");
-    phone
-        .append_all(vec![journal::Draft::set("doc", "coc", "expiry_date", "2030-01-01")])
-        .expect("append");
+    phone.append_all(vec![Draft::set("doc", "coc", "expiry_date", "2030-01-01")]).expect("append");
     phone.commit().expect("fsync");
     drop(phone);
 
     let mut desk = Writer::open(&journal, Namespace::Meta, "desk-core", &locks, 1_700_000_000_003)
         .expect("desk");
-    desk.append_all(vec![journal::Draft::set("doc", "coc", "notes", "renewed in Mumbai")])
-        .expect("append");
+    desk.append_all(vec![Draft::set("doc", "coc", "notes", "renewed in Mumbai")]).expect("append");
     desk.commit().expect("fsync");
     drop(desk);
 
@@ -329,11 +333,7 @@ fn undo_walks_back_more_than_one_write() {
 
 /// Saves what the model asked for through the session's own follower and
 /// hands the model what comes back.
-fn write_and_reload(
-    follower: &mut ds::follow::Follower,
-    drafts: Vec<journal::Draft>,
-    model: &mut Model,
-) {
+fn write_and_reload(follower: &mut ds::follow::Follower, drafts: Vec<Draft>, model: &mut Model) {
     let msg = follower.save(drafts);
     assert!(matches!(msg, Msg::Saved(_)), "{msg:?}");
     update(model, msg);
@@ -429,16 +429,22 @@ fn undoing_a_delete_restores_every_field() {
     let _ = std::fs::remove_dir_all(&dir);
     let meta = dir.join("meta");
     std::fs::create_dir_all(&meta).expect("mkdir");
-    let lines = [
-        r#"{"v":1,"ts":1700000000001,"w":"desk-core","op":"create","ent":"doc","id":"coc"}"#,
-        r#"{"v":1,"ts":1700000000002,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"name","val":"COC Certificate"}"#,
-        r#"{"v":1,"ts":1700000000003,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"expiry_date","val":"2026-09-28"}"#,
-        r#"{"v":1,"ts":1700000000004,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"tags","val":["marine","ticket"]}"#,
-        r#"{"v":1,"ts":1700000000005,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"location","val":"cert-file"}"#,
-        r#"{"v":1,"ts":1700000000007,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"notes","val":"the one with the stamp"}"#,
-        r#"{"v":1,"ts":1700000000008,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"files","val":[{"label":"complete","path":"Marine/coc.pdf","primary":true}]}"#,
+    let drafts = vec![
+        Draft::create("doc", "coc"),
+        Draft::set("doc", "coc", "name", "COC Certificate"),
+        Draft::set("doc", "coc", "expiry_date", "2026-09-28"),
+        Draft::set("doc", "coc", "tags", json!(["marine", "ticket"])),
+        Draft::set("doc", "coc", "location", "cert-file"),
+        Draft::set("doc", "coc", "notes", "the one with the stamp"),
+        Draft::set(
+            "doc",
+            "coc",
+            "files",
+            json!([{"label": "complete", "path": "Marine/coc.pdf", "primary": true}]),
+        ),
     ];
-    std::fs::write(meta.join("desk-core.jsonl"), format!("{}\n", lines.join("\n"))).expect("write");
+    std::fs::write(meta.join("desk-core.jsonl"), desk_lines(1_700_000_000_001, drafts))
+        .expect("write");
     let journal = Journal::new(&dir);
 
     let (mut model, _) = load_model(&journal);
@@ -503,17 +509,17 @@ fn a_location_created_while_filing_is_taken_back_whole() {
 #[test]
 fn a_deleted_location_comes_back_with_everything_inside() {
     let (dir, journal) = journal_with_a_document("delete-location");
-    let lines = [
-        r#"{"v":1,"ts":1700000000004,"w":"desk-core","op":"create","ent":"location","id":"desk"}"#,
-        r#"{"v":1,"ts":1700000000005,"w":"desk-core","op":"set","ent":"location","id":"desk","f":"name","val":"desk"}"#,
-        r#"{"v":1,"ts":1700000000006,"w":"desk-core","op":"create","ent":"location","id":"folder"}"#,
-        r#"{"v":1,"ts":1700000000007,"w":"desk-core","op":"set","ent":"location","id":"folder","f":"name","val":"leather folder"}"#,
-        r#"{"v":1,"ts":1700000000008,"w":"desk-core","op":"set","ent":"location","id":"folder","f":"parent","val":"desk"}"#,
-        r#"{"v":1,"ts":1700000000009,"w":"desk-core","op":"set","ent":"doc","id":"coc","f":"location","val":"folder"}"#,
+    let drafts = vec![
+        Draft::create("location", "desk"),
+        Draft::set("location", "desk", "name", "desk"),
+        Draft::create("location", "folder"),
+        Draft::set("location", "folder", "name", "leather folder"),
+        Draft::set("location", "folder", "parent", "desk"),
+        Draft::set("doc", "coc", "location", "folder"),
     ];
     let file = dir.join("meta").join("desk-core.jsonl");
     let mut text = std::fs::read_to_string(&file).expect("read");
-    text.push_str(&format!("{}\n", lines.join("\n")));
+    text.push_str(&desk_lines(1_700_000_000_004, drafts));
     std::fs::write(&file, text).expect("write");
 
     let (mut model, _) = load_model(&journal);
@@ -590,11 +596,9 @@ fn a_created_bundle_folds_as_its_own_record() {
     assert!(matches!(model.views.last(), Some(ds::View::Bundle { .. })), "it opened");
 }
 
-/// One op of `writer`'s, as a journal line.
+/// Returns the journal line in which `writer` sets `coc`'s `field` at `ts`.
 fn line(ts: i64, writer: &str, field: &str, value: &str) -> String {
-    format!(
-        r#"{{"v":1,"ts":{ts},"w":"{writer}","op":"set","ent":"doc","id":"coc","f":"{field}","val":"{value}"}}"#
-    )
+    Draft::set("doc", "coc", field, value).stamp(ts, writer).to_line().unwrap()
 }
 
 /// The follower a session on this journal would start with.
@@ -637,7 +641,7 @@ fn a_save_sorts_after_what_it_read() {
     let phone = dir.join("meta").join("phone-core.jsonl");
     std::fs::write(&phone, line(ahead, "phone-core", "name", "COC PHONE") + "\n").expect("write");
 
-    let saved = follower.save(vec![journal::Draft::set("doc", "coc", "name", "COC DESK")]);
+    let saved = follower.save(vec![Draft::set("doc", "coc", "name", "COC DESK")]);
     assert_eq!(name_in(&saved), "COC DESK", "{saved:?}");
     let reread = ds::load::load(&journal).expect("load");
     assert_eq!(reread.store.docs[0].name, "COC DESK", "and on disk");

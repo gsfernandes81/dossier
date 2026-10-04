@@ -27,78 +27,55 @@
 //! generator below enforces it, and `FoldStats::duplicate_keys` is how a real
 //! store notices the guarantee was broken.
 
-use journal::{compaction_plan, fold, parse_line, Line};
+use journal::{compaction_plan, fold, Draft, Line, Op};
 use proptest::prelude::*;
-use serde_json::{json, Value};
-
-/// A generated op, before it becomes a line.
-#[derive(Debug, Clone)]
-struct Spec {
-    ts: i64,
-    writer: &'static str,
-    kind: &'static str,
-    ent: &'static str,
-    id: &'static str,
-    field: &'static str,
-    val: Value,
-}
-
-impl Spec {
-    fn to_line(&self) -> Line {
-        let mut object = serde_json::Map::new();
-        object.insert("v".into(), json!(1));
-        object.insert("ts".into(), json!(self.ts));
-        object.insert("w".into(), json!(self.writer));
-        object.insert("op".into(), json!(self.kind));
-        object.insert("ent".into(), json!(self.ent));
-        object.insert("id".into(), json!(self.id));
-        if matches!(self.kind, "set" | "unset") {
-            object.insert("f".into(), json!(self.field));
-        }
-        if matches!(self.kind, "set" | "state") {
-            object.insert("val".into(), self.val.clone());
-        }
-        parse_line(&serde_json::to_string(&Value::Object(object)).expect("serializes"))
-    }
-}
+use serde_json::json;
 
 const WRITERS: [&str; 3] = ["desk-core", "phone-core", "desk-lab"];
-const KINDS: [&str; 5] = ["create", "delete", "set", "unset", "state"];
+const KINDS: usize = 5;
 const ENTS: [&str; 3] = ["doc", "bundle", "review"];
 const IDS: [&str; 4] = ["a", "b", "coc-2025", "passport"];
 const FIELDS: [&str; 3] = ["name", "slot", "expiry"];
 
-fn spec() -> impl Strategy<Value = Spec> {
+fn spec() -> impl Strategy<Value = Op> {
     (
         1i64..500,
         0usize..WRITERS.len(),
-        0usize..KINDS.len(),
+        0usize..KINDS,
         0usize..ENTS.len(),
         0usize..IDS.len(),
         0usize..FIELDS.len(),
         0i64..5,
     )
-        .prop_map(|(ts, w, kind, ent, id, field, val)| Spec {
-            ts,
-            writer: WRITERS[w],
-            kind: KINDS[kind],
-            ent: ENTS[ent],
-            id: IDS[id],
-            field: FIELDS[field],
-            val: json!(val),
+        .prop_map(|(ts, w, kind, ent, id, field, val)| {
+            let (ent, id, field) = (ENTS[ent], IDS[id], FIELDS[field]);
+            let draft = match kind {
+                0 => Draft::create(ent, id),
+                1 => Draft::delete(ent, id),
+                2 => Draft::set(ent, id, field, val),
+                3 => Draft::unset(ent, id, field),
+                _ => Draft::state(ent, id, val),
+            };
+            draft.stamp(ts, WRITERS[w])
         })
 }
 
 /// A stream with the store's own guarantee applied: no writer repeats a `ts`.
-fn stream() -> impl Strategy<Value = Vec<Spec>> {
-    prop::collection::vec(spec(), 0..60).prop_map(|specs| {
+fn stream() -> impl Strategy<Value = Vec<Op>> {
+    prop::collection::vec(spec(), 0..60).prop_map(|ops| {
         let mut seen = std::collections::BTreeSet::new();
-        specs.into_iter().filter(|s| seen.insert((s.ts, s.writer))).collect()
+        ops.into_iter().filter(|op| seen.insert((op.ts, op.w.clone()))).collect()
     })
 }
 
-fn lines(specs: &[Spec]) -> Vec<Line> {
-    specs.iter().map(Spec::to_line).collect()
+fn lines(ops: &[Op]) -> Vec<Line> {
+    ops.iter().cloned().map(Line::from).collect()
+}
+
+/// Returns `b` without any `(ts, w)` that `a` already uses, so their union stays legal.
+fn disjoint(a: &[Op], b: Vec<Op>) -> Vec<Op> {
+    let taken: std::collections::BTreeSet<_> = a.iter().map(Op::order_key).collect();
+    b.into_iter().filter(|op| !taken.contains(&op.order_key())).collect()
 }
 
 proptest! {
@@ -109,10 +86,7 @@ proptest! {
     /// whatever order Syncthing delivered them in.
     #[test]
     fn union_is_commutative(a in stream(), b in stream()) {
-        // Keep the union legal: drop any (ts, w) B shares with A.
-        let taken: std::collections::BTreeSet<_> =
-            a.iter().map(|s| (s.ts, s.writer)).collect();
-        let b: Vec<Spec> = b.into_iter().filter(|s| !taken.contains(&(s.ts, s.writer))).collect();
+        let b = disjoint(&a, b);
 
         let mut ab = lines(&a);
         ab.extend(lines(&b));
@@ -150,25 +124,10 @@ proptest! {
         extra in prop::collection::vec(0usize..FIELDS.len(), 0..6),
     ) {
         let mut all = lines(&specs);
-        let deleted = Spec {
-            ts: 1000,
-            writer: "desk-core",
-            kind: "delete",
-            ent: "doc",
-            id: "passport",
-            field: "name",
-            val: json!(0),
-        };
-        all.push(deleted.to_line());
+        all.push(Draft::delete("doc", "passport").stamp(1000, "desk-core").into());
         for (i, field) in extra.into_iter().enumerate() {
-            all.push(Spec {
-                ts: 1001 + i as i64,
-                writer: "phone-core",
-                kind: "set",
-                field: FIELDS[field],
-                val: json!("zombie"),
-                ..deleted.clone()
-            }.to_line());
+            let set = Draft::set("doc", "passport", FIELDS[field], "zombie");
+            all.push(set.stamp(1001 + i as i64, "phone-core").into());
         }
 
         let state = fold(&all);
@@ -181,14 +140,10 @@ proptest! {
     /// but never the dead entity's fields.
     #[test]
     fn a_recreate_after_a_tombstone_inherits_nothing(specs in stream()) {
-        let base = Spec {
-            ts: 0, writer: "desk-core", kind: "create", ent: "doc", id: "passport",
-            field: "name", val: json!(0),
-        };
         let mut all = lines(&specs);
-        all.push(Spec { ts: 1000, kind: "delete", ..base.clone() }.to_line());
-        all.push(Spec { ts: 1001, kind: "create", ..base.clone() }.to_line());
-        all.push(Spec { ts: 1002, kind: "set", field: "slot", val: json!(3), ..base }.to_line());
+        all.push(Draft::delete("doc", "passport").stamp(1000, "desk-core").into());
+        all.push(Draft::create("doc", "passport").stamp(1001, "desk-core").into());
+        all.push(Draft::set("doc", "passport", "slot", 3).stamp(1002, "desk-core").into());
 
         let entity = fold(&all).get("doc", "passport").cloned().expect("recreated");
         prop_assert_eq!(entity.fields.len(), 1);
@@ -202,9 +157,7 @@ proptest! {
     /// makes about every op stream.
     #[test]
     fn compaction_preserves_the_fold(a in stream(), b in stream(), now in 0i64..2_000i64) {
-        let taken: std::collections::BTreeSet<_> =
-            a.iter().map(|s| (s.ts, s.writer)).collect();
-        let b: Vec<Spec> = b.into_iter().filter(|s| !taken.contains(&(s.ts, s.writer))).collect();
+        let b = disjoint(&a, b);
 
         let (mine, theirs) = (lines(&a), lines(&b));
         let mut before = mine.clone();

@@ -21,7 +21,7 @@
 
 use std::time::Instant;
 
-use journal::{fold, parse_line, Line};
+use journal::{fold, parse_line, Draft, Line};
 
 /// Ops per document, roughly what a real record accumulates: a create plus
 /// ~15 fields and a few later edits.
@@ -39,16 +39,11 @@ fn synthetic_lines() -> Vec<String> {
     for doc in 0..DOCS {
         let id = format!("doc-{doc:04}");
         ts += 1;
-        lines.push(format!(
-            r#"{{"v":1,"ts":{ts},"w":"desk-core","op":"create","ent":"doc","id":"{id}"}}"#
-        ));
+        lines.push(Draft::create("doc", &id).stamp(ts, "desk-core").to_line().unwrap());
         for op in 1..OPS_PER_DOC {
             ts += 1;
-            let writer = writers[op % writers.len()];
-            let field = fields[op % fields.len()];
-            lines.push(format!(
-                r#"{{"v":1,"ts":{ts},"w":"{writer}","op":"set","ent":"doc","id":"{id}","f":"{field}","val":"value {op}"}}"#
-            ));
+            let set = Draft::set("doc", &id, fields[op % fields.len()], format!("value {op}"));
+            lines.push(set.stamp(ts, writers[op % writers.len()]).to_line().unwrap());
         }
     }
     lines

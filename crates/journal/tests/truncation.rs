@@ -22,14 +22,13 @@
 //! in silence. Both halves in the same test, because it is the *pair* that is
 //! the contract; either one alone can be satisfied by a broken implementation.
 
-use journal::{fold, HighWater, Journal, Namespace};
+use journal::{fold, Draft, HighWater, Journal, Namespace};
 
-fn op(ts: i64, id: &str) -> String {
-    format!(r#"{{"v":1,"ts":{ts},"w":"desk-core","op":"create","ent":"doc","id":"{id}"}}"#)
-}
-
+/// Returns a `desk-core` file body creating each `(ts, id)` document.
 fn body(ops: &[(i64, &str)]) -> String {
-    ops.iter().map(|(ts, id)| format!("{}\n", op(*ts, id))).collect()
+    ops.iter()
+        .map(|&(ts, id)| Draft::create("doc", id).stamp(ts, "desk-core").to_line().unwrap() + "\n")
+        .collect()
 }
 
 /// A launch: load `meta`, check the marks, then record what was seen.

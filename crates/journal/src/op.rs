@@ -182,6 +182,12 @@ impl Line {
     }
 }
 
+impl From<Op> for Line {
+    fn from(op: Op) -> Self {
+        Line::Op(Box::new(op))
+    }
+}
+
 /// Classify and parse one line.
 ///
 /// Never fails: an unreadable line becomes [`Line::Malformed`] rather than an

@@ -332,10 +332,11 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fold;
+    use crate::{fold, Draft};
 
-    fn op(ts: i64, w: &str, kind: &str, id: &str) -> String {
-        format!(r#"{{"v":1,"ts":{ts},"w":"{w}","op":"{kind}","ent":"doc","id":"{id}"}}"#)
+    /// The journal line in which writer `w` creates document `id` at `ts`.
+    fn created(ts: i64, w: &str, id: &str) -> String {
+        Draft::create("doc", id).stamp(ts, w).to_line().unwrap()
     }
 
     /// Write `files` into a namespace of a fresh temporary journal.
@@ -360,8 +361,8 @@ mod tests {
         let (_dir, journal) = journal_with(
             Namespace::Meta,
             &[
-                ("desk-core.jsonl", format!("{}\n", op(10, "desk-core", "create", "a"))),
-                ("phone-core.jsonl", format!("{}\n", op(20, "phone-core", "create", "b"))),
+                ("desk-core.jsonl", format!("{}\n", created(10, "desk-core", "a"))),
+                ("phone-core.jsonl", format!("{}\n", created(20, "phone-core", "b"))),
             ],
         );
         let load = journal.load(Namespace::Meta).expect("loads");
@@ -391,15 +392,12 @@ mod tests {
         let (_dir, journal) = journal_with(
             Namespace::Meta,
             &[
-                ("desk-core.jsonl", format!("{}\n", op(10, "desk-core", "create", "a"))),
+                ("desk-core.jsonl", format!("{}\n", created(10, "desk-core", "a"))),
                 (
                     "desk-core.sync-conflict-20260816-120000-ABCDEFG.jsonl",
-                    format!("{}\n", op(11, "desk-core", "create", "ghost")),
+                    format!("{}\n", created(11, "desk-core", "ghost")),
                 ),
-                (
-                    "desk-core.jsonl.tmp-4231",
-                    format!("{}\n", op(12, "desk-core", "create", "temp")),
-                ),
+                ("desk-core.jsonl.tmp-4231", format!("{}\n", created(12, "desk-core", "temp"))),
                 ("notes.txt", "not a journal".into()),
             ],
         );
@@ -416,15 +414,12 @@ mod tests {
     /// both the torn tail and the garbage line are reported.
     #[test]
     fn damage_is_contained_to_its_file_and_reported() {
-        let good = format!(
-            "{}\n{}\n",
-            op(10, "desk-core", "create", "a"),
-            op(11, "desk-core", "create", "b")
-        );
+        let good =
+            format!("{}\n{}\n", created(10, "desk-core", "a"), created(11, "desk-core", "b"));
         let damaged = format!(
             "{}\n{{not json\n{}",
-            op(20, "phone-core", "create", "c"),
-            op(21, "phone-core", "create", "torn")
+            created(20, "phone-core", "c"),
+            created(21, "phone-core", "torn")
         );
         let (_dir, journal) = journal_with(
             Namespace::Meta,
@@ -446,9 +441,9 @@ mod tests {
     #[test]
     fn an_invalid_byte_costs_one_line() {
         let (_dir, journal) = journal_with(Namespace::Meta, &[]);
-        let mut body = format!("{}\n", op(10, "desk-core", "create", "a")).into_bytes();
+        let mut body = format!("{}\n", created(10, "desk-core", "a")).into_bytes();
         body.extend_from_slice(b"{\xff}\n");
-        body.extend_from_slice(format!("{}\n", op(11, "desk-core", "create", "b")).as_bytes());
+        body.extend_from_slice(format!("{}\n", created(11, "desk-core", "b")).as_bytes());
         std::fs::write(journal.file_path(Namespace::Meta, "desk-core"), &body).expect("write");
 
         let load = journal.load(Namespace::Meta).expect("loads");
@@ -465,11 +460,8 @@ mod tests {
     /// runs, so it has to be right per file, not just in aggregate.
     #[test]
     fn per_file_reports_carry_size_and_high_water_mark() {
-        let body = format!(
-            "{}\n{}\n",
-            op(10, "desk-core", "create", "a"),
-            op(90, "desk-core", "create", "b")
-        );
+        let body =
+            format!("{}\n{}\n", created(10, "desk-core", "a"), created(90, "desk-core", "b"));
         let (_dir, journal) = journal_with(Namespace::Meta, &[("desk-core.jsonl", body.clone())]);
         let load = journal.load(Namespace::Meta).expect("loads");
 
@@ -492,7 +484,7 @@ mod tests {
             std::fs::create_dir_all(&ns_dir).expect("create");
             std::fs::write(
                 ns_dir.join("desk-core.jsonl"),
-                format!("{}\n", op(10, "desk-core", "create", id)),
+                format!("{}\n", created(10, "desk-core", id)),
             )
             .expect("write");
         }
@@ -512,9 +504,9 @@ mod tests {
         let (_dir, journal) = journal_with(
             Namespace::Meta,
             &[
-                ("phone-core.jsonl", format!("{}\n", op(20, "phone-core", "create", "b"))),
-                ("desk-core.jsonl", format!("{}\n", op(10, "desk-core", "create", "a"))),
-                ("desk-lab.jsonl", format!("{}\n", op(30, "desk-lab", "create", "c"))),
+                ("phone-core.jsonl", format!("{}\n", created(20, "phone-core", "b"))),
+                ("desk-core.jsonl", format!("{}\n", created(10, "desk-core", "a"))),
+                ("desk-lab.jsonl", format!("{}\n", created(30, "desk-lab", "c"))),
             ],
         );
         let load = journal.load(Namespace::Meta).expect("loads");
@@ -527,14 +519,13 @@ mod tests {
     fn a_stamp_changes_only_with_the_files() {
         let (_dir, journal) = journal_with(
             Namespace::Meta,
-            &[("desk-core.jsonl", op(1, "desk-core", "create", "a") + "\n")],
+            &[("desk-core.jsonl", created(1, "desk-core", "a") + "\n")],
         );
         let before = journal.stamp(Namespace::Meta);
         assert_eq!(journal.stamp(Namespace::Meta), before);
         let file = journal.file_path(Namespace::Meta, "desk-core");
-        let body = std::fs::read_to_string(&file).expect("read")
-            + &op(2, "desk-core", "create", "b")
-            + "\n";
+        let body =
+            std::fs::read_to_string(&file).expect("read") + &created(2, "desk-core", "b") + "\n";
         std::fs::write(&file, body).expect("write");
         let grown = journal.stamp(Namespace::Meta);
         assert_ne!(grown, before);

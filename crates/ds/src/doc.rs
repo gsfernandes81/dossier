@@ -680,71 +680,25 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use journal::{fold as fold_lines, parse_line, Line};
+    use journal::{fold as fold_lines, Draft, Line, Op};
 
-    /// One op as a tuple: `(ts, op, ent, id, field, value)`. Named because
-    /// these tests read as tables, and a builder would bury that.
-    type OwnedOp = (i64, String, String, String, String, Value);
-
-    /// Build a fold from `(ts, op, ent, id, field, value)` tuples.
-    fn store(ops: &[(i64, &str, &str, &str, &str, Value)]) -> Store {
-        let lines: Vec<Line> = ops
-            .iter()
-            .map(|(ts, op, ent, id, field, value)| {
-                let mut object = serde_json::Map::new();
-                object.insert("v".into(), Value::from(1));
-                object.insert("ts".into(), Value::from(*ts));
-                object.insert("w".into(), Value::from("desk-core"));
-                object.insert("op".into(), Value::from(*op));
-                object.insert("ent".into(), Value::from(*ent));
-                object.insert("id".into(), Value::from(*id));
-                if !field.is_empty() {
-                    object.insert("f".into(), Value::from(*field));
-                }
-                if !value.is_null() {
-                    object.insert("val".into(), value.clone());
-                }
-                parse_line(&serde_json::to_string(&Value::Object(object)).unwrap())
-            })
-            .collect();
-        Store::build(&fold_lines(&lines))
-    }
-
-    fn doc(ts: i64, id: &str, fields: &[(&str, Value)]) -> Vec<OwnedOp> {
+    fn doc(ts: i64, id: &str, fields: &[(&str, Value)]) -> Vec<Op> {
         entity(ts, "doc", id, fields)
     }
 
-    fn entity(ts: i64, ent: &str, id: &str, fields: &[(&str, Value)]) -> Vec<OwnedOp> {
-        let mut ops = vec![(
-            ts,
-            "create".to_string(),
-            ent.to_string(),
-            id.to_string(),
-            String::new(),
-            Value::Null,
-        )];
-        for (i, (field, value)) in fields.iter().enumerate() {
-            ops.push((
-                ts + 1 + i64::try_from(i).expect("test fixtures are small"),
-                "set".to_string(),
-                ent.to_string(),
-                id.to_string(),
-                (*field).to_string(),
-                value.clone(),
-            ));
-        }
-        ops
+    /// Returns the ops creating `id` at `ts` and setting each field a millisecond apart.
+    fn entity(ts: i64, ent: &str, id: &str, fields: &[(&str, Value)]) -> Vec<Op> {
+        let create = Draft::create(ent, id);
+        let sets = fields.iter().map(|(field, value)| Draft::set(ent, id, *field, value.clone()));
+        (ts..)
+            .zip(std::iter::once(create).chain(sets))
+            .map(|(ts, d)| d.stamp(ts, "desk-core"))
+            .collect()
     }
 
-    fn build(all: Vec<Vec<OwnedOp>>) -> Store {
-        let flat: Vec<OwnedOp> = all.into_iter().flatten().collect();
-        let refs: Vec<(i64, &str, &str, &str, &str, Value)> = flat
-            .iter()
-            .map(|(ts, op, ent, id, f, v)| {
-                (*ts, op.as_str(), ent.as_str(), id.as_str(), f.as_str(), v.clone())
-            })
-            .collect();
-        store(&refs)
+    fn build(all: Vec<Vec<Op>>) -> Store {
+        let lines: Vec<Line> = all.into_iter().flatten().map(Line::from).collect();
+        Store::build(&fold_lines(&lines))
     }
 
     /// **Every field survives a round trip through the journal**, which is what
@@ -814,7 +768,7 @@ mod tests {
         assert_eq!(rebuilt.locations.get("pouch"), Some(&place));
     }
 
-    fn named(ts: i64, id: &str, name: &str, more: &[(&str, Value)]) -> Vec<OwnedOp> {
+    fn named(ts: i64, id: &str, name: &str, more: &[(&str, Value)]) -> Vec<Op> {
         let mut fields = vec![("name", Value::from(name))];
         fields.extend(more.iter().cloned());
         doc(ts, id, &fields)
@@ -824,22 +778,10 @@ mod tests {
         indices.iter().map(|&i| store.docs[i].id.clone()).collect()
     }
 
-    fn bundle(ts: i64, id: &str, name: &str, date: Option<&str>) -> Vec<OwnedOp> {
-        let mut ops = vec![
-            (ts, "create".into(), "bundle".into(), id.into(), String::new(), Value::Null),
-            (ts + 1, "set".into(), "bundle".into(), id.into(), "name".into(), name.into()),
-        ];
-        if let Some(date) = date {
-            ops.push((
-                ts + 2,
-                "set".into(),
-                "bundle".into(),
-                id.into(),
-                "date".into(),
-                date.into(),
-            ));
-        }
-        ops
+    fn bundle(ts: i64, id: &str, name: &str, date: Option<&str>) -> Vec<Op> {
+        let mut fields = vec![("name", Value::from(name))];
+        fields.extend(date.map(|date| ("date", date.into())));
+        entity(ts, "bundle", id, &fields)
     }
 
     /// A bundle is its own record, never a document.
@@ -1023,13 +965,11 @@ mod tests {
     /// A location reads its name and parent; one with no name shows its id.
     #[test]
     fn a_location_reads_its_name_and_parent() {
-        let ops = [
-            (100, "create", "location", "desk", "", Value::Null),
-            (101, "set", "location", "desk", "name", Value::from("desk")),
-            (102, "create", "location", "folder", "", Value::Null),
-            (103, "set", "location", "folder", "parent", Value::from("desk")),
-        ];
-        let tree = store(&ops).locations;
+        let tree = build(vec![
+            entity(100, "location", "desk", &[("name", "desk".into())]),
+            entity(102, "location", "folder", &[("parent", "desk".into())]),
+        ])
+        .locations;
         assert_eq!(tree.get("folder").map(|l| l.name.as_str()), Some("folder"));
         assert_eq!(tree.parent("folder"), Some("desk"));
     }
@@ -1062,25 +1002,13 @@ mod tests {
         assert!(rebuilt.docs[0].files.is_empty(), "{:?}", rebuilt.docs[0].files);
     }
 
-    fn location(ts: i64, id: &str, name: &str, parent: Option<&str>) -> Vec<OwnedOp> {
-        let mut ops = vec![
-            (ts, "create".into(), "location".into(), id.into(), String::new(), Value::Null),
-            (ts + 1, "set".into(), "location".into(), id.into(), "name".into(), name.into()),
-        ];
-        if let Some(parent) = parent {
-            ops.push((
-                ts + 2,
-                "set".into(),
-                "location".into(),
-                id.into(),
-                "parent".into(),
-                parent.into(),
-            ));
-        }
-        ops
+    fn location(ts: i64, id: &str, name: &str, parent: Option<&str>) -> Vec<Op> {
+        let mut fields = vec![("name", Value::from(name))];
+        fields.extend(parent.map(|parent| ("parent", parent.into())));
+        entity(ts, "location", id, &fields)
     }
 
-    fn filed(ts: i64, id: &str, name: &str, at: Option<&str>) -> Vec<OwnedOp> {
+    fn filed(ts: i64, id: &str, name: &str, at: Option<&str>) -> Vec<Op> {
         let mut fields = vec![("name", Value::from(name))];
         if let Some(at) = at {
             fields.push(("location", at.into()));
@@ -1292,10 +1220,7 @@ mod tests {
     /// Locations come through the same fold as documents.
     #[test]
     fn locations_are_read_from_the_fold() {
-        let s = store(&[
-            (10, "create", "location", "cert-file", "", Value::Null),
-            (11, "set", "location", "cert-file", "name", "Cert File".into()),
-        ]);
+        let s = build(vec![location(10, "cert-file", "Cert File", None)]);
         assert_eq!(s.locations.get("cert-file").map(|l| l.name.as_str()), Some("Cert File"));
     }
 

@@ -144,14 +144,14 @@ fn text_of(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use journal::{fold, parse_line, Line};
+    use journal::{fold, Draft, Line, OpKind};
 
-    fn enrich(kind: &str, path: &str, payload: &Value) -> Line {
-        let op = serde_json::json!({
-            "v": 1, "ts": 1_700_000_000_000i64, "w": "desk-lab",
-            "op": kind, "ent": kind, "id": path, "val": payload,
-        });
-        parse_line(&serde_json::to_string(&op).unwrap())
+    /// Returns the satellite's line recording `payload` for `path` as entity kind `ent`.
+    fn enrich(ent: &str, path: &str, payload: &Value) -> Line {
+        let op = if ent == "proposal" { OpKind::Proposal } else { OpKind::Reading };
+        let draft =
+            Draft { op, ent: ent.into(), id: path.into(), f: None, val: Some(payload.clone()) };
+        draft.stamp(1_700_000_000_000, "desk-lab").into()
     }
 
     /// Every field a person might remember is searchable, and folding happens

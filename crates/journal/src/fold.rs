@@ -307,51 +307,16 @@ pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
 mod tests {
     use super::*;
     use crate::op::parse_line;
-
-    /// One op as a tuple: `(ts, writer, op, ent, id, field, value)`. A tuple
-    /// rather than a builder because these tests are read as tables — the shape
-    /// of the stream is the point, and a builder would bury it in punctuation.
-    type Spec<'a> = (i64, &'a str, &'a str, &'a str, &'a str, Option<&'a str>, Option<Value>);
-
-    /// Build lines from op tuples.
-    fn lines(specs: &[Spec]) -> Vec<Line> {
-        specs
-            .iter()
-            .map(|(ts, w, op, ent, id, f, val)| {
-                let mut object = Map::new();
-                object.insert("v".into(), Value::from(1));
-                object.insert("ts".into(), Value::from(*ts));
-                object.insert("w".into(), Value::from(*w));
-                object.insert("op".into(), Value::from(*op));
-                object.insert("ent".into(), Value::from(*ent));
-                object.insert("id".into(), Value::from(*id));
-                if let Some(f) = f {
-                    object.insert("f".into(), Value::from(*f));
-                }
-                if let Some(val) = val {
-                    object.insert("val".into(), val.clone());
-                }
-                parse_line(&serde_json::to_string(&Value::Object(object)).unwrap())
-            })
-            .collect()
-    }
+    use crate::Draft;
 
     /// Field-level last-writer-wins, ordered by `(ts, w)` and not by file order.
     #[test]
     fn the_newest_write_to_a_field_wins() {
-        let ops = lines(&[
-            (10, "desk-core", "create", "doc", "passport", None, None),
-            (
-                30,
-                "phone-core",
-                "set",
-                "doc",
-                "passport",
-                Some("name"),
-                Some("Passport (new)".into()),
-            ),
-            (20, "desk-core", "set", "doc", "passport", Some("name"), Some("Passport".into())),
-        ]);
+        let ops: Vec<Line> = vec![
+            Draft::create("doc", "passport").stamp(10, "desk-core").into(),
+            Draft::set("doc", "passport", "name", "Passport (new)").stamp(30, "phone-core").into(),
+            Draft::set("doc", "passport", "name", "Passport").stamp(20, "desk-core").into(),
+        ];
         let state = fold(&ops);
         assert_eq!(
             state.get("doc", "passport").unwrap().fields["name"],
@@ -365,12 +330,12 @@ mod tests {
     /// that missed the delete is harmless.
     #[test]
     fn a_tombstone_is_not_undone_by_a_later_set() {
-        let ops = lines(&[
-            (10, "a", "create", "doc", "x", None, None),
-            (20, "a", "set", "doc", "x", Some("name"), Some("X".into())),
-            (30, "a", "delete", "doc", "x", None, None),
-            (40, "b", "set", "doc", "x", Some("name"), Some("zombie".into())),
-        ]);
+        let ops: Vec<Line> = vec![
+            Draft::create("doc", "x").stamp(10, "a").into(),
+            Draft::set("doc", "x", "name", "X").stamp(20, "a").into(),
+            Draft::delete("doc", "x").stamp(30, "a").into(),
+            Draft::set("doc", "x", "name", "zombie").stamp(40, "b").into(),
+        ];
         let state = fold(&ops);
         assert!(state.get("doc", "x").is_none(), "the document stays deleted");
         assert!(state.tombstones.contains_key(&("doc".into(), "x".into())));
@@ -381,13 +346,13 @@ mod tests {
     /// it starts empty rather than inheriting the dead entity's fields.
     #[test]
     fn a_create_after_a_tombstone_recreates_from_empty() {
-        let ops = lines(&[
-            (10, "a", "create", "doc", "x", None, None),
-            (20, "a", "set", "doc", "x", Some("name"), Some("old".into())),
-            (30, "a", "delete", "doc", "x", None, None),
-            (40, "a", "create", "doc", "x", None, None),
-            (50, "a", "set", "doc", "x", Some("slot"), Some(7.into())),
-        ]);
+        let ops: Vec<Line> = vec![
+            Draft::create("doc", "x").stamp(10, "a").into(),
+            Draft::set("doc", "x", "name", "old").stamp(20, "a").into(),
+            Draft::delete("doc", "x").stamp(30, "a").into(),
+            Draft::create("doc", "x").stamp(40, "a").into(),
+            Draft::set("doc", "x", "slot", 7).stamp(50, "a").into(),
+        ];
         let state = fold(&ops);
         let entity = state.get("doc", "x").expect("recreated");
         assert_eq!(entity.fields["slot"], Value::from(7));
@@ -399,11 +364,11 @@ mod tests {
     /// un-dismiss verb depends on the newest op winning, in both directions.
     #[test]
     fn state_entries_are_per_key_lww_in_both_directions() {
-        let ops = lines(&[
-            (10, "a", "state", "review", "orphan:scan.pdf", None, Some("dismissed".into())),
-            (20, "b", "state", "review", "orphan:scan.pdf", None, Some("active".into())),
-            (15, "a", "state", "review", "other", None, Some("dismissed".into())),
-        ]);
+        let ops: Vec<Line> = vec![
+            Draft::state("review", "orphan:scan.pdf", "dismissed").stamp(10, "a").into(),
+            Draft::state("review", "orphan:scan.pdf", "active").stamp(20, "b").into(),
+            Draft::state("review", "other", "dismissed").stamp(15, "a").into(),
+        ];
         let state = fold(&ops);
         assert_eq!(state.states[&("review".into(), "orphan:scan.pdf".into())], "active");
         assert_eq!(state.states[&("review".into(), "other".into())], "dismissed");
@@ -412,12 +377,12 @@ mod tests {
     /// `unset` removes a field without touching the rest.
     #[test]
     fn unset_removes_one_field() {
-        let ops = lines(&[
-            (10, "a", "create", "doc", "x", None, None),
-            (20, "a", "set", "doc", "x", Some("name"), Some("X".into())),
-            (30, "a", "set", "doc", "x", Some("expiry"), Some("2027-01-01".into())),
-            (40, "a", "unset", "doc", "x", Some("expiry"), None),
-        ]);
+        let ops: Vec<Line> = vec![
+            Draft::create("doc", "x").stamp(10, "a").into(),
+            Draft::set("doc", "x", "name", "X").stamp(20, "a").into(),
+            Draft::set("doc", "x", "expiry", "2027-01-01").stamp(30, "a").into(),
+            Draft::unset("doc", "x", "expiry").stamp(40, "a").into(),
+        ];
         let entity = fold(&ops).get("doc", "x").unwrap().clone();
         assert!(entity.fields.contains_key("name") && !entity.fields.contains_key("expiry"));
     }
@@ -427,11 +392,11 @@ mod tests {
     /// cheap unit-level guard.)
     #[test]
     fn input_order_does_not_matter() {
-        let ops = lines(&[
-            (10, "a", "create", "doc", "x", None, None),
-            (20, "a", "set", "doc", "x", Some("name"), Some("X".into())),
-            (30, "b", "set", "doc", "x", Some("name"), Some("Y".into())),
-        ]);
+        let ops: Vec<Line> = vec![
+            Draft::create("doc", "x").stamp(10, "a").into(),
+            Draft::set("doc", "x", "name", "X").stamp(20, "a").into(),
+            Draft::set("doc", "x", "name", "Y").stamp(30, "b").into(),
+        ];
         let forward = fold(&ops).canonical_json();
         let backward = fold(ops.iter().rev()).canonical_json();
         assert_eq!(forward, backward);
@@ -441,9 +406,11 @@ mod tests {
     /// first is normal and the second is a `ds status` anomaly.
     #[test]
     fn opaque_and_malformed_lines_are_counted_separately() {
-        let mut ops = lines(&[(10, "a", "create", "doc", "x", None, None)]);
-        ops.push(parse_line(r#"{"v":9,"ts":1,"w":"a","op":"set","ent":"doc","id":"x"}"#));
-        ops.push(parse_line("{broken"));
+        let ops = [
+            Draft::create("doc", "x").stamp(10, "a").into(),
+            parse_line(r#"{"v":9,"ts":1,"w":"a","op":"set","ent":"doc","id":"x"}"#),
+            parse_line("{broken"),
+        ];
         let state = fold(&ops);
         assert_eq!((state.stats.opaque, state.stats.malformed), (1, 1));
         assert!(state.stats.has_anomalies());
@@ -453,11 +420,11 @@ mod tests {
     /// regressing, are how a reverted journal is detected at all.
     #[test]
     fn high_water_marks_are_tracked_per_writer() {
-        let ops = lines(&[
-            (10, "desk-core", "create", "doc", "x", None, None),
-            (90, "phone-core", "create", "doc", "y", None, None),
-            (50, "desk-core", "create", "doc", "z", None, None),
-        ]);
+        let ops: Vec<Line> = vec![
+            Draft::create("doc", "x").stamp(10, "desk-core").into(),
+            Draft::create("doc", "y").stamp(90, "phone-core").into(),
+            Draft::create("doc", "z").stamp(50, "desk-core").into(),
+        ];
         let stats = fold(&ops).stats;
         assert_eq!(stats.max_ts_by_writer["desk-core"], 50);
         assert_eq!(stats.max_ts_by_writer["phone-core"], 90);
@@ -468,10 +435,10 @@ mod tests {
     /// counted — that is the fold noticing two processes shared a writer id.
     #[test]
     fn duplicate_order_keys_are_counted() {
-        let ops = lines(&[
-            (10, "a", "create", "doc", "x", None, None),
-            (10, "a", "create", "doc", "y", None, None),
-        ]);
+        let ops: Vec<Line> = vec![
+            Draft::create("doc", "x").stamp(10, "a").into(),
+            Draft::create("doc", "y").stamp(10, "a").into(),
+        ];
         assert_eq!(fold(&ops).stats.duplicate_keys, 1);
     }
 
@@ -479,12 +446,12 @@ mod tests {
     /// two implementations legitimately see different files).
     #[test]
     fn canonical_json_is_sorted_and_compact() {
-        let ops = lines(&[
-            (10, "a", "create", "doc", "b", None, None),
-            (20, "a", "set", "doc", "b", Some("z"), Some(1.into())),
-            (30, "a", "set", "doc", "b", Some("a"), Some("海".into())),
-            (40, "a", "create", "doc", "a", None, None),
-        ]);
+        let ops: Vec<Line> = vec![
+            Draft::create("doc", "b").stamp(10, "a").into(),
+            Draft::set("doc", "b", "z", 1).stamp(20, "a").into(),
+            Draft::set("doc", "b", "a", "海").stamp(30, "a").into(),
+            Draft::create("doc", "a").stamp(40, "a").into(),
+        ];
         let json = fold(&ops).canonical_json();
         assert_eq!(
             json,

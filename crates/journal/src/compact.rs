@@ -188,26 +188,16 @@ pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fold;
     use crate::op::parse_line;
+    use crate::{fold, Draft};
 
     /// `now` for the tests: a fixed "today" so retention is deterministic.
     const NOW: i64 = 1_800_000_000_000;
     /// Comfortably outside the 30-day window.
     const OLD: i64 = NOW - RETENTION_MS - 1_000_000;
 
-    fn line(ts: i64, kind: &str, id: &str, field: Option<&str>, val: Option<&str>) -> Line {
-        use std::fmt::Write as _;
-        let mut json =
-            format!(r#"{{"v":1,"ts":{ts},"w":"desk-core","op":"{kind}","ent":"doc","id":"{id}""#);
-        if let Some(field) = field {
-            write!(json, r#","f":"{field}""#).expect("writing to a String never fails");
-        }
-        if let Some(val) = val {
-            write!(json, r#","val":"{val}""#).expect("writing to a String never fails");
-        }
-        json.push('}');
-        parse_line(&json)
+    fn line(ts: i64, draft: Draft) -> Line {
+        draft.stamp(ts, "desk-core").into()
     }
 
     fn kept(lines: &[Line], plan: &Plan) -> Vec<Line> {
@@ -218,11 +208,11 @@ mod tests {
     #[test]
     fn compaction_preserves_the_fold() {
         let lines = vec![
-            line(OLD, "create", "passport", None, None),
-            line(OLD + 1, "set", "passport", Some("name"), Some("v1")),
-            line(OLD + 2, "set", "passport", Some("name"), Some("v2")),
-            line(OLD + 3, "set", "passport", Some("name"), Some("v3")),
-            line(OLD + 4, "set", "passport", Some("slot"), Some("4")),
+            line(OLD, Draft::create("doc", "passport")),
+            line(OLD + 1, Draft::set("doc", "passport", "name", "v1")),
+            line(OLD + 2, Draft::set("doc", "passport", "name", "v2")),
+            line(OLD + 3, Draft::set("doc", "passport", "name", "v3")),
+            line(OLD + 4, Draft::set("doc", "passport", "slot", "4")),
         ];
         let plan = plan(&lines, NOW);
         assert_eq!(plan.dropped(), 2, "two superseded name writes go");
@@ -234,9 +224,9 @@ mod tests {
     #[test]
     fn tombstones_are_never_dropped() {
         let lines = vec![
-            line(OLD, "create", "x", None, None),
-            line(OLD + 1, "set", "x", Some("name"), Some("gone")),
-            line(OLD + 2, "delete", "x", None, None),
+            line(OLD, Draft::create("doc", "x")),
+            line(OLD + 1, Draft::set("doc", "x", "name", "gone")),
+            line(OLD + 2, Draft::delete("doc", "x")),
         ];
         let plan = plan(&lines, NOW);
         let survivors = kept(&lines, &plan);
@@ -252,9 +242,9 @@ mod tests {
     #[test]
     fn an_unset_survives_the_set_it_cancelled() {
         let lines = vec![
-            line(OLD, "create", "x", None, None),
-            line(OLD + 1, "set", "x", Some("expiry"), Some("2027-01-01")),
-            line(OLD + 2, "unset", "x", Some("expiry"), None),
+            line(OLD, Draft::create("doc", "x")),
+            line(OLD + 1, Draft::set("doc", "x", "expiry", "2027-01-01")),
+            line(OLD + 2, Draft::unset("doc", "x", "expiry")),
         ];
         let survivors = kept(&lines, &plan(&lines, NOW));
         assert!(
@@ -263,11 +253,8 @@ mod tests {
         );
 
         // Prove it: the other writer's earlier set must stay cancelled.
-        let other = parse_line(
-            r#"{"v":1,"ts":1,"w":"phone-core","op":"set","ent":"doc","id":"x","f":"expiry","val":"2099-01-01"}"#,
-        );
         let mut union = survivors;
-        union.push(other);
+        union.push(Draft::set("doc", "x", "expiry", "2099-01-01").stamp(1, "phone-core").into());
         assert!(
             !fold(&union).get("doc", "x").expect("alive").fields.contains_key("expiry"),
             "dropping the unset would have resurrected the other device's value"
@@ -279,10 +266,10 @@ mod tests {
     #[test]
     fn everything_inside_the_retention_window_is_kept() {
         let lines = vec![
-            line(NOW - 1000, "create", "x", None, None),
-            line(NOW - 900, "set", "x", Some("name"), Some("v1")),
-            line(NOW - 800, "set", "x", Some("name"), Some("v2")),
-            line(NOW - 700, "set", "x", Some("name"), Some("v3")),
+            line(NOW - 1000, Draft::create("doc", "x")),
+            line(NOW - 900, Draft::set("doc", "x", "name", "v1")),
+            line(NOW - 800, Draft::set("doc", "x", "name", "v2")),
+            line(NOW - 700, Draft::set("doc", "x", "name", "v3")),
         ];
         let plan = plan(&lines, NOW);
         assert_eq!(plan.dropped(), 0, "nothing recent is dropped, superseded or not");
@@ -294,9 +281,9 @@ mod tests {
     #[test]
     fn unreadable_and_future_lines_survive() {
         let lines = vec![
-            line(OLD, "create", "x", None, None),
-            line(OLD + 1, "set", "x", Some("name"), Some("v1")),
-            line(OLD + 2, "set", "x", Some("name"), Some("v2")),
+            line(OLD, Draft::create("doc", "x")),
+            line(OLD + 1, Draft::set("doc", "x", "name", "v1")),
+            line(OLD + 2, Draft::set("doc", "x", "name", "v2")),
             parse_line(r#"{"v":7,"ts":5,"w":"desk-core","op":"set","ent":"doc","id":"x"}"#),
             parse_line("{broken"),
         ];
@@ -310,10 +297,10 @@ mod tests {
     #[test]
     fn the_highest_timestamp_always_survives() {
         let lines = vec![
-            line(OLD, "create", "x", None, None),
-            line(OLD + 1, "set", "x", Some("name"), Some("v1")),
-            line(OLD + 2, "set", "x", Some("name"), Some("v2")),
-            line(OLD + 3, "set", "x", Some("name"), Some("v3")),
+            line(OLD, Draft::create("doc", "x")),
+            line(OLD + 1, Draft::set("doc", "x", "name", "v1")),
+            line(OLD + 2, Draft::set("doc", "x", "name", "v2")),
+            line(OLD + 3, Draft::set("doc", "x", "name", "v3")),
         ];
         let before = lines.iter().filter_map(Line::as_op).map(|op| op.ts).max();
         let after =
@@ -325,15 +312,15 @@ mod tests {
     /// device a full re-transfer, so it waits until most of the file is dead.
     #[test]
     fn the_trigger_waits_until_most_of_the_file_is_dead() {
-        let mut lines = vec![line(OLD, "create", "x", None, None)];
+        let mut lines = vec![line(OLD, Draft::create("doc", "x"))];
         for i in 1..20 {
-            lines.push(line(OLD + i, "set", "x", Some("name"), Some("v")));
+            lines.push(line(OLD + i, Draft::set("doc", "x", "name", "v")));
         }
         let plan = plan(&lines, NOW);
         assert!(plan.live_percent() < 25, "2 of 20 ops are live");
         assert!(plan.worth_doing());
 
-        let fresh = vec![line(NOW, "create", "y", None, None)];
+        let fresh = vec![line(NOW, Draft::create("doc", "y"))];
         assert!(!plan_worth(&fresh), "a file with nothing dead is not worth rewriting");
         assert!(!plan_worth(&[]), "and neither is an empty one");
     }
@@ -347,11 +334,11 @@ mod tests {
     #[test]
     fn a_recreate_keeps_only_its_own_history() {
         let lines = vec![
-            line(OLD, "create", "x", None, None),
-            line(OLD + 1, "set", "x", Some("name"), Some("before")),
-            line(OLD + 2, "delete", "x", None, None),
-            line(OLD + 3, "create", "x", None, None),
-            line(OLD + 4, "set", "x", Some("name"), Some("after")),
+            line(OLD, Draft::create("doc", "x")),
+            line(OLD + 1, Draft::set("doc", "x", "name", "before")),
+            line(OLD + 2, Draft::delete("doc", "x")),
+            line(OLD + 3, Draft::create("doc", "x")),
+            line(OLD + 4, Draft::set("doc", "x", "name", "after")),
         ];
         let plan = plan(&lines, NOW);
         let survivors = kept(&lines, &plan);

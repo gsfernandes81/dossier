@@ -25,6 +25,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use journal::Draft;
+use serde_json::json;
+
 /// A journal directory holding one writer file.
 fn journal_dir(name: &str, lines: &[String]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("ds-cli-{name}"));
@@ -35,32 +38,25 @@ fn journal_dir(name: &str, lines: &[String]) -> PathBuf {
     dir
 }
 
-fn op(ts: i64, verb: &str, id: &str, field: &str, value: &str) -> String {
-    let tail =
-        if field.is_empty() { String::new() } else { format!(r#","f":"{field}","val":{value}"#) };
-    format!(r#"{{"v":1,"ts":{ts},"w":"desk-core","op":"{verb}","ent":"doc","id":"{id}"{tail}}}"#)
-}
-
 /// Two documents: one expired with a file on disk, one with no file at all.
 fn sample(name: &str) -> PathBuf {
-    let mut lines = Vec::new();
-    let mut ts = 1_700_000_000_000;
+    let mut drafts = Vec::new();
     for (id, doc_name, expiry, file) in [
         ("coc", "COC Certificate", "2026-01-01", Some("Marine/coc.pdf")),
         ("eng1", "ENG-1 Medical", "2031-01-13", None),
     ] {
-        lines.push(op(ts, "create", id, "", ""));
-        ts += 1;
-        lines.push(op(ts, "set", id, "name", &format!("\"{doc_name}\"")));
-        ts += 1;
-        lines.push(op(ts, "set", id, "expiry_date", &format!("\"{expiry}\"")));
-        ts += 1;
+        drafts.push(Draft::create("doc", id));
+        drafts.push(Draft::set("doc", id, "name", doc_name));
+        drafts.push(Draft::set("doc", id, "expiry_date", expiry));
         if let Some(path) = file {
-            let value = format!(r#"[{{"label":"complete","path":"{path}","primary":true}}]"#);
-            lines.push(op(ts, "set", id, "files", &value));
-            ts += 1;
+            let files = json!([{"label": "complete", "path": path, "primary": true}]);
+            drafts.push(Draft::set("doc", id, "files", files));
         }
     }
+    let lines: Vec<String> = (1_700_000_000_000..)
+        .zip(drafts)
+        .map(|(ts, draft)| draft.stamp(ts, "desk-core").to_line().unwrap())
+        .collect();
     let root = journal_dir(name, &lines);
     std::fs::create_dir_all(root.join("Marine")).expect("mkdir");
     std::fs::write(root.join("Marine/coc.pdf"), "").expect("write");

@@ -169,6 +169,22 @@ impl Draft {
     pub fn state(ent: impl Into<String>, id: impl Into<String>, val: impl Into<Value>) -> Self {
         Self { op: OpKind::State, ent: ent.into(), id: id.into(), f: None, val: Some(val.into()) }
     }
+
+    /// Returns the op this draft becomes when writer `w` stamps it at `ts`.
+    #[must_use]
+    pub fn stamp(self, ts: i64, w: &str) -> Op {
+        Op {
+            v: FORMAT_VERSION,
+            ts,
+            w: w.to_string(),
+            op: self.op,
+            ent: self.ent,
+            id: self.id,
+            f: self.f,
+            val: self.val,
+            extra: std::collections::BTreeMap::new(),
+        }
+    }
 }
 
 /// Why an append could not happen.
@@ -346,17 +362,7 @@ impl Writer {
         let mut written = Vec::new();
         let mut buffer = String::new();
         for draft in drafts {
-            let op = Op {
-                v: FORMAT_VERSION,
-                ts: self.clock.tick(),
-                w: self.writer_id.clone(),
-                op: draft.op,
-                ent: draft.ent,
-                id: draft.id,
-                f: draft.f,
-                val: draft.val,
-                extra: std::collections::BTreeMap::new(),
-            };
+            let op = draft.stamp(self.clock.tick(), &self.writer_id);
             buffer.push_str(&op.to_line()?);
             buffer.push('\n');
             written.push(op);
