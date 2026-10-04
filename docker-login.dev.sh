@@ -94,8 +94,8 @@ else
 fi
 
 # ── 3/3  Claude Code ─────────────────────────────────────────────────────────
-# Logging in here is what makes `claude` work in the container at all: ssh in and run
-# it inside an abduco session, which is how every dev container on this host is used.
+# Logging in here is what makes `claude` work in the container at all: ssh in and start
+# one from the claude-sessions menu, which is how every dev container on this host is used.
 bold "3/3  Claude Code"
 if claude auth status >/dev/null 2>&1; then
   ok "$(claude auth status --text 2>&1 | grep -m1 -E 'Email|Login method' | sed 's/^[[:space:]]*//')"
@@ -106,12 +106,15 @@ fi
 
 bold "Done."
 if claude auth status >/dev/null 2>&1; then
-  ok "Work in it over ssh: 'ssh -p <port> dev@<host>' then 'abduco -A claude claude'."
+  ok "Work in it over ssh: 'ssh ds-dev' lands on the claude-sessions menu (n starts a session)."
 fi
 cat <<'EOF'
 
-  Attach a shell:   docker exec -it ds-dev fish
-  Work in it:       ssh -p <port> dev@<host>  then  abduco -A claude claude
+  Attach a shell:   docker exec -it ds-dev fish    (or over ssh: ssh -t ds-dev bash)
+  Work in it:       ssh ds-dev  — the claude-sessions menu: Enter attaches or resumes,
+                    n starts a session in /workspace, c closes, s a shell, ? the keys
   Idle sessions:    stopped after 90m and left resumable — ~/.local/share/claude-offload.log
+  Its replacement:  dry run, logs only — ~/.local/share/claude-sessions-dry-run.log
+                    and ~/.local/share/claude-sessions/ (hook.log, offload.log)
   Re-run logins:    make dev-login
 EOF
