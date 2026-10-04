@@ -678,7 +678,7 @@ fn locpick_heading(
                     .iter()
                     .filter(|row| matches!(row, crate::locpick::Row::Match(_)))
                     .count();
-                format!("{n} match{}", if n == 1 { "" } else { "es" })
+                crate::layout::plural(n, "match", "matches")
             } else {
                 "type to search".to_string()
             };
@@ -823,12 +823,11 @@ fn count(
         (0, n) => (n, "location", "loc"),
         (n, _) => (n, "document", "doc"),
     };
-    let plural = if n == 1 { "" } else { "s" };
-    let words = format!("{n} {long}{plural}");
+    let words = crate::layout::plural(n, long, &format!("{long}s"));
     if width(&words) <= room {
         words
     } else {
-        format!("{n} {short}{plural}")
+        crate::layout::plural(n, short, &format!("{short}s"))
     }
 }
 
@@ -864,7 +863,7 @@ fn draw_panel(
     let note = match panel.filter {
         None => String::new(),
         Some("") => "type to search".to_string(),
-        Some(_) => format!("{} match{}", rows.len(), if rows.len() == 1 { "" } else { "es" }),
+        Some(_) => crate::layout::plural(rows.len(), "match", "matches"),
     };
     let head_gap = cols.saturating_sub(width(&panel.crumb) + width(&note) + gutter * 2);
     let mut lines = vec![
@@ -954,7 +953,7 @@ fn count_text(model: &Model) -> String {
         }
         Some(View::Bundle { id, .. }) => {
             let n = model.store.members(id).len();
-            format!("{n} document{}", if n == 1 { "" } else { "s" })
+            crate::layout::plural(n, "document", "documents")
         }
         _ => format!("{}/{}", model.rows.len(), model.total()),
     }

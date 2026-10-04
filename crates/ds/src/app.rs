@@ -1468,8 +1468,7 @@ impl Model {
             return self.remove(&id);
         }
         let name = self.store.locations.get(&id).map_or("", |l| l.name.as_str());
-        let count =
-            |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let count = crate::layout::plural;
         let holds = match (inside, held) {
             (0, held) => count(held, "hard copy", "hard copies"),
             (inside, 0) => count(inside, "location", "locations"),

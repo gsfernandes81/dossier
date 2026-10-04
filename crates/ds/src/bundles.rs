@@ -89,7 +89,7 @@ pub fn rows(store: &Store, id: &str) -> Vec<Row> {
 /// How many document versions a bundle holds, said briefly.
 fn holds(store: &Store, bundle: &Bundle) -> String {
     let n = store.members(&bundle.id).len();
-    format!("{n} doc{}", if n == 1 { "" } else { "s" })
+    crate::layout::plural(n, "doc", "docs")
 }
 
 /// Draws the Bundles view's list, and returns where each entry landed.
