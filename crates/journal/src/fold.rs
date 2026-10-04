@@ -37,7 +37,7 @@
 //! in `tests/properties.rs`, and the exact behaviours above are pinned by the
 //! golden vectors in `tests/golden/`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
@@ -73,21 +73,11 @@ pub struct FoldStats {
     /// a non-zero count means two processes wrote one writer id — exactly what
     /// the writer lock exists to prevent.
     pub duplicate_keys: usize,
-    /// Highest `ts` seen per writer.
-    ///
-    /// Two jobs: it seeds the hybrid logical clock on startup, and its
-    /// **regression** between runs is the signal that a journal was reverted
-    /// behind Syncthing's back.
-    pub max_ts_by_writer: BTreeMap<String, i64>,
+    /// Highest `ts` anywhere; seeds the clock.
+    pub max_ts: i64,
 }
 
 impl FoldStats {
-    /// The highest `ts` anywhere — the value a new writer's clock starts from.
-    #[must_use]
-    pub fn max_ts(&self) -> i64 {
-        self.max_ts_by_writer.values().copied().max().unwrap_or(0)
-    }
-
     /// Whether anything here is worth a `ds status` line.
     #[must_use]
     pub fn has_anomalies(&self) -> bool {
@@ -204,8 +194,8 @@ impl Fold {
 ///
 /// # Performance
 ///
-/// This runs on every launch, so it works in **borrowed keys** and materializes
-/// owned `String`s only for the entities that survive. The obvious version —
+/// This runs on every launch, so it works in **borrowed keys and values** and
+/// materializes owned ones only for what survives. The obvious version —
 /// `(op.ent.clone(), op.id.clone())` per op — allocates three strings for every
 /// op in the store (150,000 of them at the stress-test size) to build map keys
 /// that are almost always already present. Same output, a fraction of the work.
@@ -225,16 +215,12 @@ pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
     // merging per-file streams is deliberate — it makes the input order of the
     // files structurally irrelevant instead of accidentally irrelevant.
     ops.sort_unstable_by_key(|op| op.order_key());
+    result.stats.max_ts = ops.last().map_or(0, |op| op.ts);
 
-    // Working state, keyed by borrows into the ops. `alive` tracks existence
-    // separately from `entities` because a deleted entity must stay *absent*
-    // from the output while its history keeps being processed.
-    let mut entities: BTreeMap<(&str, &str), Entity> = BTreeMap::new();
+    let mut entities: BTreeMap<(&str, &str), BTreeMap<&'a str, &'a Value>> = BTreeMap::new();
     let mut states: BTreeMap<(&str, &str), &'a Value> = BTreeMap::new();
     let mut enrich: BTreeMap<(&str, &str), &'a Value> = BTreeMap::new();
     let mut tombstones: BTreeMap<(&str, &str), i64> = BTreeMap::new();
-    let mut alive: BTreeSet<(&str, &str)> = BTreeSet::new();
-    let mut max_ts: BTreeMap<&str, i64> = BTreeMap::new();
     let mut previous_key: Option<(i64, &str)> = None;
 
     for op in ops {
@@ -245,8 +231,6 @@ pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
         previous_key = Some(key);
 
         let entity_key = op.entity_key();
-        let writer_max = max_ts.entry(op.w.as_str()).or_insert(i64::MIN);
-        *writer_max = (*writer_max).max(op.ts);
         result.stats.folded += 1;
 
         match op.op {
@@ -254,31 +238,25 @@ pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
                 // A create *after* a tombstone is a legitimate recreate, and it
                 // starts from nothing — inheriting the dead entity's fields
                 // would be a resurrection by another name.
-                alive.insert(entity_key);
                 tombstones.remove(&entity_key);
-                entities.insert(entity_key, Entity::default());
+                entities.insert(entity_key, BTreeMap::new());
             }
             OpKind::Delete => {
-                alive.remove(&entity_key);
                 entities.remove(&entity_key);
                 tombstones.insert(entity_key, op.ts);
             }
             OpKind::Set | OpKind::Unset => {
-                if !alive.contains(&entity_key) {
-                    // Rule 2: no partial-doc resurrection, and no materializing
-                    // an entity that was never created.
-                    result.stats.orphaned += 1;
-                    continue;
-                }
-                let Some(field) = op.f.as_deref() else {
+                // No partial-doc resurrection, and no materializing an entity
+                // that was never created.
+                let (Some(entity), Some(field)) = (entities.get_mut(&entity_key), op.f.as_deref())
+                else {
                     result.stats.orphaned += 1;
                     continue;
                 };
-                let entity = entities.entry(entity_key).or_default();
                 if op.op == OpKind::Set {
-                    entity.fields.insert(field.to_string(), op.val.clone().unwrap_or(Value::Null));
+                    entity.insert(field, op.val.as_ref().unwrap_or(NULL));
                 } else {
-                    entity.fields.remove(field);
+                    entity.remove(field);
                 }
             }
             // Rule 3: per-key LWW, independent of create/delete. Sorted
@@ -293,13 +271,17 @@ pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
         }
     }
 
-    // Materialize owned keys once, for what survived.
     let own = |(ent, id): (&str, &str)| (ent.to_string(), id.to_string());
-    result.entities = entities.into_iter().map(|(k, v)| (own(k), v)).collect();
+    result.entities = entities
+        .into_iter()
+        .map(|(k, fields)| {
+            let fields = fields.into_iter().map(|(f, v)| (f.to_string(), v.clone())).collect();
+            (own(k), Entity { fields })
+        })
+        .collect();
     result.states = states.into_iter().map(|(k, v)| (own(k), v.clone())).collect();
     result.enrich = enrich.into_iter().map(|(k, v)| (own(k), v.clone())).collect();
     result.tombstones = tombstones.into_iter().map(|(k, ts)| (own(k), ts)).collect();
-    result.stats.max_ts_by_writer = max_ts.into_iter().map(|(w, ts)| (w.to_string(), ts)).collect();
     result
 }
 
@@ -416,19 +398,15 @@ mod tests {
         assert!(state.stats.has_anomalies());
     }
 
-    /// Per-writer high-water marks seed the hybrid logical clock and, by
-    /// regressing, are how a reverted journal is detected at all.
     #[test]
-    fn high_water_marks_are_tracked_per_writer() {
+    fn max_ts_is_the_highest_ts_of_any_writer() {
         let ops: Vec<Line> = vec![
             Draft::create("doc", "x").stamp(10, "desk-core").into(),
             Draft::create("doc", "y").stamp(90, "phone-core").into(),
             Draft::create("doc", "z").stamp(50, "desk-core").into(),
         ];
         let stats = fold(&ops).stats;
-        assert_eq!(stats.max_ts_by_writer["desk-core"], 50);
-        assert_eq!(stats.max_ts_by_writer["phone-core"], 90);
-        assert_eq!(stats.max_ts(), 90);
+        assert_eq!(stats.max_ts, 90);
     }
 
     /// Two ops sharing `(ts, w)` are impossible under the HLC rule, so they are

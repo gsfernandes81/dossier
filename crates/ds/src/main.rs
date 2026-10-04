@@ -299,7 +299,7 @@ fn browse(
         Ok(owner) => ds::app::WriteState::Ready { device: owner.device.clone() },
         Err(reason) => ds::app::WriteState::Off(reason.clone()),
     };
-    let follower = Follower::new(journal.clone(), owner.ok(), loaded.stamp, loaded.stats.max_ts());
+    let follower = Follower::new(journal.clone(), owner.ok(), loaded.stamp, loaded.stats.max_ts);
     let session = Session::start(follower, tx.clone());
 
     let mut tui = Tui::enter()?;

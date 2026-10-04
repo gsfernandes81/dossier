@@ -558,7 +558,7 @@ fn line(ts: i64, writer: &str, field: &str, value: &str) -> String {
 fn follower(dir: &std::path::Path, journal: &Journal, device: &str) -> ds::follow::Follower {
     let loaded = ds::load::load(journal).expect("load");
     let owner = ds::follow::Owner::new(device, dir, &lock_dir(dir));
-    ds::follow::Follower::new(journal.clone(), Some(owner), loaded.stamp, loaded.stats.max_ts())
+    ds::follow::Follower::new(journal.clone(), Some(owner), loaded.stamp, loaded.stats.max_ts)
 }
 
 fn name_in(msg: &Msg) -> String {

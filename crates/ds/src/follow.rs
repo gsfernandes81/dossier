@@ -139,7 +139,7 @@ impl Follower {
     fn read(&mut self) -> Result<crate::Store, journal::store::Error> {
         let loaded = crate::load::load(&self.journal)?;
         self.stamp = loaded.stamp;
-        self.max_ts = self.max_ts.max(loaded.stats.max_ts());
+        self.max_ts = self.max_ts.max(loaded.stats.max_ts);
         if let Some(writer) = &mut self.writer {
             writer.observe(self.max_ts);
         }
