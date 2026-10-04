@@ -84,13 +84,8 @@ pub fn detect(osrelease: &str, wsl_env: bool, interop: bool) -> bool {
 }
 
 impl Wsl {
-    /// The WSL this process runs under, or `None` anywhere else — including
-    /// native Windows, macOS, and Termux.
-    ///
-    /// rust: `OnceLock` is a lazily-initialized global — the files are read at
-    /// most once per process, and never at all on a platform where the
-    /// `cfg!` is false. Nothing on the startup path asks, so the phone never
-    /// pays for it.
+    /// The WSL this process runs under, or `None` anywhere else; read once,
+    /// and never off Linux.
     #[must_use]
     pub fn current() -> Option<&'static Wsl> {
         static CURRENT: OnceLock<Option<Wsl>> = OnceLock::new();

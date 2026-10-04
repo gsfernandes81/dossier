@@ -24,10 +24,10 @@
 //! Two rules from the plan are implemented here rather than in the renderer,
 //! because they are facts about the data and not about the screen:
 //!
-//! * **Shelf order** (REWRITE-UI.md §1): the location tree in sibling order,
+//! * **Shelf order**: the location tree in sibling order,
 //!   then name, then id, so the list never jitters between frames. Unfiled and
 //!   digital-only documents come last.
-//! * **The expiry watch is opt-out** (DESIGN §14): a document is tracked if it
+//! * **The expiry watch is opt-out**: a document is tracked if it
 //!   has an expiry date and is neither superseded by a newer document nor
 //!   explicitly ignored. Being superseded is a *collection-level* fact — some
 //!   other document's `supersedes` points here — so it can only be computed with
@@ -40,11 +40,7 @@ use journal::{Entity, Fold};
 use crate::place::{HardCopy, Location, Tree};
 use serde_json::Value;
 
-/// A document's expiry standing, as the row renders it.
-///
-/// rust: an enum with a `marker()`, not a colour. Colour is the renderer's
-/// business; the *signal* is this, and REWRITE-UI.md §6 requires the glyph to
-/// carry it so a monochrome terminal loses nothing.
+/// A document's expiry standing, with a glyph that carries it without colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
     /// Past its expiry date, still in use.
@@ -70,14 +66,13 @@ impl Status {
     }
 }
 
-/// One file linked to a document. The word "rendition" is dropped (D9); the
-/// capability — several files, one marked primary — is unchanged.
+/// One file linked to a document; a document has several, one primary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileRef {
     /// What this copy is: `complete`, `front`, `scan`.
     pub label: String,
     /// POSIX path relative to the Syncthing root — never absolute, never
-    /// per-device (DESIGN §4/§6).
+    /// per-device.
     pub path: String,
     /// The one to open by default.
     pub primary: bool,
@@ -131,7 +126,7 @@ pub struct Doc {
     pub id: String,
     /// Display name — the left column and the main search target.
     pub name: String,
-    /// Flat tags (hierarchical tags are dropped, §8).
+    /// Flat tags.
     pub tags: Vec<String>,
     /// The bundles this version was added to.
     pub bundles: Vec<Membership>,
@@ -160,7 +155,7 @@ pub struct Doc {
 }
 
 impl Doc {
-    /// Whether this document is in the expiry watch at all (opt-out, DESIGN §14).
+    /// Whether this document is in the expiry watch at all.
     #[must_use]
     pub fn is_tracked(&self) -> bool {
         self.listed() && self.expiry_date.is_some() && !self.ignore_expiry
@@ -222,8 +217,7 @@ impl Doc {
     }
 
     /// The file to open when `Enter` is pressed: the primary if one is marked,
-    /// else the first. `None` means `Enter` falls through to the record —
-    /// invariant 2, and the reason that verb can never fail.
+    /// else the first. `None` means `Enter` falls through to the record.
     #[must_use]
     pub fn primary_file(&self) -> Option<&FileRef> {
         self.files.iter().find(|f| f.primary).or_else(|| self.files.first())

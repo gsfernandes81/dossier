@@ -17,7 +17,7 @@
 //!
 //! Its letters run verbs and nothing searches it; finding a command by name is
 //! the command line's job. Which letters it lists follows what is on screen.
-//! The rules are REWRITE-UI.md §5c.
+//! The rules are in REWRITE-UI.md.
 
 use crate::app::Model;
 

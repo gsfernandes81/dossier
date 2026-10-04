@@ -206,10 +206,8 @@ fn run(opener: &str, mut command: Command, path: &Path, hint: &str) -> Result<()
 
 /// Resolve a stored document path against the Syncthing root.
 ///
-/// Paths in the data model are POSIX and **relative to the device's Syncthing
-/// root** (DESIGN §4/§6) — never absolute, never per-device — so this is the one
-/// place a stored path becomes a real one. Windows accepts forward slashes, so
-/// the join needs no separator translation.
+/// The one place a stored path, POSIX and relative to the root, becomes a real
+/// one. Windows accepts forward slashes, so no separator is translated.
 #[must_use]
 pub fn resolve(root: &Path, stored: &str) -> PathBuf {
     root.join(stored)

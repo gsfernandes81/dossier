@@ -44,17 +44,11 @@ pub enum Msg {
     SaveFailed {
         /// What went wrong, ready for the status band.
         reason: String,
-        /// Whether it will fail the same way every time.
-        ///
-        /// A held writer lock will (another `ds` has the journal, §3.1), so
-        /// editing goes off for the session; a full disk might not, so it does
-        /// not. The shell decides this, because the shell is what knows which
-        /// error it caught — a caller matching on the *text* of a message would
-        /// break the first time the wording improved.
+        /// Whether it will fail the same way every time, as a held writer lock
+        /// will, so editing goes off for the session; a full disk might not.
         permanent: bool,
     },
-    /// A bare printable character. On the Find surface every one of these is
-    /// search text (invariant 1) — the surface binds no letter keys at all.
+    /// A bare printable character.
     Char(char),
     /// Rubs out the character before the query cursor.
     Backspace,
@@ -68,7 +62,7 @@ pub enum Msg {
     Right,
     /// Cursor movement.
     Move(Motion),
-    /// `Esc` — peel exactly one layer (invariant 3).
+    /// `Esc`: peels exactly one layer.
     Esc,
     /// `ctrl+q` / `ctrl+c` — leave now, from anywhere.
     Quit,
@@ -198,7 +192,7 @@ pub enum Effect {
 /// when the change was made. That is the right thing for the undo/redo dance
 /// (undo, redo, undo returns to the same place), and it is deliberately not a
 /// promise about a document the *other* device has since edited — field-level
-/// LWW settles that, and the loser is still in the journal (§3.2).
+/// LWW settles that, and the loser is still in the journal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
     /// What was written.
@@ -280,12 +274,7 @@ impl Landed {
     }
 }
 
-/// Whether this session can write, and what to say when it cannot.
-///
-/// Not a `bool`: every way of *not* being able to write comes with a reason the
-/// user needs, and a reason that is not carried next to the state is a reason
-/// that gets lost. REWRITE.md §3.1 is explicit that a second process must
-/// "continue read-only with a visible notice" rather than fail.
+/// Whether this session can write, and the reason to show when it cannot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteState {
     /// Editing is available, under this device's name.
@@ -494,7 +483,7 @@ pub struct Model {
     pub sheet: bool,
     /// The checkbox list, when one is open.
     pub check: Option<crate::check::CheckList>,
-    /// The field being edited, when one is (R4).
+    /// The field being edited, when one is.
     pub edit: Option<crate::edit::Edit>,
     /// This session's writes, each with the ops that put it back, computed
     /// from the store as it stood; the journal itself keeps everything, so a
@@ -1037,11 +1026,8 @@ impl Model {
         layout::visible_rows(self.cols, self.rows_on_screen.saturating_sub(pinned))
     }
 
-    /// Re-run filter + search and clamp the cursor.
-    ///
-    /// Called on every keystroke. The whole cost is a scan of pre-folded
-    /// haystacks — R0.2 measured 0.33 ms for filter-plus-repaint at store scale
-    /// on the phone, which is why there is no index and no debounce.
+    /// Re-runs filter and search and clamps the cursor, on every keystroke: a
+    /// scan of pre-folded haystacks, fast enough to need no index.
     fn requery(&mut self) {
         let base = self.filter.expiring.then(|| self.due());
         let mut matched = self.store.search(&self.query);
@@ -1552,12 +1538,10 @@ impl Model {
         Ok(self.write(change, landed))
     }
 
-    /// `Esc` peels exactly one layer per press (invariant 3).
-    ///
-    /// The order is REWRITE-UI.md §8's: search, then the pushed surface, then
-    /// arm, then quit. It matters most on Termux, where `Esc` is also how the
-    /// soft keyboard is dismissed: every press must consume something visible
-    /// before it can ever reach "quit", or the app dies on an IME dismissal.
+    /// `Esc` peels exactly one layer per press: panels, then search, then the
+    /// pushed view, then filters, then arm, then quit. On Termux `Esc` also
+    /// dismisses the keyboard, so every press must consume something visible
+    /// before one can quit.
     fn peel(&mut self, was_armed: bool) -> Effect {
         if let Some(picker) = &mut self.picker {
             if peel_filter(&mut picker.filter, &mut picker.cursor) {
@@ -1959,9 +1943,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         model.flash = None;
     }
 
-    // An open edit owns the keyboard before anything else does — it is the
-    // innermost layer, and §8's Esc chain starts there. `ctrl+q`/`ctrl+c` and
-    // worker messages still fall through, so nothing is trapped.
+    // An open edit owns the keyboard first; `ctrl+q`/`ctrl+c` and worker
+    // messages still fall through, so nothing is trapped.
     if model.edit.is_some() {
         if let Some(effect) = edit_key(model, &msg) {
             return effect;
@@ -2112,16 +2095,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.rub_out();
             Effect::Redraw
         }
-        // Find-fast (invariant 1): a bare printable starts the search and the
-        // **first character is kept**. This is the whole reason the surface
-        // binds no letters.
-        // A query never usefully begins with a space, so `Space` on an empty
-        // one is free — and mid-query it still types a space, which is what
-        // multi-word searches need. That is the normal-vs-insert split without
-        // modes: **the query is the mode.**
-        // **Search is a browse-surface verb** (invariant 1 scopes find-fast to
-        // it), so on the record a letter is free to be a verb — which is what
-        // lets this surface have keys at all without reaching for `ctrl`.
+        // On the record a letter is a verb; on the list every letter is search
+        // text, and Space on an empty query opens the leader.
         Msg::Char(' ') if model.detail() => update(model, Msg::Leader),
         Msg::Char(c) if model.detail() => model.record_verb(c),
         Msg::Char(' ') if model.query.is_empty() => update(model, Msg::Leader),
@@ -2259,20 +2234,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
 /// Keys while a field is being edited. `None` falls through, which is how
 /// `ctrl+q`/`ctrl+c` and worker messages still work from inside an edit.
 ///
-/// The rules, and each one is somebody's requirement:
-///
-/// * **Every printable is the value**, not search text. An edit is the one place
-///   on this app's surfaces where that is true, and it is why detail can bind
-///   letters at all (REWRITE-UI.md §2) while Find never may.
-/// * **`Enter` saves and `Esc` discards** — explicit save, and a *dirty* edit
-///   takes two `Esc`s (§2). The arming is a real layer, so invariant 3's "one
-///   layer per press" holds: an edit with typing in it is one press further from
-///   the base state than an untouched one.
-/// * **Arrows are swallowed.** They would otherwise move the list cursor under
-///   the record, and the record you are editing would stop being the record you
-///   are looking at.
-/// * **Taps and scrolls are inert**, the same rule a pushed record already
-///   follows: you cannot act on a surface the current one is covering.
+/// Every printable is the value; `Enter` saves and `Esc` discards, a dirty
+/// edit taking two; arrows, taps and scrolls are swallowed, as they would act
+/// on the surface the edit covers. The live list under a path is the one
+/// exception, in [`attach_key`].
 fn edit_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     let mut edit = model.edit.take()?;
     let (effect, open) = edit_step(model, &mut edit, msg);

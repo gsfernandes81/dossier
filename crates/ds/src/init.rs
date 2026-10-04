@@ -17,7 +17,7 @@
 //! Syncthing API, and on Termux what the phone still needs.
 //!
 //! The **device name** is the first half of the writer id every op this device
-//! emits carries (`phone` → `phone-core`, §3.1); until it is set, `ds` can
+//! emits carries (`phone` → `phone-core`); until it is set, `ds` can
 //! browse but not write. Re-running it walks through the same questions with
 //! the current answers as defaults, so filling in the Syncthing key later is
 //! just `ds init` again.
@@ -100,8 +100,7 @@ pub fn twin_message(device: &str, twin: &crate::wsl::Twin) -> String {
 
 /// The component half of this device's writer id.
 ///
-/// The core is `ds` itself; the Python satellite writes as `<device>-lab`
-/// (§3.1). Named here because init is where a user first sees the id it forms.
+/// The core is `ds` itself; the Python satellite writes as `<device>-lab`.
 pub const COMPONENT: &str = "core";
 
 /// The writer id a device name forms.

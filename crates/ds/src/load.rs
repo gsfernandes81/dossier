@@ -21,9 +21,8 @@
 //! So the steps live here once.
 //!
 //! The `meta` namespace only. Scan text and transcripts live in `enrich` and are
-//! loaded lazily when something actually asks for them (§3.1) — keeping them off
-//! the startup path is half the reason the fold is cheap enough to redo on every
-//! launch instead of caching it.
+//! loaded only when something asks for them, which keeps the fold cheap
+//! enough to redo on every launch.
 
 use std::path::{Path, PathBuf};
 

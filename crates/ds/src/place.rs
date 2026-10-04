@@ -15,7 +15,7 @@
 
 //! Physical locations: a tree of any depth, folded from `location` entities.
 //!
-//! The model is REWRITE.md §4.7.
+//! The model is in REWRITE.md.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};

@@ -18,13 +18,9 @@
 //! The desktop satellite reads scans and writes what it found into the journal's
 //! **`enrich`** namespace: a transcript, keywords, an issuer, a document number.
 //! That text is often the only way to find a document whose name you have
-//! forgotten — "the certificate with 4096 on it" — and it is also bulky, which
-//! is exactly why §3.1 puts it in a second namespace.
-//!
-//! So it is **loaded lazily, on a worker thread, the first time scan-text search is
-//! turned on** (invariant 7: nothing blocks the render loop). Until then the app
-//! has not paid a byte for it, which is what keeps the phone's cold start in
-//! single-digit milliseconds.
+//! forgotten — "the certificate with 4096 on it" — and it is bulky, so it is
+//! read on a worker thread the first time scan-text search is turned on, and
+//! the cold start never pays for it.
 //!
 //! Matching here is **exact substring only**, deliberately. A transcript is
 //! hundreds of words; letting a two-edit budget loose on it would match almost

@@ -13,36 +13,16 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Typo-tolerant matching — one bounded-edit-distance primitive.
-//!
-//! A direct port of v2's `fuzz.py`, whose contract REWRITE.md §8 keeps
-//! ("**Port** — small, well-specified in v2"). The rules, and why each exists:
-//!
-//! * **Exact matching always wins.** The fuzzy pass runs *only* when the exact
-//!   pass came up empty, so a forgiving hit can never displace a precise one.
-//!   Typing `pass` on a store containing "Passport" must not surface "Pass Book"
-//!   above it — it must not surface it at all.
-//! * **The budget scales with term length**: 0 edits for ≤ 4 characters, 1 for
-//!   5–8, 2 for ≥ 9. A short query never fuzzes, so `cat` cannot drift to `car`.
-//!   At three characters a one-edit neighbourhood is noise, not tolerance.
-//! * **Distance is OSA** (restricted Damerau–Levenshtein): a transposition costs
-//!   1, because phone-keyboard typos are dominated by swapped and dropped
-//!   characters — which is the device this is for.
-//! * **Every query term must match something.** Terms are `AND`ed, so adding a
-//!   word always narrows.
-//!
-//! Nothing here is indexed. The store is ~1,000 documents and the whole scan is
-//! well inside a frame (R0.2 measured 0.33 ms for filter-plus-repaint on the
-//! phone), so an index would be complexity bought with nothing.
+//! Typo-tolerant matching. Exact matching always wins: the fuzzy pass runs
+//! only when the exact one found nothing. The edit budget grows with term
+//! length — none up to four characters, one to eight, two beyond — so a short
+//! query never fuzzes. Distance is OSA, a transposition costing one, because
+//! phone typos are mostly swapped and dropped letters. Every term must match.
 
 use unicode_normalization::UnicodeNormalization;
 
-/// Casefold and strip diacritics: `résumé` → `resume`.
-///
-/// rust: `nfkd()` decomposes each character into base + combining marks, and the
-/// filter drops the marks — `char::is_alphabetic` would keep them, because a
-/// combining acute *is* a character. `to_lowercase` alone cannot do this, which
-/// is the whole reason for the `unicode-normalization` dependency.
+/// Casefold and strip diacritics: `résumé` → `resume`. NFKD splits a letter
+/// from its marks so the marks can be dropped.
 #[must_use]
 pub fn fold(text: &str) -> String {
     text.nfkd().filter(|c| !is_combining(*c)).collect::<String>().to_lowercase()
@@ -101,9 +81,8 @@ pub fn distance(a: &str, b: &str, k: usize) -> usize {
         return k + 1;
     }
 
-    // rust: three rows kept by value rather than a full (la+1)×(lb+1) matrix.
-    // OSA needs row i-2 for the transposition step and no further back, so the
-    // whole DP costs O(lb) memory whatever the store's longest name is.
+    // Three rows, not the whole matrix: the transposition step needs row i-2
+    // and no further back.
     let mut two_back: Vec<usize> = Vec::new();
     let mut prev: Vec<usize> = (0..=lb).collect();
     for i in 1..=la {

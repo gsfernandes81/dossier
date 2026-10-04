@@ -14,7 +14,7 @@
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
 //! Checkbox lists: several things on at once, toggled by tap, `Space` or
-//! `Enter`, searched by typing. The rules are REWRITE-UI.md §5c.
+//! `Enter`, searched by typing. The rules are in REWRITE-UI.md.
 
 /// What a checklist is choosing.
 #[derive(Debug, Clone, PartialEq, Eq)]

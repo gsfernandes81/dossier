@@ -15,7 +15,7 @@
 
 //! The Details view: one document's rows, and the selector its verbs act on.
 //!
-//! The layout is REWRITE-UI.md §2 and §5c. `e` edits the selected row, so one
+//! The layout is in REWRITE-UI.md. `e` edits the selected row, so one
 //! bare letter covers every field; a `ctrl` combination could not be offered by
 //! the Space sheet, because Termux delivers it as one finished key.
 //!

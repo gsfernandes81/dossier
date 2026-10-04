@@ -39,10 +39,7 @@ const STATUS_COLS: usize = 7;
 /// Above this width a single-line row has room for a tags column as well.
 const TAGS_COLS: u16 = 90;
 
-/// Draw one frame of the Find surface.
-///
-/// rust: `&mut Model` for the one write-back described in the module header —
-/// the row rectangle. Everything else here only reads.
+/// Draws one frame, writing back only the geometry it drew.
 pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
     let area = frame.area();
     model.cols = area.width;
