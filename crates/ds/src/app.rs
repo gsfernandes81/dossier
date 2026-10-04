@@ -15,55 +15,27 @@
 
 //! The update half of the loop: message in, state changed, effect out.
 //!
-//! REWRITE.md §11 names "Ratatui immediate-mode state management sprawl" as the
-//! top implementation risk and fixes the cure at the start of R3: a `msg →
-//! update → view` loop. This module is `update`; [`crate::find`] and
-//! [`crate::detail`] are `view`. **Nothing here draws, and nothing in the view
-//! decides.** The one exception is deliberate and documented below.
-//!
-//! # Why messages and effects, when the spike used a bool
-//!
-//! The R0.2 spike mutated state directly and returned "redraw?" — right for a
-//! throwaway. The real app has to open files, flip the terminal's mouse mode and
-//! (from R5) receive results from worker threads, none of which the model can do
-//! itself. So `update` returns an [`Effect`]: a description of what the shell of
-//! the program should do next. The model stays pure and directly testable, and
-//! every test in this file is a rule from REWRITE.md §4.5 rather than a
-//! rendering.
-//!
-//! # The one place the view writes back
-//!
-//! The renderer publishes the rectangle it actually drew the rows into
-//! ([`Model::list`]), because a tap has to be hit-tested against the layout that
-//! is on screen. Recomputing that geometry here would make two sources of truth
-//! and they would drift.
+//! [`update`] is the only mutation. It returns an [`Effect`] because the model
+//! cannot open files, flip the mouse mode or append to the journal, and staying
+//! pure keeps every rule testable. The view writes back only the geometry it
+//! drew, since hit tests must read what is on screen.
 
 use crate::complete::Completion;
 use crate::edit::{Field, Target};
 use crate::layout;
 use crate::{Doc, Status, Store};
 
-/// One thing the user did, already stripped of terminal detail.
-///
-/// rust: an enum, not a struct with an option per field. Exhaustive `match` in
-/// [`update`] then means the compiler tells us when a new message has no
-/// handler — the state-machine tool Rust gives us that Python does not.
+/// One thing the user did, or a worker reported, stripped of terminal detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
-    /// A worker finished reading the `enrich` namespace for scan-text search.
-    ///
-    /// rust: an `Arc`, so handing the result to the model costs a pointer copy
-    /// rather than cloning a store's worth of transcripts across the thread
-    /// boundary. This variant is also why `Msg` is not `Copy` — messages from
-    /// workers carry data, and that is the whole point of having them.
+    /// A worker finished reading the `enrich` namespace for scan-text search;
+    /// an `Arc` so the transcripts are not copied across the thread.
     ScansLoaded(std::sync::Arc<crate::scans::Scans>),
-    /// `ctrl+e` — edit a field of the highlighted document (R4).
+    /// Opens an edit on the current document's field; `e` on the record
+    /// reaches it, and tests send it directly.
     EditField(Field),
-    /// An append landed, and here is the store re-folded around it.
-    ///
-    /// rust: `Box`ed because a `Store` is much larger than every other variant,
-    /// and an enum is as big as its widest arm — every `Msg` in the queue would
-    /// otherwise carry a store's worth of space around with it.
+    /// An append landed, and here is the store re-folded around it; boxed so
+    /// every message is not the size of a store.
     Saved(Box<Store>),
     /// Another writer's ops arrived, and here is the store re-folded with them.
     Reloaded(Box<Store>),
@@ -205,19 +177,11 @@ pub enum Effect {
     /// Hand this path — relative to the Syncthing root — to the platform opener.
     Open(String),
     /// Read the `enrich` namespace on a worker thread and post the result back
-    /// as [`Msg::ScansLoaded`]. **Never on the render loop** (invariant 7).
+    /// as [`Msg::ScansLoaded`].
     LoadScans,
-    /// Append these ops to this device's journal, then re-fold and post the new
-    /// store back as [`Msg::Saved`].
-    ///
-    /// A `Vec` rather than one draft because the contract already needs runs
-    /// that are only correct together — an id rename is create-new, copy,
-    /// fixups, delete-old (§3.2) — and one call is what keeps them adjacent in
-    /// one writer's file. This slice only ever sends one.
-    ///
-    /// Like every other effect, it names what should happen and not how: the
-    /// writer, its lock and its fsync all live on the far side of the shell,
-    /// off the render loop (invariant 7).
+    /// Append these ops to this device's journal in one commit, then post the
+    /// re-read store back as [`Msg::Saved`]; ops that are only correct together
+    /// stay adjacent.
     Append(Vec<journal::Draft>),
     /// Leave, restoring the terminal.
     Quit,
@@ -532,19 +496,9 @@ pub struct Model {
     pub check: Option<crate::check::CheckList>,
     /// The field being edited, when one is (R4).
     pub edit: Option<crate::edit::Edit>,
-    /// **This session's own writes, newest last** — each with the way back.
-    ///
-    /// §3.3 makes the journal the history, and undo an *inverse op* rather than
-    /// a rewrite — nothing is ever removed from a journal. What is kept here is
-    /// the [`Change`]: the ops that were written and the ops that put them back,
-    /// the second computed at the moment of the write from the store as it then
-    /// stood. The inverse of a `set` is the value that was there before it,
-    /// which is knowable then and only awkwardly afterwards. Reconstructing it
-    /// later means re-folding the journal to a point in time, which is a
-    /// *history browser* — §8's "30-day horizon", a later phase — and not this.
-    ///
-    /// So this covers **this session's writes**, and a restart empties it. The
-    /// journal still holds everything; only the shortcut back is per-session.
+    /// This session's writes, each with the ops that put it back, computed
+    /// from the store as it stood; the journal itself keeps everything, so a
+    /// restart only empties the shortcut.
     pub undo: Vec<Change>,
     /// Undone writes, newest last, waiting to be put back.
     ///
@@ -1783,23 +1737,9 @@ impl Model {
         }
     }
 
-    /// The Termux IME affordance (invariant 6, DESIGN §14).
-    ///
-    /// Termux raises the soft keyboard on a tap only while mouse tracking is
-    /// **off**, and no escape sequence can raise it directly. So this drops
-    /// reporting for exactly one tap: that tap raises the keyboard, and the
-    /// first key press turns reporting back on.
-    ///
-    /// It is reached by **tapping the search bar** — REWRITE-UI.md §5's own
-    /// wording ("focusing the bar drops mouse reporting so the next tap raises
-    /// the IME"), and the thing a thumb does anyway when it wants to type. It
-    /// had a quarter of the action bar until the device said otherwise: Termux's
-    /// own extra-keys row can carry a keyboard toggle, which makes a second
-    /// button for it a waste of a quarter of the only touch chrome there is.
-    ///
-    /// This flips state only. Reporting is a *terminal* command, so the shell
-    /// performs it by reconciling itself against [`Model::mouse_on`] after every
-    /// update — one source of truth, no second mechanism to drift from it.
+    /// Drops mouse reporting for one tap, which is the only way Termux raises
+    /// the soft keyboard; the next key press turns it back on. The shell
+    /// applies it by reconciling against [`Model::mouse_on`].
     fn raise_keyboard(&mut self) -> Effect {
         self.mouse_on = false;
         self.keyboard_hint = true;
@@ -1886,16 +1826,8 @@ impl Model {
         self.write(change, landed)
     }
 
-    /// Put the last write this session made back the way it was.
-    ///
-    /// **An undo is an ordinary append**, never a rewrite: §3.1's whole
-    /// guarantee is that a journal is append-only and single-writer, so "taking
-    /// something back" is writing the op that says so. The other device sees an
-    /// edit, which is exactly what happened.
-    ///
-    /// **An undo does not stack its own inverse**, so `u u u` walks back three
-    /// writes rather than toggling the last one. Redo is therefore not free, and
-    /// is not built: pressing undo twice must mean what it means everywhere.
+    /// Puts the last write this session made back, as an ordinary append. An
+    /// undo is not itself undoable; `redo` puts it back.
     fn undo(&mut self) -> Effect {
         // Named for what it is rather than "nothing to undo": the stack is this
         // session's, and a user who edited yesterday is owed the reason it is
@@ -1994,12 +1926,12 @@ impl Model {
     }
 }
 
-/// Apply one message. The only entry point to state change.
 /// The byte offset of the `chars`-th character, or the end of `text`.
 fn byte_index(text: &str, chars: usize) -> usize {
     text.char_indices().nth(chars).map_or(text.len(), |(index, _)| index)
 }
 
+/// Applies one message: the only entry point to state change.
 #[allow(clippy::too_many_lines)] // One flat table of rules reads better than five helpers.
 pub fn update(model: &mut Model, msg: Msg) -> Effect {
     // A key press means the user is at the keyboard, so the IME affordance has
@@ -2166,10 +2098,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         Msg::Move(Motion::End) if !model.detail() && !model.query.is_empty() => {
             model.query_cursor_to(usize::MAX)
         }
-        // **The record owns `↑`/`↓` while it is open.** They used to move the
-        // list cursor underneath it, so the record silently became a different
-        // document while you were reading it — unfollowable at 47 columns, and
-        // the reason this selector exists.
+        // The record owns `↑`/`↓` while it is open, so it never becomes a
+        // different document while it is being read.
         Msg::Move(motion) => {
             if model.detail() {
                 model.move_record(motion);
@@ -2889,15 +2819,8 @@ fn from_worker(msg: &Msg) -> bool {
     matches!(msg, Msg::ScansLoaded(_) | Msg::Saved(_) | Msg::Reloaded(_) | Msg::SaveFailed { .. })
 }
 
-/// The rows the search bar occupies, inclusive — and therefore the rows that
-/// raise the keyboard when tapped.
-///
-/// **Two rows on a touch layout**, sitting against the bottom edge of the
-/// screen. One terminal row is too small a target for a thumb, and against the
-/// screen edge an overshoot downwards hits nothing at all. Upwards it now finds
-/// the list's last row rather than a button that opened files — which is the
-/// quiet win from deleting the action bar: a stray tap moves the selection, and
-/// opening needs the row to be selected already.
+/// The rows the search bar occupies, inclusive, which raise the keyboard when
+/// tapped: two on a touch layout, against the screen edge, for a thumb.
 fn search_zone(model: &Model) -> (u16, u16) {
     let last = model.rows_on_screen.saturating_sub(1);
     if crate::layout::touch_layout(model.cols) {
