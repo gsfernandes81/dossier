@@ -157,9 +157,7 @@ fn run(args: &Args, start: Instant) -> io::Result<u8> {
             Ok(status(&loaded, &config, &root, *quiet, *no_sync))
         }
         Some(Command::Open { query }) => Ok(open_one(&loaded, &root, &query.join(" "))),
-        // Handled above, before any store was read.
-        Some(Command::Init { .. }) => Ok(0),
-        None => browse(loaded, &config, &journal, &root, start).map(|()| 0),
+        _ => browse(loaded, &config, &journal, &root, start).map(|()| 0),
     }
 }
 
@@ -327,11 +325,12 @@ fn browse(
         writeln!(io::stderr(), "{line}")?;
     }
 
-    let result = event_loop(terminal, &mut model, theme, root, journal, &tx, &rx, &session);
+    let shell = Shell { theme, root, journal, tx, rx, session };
+    let result = event_loop(terminal, &mut model, &shell);
     // Restored before the writer is waited for, so a save still in its fsync
     // finishes behind the shell rather than a frozen screen.
     drop(tui);
-    session.finish();
+    shell.session.finish();
     result
 }
 
@@ -415,17 +414,12 @@ fn restore_terminal() {
 /// results from workers, so the loop blocks on a single `recv()` and wakes only
 /// for a message: a worker wakes the UI without the UI asking whether it is
 /// done.
-#[allow(clippy::too_many_arguments)] // The shell's whole state, and it is flat.
 fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<Stderr>>,
     model: &mut Model,
-    theme: Theme,
-    root: &Path,
-    journal: &Journal,
-    tx: &mpsc::Sender<Msg>,
-    rx: &mpsc::Receiver<Msg>,
-    session: &Session,
+    shell: &Shell,
 ) -> io::Result<()> {
+    let Shell { theme, root, journal, tx, rx, session } = shell;
     let mut stderr = io::stderr();
     let mut mouse_applied = model.mouse_on;
 
@@ -480,7 +474,7 @@ fn event_loop(
                 // Off the render loop: the `enrich` namespace is the bulky half
                 // of the store, and the frame that turned the chip on has
                 // already been drawn by the time this thread finishes.
-                let journal = journal.clone();
+                let journal = Journal::clone(journal);
                 let tx = tx.clone();
                 std::thread::spawn(move || {
                     let scans = Scans::load(&journal).unwrap_or_default();
@@ -488,6 +482,17 @@ fn event_loop(
                 });
             }
         }
-        terminal.draw(|frame| find::draw(frame, model, theme))?;
+        terminal.draw(|frame| find::draw(frame, model, *theme))?;
     }
+}
+
+/// What the loop reads besides the model and the terminal.
+struct Shell<'a> {
+    theme: Theme,
+    root: &'a Path,
+    journal: &'a Journal,
+    /// Where workers post their results; the loop's own queue.
+    tx: mpsc::Sender<Msg>,
+    rx: mpsc::Receiver<Msg>,
+    session: Session,
 }

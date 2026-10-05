@@ -41,7 +41,6 @@ struct Vector {
     /// Fixture name; matches the file stem.
     name: String,
     /// Why this behaviour is contractual — read this before changing a vector.
-    #[allow(dead_code)]
     why: String,
     /// Raw journal file bodies, exactly as they would sit on disk.
     files: Vec<String>,
@@ -157,8 +156,9 @@ fn every_vector_folds_to_its_canonical_json() {
         assert_eq!(
             state.canonical_json(),
             vector.canonical,
-            "vector `{}` folded differently than recorded",
-            vector.name
+            "vector `{}` folded differently than recorded ({})",
+            vector.name,
+            vector.why
         );
     }
 }
