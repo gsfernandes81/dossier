@@ -518,7 +518,7 @@ pub struct Model {
     pub tree: RowGeometry,
     /// Where the Details view's rows were drawn.
     pub record: RowGeometry,
-    /// Where an open checklist's rows were drawn.
+    /// Where the open panel's rows were drawn.
     pub panel: RowGeometry,
 }
 
@@ -1104,7 +1104,6 @@ impl Model {
             return effect;
         }
         self.picker = Some(Picker::new(purpose));
-        self.sheet = false;
         Effect::Redraw
     }
 
@@ -1244,7 +1243,6 @@ impl Model {
         }
         let Some(doc) = self.current() else { return Effect::Idle };
         self.locpick = Some(crate::locpick::LocationPicker::file(&self.store, &doc.id));
-        self.sheet = false;
         self.show_details();
         self.flash = self.store.locations.loop_message();
         Effect::Redraw
@@ -1475,6 +1473,13 @@ impl Model {
         Ok(self.append(change, landed))
     }
 
+    /// Replaces the query, puts the cursor at its end, and requeries.
+    fn set_query(&mut self, text: String) {
+        self.query_cursor = text.chars().count();
+        self.query = text;
+        self.requery();
+    }
+
     /// `Esc` peels one layer per press: a panel, the sheet, the Bundles search,
     /// a pushed view, the query, the filters, then arms the quit. On Termux
     /// `Esc` also dismisses the keyboard, so every press must undo something
@@ -1491,21 +1496,15 @@ impl Model {
             return Effect::Redraw;
         }
         if matches!(self.views.last(), Some(View::Bundles { .. })) && !self.query.is_empty() {
-            self.query.clear();
-            self.query_cursor = 0;
-            self.requery();
+            self.set_query(String::new());
             self.reset_bundles();
         } else if let Some(View::Bundles { query, .. }) = self.views.last().cloned() {
             self.views.pop();
-            self.query_cursor = query.chars().count();
-            self.query = query;
-            self.requery();
+            self.set_query(query);
         } else if !self.views.is_empty() {
             self.views.pop();
         } else if !self.query.is_empty() {
-            self.query.clear();
-            self.query_cursor = 0;
-            self.requery();
+            self.set_query(String::new());
         } else if self.filter != Filter::ALL {
             self.filter = Filter::ALL;
             self.requery();
@@ -1554,8 +1553,7 @@ impl Model {
         (index < self.rows.len()).then_some(index)
     }
 
-    /// Runs one verb of the Space sheet, through the same paths the keyboard
-    /// reaches, so a letter and its `ctrl` key cannot drift apart.
+    /// Runs one verb of the Space sheet through the same paths the keyboard reaches.
     fn run(&mut self, act: crate::sheet::Act) -> Effect {
         self.sheet = false;
         match act {
@@ -1672,7 +1670,6 @@ impl Model {
             edit.list = self.root.clone().map(|root| Completion::new(root, false, None, ""));
         }
         self.edit = Some(edit);
-        self.sheet = false;
         self.show_details();
         Effect::Redraw
     }
@@ -1684,7 +1681,6 @@ impl Model {
             return effect;
         }
         self.edit = Some(crate::edit::Edit::new(Target::NewDoc, Field::Name, None));
-        self.sheet = false;
         Effect::Redraw
     }
 
@@ -1738,13 +1734,12 @@ impl Model {
         let id = doc.id.clone();
         let change = Change::create("doc", &id, doc.as_fields()).reversed();
         self.armed = None;
-        self.sheet = false;
         self.append(change, Landed::saying("deleted — u to undo"))
     }
 
     /// Undoes the last write, or redoes the last undo: pops from one stack,
-    /// appends, and lets [`Msg::Saved`] move the change to the other. Redo
-    /// has its own stack because `u u u` walks back three writes.
+    /// appends, and lets [`Msg::Saved`] move the change to the other. Undo
+    /// is not itself undoable, so `u u u` walks back three writes.
     fn step(&mut self, direction: Direction) -> Effect {
         if let Some(effect) = self.refused() {
             return effect;
@@ -1770,7 +1765,6 @@ impl Model {
             ..Landed::default()
         };
         self.pending = Some(Pending { change, direction, landed });
-        self.sheet = false;
         Effect::Append(drafts)
     }
 
