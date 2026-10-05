@@ -1369,8 +1369,8 @@ impl Model {
         Effect::Redraw
     }
 
-    /// Deletes a location and everything inside it, as one change whose way
-    /// back recreates each of them where it was.
+    /// Deletes a location and everything inside it, unfiling the hard copies
+    /// they held, as one change whose way back puts all of it where it was.
     fn remove(&mut self, id: &str) -> Effect {
         if let Some(effect) = self.refused() {
             return effect;
@@ -1379,12 +1379,15 @@ impl Model {
         let doomed: Vec<&crate::Location> =
             tree.subtree(id).into_iter().filter_map(|at| tree.get(at)).collect();
         let Some(name) = doomed.first().map(|l| l.name.clone()) else { return Effect::Redraw };
-        let Some(change) = doomed
+        let held = self.store.docs.iter().filter(|doc| {
+            doc.location.as_deref().is_some_and(|at| doomed.iter().any(|l| l.id == at))
+        });
+        let unfile = held.map(|doc| self.flip("doc", &doc.id, "location", None));
+        let delete = doomed
             .iter()
             .rev()
-            .map(|l| Change::create("location", &l.id, l.as_fields()).reversed())
-            .reduce(Change::then)
-        else {
+            .map(|l| Change::create("location", &l.id, l.as_fields()).reversed());
+        let Some(change) = unfile.chain(delete).reduce(Change::then) else {
             return Effect::Redraw;
         };
         let parent = tree.parent(id).map(str::to_string);
@@ -3339,12 +3342,24 @@ pub(crate) mod tests {
         update(&mut m, Msg::Char(' '));
         update(&mut m, Msg::Char('d'));
         let delete = |id: &str| journal::Draft::delete("location", id);
+        let unfile = |id: &str| journal::Draft::unset("doc", id, "location");
         assert_eq!(
             update(&mut m, Msg::Char('d')),
-            Effect::Append(vec![delete("cert-file"), delete("shelf")])
+            Effect::Append(vec![
+                unfile("coc"),
+                unfile("eng1"),
+                unfile("passport"),
+                unfile("testimonial"),
+                delete("cert-file"),
+                delete("shelf")
+            ]),
+            "the hard copies it held are unfiled in the same change"
         );
         let back = m.pending.as_ref().unwrap().change.back.clone();
         assert_eq!(back.first(), Some(&journal::Draft::create("location", "shelf")));
+        assert!(back
+            .iter()
+            .any(|draft| draft.id == "coc" && draft.f.as_deref() == Some("location")));
         assert!(back.contains(&journal::Draft::set(
             "location",
             "cert-file",
