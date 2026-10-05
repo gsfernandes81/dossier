@@ -259,6 +259,9 @@ pub struct Store {
     pub locations: Tree,
     /// Bundles, newest first; undated ones last, by name.
     pub bundles: Vec<Bundle>,
+    /// Deleted ids by kind, so a recreated name never takes over a dead
+    /// record's references.
+    pub retired: BTreeSet<(String, String)>,
 }
 
 /// Days before expiry that count as expiring.
@@ -443,7 +446,8 @@ impl Store {
             name: string(entity, "name").unwrap_or_else(|| id.to_string()),
             parent: string(entity, "parent"),
         }));
-        let mut store = Self { docs, locations, bundles };
+        let retired = fold.tombstones.keys().cloned().collect();
+        let mut store = Self { docs, locations, bundles, retired };
         store.derive();
         store
     }
@@ -677,6 +681,15 @@ mod tests {
     fn build(all: Vec<Vec<Op>>) -> Store {
         let lines: Vec<Line> = all.into_iter().flatten().map(Line::from).collect();
         Store::build(&fold_lines(&lines))
+    }
+
+    #[test]
+    fn a_deleted_id_stays_retired() {
+        let mut ops = entity(1, "bundle", "trip-desk", &[("name", "Trip".into())]);
+        ops.push(Draft::delete("bundle", "trip-desk").stamp(9, "desk-core"));
+        let store = build(vec![ops]);
+        assert_eq!(store.bundles, []);
+        assert!(store.retired.contains(&("bundle".to_string(), "trip-desk".to_string())));
     }
 
     /// An exhaustive struct literal on purpose, with no `..Default::default()`: a

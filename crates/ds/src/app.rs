@@ -1770,11 +1770,14 @@ impl Model {
 
     /// A new id for a record of `ent` named `name`, unused by any of its kind.
     fn mint(&self, ent: &str, name: &str) -> String {
-        let taken = match ent {
+        let mut taken: std::collections::BTreeSet<&str> = match ent {
             "doc" => self.store.docs.iter().map(|doc| doc.id.as_str()).collect(),
             "bundle" => self.store.bundles.iter().map(|bundle| bundle.id.as_str()).collect(),
             _ => self.store.locations.iter().map(|location| location.id.as_str()).collect(),
         };
+        taken.extend(
+            self.store.retired.iter().filter(|(kind, _)| kind == ent).map(|(_, id)| id.as_str()),
+        );
         crate::id::mint(name, self.write.device().unwrap_or_default(), &taken)
     }
 
@@ -2915,6 +2918,14 @@ pub(crate) mod tests {
     fn a_new_id_avoids_every_id_already_in_the_store() {
         let mut m = writable();
         m.store.docs[0].id = "passport-desk".into();
+        let Effect::Append(drafts) = create(&mut m, "Passport") else { panic!("no append") };
+        assert_eq!(drafts[0], journal::Draft::create("doc", "passport-desk-2"));
+    }
+
+    #[test]
+    fn a_new_id_avoids_a_deleted_one() {
+        let mut m = writable();
+        m.store.retired.insert(("doc".into(), "passport-desk".into()));
         let Effect::Append(drafts) = create(&mut m, "Passport") else { panic!("no append") };
         assert_eq!(drafts[0], journal::Draft::create("doc", "passport-desk-2"));
     }
