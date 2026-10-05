@@ -39,7 +39,7 @@ pub fn type_str(model: &mut Model, text: &str) {
 /// Opens the location picker on the selected document.
 pub fn picking(model: &mut Model) {
     update(model, Msg::Enter);
-    update(model, Msg::Leader);
+    update(model, Msg::Char(' '));
     update(model, Msg::Char('l'));
 }
 

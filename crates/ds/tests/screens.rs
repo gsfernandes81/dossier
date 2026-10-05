@@ -498,7 +498,7 @@ fn a_file_row_picker_draws_in_the_panel() {
 #[test]
 fn the_expiring_filter_is_visible_in_the_bar() {
     let mut m = model(45, 28);
-    update(&mut m, Msg::ToggleExpiring);
+    m.toggle_expiring();
     assert_eq!(m.filter, Filter { expiring: true, ..Filter::ALL });
     let lines = screen(&mut m, 45, 28);
     assert!(lines[26].contains("[expiring]"), "the chip: {:?}", lines[26]);

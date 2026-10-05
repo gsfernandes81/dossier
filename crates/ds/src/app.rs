@@ -68,16 +68,10 @@ pub enum Msg {
     Esc,
     /// `ctrl+q` / `ctrl+c` — leave now, from anywhere.
     Quit,
-    /// Include scan text in the search.
-    ToggleScans,
-    /// The expiring filter: from the filter list, or a tap on the header's count.
-    ToggleExpiring,
     /// `ctrl+z` — undo the last change this session wrote.
     Undo,
     /// `ctrl+y` — redo the last change undone.
     Redo,
-    /// `Space` on an empty query, or the `SPC` chip: open the leader sheet.
-    Leader,
     /// A tap or click at a terminal cell.
     Tap {
         /// Column, zero-based from the terminal's left edge.
@@ -1123,8 +1117,8 @@ impl Model {
     /// Does what a panel row chose for `purpose`.
     fn choose(&mut self, purpose: &Purpose, choice: Choice) -> Effect {
         let (id, change) = match (purpose, choice) {
-            (_, Choice::Expiring) => return update(self, Msg::ToggleExpiring),
-            (_, Choice::Scans) => return update(self, Msg::ToggleScans),
+            (_, Choice::Expiring) => return self.toggle_expiring(),
+            (_, Choice::Scans) => return self.toggle_scans(),
             (_, Choice::OldVersions) => {
                 self.filter.old_versions = !self.filter.old_versions;
                 self.reset_list();
@@ -1882,6 +1876,19 @@ impl Model {
         Effect::Redraw
     }
 
+    /// Opens the Space sheet.
+    fn open_sheet(&mut self) -> Effect {
+        self.sheet = true;
+        Effect::Redraw
+    }
+
+    /// Turns the expiring filter on or off.
+    pub fn toggle_expiring(&mut self) -> Effect {
+        self.filter.expiring = !self.filter.expiring;
+        self.reset_list();
+        Effect::Redraw
+    }
+
     /// Turns scan-text search off, or on, reading the scan text first.
     fn toggle_scans(&mut self) -> Effect {
         match self.scan_search {
@@ -1934,12 +1941,12 @@ impl Model {
                 self.sheet = false;
                 Effect::Redraw
             } else {
-                update(self, Msg::Leader)
+                self.open_sheet()
             }
         } else if self.count_zone.hit(col, row) && !pushed && !bundles {
             // You tap the number that told you there were three; a second
             // tap turns the filter off again.
-            update(self, Msg::ToggleExpiring)
+            self.toggle_expiring()
         } else if row >= top && row <= bottom {
             if pushed {
                 Effect::Idle
@@ -2064,10 +2071,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             Effect::Redraw
         }
         Msg::SaveFailed { reason, permanent } => model.save_failed(reason, permanent),
-        Msg::Leader => {
-            model.sheet = true;
-            Effect::Redraw
-        }
         Msg::Enter => model.drill(),
         Msg::Left | Msg::Right if model.detail() => Effect::Idle,
         Msg::Left => model.query_cursor_to(model.query_cursor.saturating_sub(1)),
@@ -2096,20 +2099,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         }
         // On the record a letter is a verb; on the list every letter is search
         // text, and Space on an empty query opens the leader.
-        Msg::Char(' ') if model.detail() => update(model, Msg::Leader),
+        Msg::Char(' ') if model.detail() => model.open_sheet(),
         Msg::Char(c) if model.detail() => model.record_verb(c),
-        Msg::Char(' ') if model.query.is_empty() => update(model, Msg::Leader),
+        Msg::Char(' ') if model.query.is_empty() => model.open_sheet(),
         Msg::Char(c) => {
             model.type_char(c);
             Effect::Redraw
         }
-        Msg::ToggleScans => model.toggle_scans(),
         Msg::ScansLoaded(scans) => model.scans_loaded(scans),
-        Msg::ToggleExpiring => {
-            model.filter.expiring = !model.filter.expiring;
-            model.reset_list();
-            Effect::Redraw
-        }
         Msg::Undo => {
             model.sheet = false;
             model.step(Direction::Undo)
@@ -2204,7 +2201,6 @@ fn edit_step(model: &mut Model, edit: &mut crate::edit::Edit, msg: &Msg) -> (Opt
         | Msg::Move(_)
         | Msg::Left
         | Msg::Right
-        | Msg::Leader
         | Msg::Tab
         | Msg::Tap { .. }
         | Msg::Scroll(_) => Effect::Idle,
@@ -2314,7 +2310,7 @@ fn bundles_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     let Some(View::Bundles { .. }) = model.views.last() else { return None };
     let entries = crate::bundles::entries(&model.store, &model.query);
     let effect = match msg {
-        Msg::Char(' ') if model.query.is_empty() => update(model, Msg::Leader),
+        Msg::Char(' ') if model.query.is_empty() => model.open_sheet(),
         Msg::Char(c) => {
             model.type_char(*c);
             model.reset_bundles();
@@ -2351,7 +2347,7 @@ fn bundle_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             Effect::Redraw
         }
         Msg::Enter => model.enter_bundle(),
-        Msg::Char(' ') => update(model, Msg::Leader),
+        Msg::Char(' ') => model.open_sheet(),
         Msg::Char(c) => model.bundle_verb(*c),
         Msg::Backspace | Msg::Left | Msg::Right => Effect::Idle,
         _ => return None,
@@ -2374,7 +2370,7 @@ fn versions_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             Effect::Redraw
         }
         Msg::Enter => model.open_version(),
-        Msg::Char(' ') => update(model, Msg::Leader),
+        Msg::Char(' ') => model.open_sheet(),
         Msg::Char('u') => model.step(Direction::Undo),
         Msg::Char('r') => model.step(Direction::Redo),
         Msg::Char(c) => model.no_verb(*c),
@@ -2423,7 +2419,7 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
             model.locpick = picker.back.map(|back| *back);
             return Some(Effect::Redraw);
         }
-        Msg::Char(' ') | Msg::Leader if picker.filter.is_empty() => {
+        Msg::Char(' ') if picker.filter.is_empty() => {
             if picker.chosen().is_some() {
                 model.sheet = true;
             } else {
@@ -2528,7 +2524,7 @@ fn picker_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
     let mut picker = model.picker.take()?;
     let hits = picker.matching(model);
     let effect = match msg {
-        Msg::Char(' ') | Msg::Leader if picker.checklist() && picker.filter.is_empty() => {
+        Msg::Char(' ') if picker.checklist() && picker.filter.is_empty() => {
             return Some(act(model, picker, &hits));
         }
         Msg::Enter => return Some(act(model, picker, &hits)),
@@ -2563,7 +2559,7 @@ fn picker_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
                 Effect::Redraw
             }
         },
-        Msg::Left | Msg::Right | Msg::Leader | Msg::Scroll(_) => Effect::Idle,
+        Msg::Left | Msg::Right | Msg::Scroll(_) => Effect::Idle,
         _ => {
             model.picker = Some(picker);
             return None;
@@ -3248,7 +3244,7 @@ pub(crate) mod tests {
 
     fn picking(m: &mut Model) {
         update(m, Msg::Enter);
-        update(m, Msg::Leader);
+        m.open_sheet();
         update(m, Msg::Char('l'));
     }
 
@@ -3612,7 +3608,7 @@ pub(crate) mod tests {
     fn a_save_keeps_the_cursor_on_the_document_it_edited() {
         let mut m = writable();
         m.warn_until = "2031-12-31".into();
-        update(&mut m, Msg::ToggleExpiring);
+        m.toggle_expiring();
         update(&mut m, Msg::Move(Motion::Down));
         let edited = m.current().unwrap().id.clone();
         assert_eq!(edited, "eng1", "second-soonest under the filter");
@@ -3630,7 +3626,7 @@ pub(crate) mod tests {
     fn a_save_that_leaves_the_filter_keeps_the_record() {
         let mut m = writable();
         m.warn_until = "2031-12-31".into();
-        update(&mut m, Msg::ToggleExpiring);
+        m.toggle_expiring();
         let edited = m.current().unwrap().id.clone();
         m.open_edit(Field::Expiry);
         assert!(m.detail());
@@ -4269,9 +4265,9 @@ pub(crate) mod tests {
     fn toggles_compose() {
         let mut m = model();
         m.filter.old_versions = true;
-        update(&mut m, Msg::ToggleExpiring);
+        m.toggle_expiring();
         assert!(m.filter.expiring && m.filter.old_versions);
-        update(&mut m, Msg::ToggleExpiring);
+        m.toggle_expiring();
         assert!(!m.filter.expiring && m.filter.old_versions);
     }
 
@@ -4557,7 +4553,7 @@ pub(crate) mod tests {
     #[test]
     fn space_still_leads_with_a_filter_up() {
         let mut m = model();
-        update(&mut m, Msg::ToggleExpiring);
+        m.toggle_expiring();
         update(&mut m, Msg::Char(' '));
         assert!(m.sheet);
     }
@@ -4753,7 +4749,7 @@ pub(crate) mod tests {
     fn the_expiring_filter_narrows_and_peels() {
         let mut m = model();
         m.warn_until = "2031-12-31".into();
-        update(&mut m, Msg::ToggleExpiring);
+        m.toggle_expiring();
         let ids: Vec<&str> = m.rows.iter().map(|&i| m.store.docs[i].id.as_str()).collect();
         assert_eq!(ids, ["coc", "eng1", "passport"], "soonest first, untracked gone");
 
@@ -4827,7 +4823,7 @@ pub(crate) mod tests {
     #[test]
     fn the_scan_search_loads_on_a_worker_and_arrives_as_a_message() {
         let mut m = model();
-        assert_eq!(update(&mut m, Msg::ToggleScans), Effect::LoadScans);
+        assert_eq!(m.toggle_scans(), Effect::LoadScans);
         assert_eq!(m.scan_search, ScanSearch::Loading, "and it says so on screen");
 
         let scans = std::sync::Arc::new(crate::scans::Scans {
@@ -4843,7 +4839,7 @@ pub(crate) mod tests {
         assert_eq!(m.current().unwrap().id, "coc");
 
         // Off again, and the word is nowhere in any name.
-        update(&mut m, Msg::ToggleScans);
+        m.toggle_scans();
         assert_eq!(m.scan_search, ScanSearch::Off);
         assert!(m.rows.is_empty(), "{:?}", m.rows);
     }
@@ -4856,7 +4852,7 @@ pub(crate) mod tests {
                 .into_iter()
                 .collect(),
         });
-        update(&mut m, Msg::ToggleScans);
+        m.toggle_scans();
         update(&mut m, Msg::ScansLoaded(scans));
         type_str(&mut m, "coc");
         let ids: Vec<&str> = m.rows.iter().map(|&i| m.store.docs[i].id.as_str()).collect();
@@ -4866,18 +4862,18 @@ pub(crate) mod tests {
     #[test]
     fn the_second_toggle_needs_no_second_load() {
         let mut m = model();
-        update(&mut m, Msg::ToggleScans);
+        m.toggle_scans();
         update(&mut m, Msg::ScansLoaded(std::sync::Arc::new(crate::scans::Scans::default())));
-        update(&mut m, Msg::ToggleScans);
-        assert_eq!(update(&mut m, Msg::ToggleScans), Effect::Redraw, "no second load");
+        m.toggle_scans();
+        assert_eq!(m.toggle_scans(), Effect::Redraw, "no second load");
         assert_eq!(m.scan_search, ScanSearch::On);
     }
 
     #[test]
     fn a_late_load_does_not_reopen_the_toggle_or_disarm_the_quit() {
         let mut m = model();
-        update(&mut m, Msg::ToggleScans);
-        update(&mut m, Msg::ToggleScans); // changed their mind while it loaded
+        m.toggle_scans();
+        m.toggle_scans(); // changed their mind while it loaded
         update(&mut m, Msg::Esc);
         assert_eq!(m.armed, Some(Armed::Esc));
 
