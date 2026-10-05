@@ -13,8 +13,8 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! `ds init` — setting this device up: its name, the Syncthing folder, the
-//! Syncthing API, and on Termux what the phone still needs.
+//! `ds init` — setting this device up: its name, the Syncthing folder and its
+//! `.stignore`, the Syncthing API, and on Termux what the phone still needs.
 //!
 //! The **device name** is the first half of the writer id every op this device
 //! emits carries (`phone` → `phone-core`); until it is set, `ds` can
@@ -27,9 +27,12 @@
 //! when [`journal::Writer::open`] creates it. Init says so rather than doing
 //! it.
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+use journal::names::COMPACTION_TEMP_GLOB;
+
+use crate::compaction::{gate, Gate};
 use crate::config::Config;
 use crate::prompt::{Kind, Prompt, Question};
 use crate::syncthing::DEFAULT_ADDRESS;
@@ -72,6 +75,15 @@ pub enum Error {
     /// The config could not be written.
     #[error(transparent)]
     Config(#[from] crate::config::Error),
+    /// The compaction-temp line could not be added to `.stignore`.
+    #[error("cannot add `{COMPACTION_TEMP_GLOB}` to {}: {source}", path.display())]
+    Ignore {
+        /// The `.stignore` being written.
+        path: PathBuf,
+        /// The underlying error.
+        #[source]
+        source: std::io::Error,
+    },
     /// Under WSL: `ds.exe` on the Windows side of this machine already writes
     /// to the same store under this name.
     #[error("{}", twin_message(device, twin))]
@@ -181,11 +193,50 @@ pub fn run(
     }
 
     let syncthing = ask_syncthing(prompt, machine, was.syncthing)?;
+    let ignore = ask_ignore(prompt, &root)?;
     let config =
         Config { syncthing_root: Some(root.clone()), device: Some(device.clone()), syncthing };
     config.save(path)?;
+    if let Some(stignore) = &ignore {
+        add_ignore(stignore)?;
+    }
     report(prompt, path, &device, &root, machine.termux)?;
     Ok(config)
+}
+
+/// The `.stignore` to add the compaction-temp line to: the store's Syncthing
+/// folder's, when it lacks the line and the person agrees.
+fn ask_ignore(prompt: &mut dyn Prompt, root: &Path) -> Result<Option<PathBuf>, Error> {
+    let Gate::Missing { stignore } = gate(journal::Journal::under_root(root).path()) else {
+        return Ok(None);
+    };
+    let add = prompt.ask(&Question {
+        prompt: &format!(
+            "Add `{COMPACTION_TEMP_GLOB}` to {}, so Syncthing never carries a half-written \
+             journal to another device? Without it `ds` never compacts its journal.",
+            stignore.display()
+        ),
+        default: Some("yes"),
+        kind: Kind::YesNo,
+        required: true,
+        flag: None,
+    })?;
+    Ok((add.as_deref() == Some("yes")).then_some(stignore))
+}
+
+/// Appends the compaction-temp glob to `stignore` on a line of its own,
+/// creating the file if it is absent.
+fn add_ignore(stignore: &Path) -> Result<(), Error> {
+    let fail = |source| Error::Ignore { path: stignore.to_path_buf(), source };
+    let body = match std::fs::read(stignore) {
+        Ok(body) => body,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(fail(error)),
+    };
+    let separator = if body.is_empty() || body.ends_with(b"\n") { "" } else { "\n" };
+    let mut file =
+        std::fs::OpenOptions::new().create(true).append(true).open(stignore).map_err(fail)?;
+    file.write_all(format!("{separator}{COMPACTION_TEMP_GLOB}\n").as_bytes()).map_err(fail)
 }
 
 /// The Syncthing root: the flag's, or asked with the current one as the
@@ -439,6 +490,13 @@ fn report(
             "\nnote: {} does not exist yet. That is fine if Syncthing has not set it up on this\n\
              device yet.",
             root.display()
+        ))?;
+    }
+    if let Gate::Missing { stignore } = gate(journal) {
+        prompt.say(&format!(
+            "\nnote: journal compaction stays off until {} has `{COMPACTION_TEMP_GLOB}` on a \
+             line of its own.",
+            stignore.display()
         ))?;
     }
     if termux {
@@ -787,6 +845,40 @@ mod tests {
         answer("desk", r"D:\Other").expect("the same name on another store");
         std::fs::remove_file(&path).expect("reset");
         answer("desk-wsl", r"C:\Users\g\Sync").expect("a name of its own");
+    }
+
+    /// A Syncthing folder at `dir/Sync` whose `.stignore` holds `body`.
+    fn synced(dir: &Path, body: &str) -> PathBuf {
+        std::fs::create_dir_all(dir.join("Sync/.stfolder")).expect("mkdir");
+        let stignore = dir.join("Sync/.stignore");
+        std::fs::write(&stignore, body).expect("write");
+        stignore
+    }
+
+    #[test]
+    fn init_appends_the_ignore_once() {
+        let (_tmp, dir) = sandbox();
+        let path = dir.join("config.toml");
+        let stignore = synced(&dir, "(?d).DS_Store");
+        for _ in 0..2 {
+            let (result, transcript) = talk(&path, &phone(&dir), "", false);
+            result.expect("init");
+            assert!(!transcript.contains("compaction stays off"), "{transcript}");
+        }
+        let body = std::fs::read_to_string(&stignore).expect("read");
+        assert_eq!(body, "(?d).DS_Store\n*.jsonl.tmp-*\n");
+    }
+
+    #[test]
+    fn declining_the_ignore_leaves_it_untouched() {
+        let (_tmp, dir) = sandbox();
+        let path = dir.join("config.toml");
+        let stignore = synced(&dir, "(?d).DS_Store\n");
+        let (result, transcript) = talk(&path, &phone(&dir), "\nn\n", true);
+        result.expect("init");
+        assert!(transcript.contains("Add `*.jsonl.tmp-*` to"), "{transcript}");
+        assert!(transcript.contains("compaction stays off"), "{transcript}");
+        assert_eq!(std::fs::read_to_string(&stignore).expect("read"), "(?d).DS_Store\n");
     }
 
     #[test]
