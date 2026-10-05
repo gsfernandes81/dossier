@@ -1807,65 +1807,221 @@ fn byte_index(text: &str, chars: usize) -> usize {
     text.char_indices().nth(chars).map_or(text.len(), |(index, _)| index)
 }
 
-/// Applies one message: the only entry point to state change.
-#[allow(clippy::too_many_lines)] // One flat table of rules reads better than five helpers.
-pub fn update(model: &mut Model, msg: Msg) -> Effect {
-    // A key press means the user is at the keyboard, so the IME affordance has
-    // done its job: restore mouse reporting. Doing it here, once, is why the
-    // drop can never become a mode you get stuck in.
-    if is_key(&msg) {
-        model.mouse_on = true;
+impl Model {
+    /// A save landed: the change goes on the stack that reverses it, and the
+    /// store and views follow what was written.
+    fn saved(&mut self, store: Store) -> Effect {
+        // The edit whose save this is closes now, not at `Enter`: until the
+        // journal answers, the value on screen is a hope.
+        self.edit.take_if(|edit| edit.saving);
+        self.armed = self.armed.filter(|armed| *armed == Armed::Esc);
+        let landed = match self.pending.take() {
+            Some(Pending { change, direction, landed }) => {
+                match direction {
+                    Direction::Forward | Direction::Redo => self.undo.push(change),
+                    Direction::Undo => self.redo.push(change),
+                }
+                if direction == Direction::Forward {
+                    self.redo.clear();
+                }
+                landed
+            }
+            None => Landed::default(),
+        };
+        let anchor = landed.anchor.or_else(|| self.current().map(|doc| doc.id.clone()));
+        self.adopt(store, anchor.as_deref().unwrap_or_default());
+        self.prune_views();
+        if let Some(view) = landed.open.filter(|view| view.alive_in(&self.store)) {
+            if landed.replace {
+                self.views.pop();
+            }
+            self.views.push(view);
+        }
+        self.flash = Some(landed.note.unwrap_or_else(|| "saved".into()));
+        Effect::Redraw
     }
 
+    /// A save did not land; the typing survives.
+    fn save_failed(&mut self, reason: String, permanent: bool) -> Effect {
+        if let Some(edit) = &mut self.edit {
+            edit.saving = false;
+            edit.armed_discard = false;
+        }
+        // A write that never landed cannot be taken back, so the change is
+        // dropped rather than left on a stack to reverse something nobody
+        // did. A refused *undo* likewise stays on the undo stack — it is
+        // still the last thing this session wrote.
+        if let Some(Pending { change, direction, .. }) = self.pending.take() {
+            match direction {
+                Direction::Undo => self.undo.push(change),
+                Direction::Redo => self.redo.push(change),
+                Direction::Forward => {}
+            }
+        }
+        self.armed = self.armed.filter(|armed| *armed == Armed::Esc);
+        self.flash = Some(reason.clone());
+        // A refusal that will refuse again takes editing off the table for
+        // the session, rather than inviting the same disappointment on
+        // every save. The typing survives either way.
+        if permanent {
+            self.write = WriteState::Off(reason);
+        }
+        Effect::Redraw
+    }
+
+    /// Turns scan-text search off, or on, reading the scan text first.
+    fn toggle_scans(&mut self) -> Effect {
+        match self.scan_search {
+            ScanSearch::On | ScanSearch::Loading => {
+                self.scan_search = ScanSearch::Off;
+                self.requery();
+                Effect::Redraw
+            }
+            // Already read once: turning it back on costs nothing.
+            ScanSearch::Off if self.scans.is_some() => {
+                self.scan_search = ScanSearch::On;
+                self.requery();
+                Effect::Redraw
+            }
+            ScanSearch::Off => {
+                self.scan_search = ScanSearch::Loading;
+                Effect::LoadScans
+            }
+        }
+    }
+
+    fn scans_loaded(&mut self, scans: std::sync::Arc<crate::scans::Scans>) -> Effect {
+        // A load that finished after the user changed their mind is kept,
+        // not applied: the work is done, and turning it on again is instant.
+        let count = scans.len();
+        self.scans = Some(scans);
+        if self.scan_search == ScanSearch::Loading {
+            self.scan_search = ScanSearch::On;
+            self.flash = Some(if count == 0 {
+                "no scan text yet — the desktop satellite writes it".into()
+            } else {
+                format!("searching inside {count} scanned files")
+            });
+            self.requery();
+        }
+        Effect::Redraw
+    }
+
+    /// A tap, routed to whatever is drawn under it.
+    fn tap(&mut self, col: u16, row: u16) -> Effect {
+        self.flash = None;
+        // A pushed record covers the list, so the chrome under it belongs to
+        // a surface you cannot see. Tapping it would mutate that surface
+        // blind — the stack metaphor has to hold for touch too.
+        let pushed = self.pane() && !crate::layout::splits(self.cols);
+        let bundles = self.views.iter().any(|view| matches!(view, View::Bundles { .. }));
+        let (top, bottom) = search_zone(self);
+        if self.leader_zone.hit(col, row) {
+            if self.sheet {
+                self.sheet = false;
+                Effect::Redraw
+            } else {
+                update(self, Msg::Leader)
+            }
+        } else if self.count_zone.hit(col, row) && !pushed && !bundles {
+            // You tap the number that told you there were three; a second
+            // tap turns the filter off again.
+            update(self, Msg::ToggleExpiring)
+        } else if row >= top && row <= bottom {
+            if pushed {
+                Effect::Idle
+            } else {
+                // Tapping the field is how every phone app says "I want to
+                // type", so it is what drops mouse reporting for one tap.
+                self.raise_keyboard()
+            }
+        } else if let Some(index) = self.record.at(col, row) {
+            match self.views.last() {
+                Some(View::Details { .. }) => self.record_tap(index),
+                Some(View::Versions { .. }) => self.versions_tap(index),
+                Some(View::Bundle { .. }) => self.bundle_tap(index),
+                Some(View::Bundles { .. }) | None => Effect::Idle,
+            }
+        } else if let Some(index) = self.bundle_list.at(col, row) {
+            self.bundles_tap(index)
+        } else if self.new_row == Some(row) && !pushed {
+            if self.on_new {
+                self.drill()
+            } else {
+                self.on_new = true;
+                Effect::Redraw
+            }
+        } else if let Some(index) = self.row_at(row) {
+            // Two taps, never a double-tap timer: timing gestures are
+            // miserable on a laggy terminal.
+            let id = self.store.docs[self.rows[index]].id.clone();
+            let shown = match self.views.as_slice() {
+                [] => true,
+                [View::Details { doc, .. }] => *doc == id,
+                _ => false,
+            };
+            if index == self.cursor && !self.on_new && shown {
+                self.drill()
+            } else {
+                self.on_new = false;
+                self.cursor = index;
+                // Beside the list, the views give way to the tapped row's
+                // Details view.
+                if !self.views.is_empty() {
+                    self.views = vec![View::Details { doc: id, cursor: 0 }];
+                }
+                Effect::Redraw
+            }
+        } else {
+            Effect::Idle
+        }
+    }
+}
+
+/// Restores mouse reporting and disarms on a press, and returns whether the
+/// quit was armed before it.
+fn note_press(model: &mut Model, msg: &Msg) -> bool {
+    let was_armed = model.armed == Some(Armed::Esc);
+    // A key press means the IME affordance has done its job. Restoring mouse
+    // reporting here, once, keeps the drop from becoming a mode.
+    if is_key(msg) {
+        model.mouse_on = true;
+        model.flash = None;
+    }
     // `d d` and `Esc Esc` act only on consecutive presses: any other key or
     // tap disarms. A resize does not, since Termux's `Esc` also drops the
     // keyboard and resizes the terminal.
-    let was_armed = model.armed == Some(Armed::Esc);
     match model.armed {
-        Some(Armed::Delete) if msg != Msg::Char('d') && disarms(&msg) => {
+        Some(Armed::Delete) if *msg != Msg::Char('d') && disarms(msg) => {
             model.armed = None;
             model.flash = None;
         }
-        Some(Armed::Esc) if msg != Msg::Esc && disarms(&msg) => model.armed = None,
+        Some(Armed::Esc) if *msg != Msg::Esc && disarms(msg) => model.armed = None,
         _ => {}
     }
-    if is_key(&msg) {
-        model.flash = None;
-    }
+    was_armed
+}
 
-    // An open edit owns the keyboard first; `ctrl+q`/`ctrl+c` and worker
-    // messages still fall through, so nothing is trapped.
-    if model.edit.is_some() {
-        if let Some(effect) = edit_key(model, &msg) {
-            return effect;
-        }
-    }
+/// The keys of whatever is in front, innermost first: an edit, the location
+/// picker, a panel, the sheet, then the view. `ctrl+q`/`ctrl+c` and worker
+/// messages fall through every one, so nothing is trapped.
+fn in_front(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    edit_key(model, msg)
+        .or_else(|| locpick_key(model, msg))
+        .or_else(|| picker_key(model, msg))
+        .or_else(|| sheet_key(model, msg))
+        .or_else(|| match model.views.last() {
+            Some(View::Versions { .. }) => versions_key(model, msg),
+            Some(View::Bundles { .. }) => bundles_key(model, msg),
+            Some(View::Bundle { .. }) => bundle_key(model, msg),
+            Some(View::Details { .. }) | None => None,
+        })
+}
 
-    if model.locpick.is_some() {
-        if let Some(effect) = locpick_key(model, &msg) {
-            return effect;
-        }
-    }
-
-    if model.picker.is_some() {
-        if let Some(effect) = picker_key(model, &msg) {
-            return effect;
-        }
-    }
-
-    if model.sheet {
-        if let Some(effect) = sheet_key(model, &msg) {
-            return effect;
-        }
-    }
-
-    let hook: Option<ViewKeys> = match model.views.last() {
-        Some(View::Versions { .. }) => Some(versions_key),
-        Some(View::Bundles { .. }) => Some(bundles_key),
-        Some(View::Bundle { .. }) => Some(bundle_key),
-        Some(View::Details { .. }) | None => None,
-    };
-    if let Some(effect) = hook.and_then(|hook| hook(model, &msg)) {
+/// Applies one message: the only entry point to state change.
+pub fn update(model: &mut Model, msg: Msg) -> Effect {
+    let was_armed = note_press(model, &msg);
+    if let Some(effect) = in_front(model, &msg) {
         return effect;
     }
 
@@ -1873,36 +2029,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         Msg::Quit => Effect::Quit,
         Msg::Tab => Effect::Idle,
         Msg::Esc => model.peel(was_armed),
-        Msg::Saved(store) => {
-            // The edit whose save this is closes now, not at `Enter`: until the
-            // journal answers, the value on screen is a hope.
-            model.edit.take_if(|edit| edit.saving);
-            model.armed = model.armed.filter(|armed| *armed == Armed::Esc);
-            let landed = match model.pending.take() {
-                Some(Pending { change, direction, landed }) => {
-                    match direction {
-                        Direction::Forward | Direction::Redo => model.undo.push(change),
-                        Direction::Undo => model.redo.push(change),
-                    }
-                    if direction == Direction::Forward {
-                        model.redo.clear();
-                    }
-                    landed
-                }
-                None => Landed::default(),
-            };
-            let anchor = landed.anchor.or_else(|| model.current().map(|doc| doc.id.clone()));
-            model.adopt(*store, anchor.as_deref().unwrap_or_default());
-            model.prune_views();
-            if let Some(view) = landed.open.filter(|view| view.alive_in(&model.store)) {
-                if landed.replace {
-                    model.views.pop();
-                }
-                model.views.push(view);
-            }
-            model.flash = Some(landed.note.unwrap_or_else(|| "saved".into()));
-            Effect::Redraw
-        }
+        Msg::Saved(store) => model.saved(*store),
         Msg::OpenFailed(reason) => {
             model.flash = Some(reason);
             Effect::Redraw
@@ -1923,32 +2050,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.flash = Some("updated from another device".into());
             Effect::Redraw
         }
-        Msg::SaveFailed { reason, permanent } => {
-            if let Some(edit) = &mut model.edit {
-                edit.saving = false;
-                edit.armed_discard = false;
-            }
-            // A write that never landed cannot be taken back, so the change is
-            // dropped rather than left on a stack to reverse something nobody
-            // did. A refused *undo* likewise stays on the undo stack — it is
-            // still the last thing this session wrote.
-            if let Some(Pending { change, direction, .. }) = model.pending.take() {
-                match direction {
-                    Direction::Undo => model.undo.push(change),
-                    Direction::Redo => model.redo.push(change),
-                    Direction::Forward => {}
-                }
-            }
-            model.armed = model.armed.filter(|armed| *armed == Armed::Esc);
-            model.flash = Some(reason.clone());
-            // A refusal that will refuse again takes editing off the table for
-            // the session, rather than inviting the same disappointment on
-            // every save. The typing survives either way.
-            if permanent {
-                model.write = WriteState::Off(reason);
-            }
-            Effect::Redraw
-        }
+        Msg::SaveFailed { reason, permanent } => model.save_failed(reason, permanent),
         Msg::Leader => {
             model.sheet = true;
             Effect::Redraw
@@ -1988,39 +2090,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.type_char(c);
             Effect::Redraw
         }
-        Msg::ToggleScans => match model.scan_search {
-            ScanSearch::On | ScanSearch::Loading => {
-                model.scan_search = ScanSearch::Off;
-                model.requery();
-                Effect::Redraw
-            }
-            // Already read once: turning it back on costs nothing.
-            ScanSearch::Off if model.scans.is_some() => {
-                model.scan_search = ScanSearch::On;
-                model.requery();
-                Effect::Redraw
-            }
-            ScanSearch::Off => {
-                model.scan_search = ScanSearch::Loading;
-                Effect::LoadScans
-            }
-        },
-        Msg::ScansLoaded(scans) => {
-            // A load that finished after the user changed their mind is kept,
-            // not applied: the work is done, and turning it on again is instant.
-            let count = scans.len();
-            model.scans = Some(scans);
-            if model.scan_search == ScanSearch::Loading {
-                model.scan_search = ScanSearch::On;
-                model.flash = Some(if count == 0 {
-                    "no scan text yet — the desktop satellite writes it".into()
-                } else {
-                    format!("searching inside {count} scanned files")
-                });
-                model.requery();
-            }
-            Effect::Redraw
-        }
+        Msg::ToggleScans => model.toggle_scans(),
+        Msg::ScansLoaded(scans) => model.scans_loaded(scans),
         Msg::ToggleExpiring => {
             model.filter.expiring = !model.filter.expiring;
             model.reset_list();
@@ -2043,74 +2114,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             model.scroll(delta);
             Effect::Redraw
         }
-        Msg::Tap { col, row } => {
-            model.flash = None;
-            // A pushed record covers the list, so the chrome under it belongs to
-            // a surface you cannot see. Tapping it would mutate that surface
-            // blind — the stack metaphor has to hold for touch too.
-            let pushed = model.pane() && !crate::layout::splits(model.cols);
-            let bundles = model.views.iter().any(|view| matches!(view, View::Bundles { .. }));
-            let (top, bottom) = search_zone(model);
-            if model.leader_zone.hit(col, row) {
-                if model.sheet {
-                    model.sheet = false;
-                    Effect::Redraw
-                } else {
-                    update(model, Msg::Leader)
-                }
-            } else if model.count_zone.hit(col, row) && !pushed && !bundles {
-                // You tap the number that told you there were three; a second
-                // tap turns the filter off again.
-                update(model, Msg::ToggleExpiring)
-            } else if row >= top && row <= bottom {
-                if pushed {
-                    Effect::Idle
-                } else {
-                    // Tapping the field is how every phone app says "I want to
-                    // type", so it is what drops mouse reporting for one tap.
-                    model.raise_keyboard()
-                }
-            } else if let Some(index) = model.record.at(col, row) {
-                match model.views.last() {
-                    Some(View::Details { .. }) => model.record_tap(index),
-                    Some(View::Versions { .. }) => model.versions_tap(index),
-                    Some(View::Bundle { .. }) => model.bundle_tap(index),
-                    Some(View::Bundles { .. }) | None => Effect::Idle,
-                }
-            } else if let Some(index) = model.bundle_list.at(col, row) {
-                model.bundles_tap(index)
-            } else if model.new_row == Some(row) && !pushed {
-                if model.on_new {
-                    model.drill()
-                } else {
-                    model.on_new = true;
-                    Effect::Redraw
-                }
-            } else if let Some(index) = model.row_at(row) {
-                // Two taps, never a double-tap timer: timing gestures are
-                // miserable on a laggy terminal.
-                let id = model.store.docs[model.rows[index]].id.clone();
-                let shown = match model.views.as_slice() {
-                    [] => true,
-                    [View::Details { doc, .. }] => *doc == id,
-                    _ => false,
-                };
-                if index == model.cursor && !model.on_new && shown {
-                    model.drill()
-                } else {
-                    model.on_new = false;
-                    model.cursor = index;
-                    // Beside the list, the views give way to the tapped row's
-                    // Details view.
-                    if !model.views.is_empty() {
-                        model.views = vec![View::Details { doc: id, cursor: 0 }];
-                    }
-                    Effect::Redraw
-                }
-            } else {
-                Effect::Idle
-            }
-        }
+        Msg::Tap { col, row } => model.tap(col, row),
     }
 }
 
@@ -2233,6 +2237,9 @@ fn attach_key(model: &Model, edit: &mut crate::edit::Edit, msg: &Msg) -> Option<
 /// Keys while the Space sheet is open: a letter runs its verb, and nothing
 /// searches it. `None` falls through, so `Esc` and `ctrl` keys keep their meaning.
 fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    if !model.sheet {
+        return None;
+    }
     match msg {
         Msg::Char(c) => {
             if let Some(item) = crate::sheet::items(model).into_iter().find(|item| item.key == *c) {
@@ -2257,9 +2264,6 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         _ => None,
     }
 }
-
-/// A view's own key handler: `None` passes the key on to the shared ones.
-type ViewKeys = fn(&mut Model, &Msg) -> Option<Effect>;
 
 /// The index of `selected` in `items`, or the first when it is not there.
 #[must_use]
@@ -2379,6 +2383,7 @@ fn versions_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
 /// Keys while the location picker is open. `None` falls through, so `ctrl+q`,
 /// `ctrl+z` and worker messages keep their meaning.
 fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
+    model.locpick.as_ref()?;
     if model.sheet {
         if *msg == Msg::Esc {
             model.sheet = false;
