@@ -151,13 +151,14 @@ pub enum Line {
         /// Which kind of unknown.
         reason: OpaqueReason,
     },
-    /// Broken bytes: not JSON, not an object, or missing required fields.
+    /// Broken bytes: not UTF-8, not JSON, not an object, or missing required
+    /// fields.
     ///
     /// Counted and surfaced as a `ds status` anomaly, preserved through
     /// compaction, **never silently discarded**.
     Malformed {
         /// The original bytes.
-        raw: String,
+        raw: Vec<u8>,
         /// A human-readable reason, for the anomaly report.
         reason: String,
     },
@@ -204,7 +205,7 @@ pub fn parse_line(raw: &str) -> Line {
                 || op.extra.values().any(contains_float) =>
         {
             Line::Malformed {
-                raw: raw.to_string(),
+                raw: raw.as_bytes().to_vec(),
                 reason: "contains a floating-point number (the format is integers-only)".into(),
             }
         }
@@ -215,7 +216,8 @@ pub fn parse_line(raw: &str) -> Line {
 
 /// The slow path: work out why a line did not deserialize into an [`Op`].
 fn classify_failure(raw: &str) -> Line {
-    let malformed = |reason: &str| Line::Malformed { raw: raw.to_string(), reason: reason.into() };
+    let malformed =
+        |reason: &str| Line::Malformed { raw: raw.as_bytes().to_vec(), reason: reason.into() };
 
     let Ok(value) = serde_json::from_str::<Value>(raw) else {
         return malformed("not valid JSON");
@@ -273,23 +275,23 @@ fn contains_float(value: &Value) -> bool {
 
 /// Parse a whole file body into lines, returning a torn final line (one with
 /// no trailing newline) separately rather than as damage.
-pub fn parse_body(body: &str) -> (Vec<Line>, Option<String>) {
-    if body.is_empty() {
-        return (Vec::new(), None);
-    }
-    let mut torn = None;
-    let mut rest = body;
-    if !body.ends_with('\n') {
-        let start = body.rfind('\n').map_or(0, |i| i + 1);
-        torn = Some(body[start..].to_string());
-        rest = &body[..start];
-    }
+///
+/// Each line is decoded on its own, so an invalid byte costs the line it sits
+/// in, which stays [`Line::Malformed`] with its bytes intact.
+#[must_use]
+pub fn parse_body(body: &[u8]) -> (Vec<Line>, Option<String>) {
+    let start = body.iter().rposition(|&byte| byte == b'\n').map_or(0, |i| i + 1);
+    let (rest, tail) = body.split_at(start);
+    let torn = (!tail.is_empty()).then(|| String::from_utf8_lossy(tail).into_owned());
     let lines = rest
-        .lines()
+        .split(|&byte| byte == b'\n')
         // Blank lines are not data and not damage; a text editor or a file
         // transfer can leave one behind.
-        .filter(|line| !line.trim().is_empty())
-        .map(parse_line)
+        .filter(|line| !line.trim_ascii().is_empty())
+        .map(|line| match std::str::from_utf8(line) {
+            Ok(text) => parse_line(text),
+            Err(_) => Line::Malformed { raw: line.to_vec(), reason: "not UTF-8".into() },
+        })
         .collect();
     (lines, torn)
 }
@@ -337,7 +339,7 @@ mod tests {
             let Line::Malformed { raw: kept, .. } = parse_line(raw) else {
                 panic!("{raw} should be malformed")
             };
-            assert_eq!(kept, raw);
+            assert_eq!(kept, raw.as_bytes());
         }
     }
 
@@ -350,18 +352,18 @@ mod tests {
     #[test]
     fn a_torn_final_line_is_split_off() {
         let body = format!("{}\n{}", op_line(), r#"{"v":1,"ts":2,"w":"desk-c"#);
-        let (lines, torn) = parse_body(&body);
+        let (lines, torn) = parse_body(body.as_bytes());
         assert_eq!(lines.len(), 1);
         assert!(torn.unwrap().starts_with(r#"{"v":1,"ts":2"#));
 
-        let (lines, torn) = parse_body(&format!("{}\n", op_line()));
+        let (lines, torn) = parse_body(format!("{}\n", op_line()).as_bytes());
         assert_eq!(lines.len(), 1);
         assert!(torn.is_none(), "a complete file has no torn tail");
     }
 
     #[test]
     fn blank_lines_are_ignored() {
-        let (lines, _) = parse_body(&format!("{}\n\n{}\n", op_line(), op_line()));
+        let (lines, _) = parse_body(format!("{}\n\n{}\n", op_line(), op_line()).as_bytes());
         assert_eq!(lines.len(), 2);
         assert!(lines.iter().all(|l| l.as_op().is_some()));
     }

@@ -291,9 +291,7 @@ impl Journal {
                     continue;
                 }
             };
-            // Lossy, so an invalid byte costs the line it sits in rather than
-            // every op in the file.
-            let (lines, torn) = parse_body(&String::from_utf8_lossy(&raw));
+            let (lines, torn) = parse_body(&raw);
             let bytes = raw.len() as u64;
             if torn.is_some() {
                 load.anomalies.push(Anomaly::TornTail { file: name.clone() });

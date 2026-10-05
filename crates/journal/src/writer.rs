@@ -26,7 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 
 use crate::names;
-use crate::op::{Op, OpKind, FORMAT_VERSION};
+use crate::op::{Line, Op, OpKind, FORMAT_VERSION};
 use crate::store::{Journal, Namespace};
 
 /// The hybrid logical clock: milliseconds since the epoch, strictly monotonic
@@ -378,15 +378,14 @@ impl Writer {
     /// is complete and flushed.
     pub fn compact(&mut self, now_ms: i64, when: When) -> Result<Option<Report>, Error> {
         let before = fingerprint(&self.path)?;
-        let body =
-            std::fs::read_to_string(&self.path).map_err(io("read for compaction", &self.path))?;
+        let body = std::fs::read(&self.path).map_err(io("read for compaction", &self.path))?;
         self.rewrite(&body, before, now_ms, when)
     }
 
     /// Compacts from `body`, the file as read when it looked like `before`.
     fn rewrite(
         &self,
-        body: &str,
+        body: &[u8],
         before: Fingerprint,
         now_ms: i64,
         when: When,
@@ -402,24 +401,20 @@ impl Writer {
 
         // Built in memory first (a writer's file is a few megabytes), so the
         // temp exists for as short a window as possible.
-        let mut rewritten = String::with_capacity(body.len());
+        let mut rewritten = Vec::with_capacity(body.len());
         for &index in &plan.keep {
             match &lines[index] {
                 // Re-serialized, which is lossless because `Op` carries unknown
                 // fields (`extra`).
-                crate::op::Line::Op(op) => rewritten.push_str(&op.to_line()?),
-                // Never re-serialized: bytes this build did not understand are
-                // bytes it must not rewrite.
-                crate::op::Line::Opaque { raw, .. } | crate::op::Line::Malformed { raw, .. } => {
-                    rewritten.push_str(raw);
-                }
+                Line::Op(op) => rewritten.extend_from_slice(op.to_line()?.as_bytes()),
+                Line::Opaque { raw, .. } => rewritten.extend_from_slice(raw.as_bytes()),
+                Line::Malformed { raw, .. } => rewritten.extend_from_slice(raw),
             }
-            rewritten.push('\n');
+            rewritten.push(b'\n');
         }
 
-        let replaced = write_temp(&temp, rewritten.as_bytes())
-            .map_err(io("compact", &self.path))
-            .and_then(|()| {
+        let replaced =
+            write_temp(&temp, &rewritten).map_err(io("compact", &self.path)).and_then(|()| {
                 if fingerprint(&self.path)? != before {
                     return Err(Error::Changed { path: self.path.clone() });
                 }
@@ -613,8 +608,7 @@ mod tests {
         let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::create("doc", "new")]).expect("append");
 
-        let body = std::fs::read_to_string(&path).expect("read");
-        let (lines, torn) = parse_body(&body);
+        let (lines, torn) = parse_body(&std::fs::read(&path).expect("read"));
         assert!(torn.is_none(), "the file ends cleanly");
         assert_eq!(lines.len(), 2, "the torn line is gone, the new op is intact");
         assert!(lines.iter().all(|line| line.as_op().is_some()), "nothing was glued together");
@@ -632,7 +626,7 @@ mod tests {
 
         let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::create("doc", "new")]).expect("append");
-        let (lines, torn) = parse_body(&std::fs::read_to_string(&path).expect("read"));
+        let (lines, torn) = parse_body(&std::fs::read(&path).expect("read"));
         assert!(torn.is_none() && lines.len() == 1);
     }
 
@@ -660,7 +654,7 @@ mod tests {
         let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::create("doc", "new")]).expect("append");
 
-        let (lines, torn) = parse_body(&std::fs::read_to_string(&path).expect("read"));
+        let (lines, torn) = parse_body(&std::fs::read(&path).expect("read"));
         assert!(torn.is_none(), "the file ends cleanly");
         assert_eq!(lines.len(), 2, "the torn line is gone, the new op is intact");
         assert!(lines.iter().all(|line| line.as_op().is_some()), "nothing was glued together");
@@ -725,6 +719,35 @@ mod tests {
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         assert!(load.anomalies.is_empty(), "{:?}", load.anomalies);
         assert_eq!(fold(&load.lines).canonical_json(), before.canonical_json());
+    }
+
+    /// The invalid byte sits in an otherwise valid op, which must neither fold
+    /// as a patched value nor be rewritten.
+    #[test]
+    fn a_line_with_an_invalid_byte_folds_and_compacts_untouched() {
+        const BAD: &[u8] =
+            b"{\"v\":1,\"ts\":13,\"w\":\"desk-core\",\"op\":\"set\",\"ent\":\"doc\",\"id\":\"a\",\"f\":\"name\",\"val\":\"caf\xe9\"}";
+        let fixture = fixture();
+        let path = fixture.journal.file_path(Namespace::Meta, "desk-core");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create");
+        let line = |op: Draft, ts| format!("{}\n", op.stamp(ts, "desk-core").to_line().unwrap());
+        let mut body = line(Draft::create("doc", "a"), 10).into_bytes();
+        body.extend_from_slice(line(Draft::set("doc", "a", "name", "old"), 11).as_bytes());
+        body.extend_from_slice(line(Draft::set("doc", "a", "name", "new"), 12).as_bytes());
+        body.extend_from_slice(BAD);
+        body.push(b'\n');
+        std::fs::write(&path, &body).expect("write");
+
+        let mut writer = open(&fixture, "desk-core");
+        let state = fold(&fixture.journal.load(Namespace::Meta).expect("loads").lines);
+        assert_eq!(state.get("doc", "a").expect("folds").fields["name"], "new");
+
+        let report = writer.compact(13 + crate::compact::RETENTION_MS * 2, When::Always);
+        assert_eq!(report.expect("compacts").expect("did work").lines_after, 3);
+        let after = std::fs::read(&path).expect("read");
+        assert!(after.split(|&byte| byte == b'\n').any(|kept| kept == BAD), "bytes kept");
+        let load = fixture.journal.load(Namespace::Meta).expect("loads");
+        assert_eq!(fold(&load.lines).canonical_json(), state.canonical_json());
     }
 
     #[test]
@@ -833,7 +856,7 @@ mod tests {
             writer.append_all([Draft::set("doc", "x", "name", format!("v{i}"))]).expect("append");
         }
         let before = fingerprint(writer.path()).expect("stat");
-        let body = std::fs::read_to_string(writer.path()).expect("read");
+        let body = std::fs::read(writer.path()).expect("read");
         writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("the twin appends");
         let appended = std::fs::read(writer.path()).expect("read");
 

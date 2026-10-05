@@ -103,7 +103,7 @@ fn parse(vector: &Vector) -> (Vec<Line>, Vec<String>) {
     let mut lines = Vec::new();
     let mut torn = Vec::new();
     for body in &vector.files {
-        let (parsed, tail) = parse_body(body);
+        let (parsed, tail) = parse_body(body.as_bytes());
         lines.extend(parsed);
         torn.extend(tail);
     }
@@ -119,7 +119,8 @@ fn compaction_preserves_the_fold() {
         ran += 1;
 
         // Parse each file separately: only the named one is compacted.
-        let parsed: Vec<Vec<Line>> = vector.files.iter().map(|body| parse_body(body).0).collect();
+        let parsed: Vec<Vec<Line>> =
+            vector.files.iter().map(|body| parse_body(body.as_bytes()).0).collect();
         let plan = journal::compaction_plan(&parsed[compact.file], compact.at);
         assert_eq!(
             plan.keep.len(),
