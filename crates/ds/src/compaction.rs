@@ -60,8 +60,7 @@ pub fn gate(dir: &Path) -> Gate {
 }
 
 /// Returns the nearest folder at or above `dir` that Syncthing shares.
-#[must_use]
-pub fn syncthing_folder(dir: &Path) -> Option<PathBuf> {
+fn syncthing_folder(dir: &Path) -> Option<PathBuf> {
     crate::config::absolute(dir)
         .ancestors()
         .find(|folder| folder.join(MARKER).exists())

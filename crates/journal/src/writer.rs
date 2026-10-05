@@ -71,12 +71,6 @@ impl Hlc {
     pub fn observe(&mut self, ts: i64) {
         self.last = self.last.max(ts);
     }
-
-    /// The last timestamp handed out.
-    #[must_use]
-    pub fn last(&self) -> i64 {
-        self.last
-    }
 }
 
 /// Returns milliseconds since the Unix epoch, saturating rather than panicking
@@ -292,12 +286,6 @@ impl Writer {
         Ok(Self { name: writer_id.to_string(), path, clock: Hlc::seeded(max_ts_seen), _lock: lock })
     }
 
-    /// The file being appended to.
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     /// Appends several ops as one consecutive run and flushes them to disk.
     ///
     /// For edits that are only correct together — an id rename is create-new +
@@ -345,46 +333,34 @@ impl Writer {
         self.clock.observe(ts);
     }
 
-    /// The clock, for callers that need the next `ts` without appending.
-    #[must_use]
-    pub fn clock(&self) -> &Hlc {
-        &self.clock
-    }
-
-    /// Rewrite this writer's file as the minimal set that reproduces it
-    /// ([`crate::compact`]).
+    /// Rewrites this writer's file as the minimal set that reproduces it, when
+    /// [`crate::compact::Plan::worth_doing`] says so.
     ///
     /// The writer holds its file's lock. The one appender the lock cannot see
     /// is a same-named `ds` across the WSL boundary, so the file is checked
     /// again just before the rename and left alone if it changed.
     ///
-    /// Returns `None` when nothing was done. The rewrite is a same-directory
-    /// temp plus a rename — atomic, and same-directory because a cross-device
-    /// rename fails with `EXDEV`. A compaction that dies half-way leaves a temp
-    /// the next fold ignores and the next [`Writer::open`] removes.
+    /// The rewrite is a same-directory temp plus a rename — atomic, and
+    /// same-directory because a cross-device rename fails with `EXDEV`. A
+    /// compaction that dies half-way leaves a temp the next fold ignores and
+    /// the next [`Writer::open`] removes.
     ///
     /// # Errors
     /// [`Error::Io`] or [`Error::Serialize`], or [`Error::Changed`] when the
     /// file was appended to meanwhile. Nothing is replaced until the new file
     /// is complete and flushed.
-    pub fn compact(&mut self, now_ms: i64, when: When) -> Result<Option<Report>, Error> {
+    pub fn compact(&self, now_ms: i64) -> Result<(), Error> {
         let before = fingerprint(&self.path)?;
         let body = std::fs::read(&self.path).map_err(io("read for compaction", &self.path))?;
-        self.rewrite(&body, before, now_ms, when)
+        self.rewrite(&body, before, now_ms)
     }
 
     /// Compacts from `body`, the file as read when it looked like `before`.
-    fn rewrite(
-        &self,
-        body: &[u8],
-        before: Fingerprint,
-        now_ms: i64,
-        when: When,
-    ) -> Result<Option<Report>, Error> {
+    fn rewrite(&self, body: &[u8], before: Fingerprint, now_ms: i64) -> Result<(), Error> {
         let (lines, _torn) = crate::op::parse_body(body);
         let plan = crate::compact::plan(&lines, now_ms);
-        if when == When::IfWorthwhile && !plan.worth_doing() {
-            return Ok(None);
+        if !plan.worth_doing() {
+            return Ok(());
         }
 
         let directory = self.path.parent().unwrap_or_else(|| Path::new("."));
@@ -414,38 +390,8 @@ impl Writer {
         if replaced.is_err() {
             let _ = std::fs::remove_file(&temp);
         }
-        replaced?;
-
-        let report = Report {
-            lines_before: plan.total,
-            lines_after: plan.keep.len(),
-            bytes_before: body.len() as u64,
-            bytes_after: rewritten.len() as u64,
-        };
-        Ok(Some(report))
+        replaced
     }
-}
-
-/// Whether [`Writer::compact`] should respect the trigger.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum When {
-    /// Only if the file is mostly dead ops.
-    IfWorthwhile,
-    /// Regardless.
-    Always,
-}
-
-/// What a compaction did, for the caller to report.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Report {
-    /// Lines before.
-    pub lines_before: usize,
-    /// Lines after.
-    pub lines_after: usize,
-    /// Bytes before.
-    pub bytes_before: u64,
-    /// Bytes after.
-    pub bytes_after: u64,
 }
 
 /// Replaces `path` with `body` by writing a new `temp` and renaming it over.
@@ -538,6 +484,23 @@ mod tests {
 
     fn open(fixture: &Fixture, writer: &str) -> Writer {
         Writer::open(&fixture.journal, Namespace::Meta, writer, &fixture.locks, 0).expect("opens")
+    }
+
+    fn path(fixture: &Fixture) -> PathBuf {
+        fixture.journal.file_path(Namespace::Meta, "desk-core")
+    }
+
+    /// Far enough ahead that no op written now is inside the retention window.
+    fn future() -> i64 {
+        now_ms() + crate::compact::RETENTION_MS * 2
+    }
+
+    fn temps(directory: &Path) -> usize {
+        std::fs::read_dir(directory)
+            .expect("readable")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+            .count()
     }
 
     #[test]
@@ -706,13 +669,12 @@ mod tests {
         }
 
         let before = fold(&fixture.journal.load(Namespace::Meta).expect("loads").lines);
-        // Far in the future, so nothing is inside the 30-day retention window.
-        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        let report = writer.compact(future, When::IfWorthwhile).expect("compacts");
-        let report = report.expect("did work");
+        let bytes_before = std::fs::read(path(&fixture)).expect("read").len();
+        writer.compact(future()).expect("compacts");
 
-        assert_eq!(report.lines_after, 2, "a create and the newest name write");
-        assert!(report.bytes_after < report.bytes_before / 4);
+        let after = std::fs::read(path(&fixture)).expect("read");
+        assert_eq!(parse_body(&after).0.len(), 2, "a create and the newest name write");
+        assert!(after.len() < bytes_before / 4);
 
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         assert!(load.anomalies.is_empty(), "{:?}", load.anomalies);
@@ -729,20 +691,22 @@ mod tests {
         let path = fixture.journal.file_path(Namespace::Meta, "desk-core");
         std::fs::create_dir_all(path.parent().unwrap()).expect("create");
         let line = |op: Draft, ts| format!("{}\n", op.stamp(ts, "desk-core").to_line().unwrap());
-        let mut body = line(Draft::create("doc", "a"), 10).into_bytes();
-        body.extend_from_slice(line(Draft::set("doc", "a", "name", "old"), 11).as_bytes());
+        let mut body = line(Draft::create("doc", "a"), 1).into_bytes();
+        for ts in 2..12 {
+            body.extend_from_slice(line(Draft::set("doc", "a", "name", "old"), ts).as_bytes());
+        }
         body.extend_from_slice(line(Draft::set("doc", "a", "name", "new"), 12).as_bytes());
         body.extend_from_slice(BAD);
         body.push(b'\n');
         std::fs::write(&path, &body).expect("write");
 
-        let mut writer = open(&fixture, "desk-core");
+        let writer = open(&fixture, "desk-core");
         let state = fold(&fixture.journal.load(Namespace::Meta).expect("loads").lines);
         assert_eq!(state.get("doc", "a").expect("folds").fields["name"], "new");
 
-        let report = writer.compact(13 + crate::compact::RETENTION_MS * 2, When::Always);
-        assert_eq!(report.expect("compacts").expect("did work").lines_after, 3);
+        writer.compact(future()).expect("compacts");
         let after = std::fs::read(&path).expect("read");
+        assert_eq!(parse_body(&after).0.len(), 3, "the create, the newest set, the bad line");
         assert!(after.split(|&byte| byte == b'\n').any(|kept| kept == BAD), "bytes kept");
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         assert_eq!(fold(&load.lines).canonical_json(), state.canonical_json());
@@ -758,8 +722,7 @@ mod tests {
         }
         let before = fixture.journal.load(Namespace::Meta).expect("loads").files[0].max_ts;
 
-        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        let _ = writer.compact(future, When::Always).expect("compacts");
+        writer.compact(future()).expect("compacts");
 
         let after = fixture.journal.load(Namespace::Meta).expect("loads").files[0].max_ts;
         assert_eq!(before, after);
@@ -772,10 +735,11 @@ mod tests {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::create("doc", "x")]).expect("append");
-        let synced = std::fs::read(writer.path()).expect("read");
-        let temp = writer.path().with_file_name(".syncthing.desk-core.jsonl.tmp");
+        let path = path(&fixture);
+        let synced = std::fs::read(&path).expect("read");
+        let temp = path.with_file_name(".syncthing.desk-core.jsonl.tmp");
         std::fs::write(&temp, synced).expect("write temp");
-        std::fs::rename(&temp, writer.path()).expect("replace");
+        std::fs::rename(&temp, &path).expect("replace");
 
         writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("append after replace");
 
@@ -790,17 +754,13 @@ mod tests {
         let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::create("doc", "x")]).expect("append");
         writer.append_all([Draft::set("doc", "x", "name", "only")]).expect("append");
-        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        let report = writer.compact(future, When::IfWorthwhile).expect("runs");
-        assert!(report.is_none());
+        let path = path(&fixture);
+        let before = std::fs::read(&path).expect("read");
+        writer.compact(future()).expect("runs");
 
-        let directory = writer.path().parent().expect("has a parent");
-        let leftovers: Vec<_> = std::fs::read_dir(directory)
-            .expect("readable")
-            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
-            .filter(|name| name.contains(".tmp-"))
-            .collect();
-        assert!(leftovers.is_empty(), "temp files must never be left in the synced tree");
+        assert_eq!(std::fs::read(&path).expect("read"), before);
+        let directory = path.parent().expect("has a parent");
+        assert_eq!(temps(directory), 0, "temp files must never be left in the synced tree");
     }
 
     #[test]
@@ -808,15 +768,16 @@ mod tests {
         let fixture = fixture();
         let mut writer = open(&fixture, "desk-core");
         writer.append_all([Draft::create("doc", "x")]).expect("append");
-        let before = std::fs::read(writer.path()).expect("read");
-        let temp = writer
-            .path()
-            .with_file_name(names::compaction_temp_file("desk-core", std::process::id()));
+        for i in 0..9 {
+            writer.append_all([Draft::set("doc", "x", "name", format!("v{i}"))]).expect("append");
+        }
+        let path = path(&fixture);
+        let before = std::fs::read(&path).expect("read");
+        let temp =
+            path.with_file_name(names::compaction_temp_file("desk-core", std::process::id()));
         std::fs::write(&temp, "stale").expect("plant a stale temp");
 
-        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        let path = writer.path().to_path_buf();
-        assert!(writer.compact(future, When::Always).is_err(), "the temp name is taken");
+        assert!(writer.compact(future()).is_err(), "the temp name is taken");
         assert!(!temp.exists(), "the temp is removed on failure");
         assert_eq!(std::fs::read(&path).expect("read"), before);
 
@@ -853,22 +814,16 @@ mod tests {
         for i in 0..30 {
             writer.append_all([Draft::set("doc", "x", "name", format!("v{i}"))]).expect("append");
         }
-        let before = fingerprint(writer.path()).expect("stat");
-        let body = std::fs::read(writer.path()).expect("read");
+        let path = path(&fixture);
+        let before = fingerprint(&path).expect("stat");
+        let body = std::fs::read(&path).expect("read");
         writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("the twin appends");
-        let appended = std::fs::read(writer.path()).expect("read");
+        let appended = std::fs::read(&path).expect("read");
 
-        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
-        let result = writer.rewrite(&body, before, future, When::Always);
+        let result = writer.rewrite(&body, before, future());
         assert!(matches!(result, Err(Error::Changed { .. })), "{result:?}");
-        assert_eq!(std::fs::read(writer.path()).expect("read"), appended, "left as it was");
-        let directory = writer.path().parent().expect("has a parent");
-        let leftovers = std::fs::read_dir(directory)
-            .expect("readable")
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
-            .count();
-        assert_eq!(leftovers, 0, "and no temp is left behind");
+        assert_eq!(std::fs::read(&path).expect("read"), appended, "left as it was");
+        assert_eq!(temps(path.parent().expect("has a parent")), 0, "and no temp is left behind");
     }
 
     /// An id outside the frozen grammar is refused before anything is created —

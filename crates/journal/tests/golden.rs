@@ -121,7 +121,7 @@ fn compaction_preserves_the_fold() {
         // Parse each file separately: only the named one is compacted.
         let parsed: Vec<Vec<Line>> =
             vector.files.iter().map(|body| parse_body(body.as_bytes()).0).collect();
-        let plan = journal::compaction_plan(&parsed[compact.file], compact.at);
+        let plan = journal::compact::plan(&parsed[compact.file], compact.at);
         assert_eq!(
             plan.keep.len(),
             compact.expect_lines,

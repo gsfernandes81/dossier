@@ -520,7 +520,7 @@ fn a_poll_brings_in_another_writers_op() {
 fn a_save_sorts_after_what_it_read() {
     let (dir, journal) = journal_with(&desk(coc()));
     let mut follower = follower(dir.path(), &journal, "desk");
-    let ahead = journal::Hlc::seeded(0).tick() + 86_400_000;
+    let ahead = journal::writer::now_ms() + 86_400_000;
     let phone = dir.path().join("meta").join("phone-core.jsonl");
     std::fs::write(&phone, line(ahead, "phone-core", "name", "COC PHONE") + "\n").expect("write");
 

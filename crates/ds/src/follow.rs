@@ -170,13 +170,13 @@ impl Follower {
     /// burst tries again. The re-read it causes folds to the same store, which
     /// the UI drops.
     fn compact_when_quiet(&mut self) {
-        let (Some(writer), Some(saved)) = (&mut self.writer, self.since_save) else { return };
+        let (Some(writer), Some(saved)) = (&self.writer, self.since_save) else { return };
         if saved.elapsed() < self.quiet {
             return;
         }
         self.since_save = None;
         if crate::compaction::gate(self.journal.path()).allows() {
-            let _ = writer.compact(journal::writer::now_ms(), journal::writer::When::IfWorthwhile);
+            let _ = writer.compact(journal::writer::now_ms());
         }
     }
 

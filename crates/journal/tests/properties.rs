@@ -23,7 +23,7 @@
 //! it is violated the fold stops being a function of the op *set*;
 //! `FoldStats::duplicate_keys` is how a real store notices.
 
-use journal::{compaction_plan, fold, Draft, Line, Op};
+use journal::{fold, Draft, Line, Op};
 use proptest::prelude::*;
 use serde_json::json;
 
@@ -144,7 +144,7 @@ proptest! {
         let mut before = mine.clone();
         before.extend(theirs.clone());
 
-        let plan = compaction_plan(&mine, journal::compact::RETENTION_MS + k);
+        let plan = journal::compact::plan(&mine, journal::compact::RETENTION_MS + k);
         let mut after: Vec<Line> = plan.keep.iter().map(|&i| mine[i].clone()).collect();
         after.extend(theirs);
 
@@ -157,7 +157,7 @@ proptest! {
     #[test]
     fn compaction_never_lowers_the_high_water_mark(specs in stream(), k in 0i64..600) {
         let all = lines(&specs);
-        let plan = compaction_plan(&all, journal::compact::RETENTION_MS + k);
+        let plan = journal::compact::plan(&all, journal::compact::RETENTION_MS + k);
         let max = |lines: &[Line]| lines.iter().filter_map(Line::as_op).map(|op| op.ts).max();
         let kept: Vec<Line> = plan.keep.iter().map(|&i| all[i].clone()).collect();
         prop_assert_eq!(max(&kept), max(&all));

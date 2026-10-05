@@ -35,7 +35,6 @@ pub mod store;
 pub mod watermark;
 pub mod writer;
 
-pub use compact::{plan as compaction_plan, Plan as CompactionPlan};
 pub use fold::{fold, Entity, EntityKey, Fold, FoldStats};
 pub use op::{parse_body, parse_line, Line, Op, OpKind, FORMAT_VERSION};
 pub use store::{Anomaly, Journal, Load, Namespace, Stamp};

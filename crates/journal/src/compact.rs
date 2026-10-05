@@ -53,12 +53,6 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Lines that would be dropped.
-    #[must_use]
-    pub fn dropped(&self) -> usize {
-        self.total - self.keep.len()
-    }
-
     /// Whether this file is worth rewriting.
     #[must_use]
     pub fn worth_doing(&self) -> bool {
@@ -169,7 +163,7 @@ mod tests {
             line(OLD + 4, Draft::set("doc", "passport", "slot", "4")),
         ];
         let plan = plan(&lines, NOW);
-        assert_eq!(plan.dropped(), 2, "two superseded name writes go");
+        assert_eq!(plan.keep.len(), 3, "two superseded name writes go");
         assert_eq!(fold(&kept(&lines, &plan)).canonical_json(), fold(&lines).canonical_json());
     }
 
@@ -184,7 +178,7 @@ mod tests {
         let survivors = kept(&lines, &plan);
         assert!(survivors.iter().filter_map(Line::as_op).any(|op| op.op == OpKind::Delete));
         assert_eq!(fold(&survivors).canonical_json(), fold(&lines).canonical_json());
-        assert_eq!(plan.dropped(), 1, "the set behind the tombstone is dead and goes");
+        assert_eq!(plan.keep.len(), 2, "the set behind the tombstone is dead and goes");
     }
 
     #[test]
@@ -194,7 +188,7 @@ mod tests {
             line(OLD + 1, Draft::delete("review", "x")),
         ];
         let plan = plan(&lines, NOW);
-        assert_eq!(plan.dropped(), 0);
+        assert_eq!(plan.keep.len(), 2);
         assert_eq!(fold(&kept(&lines, &plan)).canonical_json(), fold(&lines).canonical_json());
     }
 
@@ -229,7 +223,7 @@ mod tests {
             line(NOW - 700, Draft::set("doc", "x", "name", "v3")),
         ];
         let plan = plan(&lines, NOW);
-        assert_eq!(plan.dropped(), 0, "nothing recent is dropped, superseded or not");
+        assert_eq!(plan.keep.len(), 4, "nothing recent is dropped, superseded or not");
         assert!(!plan.worth_doing());
     }
 
