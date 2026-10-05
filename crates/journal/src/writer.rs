@@ -456,10 +456,9 @@ fn io<'a>(action: &'static str, path: &'a Path) -> impl FnOnce(std::io::Error) -
 fn repair_torn_tail(mut file: File, path: &Path) -> Result<(), Error> {
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(io("read", path))?;
-    if bytes.last().is_some_and(|byte| *byte != b'\n') {
-        let keep =
-            bytes.iter().rposition(|byte| *byte == b'\n').map_or(0, |index| index as u64 + 1);
-        file.set_len(keep).map_err(io("truncate torn tail of", path))?;
+    let keep = crate::op::complete_len(&bytes);
+    if keep != bytes.len() {
+        file.set_len(keep as u64).map_err(io("truncate torn tail of", path))?;
     }
     Ok(())
 }

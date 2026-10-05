@@ -218,8 +218,7 @@ fn contains_float(value: &Value) -> bool {
 /// in, which stays [`Line::Malformed`] with its bytes intact.
 #[must_use]
 pub fn parse_body(body: &[u8]) -> (Vec<Line>, Option<String>) {
-    let start = body.iter().rposition(|&byte| byte == b'\n').map_or(0, |i| i + 1);
-    let (rest, tail) = body.split_at(start);
+    let (rest, tail) = body.split_at(complete_len(body));
     let torn = (!tail.is_empty()).then(|| String::from_utf8_lossy(tail).into_owned());
     let lines = rest
         .split(|&byte| byte == b'\n')
@@ -232,6 +231,11 @@ pub fn parse_body(body: &[u8]) -> (Vec<Line>, Option<String>) {
         })
         .collect();
     (lines, torn)
+}
+
+/// Bytes up to and including the last newline; what follows is a torn line.
+pub(crate) fn complete_len(body: &[u8]) -> usize {
+    body.iter().rposition(|&byte| byte == b'\n').map_or(0, |i| i + 1)
 }
 
 #[cfg(test)]
