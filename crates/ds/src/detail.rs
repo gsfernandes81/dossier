@@ -100,7 +100,7 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) -> crate
     };
 
     let rows = rows(doc);
-    let selected = model.record_cursor().min(rows.len().saturating_sub(1));
+    let selected = model.record_cursor();
     let mut lines: Vec<Line> = Vec::new();
     let mut owners = Vec::new();
     for (index, row) in rows.iter().enumerate() {

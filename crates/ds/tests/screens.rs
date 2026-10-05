@@ -499,7 +499,7 @@ fn a_file_row_picker_draws_in_the_panel() {
 fn the_expiring_filter_is_visible_in_the_bar() {
     let mut m = model(45, 28);
     update(&mut m, Msg::ToggleExpiring);
-    assert_eq!(m.filter, Filter::EXPIRING);
+    assert_eq!(m.filter, Filter { expiring: true, ..Filter::ALL });
     let lines = screen(&mut m, 45, 28);
     assert!(lines[26].contains("[expiring]"), "the chip: {:?}", lines[26]);
     assert!(lines[1].contains("Motorcycle Insurance"), "soonest first: {:?}", lines[1]);

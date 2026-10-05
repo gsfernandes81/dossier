@@ -339,8 +339,6 @@ pub struct Filter {
 impl Filter {
     /// No toggle on: the latest version of every document, in shelf order.
     pub const ALL: Self = Self { expiring: false, old_versions: false };
-    /// Only what the expiry watch is tracking.
-    pub const EXPIRING: Self = Self { expiring: true, ..Self::ALL };
 }
 
 /// Whether scan-text search is on, and whether the text it needs has arrived.
@@ -593,7 +591,10 @@ impl Model {
     #[must_use]
     pub fn record_cursor(&self) -> usize {
         match self.views.last() {
-            Some(View::Details { cursor, .. }) => *cursor,
+            Some(View::Details { doc, cursor }) => self
+                .store
+                .get(doc)
+                .map_or(0, |doc| (*cursor).min(crate::detail::rows(doc).len().saturating_sub(1))),
             _ => 0,
         }
     }
@@ -905,11 +906,23 @@ impl Model {
         }
         let Some(View::Bundle { id, .. }) = self.views.last().cloned() else { return Effect::Idle };
         let Some(bundle) = self.store.bundle(&id) else { return Effect::Idle };
+        let fields = bundle.as_fields();
+        self.delete_record("bundle", &id, fields)
+    }
+
+    /// Arms on the first `d`; on the second, deletes `id` with a way back
+    /// that recreates it from `fields`.
+    fn delete_record(
+        &mut self,
+        ent: &str,
+        id: &str,
+        fields: Vec<(&str, serde_json::Value)>,
+    ) -> Effect {
         if self.armed != Some(Armed::Delete) {
             self.armed = Some(Armed::Delete);
             return Effect::Redraw;
         }
-        let change = Change::create("bundle", &id, bundle.as_fields()).reversed();
+        let change = Change::create(ent, id, fields).reversed();
         self.armed = None;
         self.append(change, Landed::saying("deleted — u to undo"))
     }
@@ -1055,7 +1068,7 @@ impl Model {
             return Effect::Redraw;
         }
         let rows = crate::detail::rows(doc);
-        let file = match rows.get(self.record_cursor().min(rows.len().saturating_sub(1))) {
+        let file = match rows.get(self.record_cursor()) {
             Some(crate::detail::Row::File(index)) => doc.files.get(*index),
             _ => doc.primary_file(),
         };
@@ -1159,6 +1172,9 @@ impl Model {
     /// Changes how version `doc` is in `bundle`: another version in its
     /// place, one soft copy or all, or out of it altogether.
     fn change_member(&mut self, doc: &str, bundle: &str, choice: Choice) -> Effect {
+        if let Some(effect) = self.refused() {
+            return effect;
+        }
         let entries =
             |id: &str| self.store.get(id).map(|doc| doc.bundles.clone()).unwrap_or_default();
         let mut mine = entries(doc);
@@ -1419,7 +1435,7 @@ impl Model {
 
     /// Links the typed path as one more soft copy of `doc`, the first being
     /// primary, or says why it cannot be.
-    fn attach(&self, doc: &str, path: String, field: &str) -> Result<Change, String> {
+    fn attach(&self, doc: &str, path: String) -> Result<Change, String> {
         if self.root.as_ref().is_some_and(|root| root.join(&path).is_dir()) {
             return Err(format!("{path} is a folder — choose a file in it"));
         }
@@ -1429,7 +1445,7 @@ impl Model {
         }
         let primary = files.is_empty();
         files.push(crate::FileRef { label: String::new(), path, primary });
-        Ok(self.flip("doc", doc, field, crate::doc::files_value(&files)))
+        Ok(self.flip("doc", doc, "files", crate::doc::files_value(&files)))
     }
 
     /// Saves an open edit, or says why it cannot be saved. An edit that
@@ -1445,7 +1461,7 @@ impl Model {
                     .value()?
                     .and_then(|value| value.as_str().map(str::to_owned))
                     .ok_or("type a path, or choose one from the list")?;
-                (self.attach(&id, path, edit.journal_field())?, Landed::on(&id, "saved"))
+                (self.attach(&id, path)?, Landed::on(&id, "saved"))
             }
             (Target::Doc(id), _) => {
                 let change = self.flip("doc", &id, edit.journal_field(), edit.value()?);
@@ -1489,8 +1505,11 @@ impl Model {
     /// visible before one can quit.
     fn peel(&mut self, was_armed: bool) -> Effect {
         if let Some(picker) = &mut self.picker {
-            if peel_filter(&mut picker.filter, &mut picker.cursor) {
+            picker.cursor = 0;
+            if picker.filter.is_empty() {
                 self.picker = None;
+            } else {
+                picker.filter.clear();
             }
             return Effect::Redraw;
         }
@@ -1620,7 +1639,7 @@ impl Model {
         let Some(doc) = self.current() else { return Effect::Idle };
         let id = doc.id.clone();
         let rows = crate::detail::rows(doc);
-        let row = rows.get(self.record_cursor().min(rows.len().saturating_sub(1))).copied();
+        let row = rows.get(self.record_cursor()).copied();
         match (key, row) {
             ('e', Some(crate::detail::Row::Editable(field))) => self.open_edit(field),
             ('e', Some(crate::detail::Row::File(index))) => {
@@ -1730,14 +1749,8 @@ impl Model {
             self.flash = Some("nothing to delete".into());
             return Effect::Redraw;
         };
-        if self.armed != Some(Armed::Delete) {
-            self.armed = Some(Armed::Delete);
-            return Effect::Redraw;
-        }
-        let id = doc.id.clone();
-        let change = Change::create("doc", &id, doc.as_fields()).reversed();
-        self.armed = None;
-        self.append(change, Landed::saying("deleted — u to undo"))
+        let (id, fields) = (doc.id.clone(), doc.as_fields());
+        self.delete_record("doc", &id, fields)
     }
 
     /// Undoes the last write, or redoes the last undo: pops from one stack,
@@ -2293,16 +2306,6 @@ fn select<T: Clone + PartialEq>(items: &[T], selected: &mut T, motion: Motion) {
     if let Some(next) = items.get(at) {
         *selected = next.clone();
     }
-}
-
-/// Clears a panel's search, or says the panel should close when there is none.
-fn peel_filter(filter: &mut String, cursor: &mut usize) -> bool {
-    *cursor = 0;
-    if filter.is_empty() {
-        return true;
-    }
-    filter.clear();
-    false
 }
 
 /// Keys on the Bundles view: typing searches it, the arrows walk it, and
@@ -2923,6 +2926,14 @@ pub(crate) mod tests {
         m.store.docs[0].id = "passport-desk".into();
         let Effect::Append(drafts) = create(&mut m, "Passport") else { panic!("no append") };
         assert_eq!(drafts[0], journal::Draft::create("doc", "passport-desk-2"));
+    }
+
+    #[test]
+    fn a_member_choice_is_refused_when_the_session_cannot_write() {
+        let mut m = with_bundles();
+        m.write = WriteState::Off("read-only".into());
+        let member = Purpose::Member { doc: "coc".into(), bundle: "joining".into() };
+        assert!(!matches!(m.choose(&member, Choice::Leave), Effect::Append(_)));
     }
 
     #[test]
@@ -4503,7 +4514,7 @@ pub(crate) mod tests {
             let mut m = model();
             crate::find::draw_for_test(&mut m, 45, 28);
             update(&mut m, Msg::Tap { col, row: 0 });
-            assert_eq!(m.filter, Filter::EXPIRING, "col {col} filters");
+            assert_eq!(m.filter, Filter { expiring: true, ..Filter::ALL }, "col {col} filters");
             // A toggle, not a jump: the second tap peels it off.
             update(&mut m, Msg::Tap { col, row: 0 });
             assert_eq!(m.filter, Filter::ALL, "col {col} toggles back");
@@ -4752,7 +4763,11 @@ pub(crate) mod tests {
         assert_eq!(m.rows.len(), 1, "search narrows inside the filter");
 
         update(&mut m, Msg::Esc);
-        assert_eq!(m.filter, Filter::EXPIRING, "the first peel took the search");
+        assert_eq!(
+            m.filter,
+            Filter { expiring: true, ..Filter::ALL },
+            "the first peel took the search"
+        );
         update(&mut m, Msg::Esc);
         assert_eq!(m.filter, Filter::ALL);
         assert_eq!(m.rows.len(), 4);
