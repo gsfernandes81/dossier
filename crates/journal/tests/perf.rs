@@ -107,10 +107,7 @@ fn folding_50k_ops_stays_within_the_budget() {
     );
 }
 
-/// Canonical serialization is part of the startup path for nothing, but it *is*
-/// every cross-language fold comparison's inner loop (`fold_dir` against the
-/// Python fold, over a whole store), so a quadratic surprise here would show up
-/// as a mysteriously slow check.
+/// Canonical serialization must also stay linear.
 #[test]
 fn canonical_serialization_of_a_full_store_is_fast() {
     let raw = synthetic_lines();

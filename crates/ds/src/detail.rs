@@ -55,9 +55,7 @@ pub enum Row {
 
 /// Every row of the record, in the order it is drawn.
 ///
-/// The selector and the renderer both read this, which is the same rule the
-/// list's geometry follows: a hit test or a highlight that re-derives a layout
-/// disagrees with it at the first edge case.
+/// The selector and the renderer both read this.
 ///
 /// **An editable field is always a row, even when it is empty.** A row that
 /// appeared only once it had a value could never be the row you use to give it

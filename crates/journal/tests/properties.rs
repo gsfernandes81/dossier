@@ -16,9 +16,7 @@
 //! Property tests for the fold invariants.
 //!
 //! The golden vectors pin behaviours someone thought of. These state the claims
-//! that must hold for *every* op stream — which is the only honest way to say
-//! "conflicts are structurally impossible", since that is a statement about all
-//! possible sync orders, not about eight fixtures.
+//! that must hold for *every* op stream and every sync order.
 //!
 //! One precondition runs through all of them: **`(ts, w)` is unique**, the
 //! hybrid logical clock's guarantee enforced by the single-writer lock. Where

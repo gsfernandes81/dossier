@@ -172,18 +172,17 @@ pub fn run(
 ) -> Result<Config, Error> {
     // A config that will not parse is replaced rather than refused: repairing
     // it is one of the things init is for.
-    let existing = if path.is_file() {
+    let was = if path.is_file() {
         match Config::read(path) {
-            Ok(config) => Some(config),
+            Ok(config) => config,
             Err(error) => {
                 prompt.say(&format!("{error}\nIt will be replaced.\n"))?;
-                None
+                Config::default()
             }
         }
     } else {
-        None
+        Config::default()
     };
-    let was = existing.clone().unwrap_or_default();
 
     let device = ask_device(answers, prompt, was.device.as_deref())?;
     let root = ask_root(answers, prompt, was.syncthing_root.as_deref(), machine.wsl.as_ref())?;

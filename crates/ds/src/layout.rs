@@ -15,8 +15,7 @@
 
 //! Geometry: the layout thresholds both halves of the loop read, and the
 //! display-width helpers every column depends on. Terminal columns are not
-//! characters — a CJK name is two cells per character — so nothing here uses
-//! `len()`.
+//! characters: a CJK name is two cells per character.
 
 use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};

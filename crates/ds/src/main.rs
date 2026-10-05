@@ -18,10 +18,8 @@
 //!
 //! Everything that decides anything lives in the library. This file is the
 //! *shell*: it reads the journal, sets the terminal up, pumps events through
-//! [`ds::app::update`], performs the effects that need the outside world, and —
-//! critically — **restores the terminal on every exit path**. A TUI that leaves
-//! a phone in raw mode with mouse reporting on is worse than one that never
-//! started.
+//! [`ds::app::update`], performs the effects that need the outside world, and
+//! **restores the terminal on every exit path**.
 //!
 //! ```text
 //! ds                      browse the store
@@ -119,8 +117,7 @@ mod code {
 }
 
 fn main() -> ExitCode {
-    // The stopwatch starts on the first line of real work, as close to `execve`
-    // as a Rust program gets.
+    // The stopwatch starts on the first line of real work, before parsing.
     let start = Instant::now();
     let args = Args::parse();
 
@@ -135,8 +132,7 @@ fn main() -> ExitCode {
 
 fn run(args: &Args, start: Instant) -> io::Result<u8> {
     // Init comes first, before anything reads a config or a journal: it is the
-    // verb for a device that has neither, and loading a store to answer "what
-    // is this device called" would be backwards.
+    // verb for a device that has neither.
     if let Some(Command::Init { device, force }) = &args.command {
         return Ok(init(args, device.clone(), *force));
     }

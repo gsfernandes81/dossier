@@ -74,9 +74,8 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
         draw_footer(frame, chunks[1], model, theme);
         draw_search(frame, chunks[2], model, theme);
     }
-    // The sheet is drawn last and **covers** the list rather than shrinking it:
-    // cheaper, and it matches every editor that does this. Nothing under it can
-    // be tapped while it is up.
+    // The sheet is drawn last and **covers** the list rather than shrinking it.
+    // Nothing under it can be tapped while it is up.
     draw_sheet(frame, chunks[0], model, theme);
 }
 
@@ -88,8 +87,7 @@ pub(crate) fn draw_for_test(model: &mut Model, cols: u16, rows: u16) {
     terminal.draw(|frame| draw(frame, model, Theme { color: true })).expect("draw");
 }
 
-/// Below the floor, say so. A layout that renders half a row and clips the rest
-/// looks like a crash; this looks like an instruction.
+/// Below the floor, say so rather than render half a row and clip the rest.
 fn draw_too_small(frame: &mut Frame, area: Rect, theme: Theme) {
     let (cols, rows) = crate::layout::FLOOR;
     let notice = Paragraph::new(vec![
@@ -1067,8 +1065,8 @@ fn locpick_hints(picker: &crate::locpick::LocationPicker) -> Vec<&'static str> {
 /// another surface's verbs, and a verb appears when it works, not before.
 fn hints(model: &Model) -> Vec<&'static str> {
     use crate::app::View;
-    if model.edit.is_some() {
-        return if model.edit.as_ref().is_some_and(|edit| edit.matches().is_empty()) {
+    if let Some(edit) = &model.edit {
+        return if edit.matches().is_empty() {
             vec!["⏎ save", "esc discard"]
         } else {
             vec!["↑↓ choose", "tab fill", "⏎ save", "esc discard"]

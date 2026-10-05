@@ -33,9 +33,10 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 pub const DEFAULT_ADDRESS: &str = "127.0.0.1:8384";
 
 /// How the sync is going, as one value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum State {
     /// No address or key in the per-device config — nothing was asked.
+    #[default]
     Unconfigured,
     /// Refused before asking: verification cannot be dropped off loopback.
     Refused,
@@ -71,7 +72,7 @@ impl State {
 }
 
 /// What `ds status` prints about Syncthing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Status {
     /// The state, always present.
     pub state: State,
@@ -85,19 +86,6 @@ pub struct Status {
     pub connected: usize,
     /// Devices configured, excluding this one.
     pub devices: usize,
-}
-
-impl Default for Status {
-    fn default() -> Self {
-        Self {
-            state: State::Unconfigured,
-            detail: None,
-            version: None,
-            folder: None,
-            connected: 0,
-            devices: 0,
-        }
-    }
 }
 
 /// The synced folder the store lives in.
@@ -204,9 +192,8 @@ pub struct Settings {
 impl Settings {
     /// Resolve from the per-device config, or `None` when it says nothing.
     ///
-    /// An API key with no address means the default bind, because that is what
-    /// it means in practice — but an address with no key gets us nothing, since
-    /// every endpoint worth reading needs one.
+    /// An API key with no address means the default bind, but an address with
+    /// no key gets us nothing, since every endpoint worth reading needs one.
     #[must_use]
     pub fn from_config(config: &crate::config::Syncthing) -> Option<Self> {
         let api_key = config.apikey.clone()?;
