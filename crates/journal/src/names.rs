@@ -79,7 +79,13 @@ pub fn writer_file(writer: &str) -> String {
 /// contributing a truncated view of the writer's history.
 #[must_use]
 pub fn compaction_temp_file(writer: &str, pid: u32) -> String {
-    format!("{writer}{EXTENSION}.tmp-{pid}")
+    format!("{}{pid}", compaction_temp_prefix(writer))
+}
+
+/// Returns the name every compaction temp of `writer` starts with.
+#[must_use]
+pub fn compaction_temp_prefix(writer: &str) -> String {
+    format!("{writer}{EXTENSION}.tmp-")
 }
 
 #[cfg(test)]

@@ -80,9 +80,10 @@ impl Hlc {
     }
 }
 
-/// Milliseconds since the Unix epoch, saturating rather than panicking on a
-/// clock set before 1970 (which the HLC would correct on the next tick anyway).
-fn now_ms() -> i64 {
+/// Returns milliseconds since the Unix epoch, saturating rather than panicking
+/// on a clock set before 1970 (which the HLC would correct on the next tick).
+#[must_use]
+pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
@@ -206,6 +207,12 @@ pub enum Error {
     /// An op could not be serialized (a `val` `serde_json` cannot represent).
     #[error("cannot serialize op: {0}")]
     Serialize(#[from] serde_json::Error),
+    /// The file changed while it was being compacted, so it was left as it was.
+    #[error("{} changed during compaction; it was left as it was", path.display())]
+    Changed {
+        /// The writer's file.
+        path: PathBuf,
+    },
 }
 
 /// The lock on one writer id, and its clock.
@@ -269,6 +276,7 @@ impl Writer {
         let path = journal.file_path(namespace, writer_id);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(io("create journal directory", parent))?;
+            sweep_temps(parent, writer_id);
         }
         // The repair gets its own write handle: on Windows an append handle
         // lacks `FILE_WRITE_DATA`, so `set_len` through it fails with "Access is
@@ -355,20 +363,35 @@ impl Writer {
     ///
     /// Safe without any coordination: a writer compacts **only its own file**,
     /// and it holds that file's lock, so there is no reader-writer race to lose
-    /// and no other device to agree with.
+    /// and no other device to agree with. The one appender the lock cannot see
+    /// is a same-named `ds` across the WSL boundary, so the file is checked
+    /// again just before the rename and left alone if it changed.
     ///
     /// Returns `None` when nothing was done. The rewrite is a same-directory
     /// temp plus a rename — atomic, and same-directory because a cross-device
     /// rename fails with `EXDEV`. A compaction that dies half-way leaves a temp
-    /// the next fold ignores.
+    /// the next fold ignores and the next [`Writer::open`] removes.
     ///
     /// # Errors
-    /// [`Error::Io`] or [`Error::Serialize`]. Nothing is replaced until the new
-    /// file is complete and flushed.
+    /// [`Error::Io`] or [`Error::Serialize`], or [`Error::Changed`] when the
+    /// file was appended to meanwhile. Nothing is replaced until the new file
+    /// is complete and flushed.
     pub fn compact(&mut self, now_ms: i64, when: When) -> Result<Option<Report>, Error> {
+        let before = fingerprint(&self.path)?;
         let body =
             std::fs::read_to_string(&self.path).map_err(io("read for compaction", &self.path))?;
-        let (lines, _torn) = crate::op::parse_body(&body);
+        self.rewrite(&body, before, now_ms, when)
+    }
+
+    /// Compacts from `body`, the file as read when it looked like `before`.
+    fn rewrite(
+        &self,
+        body: &str,
+        before: Fingerprint,
+        now_ms: i64,
+        when: When,
+    ) -> Result<Option<Report>, Error> {
+        let (lines, _torn) = crate::op::parse_body(body);
         let plan = crate::compact::plan(&lines, now_ms);
         if when == When::IfWorthwhile && !plan.worth_doing() {
             return Ok(None);
@@ -394,7 +417,18 @@ impl Writer {
             rewritten.push('\n');
         }
 
-        replace_file(&self.path, &temp, rewritten.as_bytes()).map_err(io("compact", &self.path))?;
+        let replaced = write_temp(&temp, rewritten.as_bytes())
+            .map_err(io("compact", &self.path))
+            .and_then(|()| {
+                if fingerprint(&self.path)? != before {
+                    return Err(Error::Changed { path: self.path.clone() });
+                }
+                std::fs::rename(&temp, &self.path).map_err(io("compact", &self.path))
+            });
+        if replaced.is_err() {
+            let _ = std::fs::remove_file(&temp);
+        }
+        replaced?;
 
         let report = Report {
             lines_before: plan.total,
@@ -436,20 +470,47 @@ pub struct Report {
 /// # Errors
 /// Any filesystem failure; `path` is then untouched.
 pub fn replace_file(path: &Path, temp: &Path, body: &[u8]) -> std::io::Result<()> {
-    let replace = || {
-        let mut file = OpenOptions::new().create_new(true).write(true).open(temp)?;
-        file.write_all(body)?;
-        // Flushed before the rename, or a crash could leave the rename done
-        // and the contents not.
-        file.sync_all()?;
-        // Closed before the rename: on WSL's drvfs, renaming a file still open
-        // loses it.
-        drop(file);
-        std::fs::rename(temp, path)
-    };
-    replace().inspect_err(|_| {
+    write_temp(temp, body).and_then(|()| std::fs::rename(temp, path)).inspect_err(|_| {
         let _ = std::fs::remove_file(temp);
     })
+}
+
+/// Writes `body` to a new file at `temp`, flushed and closed, ready to rename.
+fn write_temp(temp: &Path, body: &[u8]) -> std::io::Result<()> {
+    let mut file = OpenOptions::new().create_new(true).write(true).open(temp)?;
+    file.write_all(body)?;
+    // Flushed before the rename, or a crash could leave the rename done and
+    // the contents not.
+    file.sync_all()?;
+    // Closed before the rename: on WSL's drvfs, renaming a file still open
+    // loses it.
+    drop(file);
+    Ok(())
+}
+
+/// A file's length and modification time, which an append changes.
+type Fingerprint = (u64, Option<SystemTime>);
+
+/// Returns `path`'s [`Fingerprint`].
+fn fingerprint(path: &Path) -> Result<Fingerprint, Error> {
+    let meta = std::fs::metadata(path).map_err(io("stat for compaction", path))?;
+    Ok((meta.len(), meta.modified().ok()))
+}
+
+/// Removes compaction temps of `writer` that a dead process left in
+/// `directory`.
+///
+/// The writer's lock proves no compaction of it is running on this device, and
+/// a leftover would sit in the synced tree, or collide with a reused pid's
+/// `create_new`. A temp that will not go is harmless: no fold reads it.
+fn sweep_temps(directory: &Path, writer: &str) {
+    let prefix = names::compaction_temp_prefix(writer);
+    let Ok(entries) = std::fs::read_dir(directory) else { return };
+    for entry in entries.flatten() {
+        if entry.file_name().to_str().is_some_and(|name| name.starts_with(&prefix)) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Maps an I/O error on `path` to [`Error::Io`].
@@ -742,6 +803,52 @@ mod tests {
         writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("append after failure");
         let load = fixture.journal.load(Namespace::Meta).expect("loads");
         assert_eq!(fold(&load.lines).get("doc", "x").expect("alive").fields["slot"], 7);
+    }
+
+    /// Termux kills processes mid-compaction, and a reused pid would otherwise
+    /// make the next compaction's `create_new` fail.
+    #[test]
+    fn a_stale_temp_from_a_dead_process_is_swept_at_open() {
+        let fixture = fixture();
+        let directory = fixture.journal.file_path(Namespace::Meta, "desk-core");
+        let directory = directory.parent().expect("has a parent");
+        std::fs::create_dir_all(directory).expect("create");
+        let own = directory.join(names::compaction_temp_file("desk-core", 99_999));
+        let other = directory.join(names::compaction_temp_file("phone-core", 1));
+        std::fs::write(&own, "stale").expect("write");
+        std::fs::write(&other, "someone else's").expect("write");
+
+        let _writer = open(&fixture, "desk-core");
+        assert!(!own.exists(), "this writer's leftover is gone");
+        assert!(other.exists(), "another writer's temp is not this writer's to remove");
+    }
+
+    /// A same-named `ds` across the WSL boundary appends behind a lock this
+    /// process cannot see; its op must not be lost to the rename.
+    #[test]
+    fn compaction_aborts_if_the_file_changed_underneath() {
+        let fixture = fixture();
+        let mut writer = open(&fixture, "desk-core");
+        writer.append_all([Draft::create("doc", "x")]).expect("append");
+        for i in 0..30 {
+            writer.append_all([Draft::set("doc", "x", "name", format!("v{i}"))]).expect("append");
+        }
+        let before = fingerprint(writer.path()).expect("stat");
+        let body = std::fs::read_to_string(writer.path()).expect("read");
+        writer.append_all([Draft::set("doc", "x", "slot", 7)]).expect("the twin appends");
+        let appended = std::fs::read(writer.path()).expect("read");
+
+        let future = writer.clock().last() + crate::compact::RETENTION_MS * 2;
+        let result = writer.rewrite(&body, before, future, When::Always);
+        assert!(matches!(result, Err(Error::Changed { .. })), "{result:?}");
+        assert_eq!(std::fs::read(writer.path()).expect("read"), appended, "left as it was");
+        let directory = writer.path().parent().expect("has a parent");
+        let leftovers = std::fs::read_dir(directory)
+            .expect("readable")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+            .count();
+        assert_eq!(leftovers, 0, "and no temp is left behind");
     }
 
     /// An id outside the frozen grammar is refused before anything is created —
