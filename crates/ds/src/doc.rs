@@ -379,18 +379,7 @@ impl Chains {
 
     /// Whether `i`'s older versions lead back to `i`.
     fn is_loop(&self, i: usize) -> bool {
-        let mut at = i;
-        let mut seen = BTreeSet::new();
-        while let Some(next) = self.older[at] {
-            if next == i {
-                return true;
-            }
-            if !seen.insert(next) {
-                return false;
-            }
-            at = next;
-        }
-        false
+        self.older[self.root(i)] == Some(i)
     }
 
     /// `i` and every version made from it, breadth first.
