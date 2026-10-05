@@ -17,8 +17,9 @@
 //!
 //! [`update`] is the only mutation. It returns an [`Effect`] because the model
 //! cannot open files, flip the mouse mode or append to the journal, and staying
-//! pure keeps every rule testable. The view writes back only the geometry it
-//! drew, since hit tests must read what is on screen.
+//! pure keeps every rule testable. The view writes back the geometry it drew,
+//! since hit tests must read what is on screen, and keeps the cursor in the
+//! window.
 
 use crate::complete::Completion;
 use crate::edit::{Field, Target};
@@ -151,14 +152,11 @@ pub enum Motion {
     End,
 }
 
-/// What the shell of the program should do after an update.
-///
-/// Everything except [`Effect::Idle`] implies a repaint — an effect exists
-/// because state changed, and state that changed is state worth showing.
+/// What the shell of the program should do after an update; everything but
+/// [`Effect::Idle`] repaints.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
-    /// Nothing happened; do not even repaint. Key releases and finger drags land
-    /// here, and on a phone not repainting is battery.
+    /// Nothing changed; do not repaint.
     Idle,
     /// Repaint.
     Redraw,
@@ -430,7 +428,7 @@ impl RowGeometry {
 /// Everything the renderer reads and the event loop changes.
 #[derive(Default)]
 pub struct Model {
-    /// The store, folded once at startup.
+    /// The current store; replaced on every save and reload.
     pub store: Store,
     /// Today, ISO. Passed in rather than read from the clock, so a test can be
     /// written about an expiry without waiting for it to happen.
@@ -472,9 +470,7 @@ pub struct Model {
     pub sheet: bool,
     /// The field being edited, when one is.
     pub edit: Option<crate::edit::Edit>,
-    /// This session's writes, each with the ops that put it back, computed
-    /// from the store as it stood; the journal itself keeps everything, so a
-    /// restart only empties the shortcut.
+    /// This session's writes, newest last, each with the ops that put it back.
     pub undo: Vec<Change>,
     /// Undone writes, newest last, waiting to be put back.
     pub redo: Vec<Change>,
@@ -488,7 +484,7 @@ pub struct Model {
     pub count_zone: Zone,
     /// Where the view drew the `SPC` chip.
     pub leader_zone: Zone,
-    /// A transient one-line message, cleared by the next key.
+    /// A transient message, cleared by the next key.
     pub flash: Option<String>,
     /// Where the next typed character lands in the query, in characters.
     pub query_cursor: usize,
@@ -1048,7 +1044,6 @@ impl Model {
 
     /// Goes one layer deeper: from the list into the record, from the record
     /// into the selected file row's file, or the primary file on any other row.
-    /// It never mutates, so it can be pressed blind after typing.
     fn drill(&mut self) -> Effect {
         if self.on_new {
             return self.create_from_query();
@@ -1644,9 +1639,6 @@ impl Model {
             ('e', Some(crate::detail::Row::Location)) => self.open_locations(),
             ('e', Some(crate::detail::Row::Renews)) => self.open_picker(Purpose::Renews(id)),
             ('e', Some(crate::detail::Row::Bundles)) => self.open_bundle_checklist(),
-            // Undo is about the session, not about the row — but it is bound
-            // here because this is the surface where a bare letter is a verb,
-            // and it is where a write has just been made.
             ('u', _) => self.step(Direction::Undo),
             ('r', _) => self.step(Direction::Redo),
             ('d', _) => self.delete(),
@@ -1791,12 +1783,7 @@ impl Model {
         crate::id::mint(name, self.write.device().unwrap_or_default(), &taken)
     }
 
-    /// Take a re-folded store, keeping the user's place in it.
-    ///
-    /// A save can reorder the list — an expiry edit moves a row under the
-    /// `expiring` filter — or push the document out of it entirely, so the row
-    /// index the cursor held before the fold means nothing after it. The anchor
-    /// is therefore the **document id**.
+    /// Takes a re-folded store, keeping the cursor on `anchor` by document id.
     fn adopt(&mut self, store: Store, anchor: &str) {
         self.store = store;
         self.requery();
@@ -1848,16 +1835,13 @@ impl Model {
         Effect::Redraw
     }
 
-    /// A save did not land; the typing survives.
+    /// A save did not land.
     fn save_failed(&mut self, reason: String, permanent: bool) -> Effect {
         if let Some(edit) = &mut self.edit {
             edit.saving = false;
             edit.armed_discard = false;
         }
-        // A write that never landed cannot be taken back, so the change is
-        // dropped rather than left on a stack to reverse something nobody
-        // did. A refused *undo* likewise stays on the undo stack — it is
-        // still the last thing this session wrote.
+        // A refused undo or redo goes back on its own stack.
         if let Some(Pending { change, direction, .. }) = self.pending.take() {
             match direction {
                 Direction::Undo => self.undo.push(change),
@@ -1867,9 +1851,6 @@ impl Model {
         }
         self.armed = self.armed.filter(|armed| *armed == Armed::Esc);
         self.flash = Some(reason.clone());
-        // A refusal that will refuse again takes editing off the table for
-        // the session, rather than inviting the same disappointment on
-        // every save. The typing survives either way.
         if permanent {
             self.write = WriteState::Off(reason);
         }
@@ -1931,8 +1912,7 @@ impl Model {
     fn tap(&mut self, col: u16, row: u16) -> Effect {
         self.flash = None;
         // A pushed record covers the list, so the chrome under it belongs to
-        // a surface you cannot see. Tapping it would mutate that surface
-        // blind — the stack metaphor has to hold for touch too.
+        // a surface you cannot see.
         let pushed = self.pane() && !crate::layout::splits(self.cols);
         let bundles = self.views.iter().any(|view| matches!(view, View::Bundles { .. }));
         let (top, bottom) = search_zone(self);
@@ -2175,7 +2155,6 @@ fn edit_step(model: &mut Model, edit: &mut crate::edit::Edit, msg: &Msg) -> (Opt
             Ok(effect) if edit.saving => effect,
             Ok(effect) => return (Some(effect), false),
             Err(complaint) => {
-                // The typing survives a refusal: it is what needs correcting.
                 model.flash = Some(complaint);
                 Effect::Redraw
             }
@@ -2586,11 +2565,7 @@ fn act(model: &mut Model, picker: Picker, hits: &[crate::pick::Entry]) -> Effect
     }
 }
 
-/// Whether this message came from the keyboard.
-///
-/// A result posted back by a worker is not a keystroke, however it arrives — so
-/// a save landing must not disarm a pending quit or restore mouse reporting the
-/// IME affordance dropped, any more than a finished scan load does.
+/// Whether this message came from the keyboard; worker results are not keystrokes.
 fn is_key(msg: &Msg) -> bool {
     !from_worker(msg) && !matches!(msg, Msg::Tap { .. } | Msg::Scroll(_) | Msg::Resize { .. })
 }

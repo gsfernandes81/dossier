@@ -16,9 +16,8 @@
 //! The view half of the loop: the Find surface, its panels and bottom rows.
 //!
 //! Only the rows that fit are built, so frame time follows the viewport and
-//! not the store, and every column is measured in cells. The renderer decides
-//! nothing: it reads [`Model`] and writes back only the geometry it drew, so
-//! taps hit-test against what is really on screen.
+//! not the store, and every column is measured in cells. It writes back the
+//! geometry it drew, so taps hit-test against what is really on screen.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
