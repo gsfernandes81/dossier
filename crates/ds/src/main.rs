@@ -280,6 +280,7 @@ fn browse(
     let ops = loaded.load.lines.len();
     let build_at = start.elapsed();
     let missing_journal = (!loaded.load.present).then(|| loaded.path.display().to_string());
+    drop(loaded.load);
     let mut model = Model::new(loaded.store, loaded.today, loaded.warn_until, 80, 24);
     model.missing_journal = missing_journal;
     model.root = Some(root.to_path_buf());
@@ -382,7 +383,9 @@ struct Tui(Terminal<CrosstermBackend<Stderr>>);
 
 impl Tui {
     fn enter() -> io::Result<Self> {
+        let terminal = Terminal::new(CrosstermBackend::new(io::stderr()))?;
         enable_raw_mode()?;
+        let tui = Self(terminal);
         // SGR mouse reporting is what makes Termux taps arrive as clicks.
         execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
         // Restored before the message prints, or the alternate screen eats
@@ -392,7 +395,7 @@ impl Tui {
             restore_terminal();
             report(info);
         }));
-        Ok(Self(Terminal::new(CrosstermBackend::new(io::stderr()))?))
+        Ok(tui)
     }
 }
 
