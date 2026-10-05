@@ -221,12 +221,6 @@ impl Tree {
         crate::search::two_pass(paths, &crate::search::Query::new(query))
     }
 
-    /// The locations two devices moved into each other, which read as top level.
-    #[must_use]
-    pub fn looped(&self) -> &BTreeSet<String> {
-        &self.looped
-    }
-
     /// What to tell the user about a loop, naming the locations in it.
     #[must_use]
     pub fn loop_message(&self) -> Option<String> {
@@ -378,7 +372,6 @@ mod tests {
     fn a_loop_breaks_at_its_members_only() {
         let tree =
             Tree::new([at("a", "a", Some("b")), at("b", "b", Some("c")), at("c", "c", Some("b"))]);
-        assert_eq!(tree.looped().iter().collect::<Vec<_>>(), ["b", "c"]);
         assert_eq!(tree.parent("a"), Some("b"));
         assert_eq!(tree.parent("b"), None);
         assert_eq!(tree.parent("c"), None);

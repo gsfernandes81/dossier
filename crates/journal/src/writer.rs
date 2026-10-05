@@ -293,12 +293,6 @@ impl Writer {
         Ok(Self { name: writer_id.to_string(), path, clock: Hlc::seeded(max_ts_seen), _lock: lock })
     }
 
-    /// The writer id this handle appends as.
-    #[must_use]
-    pub fn writer_id(&self) -> &str {
-        &self.name
-    }
-
     /// The file being appended to.
     #[must_use]
     pub fn path(&self) -> &Path {

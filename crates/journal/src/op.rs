@@ -58,15 +58,6 @@ pub enum OpKind {
     Proposal,
 }
 
-impl OpKind {
-    /// Whether this op belongs to the lazily-loaded `enrich` namespace, which
-    /// keeps transcripts out of the startup fold.
-    #[must_use]
-    pub fn is_enrich(self) -> bool {
-        matches!(self, OpKind::Reading | OpKind::Proposal)
-    }
-}
-
 /// One parsed op.
 ///
 /// `#[serde(flatten)] extra` collects any field this build does not know and
@@ -366,13 +357,5 @@ mod tests {
         let (lines, _) = parse_body(format!("{}\n\n{}\n", op_line(), op_line()).as_bytes());
         assert_eq!(lines.len(), 2);
         assert!(lines.iter().all(|l| l.as_op().is_some()));
-    }
-
-    #[test]
-    fn enrich_verbs_are_identifiable() {
-        assert!(OpKind::Reading.is_enrich() && OpKind::Proposal.is_enrich());
-        for kind in [OpKind::Create, OpKind::Delete, OpKind::Set, OpKind::Unset, OpKind::State] {
-            assert!(!kind.is_enrich());
-        }
     }
 }

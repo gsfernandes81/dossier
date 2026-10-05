@@ -68,15 +68,6 @@ impl Plan {
         self.total - self.keep.len()
     }
 
-    /// The percentage of the file that is still live, for reporting.
-    #[must_use]
-    pub fn live_percent(&self) -> usize {
-        if self.total == 0 {
-            return 100;
-        }
-        self.keep.len() * 100 / self.total
-    }
-
     /// Whether this file is worth rewriting.
     #[must_use]
     pub fn worth_doing(&self) -> bool {
@@ -288,8 +279,7 @@ mod tests {
             lines.push(line(OLD + i, Draft::set("doc", "x", "name", "v")));
         }
         let plan = plan(&lines, NOW);
-        assert!(plan.live_percent() < 25, "2 of 20 ops are live");
-        assert!(plan.worth_doing());
+        assert!(plan.worth_doing(), "2 of 20 ops are live");
 
         let fresh = vec![line(NOW, Draft::create("doc", "y"))];
         assert!(!plan_worth(&fresh), "a file with nothing dead is not worth rewriting");
