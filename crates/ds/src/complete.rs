@@ -80,16 +80,7 @@ fn resolve(base: &Path, head: &str, wsl: Option<&crate::wsl::Wsl>) -> PathBuf {
     if let Some(native) = wsl.and_then(|wsl| wsl.to_linux(head)) {
         return native;
     }
-    if head == "~/" || head == "~\\" {
-        return dirs::home_dir().unwrap_or_default();
-    }
-    if let Some(rest) = head.strip_prefix("~/").or_else(|| head.strip_prefix("~\\")) {
-        return dirs::home_dir().unwrap_or_default().join(rest);
-    }
-    if head.is_empty() {
-        return base.to_path_buf();
-    }
-    base.join(head)
+    base.join(crate::config::expand_home(PathBuf::from(head)))
 }
 
 /// Reads the folder `typed` is in, relative to `base`; `dirs_only` leaves out
