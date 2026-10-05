@@ -222,8 +222,8 @@ pub struct Writer {
 }
 
 impl Writer {
-    /// Open a writer: validate the id, take the lock, repair a torn tail, and
-    /// seed the clock.
+    /// Opens a writer: validates the id, takes the lock, sweeps stale temps,
+    /// repairs a torn tail and seeds the clock.
     ///
     /// `lock_dir` must be the device's **local** data directory — a lock on the
     /// synced tree would replicate to the other device and lock it out, and a
@@ -288,8 +288,8 @@ impl Writer {
 
     /// Appends several ops as one consecutive run and flushes them to disk.
     ///
-    /// For edits that are only correct together — an id rename is create-new +
-    /// copy fields + reference fixups + delete-old. One call keeps them
+    /// For edits that are only correct together — a location delete unfiles
+    /// the hard copies it held and tombstones the subtree. One call keeps them
     /// adjacent in one writer's file, as close to atomic as an append-only log
     /// gets. The flush is what lets a caller say "saved": a power cut must not
     /// disagree.
@@ -321,8 +321,7 @@ impl Writer {
             .append(true)
             .open(&self.path)
             .map_err(io("open journal file", &self.path))?;
-        // One `write_all` for the whole run: fewer partial-write windows, and
-        // for a single op it is exactly the "one op = one write" rule.
+        // One `write_all` for the whole run: fewer partial-write windows.
         file.write_all(buffer.as_bytes()).map_err(io("append to", &self.path))?;
         file.sync_data().map_err(io("flush", &self.path))?;
         Ok(written)
@@ -333,22 +332,16 @@ impl Writer {
         self.clock.observe(ts);
     }
 
-    /// Rewrites this writer's file as the minimal set that reproduces it, when
-    /// [`crate::compact::Plan::worth_doing`] says so.
+    /// Rewrites this writer's file as the minimal set that reproduces it, if
+    /// worthwhile.
     ///
-    /// The writer holds its file's lock. The one appender the lock cannot see
-    /// is a same-named `ds` across the WSL boundary, so the file is checked
-    /// again just before the rename and left alone if it changed.
-    ///
-    /// The rewrite is a same-directory temp plus a rename — atomic, and
-    /// same-directory because a cross-device rename fails with `EXDEV`. A
-    /// compaction that dies half-way leaves a temp the next fold ignores and
-    /// the next [`Writer::open`] removes.
+    /// [`crate::compact::Plan::worth_doing`] decides; the rewrite is a
+    /// same-directory temp plus a rename. The lock cannot see a same-named `ds`
+    /// across the WSL boundary, so the file is fingerprinted again before the
+    /// rename and left alone if it changed.
     ///
     /// # Errors
-    /// [`Error::Io`] or [`Error::Serialize`], or [`Error::Changed`] when the
-    /// file was appended to meanwhile. Nothing is replaced until the new file
-    /// is complete and flushed.
+    /// [`Error::Io`], [`Error::Serialize`] or [`Error::Changed`].
     pub fn compact(&self, now_ms: i64) -> Result<(), Error> {
         let before = fingerprint(&self.path)?;
         let body = std::fs::read(&self.path).map_err(io("read for compaction", &self.path))?;

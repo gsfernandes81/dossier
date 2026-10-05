@@ -186,9 +186,9 @@ impl Config {
         out
     }
 
-    /// Write this config, replacing whatever is there, through a temp file in
-    /// the same directory: a rename across devices fails, and a half-written
-    /// config is a device that cannot find its store.
+    /// Write this config, replacing whatever is there, through
+    /// [`journal::replace_file`]: a half-written config is a device that cannot
+    /// find its store.
     ///
     /// # Errors
     /// [`Error::Write`] for any filesystem failure, naming the file.

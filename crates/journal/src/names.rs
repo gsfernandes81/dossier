@@ -20,7 +20,7 @@
 pub const EXTENSION: &str = ".jsonl";
 
 /// The `.stignore` line a folder needs before any journal in it is compacted:
-/// the temps sit in the synced directory, since a cross-device rename fails.
+/// the temps sit in the synced directory.
 pub const COMPACTION_TEMP_GLOB: &str = "*.jsonl.tmp-*";
 
 /// Whether `name` is a Syncthing conflict copy.
