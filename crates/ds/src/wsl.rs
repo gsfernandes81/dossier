@@ -243,8 +243,9 @@ pub fn native_root(wsl: Option<&Wsl>, typed: PathBuf) -> PathBuf {
 #[must_use]
 pub fn comparable(path: &Path, wsl: Option<&Wsl>) -> String {
     let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let fold = wsl.is_some_and(|wsl| wsl.on_windows_drive(&resolved));
     let text = resolved.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_string();
-    if wsl.is_some_and(|wsl| wsl.on_windows_drive(Path::new(&text))) {
+    if fold {
         text.to_ascii_lowercase()
     } else {
         text
