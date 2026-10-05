@@ -1,10 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/journal", "crates/ds"]
-# The R0.2 spike is a throwaway with its own profile settings and its own CI
-# workflow (REWRITE.md §6 R0.2). Excluding it keeps a `cargo test` at the root
-# from building it, and keeps its `[profile.release]` legal — Cargo only honours
-# profiles at a workspace root, so a member crate declaring one is an error.
+# The spike has its own `[profile.release]` and CI; Cargo only honours profiles
+# at a workspace root, so it stays outside the workspace.
 exclude = ["spike"]
 
 # Shared by every crate so a dependency bump happens in one place.

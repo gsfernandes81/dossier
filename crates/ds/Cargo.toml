@@ -16,8 +16,7 @@ path = "src/main.rs"
 journal = { path = "../journal" }
 # The TUI. Ratatui re-exports the crossterm it was built against
 # (`ratatui::crossterm`), so this is one dependency and not two — no version
-# skew between backend and frontend. R0.2 proved the pair on the phone: SGR
-# mouse reporting, taps, the IME trick and 6.2 ms to first paint.
+# skew between backend and frontend.
 ratatui = "0.30"
 # Today's date, and the warn window's far edge. Everything else about dates is
 # string comparison on ISO values, which is why this is the only date use in the
@@ -28,34 +27,26 @@ ratatui = "0.30"
 # for a system lookup to find. Getting the zone wrong would move "expired" by a
 # day near midnight, which is exactly the signal this app exists to give.
 jiff = { version = "0.2", features = ["tzdb-bundle-always"] }
-# Argument parsing. `ds` grows subcommands (`status`, `open`) in later slices;
-# derive keeps their definitions next to the types they fill in.
 clap = { version = "4", features = ["derive", "env"] }
-# `val` payloads arrive as JSON values and stay that way until a field is read.
 serde_json = { workspace = true }
-# Deriving the config's shape, so a malformed file is a parse error naming the
-# key rather than a pile of hand-written `get`/`as_str` checks.
 serde = { workspace = true }
-# Error types that carry what to do about them — the opener's whole job.
 thiserror = { workspace = true }
 # Search folds accents so `résumé` matches `resume`, which needs NFKD
-# decomposition — the one thing std's `to_lowercase` cannot do. Ported from v2's
-# `fuzz.fold`, whose behaviour the golden expectations here depend on.
+# decomposition — the one thing std's `to_lowercase` cannot do.
 unicode-normalization = "0.1"
 # Terminal columns are not characters: a CJK document name is two cells per
-# character, and every alignment decision in REWRITE-UI.md depends on knowing
-# that. R0.2 confirmed the phone agrees with this crate's table.
+# character.
 unicode-width = "0.2"
-# The per-device config file is TOML (REWRITE.md §2), and it is the only TOML
-# left in v3 — everything shared moved into the journal as ops.
+# The per-device config file; the only TOML in v3, everything shared lives in
+# the journal.
 toml = "1"
-# The platform config directory, so the config lands where v2's `platformdirs`
-# put it and a configured device keeps working.
+# The same config location the Python app uses, so a configured device keeps
+# working.
 dirs = "6"
-# Syncthing's REST API, status only (REWRITE.md §4.3). Blocking, tiny, and
-# rustls rather than the system TLS stack — the phone binary is static musl, so
-# there is no system stack to link against. `default-features = false` drops the
-# platform certificate verifier for the same reason.
+# Syncthing's REST API, status only. Blocking, tiny, and rustls rather than the
+# system TLS stack — the phone binary is static musl, so there is no system
+# stack to link against. `default-features = false` drops the platform
+# certificate verifier for the same reason.
 ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
 
 [dev-dependencies]
