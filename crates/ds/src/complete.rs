@@ -211,15 +211,6 @@ impl Completion {
         !entry.dir
     }
 
-    /// `Enter`: true when the line is finished — nothing was chosen, or a
-    /// file was. A chosen folder opens instead.
-    pub fn enter(&mut self, line: &mut String) -> bool {
-        match self.chosen {
-            Some(at) => self.pick(line, at),
-            None => true,
-        }
-    }
-
     /// Applies a list key: `↑`/`↓` choose a row, `Tab` fills it, and `Enter`
     /// picks a chosen one.
     ///
@@ -230,7 +221,7 @@ impl Completion {
             Msg::Move(Motion::Up) => self.step(line, false),
             Msg::Move(Motion::Down) => self.step(line, true),
             Msg::Tab => self.tab(line),
-            Msg::Enter if self.chosen.is_some() => return Some(self.enter(line)),
+            Msg::Enter => return self.chosen.map(|at| self.pick(line, at)),
             _ => return None,
         }
         Some(false)
