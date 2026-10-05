@@ -96,12 +96,9 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model, id: &str, theme: Theme
     let cols = area.width as usize;
     let rows = rows(&model.store, id);
     let cursor = rows.iter().position(|&i| model.store.docs[i].id == id).unwrap_or(0);
-    let name = model.store.index_of(id).map_or("", |i| model.store.docs[i].name.as_str());
+    let name = model.store.get(id).map_or("", |doc| doc.name.as_str());
     let mut heading = vec![
-        Line::styled(
-            format!(" {}", truncate(name, cols.saturating_sub(2))),
-            theme.style(Tone::Title),
-        ),
+        crate::detail::title(name, false, cols.saturating_sub(2), theme),
         Line::styled(" versions, newest first", theme.style(Tone::Muted)),
     ];
     if rows.iter().any(|&i| model.store.docs[i].conflicting) {
