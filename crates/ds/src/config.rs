@@ -97,8 +97,8 @@ pub enum Error {
 }
 
 /// This device's config file path: `~/.config/dossier/config.toml` on Linux
-/// and Termux, `%LOCALAPPDATA%\\dossier` on Windows. [`DIR_ENV`] overrides the
-/// directory.
+/// and Termux, `%LOCALAPPDATA%\dossier\config.toml` on Windows. [`DIR_ENV`]
+/// overrides the directory.
 #[must_use]
 pub fn path() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os(DIR_ENV) {

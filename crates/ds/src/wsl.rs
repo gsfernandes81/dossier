@@ -13,31 +13,11 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! WSL — the Linux build of `ds`, running on a Windows machine.
-//!
-//! Under the Windows Subsystem for Linux, `ds` is an ordinary Linux binary, and
-//! almost everything it does is ordinary Linux: the journal reads, appends,
-//! locks and renames work on the Windows drive's mount (`/mnt/c`) as they do
-//! anywhere else, and the CI `wsl` leg holds that to account on a real drvfs.
-//! What is **not** ordinary is everything that crosses the boundary:
-//!
-//! - **Opening a file.** There is no Linux desktop to hand it to; the default
-//!   application lives on the Windows side, so the path has to become a Windows
-//!   path and go to a Windows opener ([`crate::open`]).
-//! - **The Syncthing check.** Syncthing usually runs on Windows and reports
-//!   folder paths as `C:\Users\…\Sync`, which the store root `/mnt/c/Users/…/Sync`
-//!   never matches as text ([`crate::syncthing`]). Under WSL's default NAT
-//!   networking, `127.0.0.1` is not even the same machine's loopback.
-//! - **Two `ds` on one PC.** `ds.exe` on Windows and `ds` in WSL keep separate
-//!   configs and separate lock directories, and a lock taken in one is invisible
-//!   to the other. The same device name on both sides would put two processes
-//!   on one writer file — the thing the lock exists to prevent — so WSL, the
-//!   only side that can see both configs, refuses it ([`windows_twin`]).
-//!
-//! The translation is **pure string work**, not `wslpath`: it has to be tested
-//! on every CI platform, and a subprocess can only be tested where it exists.
-//! It honours the one setting that moves the drives, `[automount] root` in
-//! `/etc/wsl.conf`; drives mounted by hand somewhere else are not modelled.
+//! WSL: the Linux build of `ds` on a Windows machine, and everything that
+//! crosses the boundary — opening a file, Syncthing's Windows paths, a `ds.exe`
+//! twin on the same PC. Translation is pure string work rather than `wslpath`,
+//! so it is tested on every CI platform; it honours `[automount] root` in
+//! `/etc/wsl.conf`, and drives mounted by hand elsewhere are not modelled.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -268,23 +248,14 @@ pub struct Twin {
     pub writer: String,
 }
 
-/// Look for a Windows-side `ds` that shares this device's name and store.
+/// Looks for a Windows-side `ds` that shares this device's name and store.
 ///
-/// The Windows config lives at `%LOCALAPPDATA%\dossier\config.toml`, which from
-/// here is `<mount>/<drive>/Users/<user>/AppData/Local/dossier/config.toml`.
-/// Every drive and every profile is looked at rather than "the current user's":
-/// the WSL user name need not be the Windows one, finding the Windows one costs
-/// an interop round trip, profiles are not always on `C:`, and a second account
-/// on one PC sharing a store *and* a device name is exactly as broken. A profile
-/// that cannot be read is not a match.
-///
-/// A Windows config with no root is treated as the same store: it can only be
-/// writing through `--root`, which is invisible from here, and a false refusal
-/// costs a rename where a missed one costs the journal.
-///
-/// Cost: one directory listing and a stat per profile on the Windows drive —
-/// which is why it runs at `ds init` and at the writer's first open, never at
-/// launch.
+/// Every drive and profile is scanned, not the current user's: the WSL user
+/// name need not be the Windows one, and a second account sharing a store and
+/// a device name is just as broken. A Windows config with no root counts as the
+/// same store, since a false refusal costs a rename and a missed one the
+/// journal. It stats every profile, so it runs at `ds init` and the writer's
+/// first open, never at launch.
 #[must_use]
 pub fn windows_twin(wsl: &Wsl, device: &str, root: Option<&Path>) -> Option<Twin> {
     // Relative text never matches a drive path, so `--root .` would slip by.

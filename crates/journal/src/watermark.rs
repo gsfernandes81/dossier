@@ -13,30 +13,11 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Truncation detection — the Proton-revert defense.
-//!
-//! Single-writer-per-file makes Syncthing *conflicts* structurally impossible.
-//! It does not make **damage** impossible, and the difference matters: a cloud
-//! layer (Proton Drive mirrors the store on the PC) can revert a file to an
-//! older, shorter version, and that revert propagates through Syncthing as an
-//! ordinary modification. No conflict copy, still valid JSONL, silently missing
-//! the newest ops. Nothing in the format notices — so this does.
-//!
-//! **The signal is a `max_ts` regression, not a size change.** Compaction
-//! legitimately shrinks a file, sometimes drastically, but it can never lower
-//! the highest timestamp in it (it always keeps the newest ops). A revert
-//! by definition deletes them. So:
-//!
-//! | observation | verdict |
-//! |---|---|
-//! | `max_ts` fell | **damage** — loud, points at Syncthing versioning |
-//! | file vanished | **damage** — a writer's whole history is gone |
-//! | bytes fell, `max_ts` held | ordinary compaction — say nothing |
-//! | both grew | ordinary appends |
-//!
-//! The marks live in the device's **local** data directory, never in the synced
-//! tree — a high-water mark that syncs would be reverted along with the file it
-//! is supposed to be checking.
+//! Truncation detection. A cloud layer (Proton Drive mirrors the store on the
+//! PC) can revert a file to an older, shorter, still-valid version, and
+//! Syncthing propagates that as an ordinary modification. The signal is a
+//! `max_ts` regression, not a size change: compaction shrinks a file but always
+//! keeps its newest ops.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -91,7 +72,8 @@ impl fmt::Display for Damage {
     }
 }
 
-/// Per-file high-water marks, persisted in the device's local data directory.
+/// Per-file high-water marks, persisted in the device's local data directory:
+/// a mark in the synced tree would be reverted along with the file it checks.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HighWater {
     /// Writer id → mark.

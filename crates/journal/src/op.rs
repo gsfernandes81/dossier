@@ -13,20 +13,12 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The op — one line of a journal file, and the unit the whole store is built from.
+//! The op: one line of a journal file, the unit the store is built from.
 //!
-//! ```json
-//! {"v":1,"ts":1755300000123,"w":"desk-core","op":"set","ent":"doc","id":"coc-card-2025","f":"expiry_date","val":"2026-09-28"}
-//! ```
-//!
-//! The design decision that shapes this file is **forward compatibility**. A
-//! journal is read by two implementations (this crate and the Python satellite)
-//! and by two versions of each over time, so a line this build does not
-//! understand must survive it rather than be dropped. That gives three possible
-//! outcomes for a line, not two — [`Line::Op`], [`Line::Opaque`] (well-formed
-//! but from the future: unknown `v` or unknown `op`) and [`Line::Malformed`]
-//! (broken bytes). Only the first folds; **all three are kept**, and the last
-//! two are counted so `ds status` can say so out loud.
+//! Two implementations and their future versions share a journal, so a line
+//! this build does not understand must survive it: a line is [`Line::Op`],
+//! [`Line::Opaque`] (well-formed, from the future) or [`Line::Malformed`]. All
+//! three are kept; only the first folds.
 
 use std::collections::BTreeMap;
 
@@ -57,7 +49,7 @@ pub enum OpKind {
     /// Remove one field.
     Unset,
     /// A review/suggestion entry's state — per-key LWW, independent of
-    /// create/delete, because a restore verb takes a dismissal back, which a
+    /// create/delete, because a later state op reverses a dismissal, which a
     /// monotone union could never express.
     State,
     /// A scan reading (the `enrich` namespace).

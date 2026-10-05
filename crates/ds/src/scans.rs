@@ -13,18 +13,11 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Searching what the documents *say*: the filter list's search scan text.
-//!
-//! The desktop satellite reads scans and writes what it found into the journal's
-//! **`enrich`** namespace: a transcript, keywords, an issuer, a document number.
-//! That text is often the only way to find a document whose name you have
-//! forgotten — "the certificate with 4096 on it" — and it is bulky, so it is
-//! read on a worker thread the first time scan-text search is turned on, and
-//! the cold start never pays for it.
-//!
-//! Matching here is **exact substring only**, deliberately. A transcript is
-//! hundreds of words; letting a two-edit budget loose on it would match almost
-//! anything.
+//! Searching what the documents *say*: the scan text the desktop satellite
+//! writes into the journal's `enrich` namespace. It is bulky, so it is read on
+//! a worker thread the first time scan-text search is turned on, never at cold
+//! start. Matching is exact substring only: a two-edit budget loose on a
+//! transcript of hundreds of words would match almost anything.
 
 use std::collections::BTreeMap;
 

@@ -13,29 +13,12 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The fold: ops in, current state out.
-//!
-//! This is the heart of the store. Everything else — files,
-//! writers, Syncthing — exists to deliver ops here. The fold is a **pure
-//! function of the set of ops**, which is what makes conflicts structurally
-//! impossible: two devices that have seen the same ops in any order compute the
-//! same state, so there is nothing to reconcile.
-//!
-//! Three rules do all the work:
-//!
-//! 1. **Order is `(ts, w)`**, globally, not per file. A writer never repeats a
-//!    `ts`, so the order is total and unique — the fold is a function, not a
-//!    race.
-//! 2. **A tombstone wins over everything older**, and ops newer than it are
-//!    ignored *unless a `create` newer than the tombstone precedes them*. A
-//!    stray `set` can never resurrect half a document.
-//! 3. **`state` entries are per-key LWW**, independent of create/delete,
-//!    because a restore verb (`h` un-dismisses an orphan) takes a dismissal
-//!    back, which a monotone union could not express.
-//!
-//! The commutativity claim — `fold(A ∪ B) ≡ fold(B ∪ A)` — is property-tested
-//! in `tests/properties.rs`, and the exact behaviours above are pinned by the
-//! golden vectors in `tests/golden/`.
+//! The fold: ops in, current state out, as a **pure function of the set of
+//! ops** ordered by `(ts, w)` across every file, so devices that have seen the
+//! same ops compute the same state. A tombstone wins over everything older and
+//! ignores newer ops until a newer `create`; `state` entries are per-key LWW.
+//! Commutativity is property-tested in `tests/properties.rs`, and the exact
+//! rules are pinned by the golden vectors in `tests/golden/`.
 
 use std::collections::BTreeMap;
 
@@ -184,11 +167,8 @@ impl Fold {
 ///
 /// # Performance
 ///
-/// This runs on every launch, so it works in **borrowed keys and values** and
-/// materializes owned ones only for what survives. The obvious version —
-/// `(op.ent.clone(), op.id.clone())` per op — allocates three strings for every
-/// op in the store (150,000 of them at the stress-test size) to build map keys
-/// that are almost always already present. Same output, a fraction of the work.
+/// Works in borrowed keys: owned ones would allocate three strings per op on
+/// every launch.
 pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
     let mut result = Fold::default();
     let mut ops: Vec<&'a Op> = Vec::new();
@@ -327,8 +307,8 @@ mod tests {
         assert!(state.tombstones.is_empty(), "the recreate clears the tombstone");
     }
 
-    /// `state` entries are per-key LWW and independent of create/delete — the
-    /// un-dismiss verb depends on the newest op winning, in both directions.
+    /// `state` entries are per-key LWW and independent of create/delete, so a
+    /// later state op reverses a dismissal and the newest wins both ways.
     #[test]
     fn state_entries_are_per_key_lww_in_both_directions() {
         let ops: Vec<Line> = vec![

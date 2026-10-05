@@ -81,19 +81,9 @@ pub fn draw(frame: &mut Frame, model: &mut Model, theme: Theme) {
     draw_sheet(frame, chunks[0], model, theme);
 }
 
-/// Render one frame into a scratch backend so a unit test can read back the
-/// geometry the view published.
-///
-/// The hit test must be checked against numbers the renderer really produced,
-/// never against re-derived ones — dividing a width twice and getting two
-/// answers is the exact bug the write-back exists to prevent.
-///
-/// # Panics
-///
-/// If the scratch terminal cannot be built or drawn — which in a test means the
-/// renderer is broken, and failing loudly is the point.
+/// Renders one frame, so a hit test checks numbers the renderer produced.
 #[cfg(test)]
-pub fn draw_for_test(model: &mut Model, cols: u16, rows: u16) {
+pub(crate) fn draw_for_test(model: &mut Model, cols: u16, rows: u16) {
     let backend = ratatui::backend::TestBackend::new(cols, rows);
     let mut terminal = ratatui::Terminal::new(backend).expect("test backend");
     terminal.draw(|frame| draw(frame, model, Theme { color: true })).expect("draw");
@@ -277,8 +267,6 @@ fn status_cell(doc: &Doc, status: Status) -> String {
     }
 }
 
-/// The cursor column. Selection is reverse video and the marker never shifts the
-/// row: an indent shift makes the whole list twitch as the cursor moves.
 /// The wide layout's column widths, decided once per screen from the rows on
 /// it, so the columns line up and spare width goes to what needs it.
 #[derive(Clone, Copy)]
@@ -489,7 +477,7 @@ fn draw_sheet(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     model.panel = geometry;
 }
 
-/// The location picker: a three-row heading, then the tree.
+/// The location picker: a heading, then the tree.
 ///
 /// Full screen in the single-pane layout; over the bottom of the view when the
 /// terminal splits.

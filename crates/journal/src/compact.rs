@@ -97,8 +97,7 @@ impl Plan {
 pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
     let cutoff = now_ms.saturating_sub(RETENTION_MS);
 
-    // Pass 1: find each entity's newest tombstone, and the newest op index for
-    // every key that supersedes older ones.
+    // First, each entity's newest tombstone.
     let mut newest_tombstone: BTreeMap<(&str, &str), i64> = BTreeMap::new();
     for line in lines {
         if let Line::Op(op) = line {
@@ -109,8 +108,8 @@ pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
         }
     }
 
-    // Key → the index of the newest op for that key. `f` is part of the key for
-    // set/unset (per-field LWW) and absent for the per-entity verbs.
+    // Then the newest op per key. `f` is part of the key for set/unset
+    // (per-field LWW) and absent for the per-entity verbs.
     let mut newest: BTreeMap<(&str, &str, Option<&str>, u8), usize> = BTreeMap::new();
     for (index, line) in lines.iter().enumerate() {
         let Line::Op(op) = line else { continue };
@@ -136,7 +135,7 @@ pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
     }
     let survivors: BTreeSet<usize> = newest.into_values().collect();
 
-    // Pass 2: keep.
+    // Then keep.
     let mut keep = Vec::with_capacity(lines.len());
     for (index, line) in lines.iter().enumerate() {
         let keep_this = match line {

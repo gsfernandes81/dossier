@@ -116,9 +116,7 @@ mod tests {
         let temp = compaction_temp_file("desk-core", 4231);
         assert_eq!(temp, "desk-core.jsonl.tmp-4231");
         assert!(writer_of(&temp).is_none());
-        // …and the glob that hides it from Syncthing matches it.
-        assert!(temp.starts_with("desk-core.jsonl.tmp-"));
-        assert!(COMPACTION_TEMP_GLOB.starts_with("*.jsonl.tmp-"));
+        assert!(temp.contains(COMPACTION_TEMP_GLOB.trim_matches('*')));
     }
 
     /// Writer ids and file stems share one grammar, so a writer that can name

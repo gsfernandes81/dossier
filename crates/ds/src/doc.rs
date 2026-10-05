@@ -13,25 +13,9 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The view model: a folded journal turned into the rows the Find list shows.
-//!
-//! The `journal` crate deals in ops and untyped `serde_json` values, because
-//! that is what the format is. Everything above it wants documents — with a
-//! name, a place on a shelf, an expiry status and a search haystack. This module
-//! is that boundary, and it is deliberately the *only* place that knows field
-//! names like `expiry_date`.
-//!
-//! Two rules from the plan are implemented here rather than in the renderer,
-//! because they are facts about the data and not about the screen:
-//!
-//! * **Shelf order**: the location tree in sibling order,
-//!   then name, then id, so the list never jitters between frames. Unfiled and
-//!   digital-only documents come last.
-//! * **The expiry watch is opt-out**: a document is tracked if it
-//!   has an expiry date and is neither superseded by a newer document nor
-//!   explicitly ignored. Being superseded is a *collection-level* fact — some
-//!   other document's `supersedes` points here — so it can only be computed with
-//!   the whole store in hand, which is why [`Store::derive`] does it.
+//! The view model: a folded journal turned into the documents the Find list
+//! shows, each with a name, a place on a shelf, an expiry status and a search
+//! haystack, above the `journal` crate's untyped ops.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -267,7 +251,9 @@ pub fn memberships_value(memberships: &[Membership]) -> Option<Value> {
 /// The whole browsable store, built once per load.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Store {
-    /// Documents in shelf order.
+    /// Documents in shelf order: the location tree's sibling order, then name,
+    /// then id, so the list never jitters between frames. Unfiled and
+    /// digital-only documents come last.
     pub docs: Vec<Doc>,
     /// The physical locations.
     pub locations: Tree,

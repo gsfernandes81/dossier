@@ -61,8 +61,8 @@ pub enum Row {
 ///
 /// **An editable field is always a row, even when it is empty.** A row that
 /// appeared only once it had a value could never be the row you use to give it
-/// one — the empty `—` is the affordance, not clutter. Rows this build cannot
-/// change stay conditional, because there is nothing to do with an absent one.
+/// one — the empty `—` is the affordance, not clutter. Location and Files
+/// appear only when applicable.
 #[must_use]
 pub fn rows(doc: &crate::Doc) -> Vec<Row> {
     use crate::edit::Field;

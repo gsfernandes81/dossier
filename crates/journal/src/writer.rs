@@ -13,24 +13,10 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Appending to a journal: the clock, the lock, and the torn tail.
-//!
-//! A writer appends to **its own file and no other** — that single rule is what
-//! makes Syncthing conflicts structurally impossible. This module enforces it
-//! and the three things that have to be true around it:
-//!
-//! 1. **The timestamp is a hybrid logical clock, not the wall clock.**
-//!    `ts = max(now_ms, own_last_ts + 1)`, seeded from the highest `ts` seen
-//!    across *all* journals at startup. A writer therefore never repeats or
-//!    reverses a `ts`, which is exactly the property the fold's `(ts, w)` order
-//!    depends on — an NTP correction between sessions cannot reorder a writer
-//!    against itself.
-//! 2. **One process per writer id**, enforced with an OS advisory lock on a
-//!    file in the device's **local** data directory — never on the synced tree,
-//!    never on FUSE. A second process that cannot take the lock is not an
-//!    error to swallow: it runs read-only with a visible notice, which is how
-//!    `ds status --quiet` from cron keeps working while the TUI is open.
-//! 3. **A torn tail is repaired before the first append.**
+//! Appending to a journal. A writer appends to **its own file and no other**,
+//! which is what makes Syncthing conflicts structurally impossible; around that
+//! it keeps a hybrid logical clock, holds one OS lock per writer id, and repairs
+//! a torn tail before the first append.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -45,6 +31,9 @@ use crate::store::{Journal, Namespace};
 
 /// The hybrid logical clock: milliseconds since the epoch, strictly monotonic
 /// per writer.
+///
+/// `ts = max(now_ms, last + 1)`, so an NTP correction between sessions cannot
+/// reorder a writer against itself, which the fold's `(ts, w)` order needs.
 #[derive(Debug, Clone, Copy)]
 pub struct Hlc {
     last: i64,

@@ -13,33 +13,10 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Asking the local Syncthing daemon how the sync is going.
-//!
-//! Syncthing is the only transport in this design, so "is my phone actually
-//! going to see this?" is a question about *it*, not about dossier. `ds status`
-//! answers it by reading the daemon's REST API — status only, never a write.
-//!
-//! Three rules:
-//!
-//! * **Reachability problems are states, not errors.** A daemon that is off, or
-//!   an API key that is wrong, is something to *report* — the report is still
-//!   worth printing, and every caller wants the degraded value rather than an
-//!   exception.
-//! * **TLS verification is dropped only for loopback, never globally.** On
-//!   Termux the API is HTTPS-only with a *self-signed* certificate (plain http
-//!   307-redirects), so verification cannot succeed there. The
-//!   exception is scoped to `127.0.0.0/8`, `::1` and `localhost`; for any other
-//!   host, an unverified request is refused outright. On loopback the API key is
-//!   the real authenticator and the network is the kernel.
-//! * **The interesting folder is the one containing the store.** A device may
-//!   sync a dozen folders; only one of them decides whether these documents
-//!   move.
-//!
-//! Under WSL the daemon is usually the *Windows* one, so the folder paths it
-//! reports are Windows paths and are translated before they are compared
-//! ([`crate::wsl`]), and a loopback that does not answer gets the one
-//! explanation that is almost always true there: WSL's NAT networking gives
-//! Linux a loopback of its own.
+//! Asking the local Syncthing daemon, read-only over its REST API, whether the
+//! folder holding the store is in sync. Reachability problems are states, not
+//! errors: a daemon that is off or a wrong key is something to report, and
+//! every caller wants the degraded value.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -73,7 +50,7 @@ pub enum State {
 }
 
 impl State {
-    /// A one-word label, and a marker that survives monochrome.
+    /// A one-word label.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
@@ -219,7 +196,8 @@ pub struct Settings {
     pub base_url: String,
     /// The REST API key.
     pub api_key: String,
-    /// Whether to verify TLS.
+    /// Whether to verify TLS. Off is honoured only on loopback: Termux's API is
+    /// HTTPS-only with a self-signed certificate.
     pub verify_tls: bool,
 }
 

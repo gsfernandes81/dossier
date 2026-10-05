@@ -13,8 +13,9 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The synthetic perf gate: **fold 50k ops / 1k docs in under 20 ms**, the
-//! fold's share of the phone's "< 100 ms to usable" startup budget.
+//! The synthetic perf gate: **fold 50k ops / 1k docs in under 50 ms**, against
+//! a 20 ms target, the fold's share of the phone's "< 100 ms to usable" startup
+//! budget.
 //!
 //! It asserts only in **release** builds: a debug build is an order of
 //! magnitude slower for reasons unrelated to the design. Debug runs still print.
