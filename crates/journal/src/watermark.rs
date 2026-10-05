@@ -29,8 +29,7 @@ use serde::{Deserialize, Serialize};
 pub struct Mark {
     /// Highest `ts` ever observed in this file. Monotonic by construction.
     pub max_ts: i64,
-    /// Size at the last observation. Informational: a shrink alone is not a
-    /// signal, it is what compaction looks like.
+    /// Size at the last observation; informational.
     pub bytes: u64,
 }
 
@@ -108,8 +107,7 @@ impl HighWater {
     ///
     /// `max_ts` only ever climbs — that is what makes it a *high-water* mark,
     /// and it is why a revert keeps being reported on every launch until the
-    /// data is actually recovered. A one-shot warning about silent data loss is
-    /// a warning the user will miss. [`accept`](Self::accept) is the deliberate
+    /// data is actually recovered. [`accept`](Self::accept) is the deliberate
     /// way out.
     pub fn observe(&mut self, current: &BTreeMap<String, Mark>) {
         for (file, mark) in current {

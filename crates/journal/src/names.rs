@@ -13,25 +13,14 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The frozen filename grammar.
-//!
-//! Discovery is a directory glob — there is no registry — so *what counts as a
-//! journal file* is load-bearing safety, not cosmetics. Fold the wrong file and
-//! the store gains ops that were deliberately set aside; fold a Syncthing
-//! conflict copy and the "conflicts are structurally impossible" guarantee dies
-//! quietly. Hand-written rather than a regex: the grammar is too small to be
-//! worth a dependency.
+//! The frozen filename grammar. Discovery is a directory glob with no registry,
+//! so what counts as a journal file decides what the fold reads.
 
 /// Extension every journal file ends with.
 pub const EXTENSION: &str = ".jsonl";
 
-/// The glob a Syncthing folder's `.stignore` must hold, on a line of its own,
-/// before `ds` compacts a journal inside it.
-///
-/// Compaction writes `<writer>.jsonl.tmp-<pid>` next to the file it is
-/// rewriting, in the *synced* directory, because a cross-device rename fails
-/// with `EXDEV`. Without this ignore, Syncthing would replicate half-written
-/// temp files to the other device.
+/// The `.stignore` line a folder needs before any journal in it is compacted:
+/// the temps sit in the synced directory, since a cross-device rename fails.
 pub const COMPACTION_TEMP_GLOB: &str = "*.jsonl.tmp-*";
 
 /// Whether `name` is a Syncthing conflict copy.
@@ -49,13 +38,7 @@ pub fn writer_of(name: &str) -> Option<&str> {
     name.strip_suffix(EXTENSION).filter(|stem| is_valid_writer_id(stem))
 }
 
-/// Whether `id` is a usable writer id — the file stem, and the `w` field of
-/// every op that writer emits.
-///
-/// Convention is `<device>-<component>` (`desk-core`, `phone-core`, `desk-lab`),
-/// but the grammar only enforces the character set: the device half comes from
-/// per-device config, and rejecting a user's chosen device name for having no
-/// hyphen would be officious.
+/// Whether `id` is a usable writer id: the file stem and every op's `w`.
 #[must_use]
 pub fn is_valid_writer_id(id: &str) -> bool {
     let mut chars = id.chars();
@@ -72,11 +55,8 @@ pub fn writer_file(writer: &str) -> String {
     format!("{writer}{EXTENSION}")
 }
 
-/// The temp name compaction writes before its atomic rename.
-///
-/// Deliberately *not* matching [`writer_of`]: if a compaction dies
-/// mid-rewrite, the leftover must be invisible to the next fold rather than
-/// contributing a truncated view of the writer's history.
+/// The temp name compaction writes before its rename. It fails [`writer_of`],
+/// so a leftover from a dead compaction is never folded.
 #[must_use]
 pub fn compaction_temp_file(writer: &str, pid: u32) -> String {
     format!("{}{pid}", compaction_temp_prefix(writer))

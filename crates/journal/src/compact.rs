@@ -13,13 +13,9 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Compaction: shrinking a writer's own file without changing what it means.
-//!
-//! An append-only log grows forever, and most of what it holds is superseded:
-//! fifteen edits to one document's name leave fourteen ops that no fold will
-//! ever consult again. Compaction rewrites a writer's file as the minimal set
-//! that reproduces its contribution — and **only its own file**, which is why it
-//! needs no coordination with the other device at all.
+//! Compaction: rewriting a writer's file as the minimal set that reproduces its
+//! contribution. A writer compacts only its own file, so no other device has to
+//! agree.
 //!
 //! # The two rules that are easy to get wrong
 //!
@@ -33,11 +29,6 @@
 //! write, and a later `create` starts from empty fields. `state` and enrich
 //! ops are per key and independent of the lifecycle, so a tombstone buries
 //! none of them.
-//!
-//! Everything here is a **pure function** of the lines and the clock —
-//! [`plan`] decides, and the writer does the I/O. That is what lets the
-//! "compaction preserves the fold" property be tested exhaustively rather than
-//! demonstrated on an example.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -124,8 +115,6 @@ pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
     let mut keep = Vec::with_capacity(lines.len());
     for (index, line) in lines.iter().enumerate() {
         let keep_this = match line {
-            // Lines this build did not understand are never compaction's to
-            // throw away — that is the forward-compatibility promise.
             Line::Opaque { .. } | Line::Malformed { .. } => true,
             Line::Op(op) => {
                 op.ts >= cutoff

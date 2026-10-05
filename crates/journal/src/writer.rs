@@ -13,10 +13,9 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! Appending to a journal. A writer appends to **its own file and no other**,
-//! which is what makes Syncthing conflicts structurally impossible; around that
-//! it keeps a hybrid logical clock, holds one OS lock per writer id, and repairs
-//! a torn tail before the first append.
+//! Appending to a journal. A writer appends to **its own file and no other**;
+//! around that it keeps a hybrid logical clock, holds one OS lock per writer
+//! id, and repairs a torn tail before the first append.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -355,9 +354,7 @@ impl Writer {
     /// Rewrite this writer's file as the minimal set that reproduces it
     /// ([`crate::compact`]).
     ///
-    /// Safe without any coordination: a writer compacts **only its own file**,
-    /// and it holds that file's lock, so there is no reader-writer race to lose
-    /// and no other device to agree with. The one appender the lock cannot see
+    /// The writer holds its file's lock. The one appender the lock cannot see
     /// is a same-named `ds` across the WSL boundary, so the file is checked
     /// again just before the rename and left alone if it changed.
     ///

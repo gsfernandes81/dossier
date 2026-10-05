@@ -118,9 +118,6 @@ impl Fold {
     /// whitespace, UTF-8 with no ASCII escaping, integers only. In Python the
     /// equivalent call is
     /// `json.dumps(state, sort_keys=True, ensure_ascii=False, separators=(",", ":"))`.
-    /// Comparing raw serializer defaults instead would be unimplementable —
-    /// `serde_json` and `json.dumps` disagree on key order and escaping — which
-    /// is why this function exists rather than a `Serialize` impl.
     ///
     /// Health counters are **not** included: they describe the files, not the
     /// state, and the two implementations legitimately see different files.

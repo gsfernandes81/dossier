@@ -21,19 +21,10 @@
 //! └─ enrich/  desk-lab.jsonl                       ← loaded lazily
 //! ```
 //!
-//! Two decisions shape this module:
-//!
-//! 1. **The namespace split is enforced by the loader, not by convention.**
-//!    `meta` is read on every launch; `enrich` — scan transcripts, intake
-//!    proposals — is read only when something actually needs it. Startup must
-//!    never pay for a transcript it will not show.
-//! 2. **Loading never fails on one bad file.** A directory is a set of
-//!    independent writers, and one unreadable file must cost that writer's
-//!    contribution, not the whole store. Every problem becomes an [`Anomaly`] in
-//!    the report, which is what `ds status` turns into a line naming the fix.
-//!
-//! The one thing that *is* an error is a directory that cannot be listed at
-//! all: continuing there would silently present an empty store as the truth.
+//! The loader reads one namespace at a time, so startup never pays for an
+//! `enrich` transcript. One bad file costs only that writer's ops, reported as
+//! an [`Anomaly`]; the one error is a directory that cannot be listed, which
+//! would otherwise pass for an empty store.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -75,11 +66,9 @@ impl fmt::Display for Namespace {
 /// more usefully than on prose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Anomaly {
-    /// A Syncthing conflict copy exists. Under single-writer-per-file this
-    /// should be impossible, so its presence means something outside the design
+    /// A Syncthing conflict copy exists, so something outside the design
     /// touched the directory (a versioning restore, a manual copy). Never read,
-    /// always reported — "conflicts are structurally impossible" is only honest
-    /// if the exception is loud.
+    /// always reported.
     SyncConflict {
         /// The offending file name.
         file: String,
@@ -129,8 +118,7 @@ impl fmt::Display for Anomaly {
 pub struct FileReport {
     /// Writer id (the file stem).
     pub writer: String,
-    /// Size on disk, in bytes — the secondary corroborator for truncation
-    /// detection; on its own a shrink is just compaction.
+    /// Size on disk, in bytes.
     pub bytes: u64,
     /// Highest `ts` in the file. **This** is the truncation signal: compaction
     /// can never lower it, a revert always does.

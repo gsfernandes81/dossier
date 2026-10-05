@@ -15,21 +15,16 @@
 
 //! The op: one line of a journal file, the unit the store is built from.
 //!
-//! Two implementations and their future versions share a journal, so a line
-//! this build does not understand must survive it: a line is [`Line::Op`],
-//! [`Line::Opaque`] (well-formed, from the future) or [`Line::Malformed`]. All
-//! three are kept; only the first folds.
+//! A line is [`Line::Op`], [`Line::Opaque`] (well-formed, from the future) or
+//! [`Line::Malformed`]; only the first folds.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The format version this build writes and folds.
-///
-/// A line carrying any other `v` is [`Line::Opaque`]: preserved, never folded,
-/// never rewritten. That is the entire migration story — old builds ignore new
-/// lines instead of corrupting them.
+/// The format version this build writes and folds; a line carrying any other
+/// `v` is [`Line::Opaque`].
 pub const FORMAT_VERSION: u32 = 1;
 
 /// What an op does. Frozen list.
@@ -128,9 +123,8 @@ pub enum OpaqueReason {
 
 /// One line of a journal file, classified.
 ///
-/// A line this build cannot fold keeps its original bytes, because compaction
-/// copies those verbatim: bytes it did not understand are bytes it must not
-/// rewrite.
+/// Compaction keeps every line this build cannot fold and copies its original
+/// bytes verbatim: bytes it did not understand are bytes it must not rewrite.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Line {
     /// A line this build folds.
@@ -145,8 +139,7 @@ pub enum Line {
     /// Broken bytes: not UTF-8, not JSON, not an object, or missing required
     /// fields.
     ///
-    /// Counted and surfaced as a `ds status` anomaly, preserved through
-    /// compaction, **never silently discarded**.
+    /// Counted and surfaced as a `ds status` anomaly.
     Malformed {
         /// The original bytes.
         raw: Vec<u8>,
