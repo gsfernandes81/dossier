@@ -491,7 +491,6 @@ fn write_temp(temp: &Path, body: &[u8]) -> std::io::Result<()> {
 /// A file's length and modification time, which an append changes.
 type Fingerprint = (u64, Option<SystemTime>);
 
-/// Returns `path`'s [`Fingerprint`].
 fn fingerprint(path: &Path) -> Result<Fingerprint, Error> {
     let meta = std::fs::metadata(path).map_err(io("stat for compaction", path))?;
     Ok((meta.len(), meta.modified().ok()))

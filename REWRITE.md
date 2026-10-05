@@ -89,8 +89,11 @@ section and the golden vectors in the same slice.
   nothing else is folded. Both implementations **exclude** anything containing
   `.sync-conflict-`, the `.stversions/` dir, and rewrite temps. Compaction temps are
   named `<writer>.jsonl.tmp-<pid>` (does not match the glob) and the pattern
-  `*.jsonl.tmp-*` goes into `.stignore` on **both devices before any journal exists
-  in the synced tree** (Phase R7 pre-step; `.stignore` is per-device and never syncs).
+  `*.jsonl.tmp-*` goes on a line of its own in the Syncthing folder's `.stignore` on
+  **both devices** (`.stignore` is per-device and never syncs). `ds init` adds it;
+  `ds` compacts only where the folder holding the store (the nearest `.stfolder` at
+  or above it) has the line, or where no folder holds it at all, and `ds status`
+  reports a folder without it as a finding.
 - **One process per writer id**: a writer takes an OS advisory lock on a lock file in
   the platform-**local** data dir (never on FUSE / never synced) before appending or
   compacting. A second process that fails the lock runs **read-only** with a visible
@@ -196,8 +199,12 @@ section and the golden vectors in the same slice.
 - **Compaction**: a writer compacts **only its own file** (single writer ⇒ no race):
   rewrite as the minimal op set reproducing its contribution to the fold, **keeping**
   (a) all tombstones, (b) all ops newer than **30 days** — which makes the journal
-  itself the undo history with a durable 30-day horizon. Trigger: on clean exit when
-  live-op ratio < 25%. The v2 local history dir is retired; **undo = append the
+  itself the undo history with a durable 30-day horizon. Trigger: in the journal
+  thread, once a session that has saved has been quiet for 30 s, when the live-op
+  ratio is < 25% and the `.stignore` gate (§3.1) allows; no exit or startup hook.
+  A compaction re-checks the file's length and mtime before its rename and leaves
+  it alone if they moved, and a writer removes its own stale temps when it opens.
+  The v2 local history dir is retired; **undo = append the
   inverse op** (previous value read from the fold/journal). Compaction must preserve
   every op a fold would still consult and all unknown lines.
 - **Backstop**: Syncthing staggered versioning on the folder (already the Phase 15
@@ -856,8 +863,9 @@ until the cutover step the user personally green-lights.
   package, service writes to `enrich/`, sync-idle wait kept.
 - **R7 — Cutover (big-bang, D4) + polish.** Rehearse on a copy; then, in this order:
   **(1) install the phone binary and verify it launches** (the phone must never sit
-  with a deleted v2 store and no app), **(2) `.stignore` the compaction-temp pattern
-  on both devices** (per-device file, never syncs — §3.1), (3) stop edits → export →
+  with a deleted v2 store and no app), **(2) run `ds init` on both devices**, which
+  adds the compaction-temp pattern to each one's `.stignore` (per-device file, never
+  syncs — §3.1; without it that device never compacts), (3) stop edits → export →
   parity green *(moot per D13 — the exporter was deleted 2026-09-30)*, (4) archive
   the old `.dossier/` contents to the local data dir, (5) let the journal layout
   sync, (6) confirm the phone folds it. Rollback = the archived v2 store (additive,

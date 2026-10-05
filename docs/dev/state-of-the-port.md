@@ -8,7 +8,7 @@ restate them — it exists to say *where the port is*, *what the phone actually
 is*, *what is still open*, and *which mistakes have already been paid for*.
 If something here contradicts a spec, the spec wins and this file is stale.
 
-Last true as of **2026-10-04**, branch `rust-rewrite`.
+Last true as of **2026-10-05**, branch `rust-rewrite`.
 
 ---
 
@@ -30,8 +30,10 @@ Three facts that shape what the rest of R4 costs:
   new store as `Msg::Saved`. The same thread polls the journal's stamp every two
   seconds and posts `Msg::Reloaded` when another writer's ops arrive. Undo is
   another `Vec<Draft>` down the same channel. Nothing else in the program can
-  reach the `Writer`. Compaction exists in the journal crate but nothing calls
-  it yet.
+  reach the `Writer`. The same thread compacts this session's own file once
+  its saves have been quiet for 30 seconds, and only where the Syncthing
+  folder's `.stignore` ignores compaction temps or no folder holds the store
+  at all; `ds init` adds the line and `ds status` flags a folder without it.
 - **The writer opens on the first append, never at launch.** `Writer::open`
   creates the journal directory and the writer's file if absent, and §7 forbids
   `.dossier/journal/` existing in the synced tree before cutover — so an eager
@@ -43,7 +45,8 @@ Three facts that shape what the rest of R4 costs:
   TUI. Every other verb in REWRITE.md's module map — `file`, `export`,
   `organize`, the review filters — is unbuilt. `ds init` is complete: the
   device name, the root with a live folder list, the Syncthing API key (read
-  from Syncthing's own `config.xml` where it can be), the Termux checks, and a
+  from Syncthing's own `config.xml` where it can be), the compaction-temp line
+  in the folder's `.stignore`, the Termux checks, and a
   re-run that keeps every answer Enter leaves alone.
 
 The Python package in `dossier/` is still the working v2 app and stays until R6

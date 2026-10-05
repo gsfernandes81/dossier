@@ -25,8 +25,8 @@
 /// Extension every journal file ends with.
 pub const EXTENSION: &str = ".jsonl";
 
-/// The glob that must be in `.stignore` on **both devices before any journal
-/// exists in the synced tree**.
+/// The glob a Syncthing folder's `.stignore` must hold, on a line of its own,
+/// before `ds` compacts a journal inside it.
 ///
 /// Compaction writes `<writer>.jsonl.tmp-<pid>` next to the file it is
 /// rewriting, in the *synced* directory, because a cross-device rename fails
