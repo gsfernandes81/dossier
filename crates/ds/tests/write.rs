@@ -529,3 +529,22 @@ fn a_save_sorts_after_what_it_read() {
     let reread = ds::load::load(&journal).expect("load");
     assert_eq!(reread.store.docs[0].name, "COC DESK", "and on disk");
 }
+
+/// A save that fails still read the other writer's new ops; they must reach
+/// the screen at the next poll rather than wait for another change.
+#[test]
+fn a_failed_save_still_lets_the_next_poll_bring_in_another_writers_op() {
+    let (dir, journal) = journal_with(&desk(coc()));
+    let loaded = ds::load::load(&journal).expect("load");
+    let mut follower =
+        ds::follow::Follower::new(journal.clone(), None, loaded.stamp, loaded.stats.max_ts);
+    let phone = dir.path().join("meta").join("phone-core.jsonl");
+    std::fs::write(&phone, line(1_700_000_000_010, "phone-core", "name", "COC PHONE") + "\n")
+        .expect("write");
+
+    let saved = follower.save(vec![Draft::set("doc", "coc", "name", "COC DESK")]);
+    assert!(matches!(saved, Msg::SaveFailed { permanent: true, .. }), "{saved:?}");
+    let reloaded = follower.poll().expect("the other writer's op is still news");
+    assert!(matches!(reloaded, Msg::Reloaded(_)));
+    assert_eq!(name_in(&reloaded), "COC PHONE");
+}

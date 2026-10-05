@@ -116,6 +116,16 @@ impl Follower {
 
     /// Appends `drafts`, then reads the journal back.
     pub fn save(&mut self, drafts: Vec<journal::Draft>) -> Msg {
+        let msg = self.write(drafts);
+        // The catch-up a failed save made is not delivered with it, so the
+        // next poll must read again rather than find the stamp unchanged.
+        if matches!(msg, Msg::SaveFailed { .. }) {
+            self.stamp = journal::Stamp::default();
+        }
+        msg
+    }
+
+    fn write(&mut self, drafts: Vec<journal::Draft>) -> Msg {
         let failed = |reason: String| Msg::SaveFailed { reason, permanent: false };
         // Ops that landed since the last poll still raise the clock first.
         self.catch_up();
