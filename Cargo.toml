@@ -18,8 +18,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 
+# A panic on any thread ends the process: a dead worker would otherwise leave
+# the UI drawing on a restored terminal with a save stuck as pending.
+[profile.dev]
+panic = "abort"
+
 # What the real binary ships with, so measurements taken here transfer.
 [profile.release]
+panic = "abort"
 opt-level = 3
 lto = "thin"
 codegen-units = 1

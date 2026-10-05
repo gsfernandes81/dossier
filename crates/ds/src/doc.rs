@@ -543,17 +543,13 @@ impl Store {
         }
     }
 
-    /// How many documents have their hard copy in `id` or anywhere inside it,
-    /// old versions included.
-    #[must_use]
-    pub fn held(&self, id: &str) -> usize {
-        self.docs
-            .iter()
-            .filter(|doc| match self.hard_copy(doc) {
-                HardCopy::At(at) => self.locations.is_within(at, id),
-                HardCopy::Unfiled | HardCopy::DigitalOnly => false,
-            })
-            .count()
+    /// The documents whose hard copy is in `id` or anywhere inside it, old
+    /// versions included.
+    pub fn held<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a Doc> + 'a {
+        self.docs.iter().filter(move |doc| match self.hard_copy(doc) {
+            HardCopy::At(at) => self.locations.is_within(at, id),
+            HardCopy::Unfiled | HardCopy::DigitalOnly => false,
+        })
     }
 
     /// Documents whose older versions lead back to themselves, so none of
@@ -1011,8 +1007,8 @@ mod tests {
                 ],
             ),
         ]);
-        assert_eq!(s.held("desk"), 2);
-        assert_eq!(s.held("folder"), 1);
+        assert_eq!(s.held("desk").count(), 2);
+        assert_eq!(s.held("folder").count(), 1);
         assert_eq!(s.place(&s.docs[s.index_of("old").unwrap()]), "desk › leather folder");
     }
 

@@ -466,7 +466,7 @@ pub struct Model {
     pub armed: Option<Armed>,
     /// Whether SGR mouse reporting is currently on.
     pub mouse_on: bool,
-    /// The leader sheet, when it is open.
+    /// Whether the Space sheet is open.
     pub sheet: bool,
     /// The field being edited, when one is.
     pub edit: Option<crate::edit::Edit>,
@@ -483,7 +483,7 @@ pub struct Model {
     /// Where the view drew the header's pressable expiring count.
     pub count_zone: Zone,
     /// Where the view drew the `SPC` chip.
-    pub leader_zone: Zone,
+    pub space_zone: Zone,
     /// A transient message, cleared by the next key.
     pub flash: Option<String>,
     /// Where the next typed character lands in the query, in characters.
@@ -536,7 +536,7 @@ impl Model {
         self.tree = RowGeometry::default();
         self.panel = RowGeometry::default();
         self.count_zone = Zone::default();
-        self.leader_zone = Zone::default();
+        self.space_zone = Zone::default();
     }
 
     /// The highlighted document, if anything matched.
@@ -1350,7 +1350,7 @@ impl Model {
             self.flash = Some("pick a location".into());
             return Effect::Redraw;
         };
-        let held = self.store.held(&id);
+        let held = self.store.held(&id).count();
         let inside = self.store.locations.subtree(&id).len().saturating_sub(1);
         if held == 0 && inside == 0 {
             return self.remove(&id);
@@ -1384,10 +1384,7 @@ impl Model {
         let doomed: Vec<&crate::Location> =
             tree.subtree(id).into_iter().filter_map(|at| tree.get(at)).collect();
         let Some(name) = doomed.first().map(|l| l.name.clone()) else { return Effect::Redraw };
-        let held = self.store.docs.iter().filter(|doc| {
-            doc.location.as_deref().is_some_and(|at| doomed.iter().any(|l| l.id == at))
-        });
-        let unfile = held.map(|doc| self.flip("doc", &doc.id, "location", None));
+        let unfile = self.store.held(id).map(|doc| self.flip("doc", &doc.id, "location", None));
         let delete = doomed
             .iter()
             .rev()
@@ -1916,7 +1913,7 @@ impl Model {
         let pushed = self.pane() && !crate::layout::splits(self.cols);
         let bundles = self.views.iter().any(|view| matches!(view, View::Bundles { .. }));
         let (top, bottom) = search_zone(self);
-        if self.leader_zone.hit(col, row) {
+        if self.space_zone.hit(col, row) {
             if self.sheet {
                 self.sheet = false;
                 Effect::Redraw
@@ -2056,7 +2053,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
         Msg::Left => model.query_cursor_to(model.query_cursor.saturating_sub(1)),
         Msg::Right => model.query_cursor_to(model.query_cursor + 1),
         // Home and End belong to the query once there is one, and to the list
-        // until then — the same rule that makes Space the leader.
+        // until then — the same rule that makes Space open the sheet.
         Msg::Move(Motion::Home) if !model.detail() && !model.query.is_empty() => {
             model.query_cursor_to(0)
         }
@@ -2078,7 +2075,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             Effect::Redraw
         }
         // On the record a letter is a verb; on the list every letter is search
-        // text, and Space on an empty query opens the leader.
+        // text, and Space on an empty query opens the Space sheet.
         Msg::Char(' ') if model.detail() => model.open_sheet(),
         Msg::Char(c) if model.detail() => model.record_verb(c),
         Msg::Char(' ') if model.query.is_empty() => model.open_sheet(),
@@ -2242,7 +2239,7 @@ fn sheet_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
                 return Some(model.run(item.act));
             }
             // The chip that opened the sheet closes it in the shared handler.
-            if model.leader_zone.hit(*col, *row) {
+            if model.space_zone.hit(*col, *row) {
                 return None;
             }
             model.sheet = false;
@@ -2400,11 +2397,11 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         }
         Msg::Char(' ') if picker.filter.is_empty() => {
             if picker.chosen().is_some() {
-                model.sheet = true;
+                model.open_sheet()
             } else {
                 model.flash = Some("pick a location".into());
+                Effect::Redraw
             }
-            Effect::Redraw
         }
         Msg::Char(c) => {
             picker.type_char(&model.store, *c);
@@ -4503,7 +4500,7 @@ pub(crate) mod tests {
         let mut m = model();
         crate::find::draw_for_test(&mut m, 120, 40);
         assert_eq!(m.count_zone.width, 0);
-        assert_eq!(m.leader_zone.width, 0);
+        assert_eq!(m.space_zone.width, 0);
     }
 
     /// The query is the mode, which is how a modeless surface gets a prefix key.

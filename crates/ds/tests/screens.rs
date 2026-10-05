@@ -216,7 +216,7 @@ fn the_phone_screen_matches_the_mockup() {
     assert!(lines[26].contains("⏎ record"), "the hint line teaches the verbs");
     assert!(lines[26].contains("space menu"), "{:?}", lines[26]);
     assert!(lines[27].starts_with(" > █"), "the query row is last: {:?}", lines[27]);
-    assert!(lines[27].contains("SPC"), "and carries the leader chip: {:?}", lines[27]);
+    assert!(lines[27].contains("SPC"), "and carries the Space chip: {:?}", lines[27]);
     assert!(!lines[27].contains('⌨'), "and no keyboard chip: {:?}", lines[27]);
     assert!(lines[27].contains("Type to search"), "the empty field says so: {:?}", lines[27]);
     assert!(lines[27].contains("For more, hit"), "and what the chip is for");
@@ -340,7 +340,7 @@ fn the_header_count_is_a_filled_cell_on_a_touch_layout() {
 }
 
 #[test]
-fn the_leader_sheet_opens_over_the_list() {
+fn the_space_sheet_opens_over_the_list() {
     let mut m = model(45, 28);
     let before = screen(&mut m, 45, 28);
 
@@ -389,7 +389,7 @@ fn the_status_line_is_a_band_and_the_entry_line_is_not() {
     type_str(&mut m, "coc");
     assert_eq!(banded_columns(&mut m, 45, 28, 26, Theme { color: true }), band);
 
-    // The leader chip closes the entry line, reversed against the plain
+    // The Space chip closes the entry line, reversed against the plain
     // background rather than against the band.
     let reversed = modifier_columns(&mut m, 45, 28, 27, ratatui::style::Modifier::REVERSED);
     assert_eq!(reversed, [39, 40, 41, 42, 43], "SPC is reverse, with a gutter after it");
@@ -807,7 +807,7 @@ fn an_edit_takes_over_the_entry_line() {
     assert!(entry.contains("expiry:"), "the prompt names the field: {entry:?}");
     assert!(entry.contains("2026-07-31"), "seeded with the stored value: {entry:?}");
     assert!(entry.contains('█'), "and the cursor is where typing goes: {entry:?}");
-    assert!(!entry.contains("SPC"), "the leader is not reachable from inside an edit");
+    assert!(!entry.contains("SPC"), "the Space sheet is not reachable from inside an edit");
 
     let band = &rows[rows.len() - 2];
     assert!(band.contains("save"), "the band teaches the verb: {band:?}");

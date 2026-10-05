@@ -717,7 +717,7 @@ fn count(
     id: &str,
     room: usize,
 ) -> String {
-    let held = if picker.doc().is_some() { store.held(id) } else { 0 };
+    let held = if picker.doc().is_some() { store.held(id).count() } else { 0 };
     let inside = store
         .locations
         .subtree(id)
@@ -861,7 +861,7 @@ fn draw_search(frame: &mut Frame, area: Rect, model: &mut Model, theme: Theme) {
     } else {
         let key = " SPC ";
         let gutter = crate::layout::GUTTER as usize;
-        model.leader_zone = Zone {
+        model.space_zone = Zone {
             row: rows[1].y,
             col: area.x + u16::try_from(cols.saturating_sub(width(key) + gutter)).unwrap_or(0),
             width: u16::try_from(width(key)).unwrap_or(0),
