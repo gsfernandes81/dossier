@@ -13,8 +13,8 @@
 // You should have received a copy of the GNU Affero General Public License along with
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
-//! The journal thread's work: saving for the session, and noticing when
-//! another writer's ops arrive.
+//! The journal thread's work: saving for the session, compacting its own file
+//! once its saves go quiet, and noticing when another writer's ops arrive.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
