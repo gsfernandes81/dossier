@@ -208,7 +208,7 @@ fn ask_root(
                     default: default.as_deref(),
                     kind: Kind::Folder,
                     required: true,
-                    flag: "--root",
+                    flag: Some("--root"),
                 })?
                 .unwrap_or_default();
             PathBuf::from(trim_separator(&typed))
@@ -258,7 +258,7 @@ fn ask_device(
                     default: was,
                     kind: Kind::Text,
                     required: true,
-                    flag: "--device",
+                    flag: Some("--device"),
                 })?
                 .unwrap_or_default(),
         };
@@ -283,7 +283,7 @@ fn ask_device(
             default: Some("no"),
             kind: Kind::YesNo,
             required: true,
-            flag: "--force",
+            flag: Some("--force"),
         })?;
         if confirm.as_deref() == Some("yes") {
             return Ok(device);
@@ -314,7 +314,7 @@ fn ask_syncthing(
             default: Some("yes"),
             kind: Kind::YesNo,
             required: true,
-            flag: "--device",
+            flag: None,
         })?;
         if take.as_deref() == Some("yes") {
             return Ok(crate::config::Syncthing {
@@ -338,7 +338,7 @@ fn ask_syncthing(
             default: Some("yes"),
             kind: Kind::YesNo,
             required: true,
-            flag: "--device",
+            flag: None,
         })?,
         None => None,
     };
@@ -353,7 +353,7 @@ fn ask_syncthing(
             default: None,
             kind: Kind::Secret,
             required: false,
-            flag: "--device",
+            flag: None,
         })?
     };
     let Some(apikey) = apikey else {
@@ -367,7 +367,7 @@ fn ask_syncthing(
                 default: Some(&default),
                 kind: Kind::Text,
                 required: true,
-                flag: "--device",
+                flag: None,
             })?
             .unwrap_or_default();
         if crate::syncthing::is_address(&address) {
@@ -795,7 +795,7 @@ mod tests {
         let (result, _) = talk(&dir.join("config.toml"), &Answers::default(), "", false);
         match result {
             Err(Error::Prompt(crate::prompt::Error::NotATerminal { flag })) => {
-                assert_eq!(flag, "--device");
+                assert_eq!(flag, Some("--device"));
             }
             other => panic!("expected a fail-fast, got {other:?}"),
         }

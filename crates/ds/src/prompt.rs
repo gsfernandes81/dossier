@@ -53,18 +53,18 @@ pub struct Question<'a> {
     /// Whether an empty reply with no default is asked again. When not, it
     /// skips the question.
     pub required: bool,
-    /// The flag that answers it without asking.
-    pub flag: &'static str,
+    /// The flag that answers it without asking, if one does.
+    pub flag: Option<&'static str>,
 }
 
 /// Why a question went unanswered.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// A value was missing and there was no terminal to ask at.
-    #[error("no terminal to ask on — pass {flag}")]
+    #[error("no terminal to ask on{}", .flag.map_or(String::new(), |flag| format!(" — pass {flag}")))]
     NotATerminal {
         /// The flag that would have supplied it.
-        flag: &'static str,
+        flag: Option<&'static str>,
     },
     /// The person left with `Esc` or `ctrl+c`.
     #[error("cancelled — nothing was written")]
@@ -411,7 +411,7 @@ mod tests {
             default,
             kind,
             required,
-            flag: "--x",
+            flag: Some("--x"),
         };
         assert_eq!(
             settle(&question(Kind::Text, Some("phone"), true), ""),
