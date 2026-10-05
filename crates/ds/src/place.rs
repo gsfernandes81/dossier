@@ -14,8 +14,6 @@
 // dossier. If not, see <https://www.gnu.org/licenses/>.
 
 //! Physical locations: a tree of any depth, folded from `location` entities.
-//!
-//! The model is in REWRITE.md.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};

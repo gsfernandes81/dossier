@@ -15,9 +15,8 @@
 
 //! The Space sheet: what `Space` opens, and the verbs it lists.
 //!
-//! Its letters run verbs and nothing searches it; finding a command by name is
-//! the command line's job. Which letters it lists follows what is on screen.
-//! The rules are in REWRITE-UI.md.
+//! Its letters run verbs and nothing searches it. Which letters it lists
+//! follows what is on screen.
 
 use crate::app::Model;
 

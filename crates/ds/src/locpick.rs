@@ -15,8 +15,8 @@
 
 //! The location picker: the tree of physical locations, drawn like `tree`.
 //!
-//! The behaviour is in REWRITE-UI.md, "The location picker". [`LocationPicker::rows`]
-//! is what the renderer draws and the keys walk, derived afresh every frame.
+//! [`LocationPicker::rows`] is what the renderer draws and the keys walk,
+//! derived afresh every frame.
 
 use std::collections::BTreeSet;
 

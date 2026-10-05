@@ -15,7 +15,7 @@
 
 //! The Details view: one document's rows, and the selector its verbs act on.
 //!
-//! The layout is in REWRITE-UI.md. `e` edits the selected row.
+//! `e` edits the selected row.
 //!
 //! [`rows`] is the list the selector walks and the renderer draws, so a
 //! highlight can never land on a row the reader is not looking at.
