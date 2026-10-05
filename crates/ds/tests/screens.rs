@@ -441,7 +441,6 @@ fn the_touch_layout_has_one_button_and_it_explains_itself() {
     // one row is too small a thing to ask a thumb to hit.
     for row in [26u16, 27] {
         m.mouse_on = true;
-        m.keyboard_hint = false;
         update(&mut m, Msg::Tap { col: 3, row });
         assert!(!m.mouse_on, "row {row} is part of the target");
     }

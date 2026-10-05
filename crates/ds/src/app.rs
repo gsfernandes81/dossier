@@ -275,6 +275,16 @@ impl Landed {
     }
 }
 
+/// A press that has asked once and acts on the next one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Armed {
+    /// One more `Esc` quits.
+    Esc,
+    /// One more `d` deletes what is in front: the document, the bundle, or
+    /// the picked location with everything inside it. `u` puts it back.
+    Delete,
+}
+
 /// Whether this session can write, and the reason to show when it cannot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteState {
@@ -427,7 +437,6 @@ impl RowGeometry {
 
 /// Everything the renderer reads and the event loop changes.
 #[derive(Default)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct Model {
     /// The store, folded once at startup.
     pub store: Store,
@@ -463,12 +472,10 @@ pub struct Model {
     pub new_row: Option<u16>,
     /// The views pushed over the Find view, innermost last.
     pub views: Vec<View>,
-    /// One more `Esc` and we quit.
-    pub esc_armed: bool,
+    /// What the next press of the same key does without asking again.
+    pub armed: Option<Armed>,
     /// Whether SGR mouse reporting is currently on.
     pub mouse_on: bool,
-    /// Reporting was dropped on purpose so the next tap raises the keyboard.
-    pub keyboard_hint: bool,
     /// The leader sheet, when it is open.
     pub sheet: bool,
     /// The field being edited, when one is.
@@ -483,10 +490,6 @@ pub struct Model {
     /// direction says when the journal confirms it and dropped when it
     /// refuses, so a write that never landed can never be taken back.
     pending: Option<Pending>,
-    /// One more `d` deletes what is in front: the document, the bundle, or
-    /// the picked location with everything inside it. Armed rather than
-    /// confirmed in a dialog, since `u` puts it back.
-    pub delete_armed: bool,
     /// Whether this session can write, and why not when it cannot.
     pub write: WriteState,
     /// Where the view drew the header's pressable expiring count.
@@ -902,12 +905,12 @@ impl Model {
         }
         let Some(View::Bundle { id, .. }) = self.views.last().cloned() else { return Effect::Idle };
         let Some(bundle) = self.store.bundle(&id) else { return Effect::Idle };
-        if !self.delete_armed {
-            self.delete_armed = true;
+        if self.armed != Some(Armed::Delete) {
+            self.armed = Some(Armed::Delete);
             return Effect::Redraw;
         }
         let change = Change::create("bundle", &id, bundle.as_fields()).reversed();
-        self.delete_armed = false;
+        self.armed = None;
         self.append(change, Landed::saying("deleted — u to undo"))
     }
 
@@ -1364,7 +1367,7 @@ impl Model {
             "Caution: {name} holds {holds}. Press d again to delete and remove their location \
              attributes"
         ));
-        self.delete_armed = true;
+        self.armed = Some(Armed::Delete);
         Effect::Redraw
     }
 
@@ -1509,7 +1512,7 @@ impl Model {
         } else if was_armed {
             return Effect::Quit;
         } else {
-            self.esc_armed = true;
+            self.armed = Some(Armed::Esc);
         }
         Effect::Redraw
     }
@@ -1642,7 +1645,6 @@ impl Model {
     /// applies it by reconciling against [`Model::mouse_on`].
     fn raise_keyboard(&mut self) -> Effect {
         self.mouse_on = false;
-        self.keyboard_hint = true;
         Effect::Redraw
     }
 
@@ -1729,13 +1731,13 @@ impl Model {
             self.flash = Some("nothing to delete".into());
             return Effect::Redraw;
         };
-        if !self.delete_armed {
-            self.delete_armed = true;
+        if self.armed != Some(Armed::Delete) {
+            self.armed = Some(Armed::Delete);
             return Effect::Redraw;
         }
         let id = doc.id.clone();
         let change = Change::create("doc", &id, doc.as_fields()).reversed();
-        self.delete_armed = false;
+        self.armed = None;
         self.sheet = false;
         self.append(change, Landed::saying("deleted — u to undo"))
     }
@@ -1811,21 +1813,21 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
     // A key press means the user is at the keyboard, so the IME affordance has
     // done its job: restore mouse reporting. Doing it here, once, is why the
     // drop can never become a mode you get stuck in.
-    if model.keyboard_hint && is_key(&msg) {
+    if is_key(&msg) {
         model.mouse_on = true;
-        model.keyboard_hint = false;
     }
 
     // `d d` and `Esc Esc` act only on consecutive presses: any other key or
     // tap disarms. A resize does not, since Termux's `Esc` also drops the
     // keyboard and resizes the terminal.
-    if model.delete_armed && msg != Msg::Char('d') && disarms(&msg) {
-        model.delete_armed = false;
-        model.flash = None;
-    }
-    let was_armed = model.esc_armed;
-    if msg != Msg::Esc && disarms(&msg) {
-        model.esc_armed = false;
+    let was_armed = model.armed == Some(Armed::Esc);
+    match model.armed {
+        Some(Armed::Delete) if msg != Msg::Char('d') && disarms(&msg) => {
+            model.armed = None;
+            model.flash = None;
+        }
+        Some(Armed::Esc) if msg != Msg::Esc && disarms(&msg) => model.armed = None,
+        _ => {}
     }
     if is_key(&msg) {
         model.flash = None;
@@ -1875,7 +1877,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             // The edit whose save this is closes now, not at `Enter`: until the
             // journal answers, the value on screen is a hope.
             model.edit.take_if(|edit| edit.saving);
-            model.delete_armed = false;
+            model.armed = model.armed.filter(|armed| *armed == Armed::Esc);
             let landed = match model.pending.take() {
                 Some(Pending { change, direction, landed }) => {
                     match direction {
@@ -1937,7 +1939,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                     Direction::Forward => {}
                 }
             }
-            model.delete_armed = false;
+            model.armed = model.armed.filter(|armed| *armed == Armed::Esc);
             model.flash = Some(reason.clone());
             // A refusal that will refuse again takes editing off the table for
             // the session, rather than inviting the same disappointment on
@@ -2384,8 +2386,8 @@ fn locpick_key(model: &mut Model, msg: &Msg) -> Option<Effect> {
         }
         return None;
     }
-    if model.delete_armed && *msg == Msg::Char('d') {
-        model.delete_armed = false;
+    if model.armed == Some(Armed::Delete) && *msg == Msg::Char('d') {
+        model.armed = None;
         model.flash = None;
         if let Some(id) = model.picked_location() {
             return Some(model.remove(&id));
@@ -3297,9 +3299,12 @@ pub(crate) mod tests {
         update(&mut m, Msg::Move(Motion::Up));
         update(&mut m, Msg::Char(' '));
         update(&mut m, Msg::Char('d'));
-        assert!(m.delete_armed);
+        assert_eq!(m.armed, Some(Armed::Delete));
         update(&mut m, Msg::Tap { col: 0, row: 0 });
-        assert!(!m.delete_armed && m.flash.is_none(), "the caution goes with the arm");
+        assert!(
+            m.armed != Some(Armed::Delete) && m.flash.is_none(),
+            "the caution goes with the arm"
+        );
         assert!(!matches!(update(&mut m, Msg::Char('d')), Effect::Append(_)));
     }
 
@@ -3318,7 +3323,7 @@ pub(crate) mod tests {
             )
         );
         update(&mut m, Msg::Move(Motion::Down));
-        assert!(!m.delete_armed, "any other key cancels");
+        assert_ne!(m.armed, Some(Armed::Delete), "any other key cancels");
 
         update(&mut m, Msg::Move(Motion::Up));
         update(&mut m, Msg::Char(' '));
@@ -3434,14 +3439,14 @@ pub(crate) mod tests {
         update(&mut m, Msg::Enter);
 
         assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw, "the first press only asks");
-        assert!(m.delete_armed);
+        assert_eq!(m.armed, Some(Armed::Delete));
 
         assert_eq!(
             update(&mut m, Msg::Char('d')),
             Effect::Append(vec![journal::Draft::delete("doc", "coc")]),
             "the second press writes the tombstone"
         );
-        assert!(!m.delete_armed);
+        assert_ne!(m.armed, Some(Armed::Delete));
     }
 
     #[test]
@@ -3449,10 +3454,10 @@ pub(crate) mod tests {
         let mut m = writable();
         update(&mut m, Msg::Enter);
         update(&mut m, Msg::Char('d'));
-        assert!(m.delete_armed);
+        assert_eq!(m.armed, Some(Armed::Delete));
 
         update(&mut m, Msg::Move(Motion::Down));
-        assert!(!m.delete_armed, "moving the selector is not consent");
+        assert_ne!(m.armed, Some(Armed::Delete), "moving the selector is not consent");
         assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw, "so this asks again");
     }
 
@@ -3486,7 +3491,7 @@ pub(crate) mod tests {
         let mut m = model();
         update(&mut m, Msg::Enter);
         update(&mut m, Msg::Char('d'));
-        assert!(!m.delete_armed, "it did not even arm");
+        assert_ne!(m.armed, Some(Armed::Delete), "it did not even arm");
         assert!(m.flash.is_some());
     }
 
@@ -3630,13 +3635,13 @@ pub(crate) mod tests {
         // Arm first: `Esc` is a real keystroke, so it would restore the mouse
         // reporting the affordance drops — the drop has to come after it.
         update(&mut m, Msg::Esc);
-        assert!(m.esc_armed);
+        assert_eq!(m.armed, Some(Armed::Esc));
         m.raise_keyboard();
         assert!(!m.mouse_on);
 
         let store = restored(&m, "coc", Some("2027-04-01"));
         land_as(&mut m, store);
-        assert!(m.esc_armed, "a worker message did not disarm the quit");
+        assert_eq!(m.armed, Some(Armed::Esc), "a worker message did not disarm the quit");
         assert!(!m.mouse_on, "nor did it restore mouse reporting");
     }
 
@@ -3767,13 +3772,13 @@ pub(crate) mod tests {
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw);
         assert!(!m.detail(), "first press closed the record");
         assert_eq!(m.query, "c", "and nothing else");
-        assert!(!m.esc_armed, "closing something is not arming");
+        assert_ne!(m.armed, Some(Armed::Esc), "closing something is not arming");
 
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw);
         assert!(m.query.is_empty(), "second press cleared the search");
 
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw);
-        assert!(m.esc_armed, "at base state it arms");
+        assert_eq!(m.armed, Some(Armed::Esc), "at base state it arms");
 
         assert_eq!(update(&mut m, Msg::Esc), Effect::Quit);
     }
@@ -4003,7 +4008,7 @@ pub(crate) mod tests {
         m.run(crate::sheet::Act::Bundles);
         update(&mut m, Msg::Enter);
         assert_eq!(update(&mut m, Msg::Char('d')), Effect::Redraw);
-        assert!(m.delete_armed);
+        assert_eq!(m.armed, Some(Armed::Delete));
         assert_eq!(
             update(&mut m, Msg::Char('d')),
             Effect::Append(vec![journal::Draft::delete("bundle", "joining")])
@@ -4177,9 +4182,9 @@ pub(crate) mod tests {
     fn any_other_key_disarms_the_quit() {
         let mut m = model();
         update(&mut m, Msg::Esc);
-        assert!(m.esc_armed);
+        assert_eq!(m.armed, Some(Armed::Esc));
         update(&mut m, Msg::Move(Motion::Down));
-        assert!(!m.esc_armed);
+        assert_ne!(m.armed, Some(Armed::Esc));
         assert_eq!(update(&mut m, Msg::Esc), Effect::Redraw, "arms again rather than quitting");
     }
 
@@ -4453,10 +4458,10 @@ pub(crate) mod tests {
     fn the_ime_affordance_restores_itself_on_the_next_key() {
         let mut m = model();
         m.raise_keyboard();
-        assert!(!m.mouse_on && m.keyboard_hint);
+        assert!(!m.mouse_on);
 
         update(&mut m, Msg::Char('c'));
-        assert!(m.mouse_on && !m.keyboard_hint);
+        assert!(m.mouse_on);
         assert_eq!(m.query, "c", "and the keystroke still counted");
     }
 
@@ -4545,7 +4550,7 @@ pub(crate) mod tests {
         assert_eq!(m.picker.as_ref().map(|p| p.filter.as_str()), Some(""), "the typing went first");
         update(&mut m, Msg::Esc);
         assert!(m.picker.is_none());
-        assert!(!m.esc_armed, "closing it did not arm the quit");
+        assert_ne!(m.armed, Some(Armed::Esc), "closing it did not arm the quit");
     }
 
     #[test]
@@ -4698,14 +4703,13 @@ pub(crate) mod tests {
         // **Both** rows of the touch search bar, right down to the screen edge.
         for row in [m.rows_on_screen - 2, m.rows_on_screen - 1] {
             m.mouse_on = true;
-            m.keyboard_hint = false;
             update(&mut m, Msg::Tap { col: 3, row });
-            assert!(!m.mouse_on && m.keyboard_hint, "row {row} is part of the target");
+            assert!(!m.mouse_on, "row {row} is part of the target");
         }
 
         // And the next keystroke puts reporting back.
         update(&mut m, Msg::Char('c'));
-        assert!(m.mouse_on && !m.keyboard_hint);
+        assert!(m.mouse_on);
         assert_eq!(m.query, "c");
     }
 
@@ -4835,12 +4839,12 @@ pub(crate) mod tests {
         update(&mut m, Msg::ToggleScans);
         update(&mut m, Msg::ToggleScans); // changed their mind while it loaded
         update(&mut m, Msg::Esc);
-        assert!(m.esc_armed);
+        assert_eq!(m.armed, Some(Armed::Esc));
 
         update(&mut m, Msg::ScansLoaded(std::sync::Arc::new(crate::scans::Scans::default())));
         assert_eq!(m.scan_search, ScanSearch::Off, "not turned on behind their back");
         assert!(m.scans.is_some(), "but the work is kept");
-        assert!(m.esc_armed, "a worker message is not a keystroke");
+        assert_eq!(m.armed, Some(Armed::Esc), "a worker message is not a keystroke");
     }
 
     #[test]

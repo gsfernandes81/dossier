@@ -26,7 +26,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{ListGeometry, Model, ScanSearch, Zone};
+use crate::app::{Armed, ListGeometry, Model, ScanSearch, Zone};
 use crate::layout::{cursor_cell, fit, pad_left, short_date, spread, truncate, width, wrap};
 use crate::theme::{Theme, Tone};
 use crate::{Doc, Status};
@@ -952,7 +952,7 @@ fn entry_row(model: &Model, key: &'static str, cols: usize, theme: Theme) -> Lin
 fn mode_line(model: &Model) -> String {
     use crate::app::View;
     let top = model.views.last();
-    if model.delete_armed && model.locpick.is_none() {
+    if model.armed == Some(Armed::Delete) && model.locpick.is_none() {
         return match top {
             Some(View::Bundle { id, .. }) => {
                 let name = model.store.bundle(id).map_or("", |bundle| bundle.name.as_str());
@@ -995,7 +995,7 @@ fn info_row(model: &Model, cols: usize, theme: Theme) -> Line<'static> {
 /// How many rows the status line needs: one, or as many as an armed location
 /// delete's caution wraps to.
 fn status_rows(model: &Model, cols: u16) -> u16 {
-    match (model.delete_armed && model.locpick.is_some(), &model.flash) {
+    match (model.armed == Some(Armed::Delete) && model.locpick.is_some(), &model.flash) {
         (true, Some(flash)) => {
             u16::try_from(wrap(flash, cols.saturating_sub(2) as usize).len().clamp(1, 4))
                 .unwrap_or(1)
@@ -1099,7 +1099,7 @@ fn hints(model: &Model) -> Vec<&'static str> {
     if model.picker.is_some() {
         return vec!["type to narrow", "⏎ choose", "esc back"];
     }
-    if model.delete_armed {
+    if model.armed == Some(Armed::Delete) {
         return vec!["any other key cancels"];
     }
     let ready = model.write.ready();
@@ -1152,7 +1152,7 @@ fn message(model: &Model) -> Option<(String, Tone)> {
     if let Some(flash) = &model.flash {
         return Some((flash.clone(), Tone::Flash));
     }
-    if model.esc_armed {
+    if model.armed == Some(Armed::Esc) {
         return Some(("esc again to quit".into(), Tone::Armed));
     }
     let edit = model.edit.as_ref()?;
