@@ -1175,7 +1175,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, model: &Model, theme: Theme) {
         caution_lines(&message, area.width as usize, tone, theme)
     } else {
         vec![Line::styled(
-            format!(" {}", truncate(&message, area.width as usize - 1)),
+            format!(" {}", truncate(&message, (area.width as usize).saturating_sub(1))),
             theme.on_band(tone),
         )]
     };
