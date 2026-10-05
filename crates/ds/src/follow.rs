@@ -166,17 +166,19 @@ impl Follower {
 
     /// Compacts the writer's file if worthwhile, once per burst of saves.
     ///
-    /// Silent: a failed compaction leaves the file as it was, and the next
-    /// burst tries again. The re-read it causes folds to the same store, which
-    /// the UI drops.
+    /// Silent: a failed compaction leaves the file as it was and is tried again
+    /// after the next quiet period. The re-read it causes folds to the same
+    /// store, which the UI drops.
     fn compact_when_quiet(&mut self) {
         let (Some(writer), Some(saved)) = (&self.writer, self.since_save) else { return };
         if saved.elapsed() < self.quiet {
             return;
         }
         self.since_save = None;
-        if crate::compaction::gate(self.journal.path()).allows() {
-            let _ = writer.compact(journal::writer::now_ms());
+        if crate::compaction::gate(self.journal.path()).allows()
+            && writer.compact(journal::writer::now_ms()).is_err()
+        {
+            self.since_save = Some(Instant::now());
         }
     }
 
@@ -298,6 +300,25 @@ mod tests {
         follower.quiet = Duration::ZERO;
         follower.poll();
         assert_eq!(lines(&path), 3, "the create, the newest name and the new slot");
+    }
+
+    /// A rename refused by a Syncthing scan holding the file must not wait
+    /// for the next save, which may be days away.
+    #[test]
+    fn a_failed_compaction_is_retried_without_another_save() {
+        let fixture = fixture();
+        let path = history(&fixture);
+        let mut follower = follower(&fixture, true);
+        save(&mut follower);
+        let temp = path
+            .with_file_name(journal::names::compaction_temp_file("desk-core", std::process::id()));
+        std::fs::write(&temp, "taken").expect("plant a temp");
+        follower.poll();
+        assert_eq!(lines(&path), 42, "the temp name is taken");
+        assert!(!temp.exists(), "the failure cleared the way");
+
+        follower.poll();
+        assert_eq!(lines(&path), 3, "retried");
     }
 
     /// Opening the writer creates the journal, which must not appear merely
