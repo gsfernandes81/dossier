@@ -22,9 +22,11 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use journal::names::COMPACTION_TEMP_GLOB;
 use journal::store::FileReport;
 use journal::{FoldStats, Load};
 
+use crate::compaction::Gate;
 use crate::syncthing::State;
 use crate::Store;
 
@@ -61,6 +63,8 @@ pub struct Report {
     pub missing: Vec<String>,
     /// What the local Syncthing daemon says, unless `--no-sync`.
     pub sync: Option<crate::syncthing::Status>,
+    /// Whether this device's `ds` may compact its journal file.
+    pub compaction: Option<Gate>,
 }
 
 /// Something that needs a person, under the topic it is about.
@@ -110,6 +114,7 @@ impl Report {
             version_loops,
             missing,
             sync: None,
+            compaction: None,
         }
     }
 
@@ -194,6 +199,16 @@ impl Report {
                 say("syncthing", "the store is in no synced folder".into());
             }
         }
+        if let Some(Gate::Missing { stignore }) = &self.compaction {
+            say(
+                "syncthing",
+                format!(
+                    "`.stignore` at {} lacks `{COMPACTION_TEMP_GLOB}` — journal compaction is off \
+                     until it is added (`ds init` adds it)",
+                    stignore.display()
+                ),
+            );
+        }
         found
     }
 
@@ -215,6 +230,13 @@ impl Report {
                 "          {} ops are for deleted entries, as a deletion leaves them",
                 self.orphaned
             );
+        }
+        match self.compaction {
+            Some(Gate::Ignored) => out.push_str("          compaction on\n"),
+            Some(Gate::Unsynced) => {
+                out.push_str("          no Syncthing folder marker found; compaction runs\n");
+            }
+            Some(Gate::Missing { .. }) | None => {}
         }
         let _ = writeln!(out, "documents {} in {} locations", self.docs, self.locations);
         if let Some(line) = self.sync.as_ref().and_then(sync_line) {
@@ -434,6 +456,35 @@ mod tests {
         let mut r = report(&present(), Vec::new());
         r.sync = Some(sync(State::Idle, None));
         assert!(r.problems().contains("the store is in no synced folder"), "{}", r.problems());
+    }
+
+    /// Exits 3 under `--quiet`: compaction stays off until someone acts.
+    #[test]
+    fn a_missing_ignore_is_a_finding() {
+        let mut r = report(&present(), Vec::new());
+        r.compaction = Some(Gate::Missing { stignore: "/s/.stignore".into() });
+        assert!(!r.healthy());
+        let problems = r.problems();
+        assert!(problems.starts_with("syncthing `.stignore` at /s/.stignore lacks"), "{problems}");
+        assert!(problems.contains("`ds init` adds it"), "{problems}");
+        assert_eq!(r.render().matches("lacks").count(), 1, "said once");
+    }
+
+    #[test]
+    fn a_present_ignore_is_not() {
+        let mut r = report(&present(), Vec::new());
+        r.compaction = Some(Gate::Ignored);
+        assert!(r.healthy());
+        assert!(r.render().contains("compaction on"), "{}", r.render());
+    }
+
+    #[test]
+    fn no_marker_is_said_but_is_not_a_finding() {
+        let mut r = report(&present(), Vec::new());
+        r.compaction = Some(Gate::Unsynced);
+        assert!(r.healthy());
+        let text = r.render();
+        assert!(text.contains("no Syncthing folder marker found; compaction runs"), "{text}");
     }
 
     #[test]

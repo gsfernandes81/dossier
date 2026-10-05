@@ -208,6 +208,7 @@ fn status(
         &loaded.store,
         root,
     );
+    report.compaction = Some(ds::compaction::gate(&loaded.path));
     // The one network call in the binary, and the only slow one, so it is last.
     if !no_sync {
         report.sync = Some(

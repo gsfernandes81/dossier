@@ -23,6 +23,7 @@
 
 pub mod app;
 pub mod bundles;
+pub mod compaction;
 pub mod complete;
 pub mod config;
 pub mod detail;
