@@ -173,8 +173,8 @@ pub fn fold<'a>(lines: impl IntoIterator<Item = &'a Line>) -> Fold {
     for line in lines {
         match line {
             Line::Op(op) => ops.push(op),
-            Line::Opaque { .. } => result.stats.opaque += 1,
-            Line::Malformed { .. } => result.stats.malformed += 1,
+            Line::Opaque(_) => result.stats.opaque += 1,
+            Line::Malformed(_) => result.stats.malformed += 1,
         }
     }
 

@@ -115,7 +115,7 @@ pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
     let mut keep = Vec::with_capacity(lines.len());
     for (index, line) in lines.iter().enumerate() {
         let keep_this = match line {
-            Line::Opaque { .. } | Line::Malformed { .. } => true,
+            Line::Opaque(_) | Line::Malformed(_) => true,
             Line::Op(op) => {
                 op.ts >= cutoff
                     || match op.op {
@@ -243,8 +243,8 @@ mod tests {
             parse_line("{broken"),
         ];
         let survivors = kept(&lines, &plan(&lines, NOW));
-        assert!(survivors.iter().any(|l| matches!(l, Line::Opaque { .. })));
-        assert!(survivors.iter().any(|l| matches!(l, Line::Malformed { .. })));
+        assert!(survivors.iter().any(|l| matches!(l, Line::Opaque(_))));
+        assert!(survivors.iter().any(|l| matches!(l, Line::Malformed(_))));
     }
 
     #[test]

@@ -292,8 +292,8 @@ impl Journal {
                         report.ops += 1;
                         report.max_ts = report.max_ts.max(op.ts);
                     }
-                    Line::Malformed { .. } => report.malformed += 1,
-                    Line::Opaque { .. } => {}
+                    Line::Malformed(_) => report.malformed += 1,
+                    Line::Opaque(_) => {}
                 }
             }
             if report.malformed > 0 {

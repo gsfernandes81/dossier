@@ -398,8 +398,8 @@ impl Writer {
                 // Re-serialized, which is lossless because `Op` carries unknown
                 // fields (`extra`).
                 Line::Op(op) => rewritten.extend_from_slice(op.to_line()?.as_bytes()),
-                Line::Opaque { raw, .. } => rewritten.extend_from_slice(raw.as_bytes()),
-                Line::Malformed { raw, .. } => rewritten.extend_from_slice(raw),
+                Line::Opaque(raw) => rewritten.extend_from_slice(raw.as_bytes()),
+                Line::Malformed(raw) => rewritten.extend_from_slice(raw),
             }
             rewritten.push(b'\n');
         }

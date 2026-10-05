@@ -112,15 +112,6 @@ impl Op {
     }
 }
 
-/// Why a well-formed line could not be folded by this build.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OpaqueReason {
-    /// `v` is not [`FORMAT_VERSION`] — written by a newer dossier.
-    UnknownVersion,
-    /// `op` is a verb this build has never heard of.
-    UnknownOp,
-}
-
 /// One line of a journal file, classified.
 ///
 /// Compaction keeps every line this build cannot fold and copies its original
@@ -130,22 +121,9 @@ pub enum Line {
     /// A line this build folds.
     Op(Box<Op>),
     /// Well-formed JSON from a version or verb this build does not know.
-    Opaque {
-        /// The original bytes.
-        raw: String,
-        /// Which kind of unknown.
-        reason: OpaqueReason,
-    },
-    /// Broken bytes: not UTF-8, not JSON, not an object, or missing required
-    /// fields.
-    ///
-    /// Counted and surfaced as a `ds status` anomaly.
-    Malformed {
-        /// The original bytes.
-        raw: Vec<u8>,
-        /// A human-readable reason, for the anomaly report.
-        reason: String,
-    },
+    Opaque(String),
+    /// Broken bytes, kept so compaction copies them verbatim.
+    Malformed(Vec<u8>),
 }
 
 impl Line {
@@ -174,73 +152,49 @@ impl From<Op> for Line {
 /// # Performance
 ///
 /// The fast path deserializes straight into [`Op`]; only a line that does not
-/// fit is re-read as a generic `Value` to explain why. Parsing every line into
-/// `Value` first measured at 3× the cost of the fold itself.
+/// fit is re-read as a generic `Value` to tell a future version or verb from
+/// damage. Parsing every line into `Value` first measured at 3× the cost of the
+/// fold itself.
+#[must_use]
 pub fn parse_line(raw: &str) -> Line {
     match serde_json::from_str::<Op>(raw) {
-        Ok(op) if op.v != FORMAT_VERSION => {
-            Line::Opaque { raw: raw.to_string(), reason: OpaqueReason::UnknownVersion }
-        }
-        // Only `val` and unknown fields can smuggle a float in: every other
-        // field is typed, so a float there fails the deserialize above and is
-        // explained by the slow path.
-        Ok(op)
-            if op.val.as_ref().is_some_and(contains_float)
-                || op.extra.values().any(contains_float) =>
-        {
-            Line::Malformed {
-                raw: raw.as_bytes().to_vec(),
-                reason: "contains a floating-point number (the format is integers-only)".into(),
-            }
-        }
-        Ok(op) => Line::Op(Box::new(op)),
+        Ok(op) => accept(op, raw),
         Err(_) => classify_failure(raw),
     }
 }
 
-/// The slow path: work out why a line did not deserialize into an [`Op`].
+/// Folds `op` only if it carries this build's version and no float.
+fn accept(op: Op, raw: &str) -> Line {
+    if op.v != FORMAT_VERSION {
+        return Line::Opaque(raw.to_string());
+    }
+    // Only `val` and unknown fields can smuggle a float in: every other field
+    // is typed, so a float there fails the deserialize.
+    if op.val.as_ref().is_some_and(contains_float) || op.extra.values().any(contains_float) {
+        return Line::Malformed(raw.as_bytes().to_vec());
+    }
+    Line::Op(Box::new(op))
+}
+
+/// Tells a line from a newer version or verb apart from damage.
 fn classify_failure(raw: &str) -> Line {
-    let malformed =
-        |reason: &str| Line::Malformed { raw: raw.as_bytes().to_vec(), reason: reason.into() };
-
+    let malformed = || Line::Malformed(raw.as_bytes().to_vec());
     let Ok(value) = serde_json::from_str::<Value>(raw) else {
-        return malformed("not valid JSON");
+        return malformed();
     };
-    let Some(object) = value.as_object() else {
-        return malformed("not a JSON object");
-    };
-
-    // Version first: a line from the future must be preserved, not judged
-    // against this build's idea of required fields.
-    match object.get("v").and_then(Value::as_u64) {
-        None => return malformed("missing or non-integer `v`"),
-        Some(v) if v != u64::from(FORMAT_VERSION) => {
-            return Line::Opaque { raw: raw.to_string(), reason: OpaqueReason::UnknownVersion }
-        }
+    match value.get("v").and_then(Value::as_u64) {
+        None => return malformed(),
+        Some(v) if v != u64::from(FORMAT_VERSION) => return Line::Opaque(raw.to_string()),
         Some(_) => {}
     }
-
-    match object.get("op") {
-        None => return malformed("missing `op`"),
-        Some(Value::String(name)) => {
-            if serde_json::from_value::<OpKind>(Value::String(name.clone())).is_err() {
-                return Line::Opaque { raw: raw.to_string(), reason: OpaqueReason::UnknownOp };
-            }
+    if let Some(Value::String(verb)) = value.get("op") {
+        if serde_json::from_value::<OpKind>(Value::String(verb.clone())).is_err() {
+            return Line::Opaque(raw.to_string());
         }
-        Some(_) => return malformed("`op` is not a string"),
     }
-
-    if contains_float(&value) {
-        return malformed("contains a floating-point number (the format is integers-only)");
-    }
-
-    // The line is version 1 with a known verb, so reaching here means it failed
-    // the schema — a missing `ts`/`w`/`ent`/`id`, or one of them the wrong type.
-    // Re-run the deserialize purely to quote serde's reason in the anomaly.
-    match serde_json::from_value::<Op>(value) {
-        Ok(op) => Line::Op(Box::new(op)),
-        Err(err) => malformed(&format!("does not match the op schema: {err}")),
-    }
+    // `from_str` rejects a duplicate key while a `Value` keeps the last one, as
+    // Python's `json.loads` does, so the two folds agree.
+    serde_json::from_value::<Op>(value).map_or_else(|_| malformed(), |op| accept(op, raw))
 }
 
 /// Whether any number anywhere in `value` is a float.
@@ -274,7 +228,7 @@ pub fn parse_body(body: &[u8]) -> (Vec<Line>, Option<String>) {
         .filter(|line| !line.trim_ascii().is_empty())
         .map(|line| match std::str::from_utf8(line) {
             Ok(text) => parse_line(text),
-            Err(_) => Line::Malformed { raw: line.to_vec(), reason: "not UTF-8".into() },
+            Err(_) => Line::Malformed(line.to_vec()),
         })
         .collect();
     (lines, torn)
@@ -309,18 +263,15 @@ mod tests {
     #[test]
     fn lines_from_the_future_are_opaque_not_malformed() {
         let newer = r#"{"v":2,"ts":1,"w":"a","op":"set","ent":"doc","id":"x"}"#;
-        assert!(matches!(
-            parse_line(newer),
-            Line::Opaque { reason: OpaqueReason::UnknownVersion, .. }
-        ));
+        assert!(matches!(parse_line(newer), Line::Opaque(_)));
         let verb = r#"{"v":1,"ts":1,"w":"a","op":"teleport","ent":"doc","id":"x"}"#;
-        assert!(matches!(parse_line(verb), Line::Opaque { reason: OpaqueReason::UnknownOp, .. }));
+        assert!(matches!(parse_line(verb), Line::Opaque(_)));
     }
 
     #[test]
     fn broken_lines_are_malformed_and_keep_their_bytes() {
         for raw in ["{not json", "[1,2,3]", r#"{"ts":1}"#, r#"{"v":1,"ts":1,"w":"a"}"#] {
-            let Line::Malformed { raw: kept, .. } = parse_line(raw) else {
+            let Line::Malformed(kept) = parse_line(raw) else {
                 panic!("{raw} should be malformed")
             };
             assert_eq!(kept, raw.as_bytes());
@@ -330,7 +281,16 @@ mod tests {
     #[test]
     fn floats_are_rejected() {
         let raw = r#"{"v":1,"ts":1,"w":"a","op":"set","ent":"doc","id":"x","f":"n","val":1.5}"#;
-        assert!(matches!(parse_line(raw), Line::Malformed { .. }));
+        assert!(matches!(parse_line(raw), Line::Malformed(_)));
+    }
+
+    #[test]
+    fn a_duplicate_key_takes_the_last_value() {
+        let raw = r#"{"v":1,"ts":1,"w":"a","w":"b","op":"set","ent":"doc","id":"x"}"#;
+        let Line::Op(op) = parse_line(raw) else { panic!("should parse") };
+        assert_eq!(op.w, "b");
+        let float = r#"{"v":1,"ts":1,"w":"a","w":"b","op":"set","ent":"doc","id":"x","val":1.5}"#;
+        assert!(matches!(parse_line(float), Line::Malformed(_)));
     }
 
     #[test]
