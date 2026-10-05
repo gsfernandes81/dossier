@@ -110,7 +110,7 @@ pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
 
     // Then the newest op per key. `f` is part of the key for set/unset
     // (per-field LWW) and absent for the per-entity verbs.
-    let mut newest: BTreeMap<(&str, &str, Option<&str>, u8), usize> = BTreeMap::new();
+    let mut newest = BTreeMap::new();
     for (index, line) in lines.iter().enumerate() {
         let Line::Op(op) = line else { continue };
         let (ent, id) = op.entity_key();
@@ -122,18 +122,12 @@ pub fn plan(lines: &[Line], now_ms: i64) -> Plan {
             OpKind::State => (ent, id, None, 1),
             OpKind::Reading | OpKind::Proposal => (ent, id, None, 2),
         };
-        match newest.get(&key) {
-            Some(&previous) => {
-                if lines[previous].as_op().is_none_or(|prev| op.order_key() > prev.order_key()) {
-                    newest.insert(key, index);
-                }
-            }
-            None => {
-                newest.insert(key, index);
-            }
+        let best = newest.entry(key).or_insert((op.order_key(), index));
+        if op.order_key() > best.0 {
+            *best = (op.order_key(), index);
         }
     }
-    let survivors: BTreeSet<usize> = newest.into_values().collect();
+    let survivors: BTreeSet<usize> = newest.into_values().map(|(_, index)| index).collect();
 
     // Then keep.
     let mut keep = Vec::with_capacity(lines.len());
