@@ -57,7 +57,7 @@ impl Hlc {
     /// Split from [`Self::tick`] so tests can drive the clock backwards on
     /// purpose — the case this type exists for cannot otherwise be reproduced.
     pub fn tick_at(&mut self, now_ms: i64) -> i64 {
-        let ts = now_ms.max(self.last + 1);
+        let ts = now_ms.max(self.last.saturating_add(1));
         self.last = ts;
         ts
     }
@@ -577,6 +577,13 @@ mod tests {
     fn the_clock_seeds_from_the_whole_store() {
         let mut clock = Hlc::seeded(9_999_999_999_999);
         assert_eq!(clock.tick_at(1_000), 10_000_000_000_000);
+    }
+
+    /// A `ts` comes from another device's file, so a hostile one must not wrap
+    /// the clock to the far past.
+    #[test]
+    fn the_clock_saturates_rather_than_wrapping() {
+        assert_eq!(Hlc::seeded(i64::MAX).tick_at(0), i64::MAX);
     }
 
     #[test]
