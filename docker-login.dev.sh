@@ -1,117 +1,124 @@
 #!/usr/bin/env bash
-# Interactive one-shot login walkthrough for the dossier dev container. Baked into the
-# image at /home/dev/login.sh; driven from the host by `make dev` (which builds +
-# starts the container first) or `make dev-login` to re-run on demand.
+# The interactive login walkthrough for ds-dev. Baked into the image at /home/dev/login.sh;
+# run from a terminal on zero with:
 #
-# Every step is IDEMPOTENT: it checks the current auth state and only prompts when
-# you are NOT already signed in, so re-running is safe and near-instant. All three
-# credential stores live in persisted named volumes / the clone (see
-# docker-compose.dev.yml), so you normally do this exactly once per machine:
-#   - git SSH  -> .dev-ssh/    (gitignored, rides with the bind-mounted clone; the
-#                              identities file in it is ssh_config.fleet, the name the
-#                              base image prepends to ~/.ssh/config at every start)
-#   - GitHub   -> ds-gh        (~/.config/gh)
-#   - Claude   -> ds-claude    (~/.claude)
+#     cd ~/infra/dev && make login C=ds-dev
+#
+# Every step is IDEMPOTENT — it reads the current state and only prompts when something
+# is NOT already set up — so re-running it is safe and near-instant. Nothing here is fatal:
+# a step that cannot finish says why and the next one runs. Where each thing lives:
+#
+#   GitHub          -> /run/github, the hub's token   (nothing to do in here; checked)
+#   ssh identities  -> /run/ds-secrets, read-only     (added on zero in ~/.ds-dev-secrets)
+#   Claude Code     -> the login volume infra's compose names (shared by default)
+#   /workspace      -> ds-workspace, cloned from DEV_REPO (here, if start-up could not)
 set -u
 
 bold() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$1"; }
+info() { printf '    %s\n' "$1"; }
 ask()  { # ask "question" -> exit 0 on yes (default yes on empty)
   local reply
   read -r -p "  $1 [Y/n] " reply || return 1
   [ -z "$reply" ] || [ "$reply" = y ] || [ "$reply" = Y ]
 }
 
-DEV_SSH=/workspace/.dev-ssh
+REPO="${DEV_REPO:-gsfernandes81/dossier}"
+SECRETS="${DEV_SECRETS_DIR:-/run/ds-secrets}"
 
-# ── 1/3  Git SSH keys ────────────────────────────────────────────────────────
-# Reuse a preexisting key if one already authenticates; otherwise offer to
-# generate one into the gitignored .dev-ssh/ (persists with the clone; the
-# child-init.sh wires it into ~/.ssh at start, and the base image's entrypoint
-# rewrites GitHub HTTPS->SSH for pushes).
-bold "1/3  Git SSH keys"
-if ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -T git@github.com 2>&1 \
-     | grep -q "successfully authenticated"; then
-  ok "GitHub SSH already authenticates — using the existing key."
-else
-  existing=$(find "$DEV_SSH" -maxdepth 1 -name 'id_*' ! -name '*.pub' 2>/dev/null | head -1)
-  if [ -n "$existing" ]; then
-    warn "Found $existing but it does not authenticate to GitHub yet."
+# ── 1/3  GitHub: the hub's token ─────────────────────────────────────────────
+# Nothing to log into: the hub mints this container an hourly token for this repo alone,
+# and git (its credential helper) and gh (its wrapper) both use it. So this only reports —
+# and NOT through `gh auth status`, which fails for an installation token (it has no user)
+# while every repo command works.
+bold "1/3  GitHub (the hub's token)"
+if [ -s /run/github/token ]; then
+  if git ls-remote "https://github.com/${REPO}.git" HEAD >/dev/null 2>&1; then
+    ok "the hub's token for ${REPO} works — git and gh need nothing else."
   else
-    warn "No git SSH key found in .dev-ssh/."
-    if ask "Generate a new ed25519 key there?"; then
-      mkdir -p "$DEV_SSH" && chmod 700 "$DEV_SSH"
-      ssh-keygen -t ed25519 -f "$DEV_SSH/id_ed25519_dev" -N "" -C "ds-dev-$(hostname)"
-      # ssh_config.fleet is the BASE IMAGE's name for the host-specific half of
-      # ~/.ssh/config: it prepends this file to the baked defaults at every start, and
-      # it does so before it pulls the clone, which is why the identities live here
-      # rather than in something this container assembles later. Don't clobber a file
-      # you may already have.
-      #
-      # The key is named by the path the BASE copies it to, not by its path in the
-      # mount: the base copies every .dev-ssh/id_* into ~/.ssh at 0600, and a copy it
-      # owns cannot be refused for the mount's modes.
-      [ -f "$DEV_SSH/ssh_config.fleet" ] || cat > "$DEV_SSH/ssh_config.fleet" <<EOF
-Host github.com
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/id_ed25519_dev
-  IdentitiesOnly yes
-  StrictHostKeyChecking accept-new
-EOF
-      # In force now rather than at the next start — the same two-part assembly the
-      # base does. NOT a symlink: the base's own write would follow it and truncate
-      # the host's file on the next boot.
-      mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-      cp -f "$DEV_SSH/id_ed25519_dev" "$HOME/.ssh/id_ed25519_dev" 2>/dev/null || true
-      chmod 600 "$HOME/.ssh/id_ed25519_dev" 2>/dev/null || true
-      rm -f "$HOME/.ssh/config"
-      cat "$DEV_SSH/ssh_config.fleet" /home/dev/ssh_config > "$HOME/.ssh/config"
-      chmod 600 "$HOME/.ssh/config"
-      existing="$DEV_SSH/id_ed25519_dev"
-    fi
+    warn "a token is here but GitHub refuses it for ${REPO}."
+    info "Is the App installed on that repo? On zero: cd ~/infra/dev && make status C=hub"
   fi
-  # Get the public key onto GitHub: upload via gh if it's already authed (re-run
-  # this script after step 2 to use the shortcut), otherwise print it to add by hand.
-  if [ -n "${existing:-}" ] && [ -f "$existing.pub" ]; then
-    if gh auth status >/dev/null 2>&1 && ask "Upload this key to GitHub via gh?"; then
-      gh ssh-key add "$existing.pub" --title "ds-dev-$(hostname)" && ok "Key uploaded to GitHub."
-    else
-      warn "Add this public key at https://github.com/settings/keys , then re-run:"
-      printf '\n'; cat "$existing.pub"; printf '\n'
-    fi
-  fi
+else
+  warn "no token from the hub yet."
+  info "The hub writes one at its start and every 30 min; on zero, make status C=hub"
+  info "says why it has not."
 fi
 
-# ── 2/3  GitHub CLI (gh) ─────────────────────────────────────────────────────
-bold "2/3  GitHub CLI (gh)"
-if gh auth status >/dev/null 2>&1; then
-  ok "$(gh auth status 2>&1 | grep -m1 'Logged in' | sed 's/^[[:space:]]*//')"
+# ── 2/3  ssh identities ──────────────────────────────────────────────────────
+# Read-only in here: the base copies the id_* keys into ~/.ssh and prepends ssh_config.fleet
+# to ~/.ssh/config at every start. Nothing in this container can add to them.
+bold "2/3  ssh identities ($SECRETS)"
+if [ ! -d "$SECRETS" ]; then
+  warn "$SECRETS is not mounted — see ds-dev's DS_SECRETS line in infra's dev/.env."
+elif ! ls "$SECRETS" >/dev/null 2>&1; then
+  warn "$SECRETS is there but uid $(id -u) cannot read it — its owner on zero must be"
+  info "this container's dev uid."
 else
-  warn "Not logged in."
-  ask "Run 'gh auth login' now?" && gh auth login
+  keys=$(cd "$SECRETS" && ls -d id_* 2>/dev/null | grep -v '\.pub$' | tr '\n' ' ')
+  if [ -n "$keys" ]; then
+    ok "keys: ${keys% }"
+  else
+    ok "no keys — none are needed for GitHub, which is the hub's token."
+  fi
+  if [ -f "$SECRETS/ssh_config.fleet" ]; then
+    ok "ssh_config.fleet is prepended to ~/.ssh/config at start."
+    if grep -qiE '^[[:space:]]*Host[[:space:]].*github\.com' "$SECRETS/ssh_config.fleet"; then
+      info "Its github.com block is unused: git reaches GitHub over https with the token."
+    fi
+  fi
+  info "To add or change them: on zero, put them in ~/.ds-dev-secrets, then"
+  info "cd ~/infra/dev && make restart C=ds-dev (the base copies them in at start)."
 fi
 
 # ── 3/3  Claude Code ─────────────────────────────────────────────────────────
-# Logging in here is what makes `claude` work in the container at all: ssh in and start
-# one from the claude-sessions menu, which is how every dev container on this host is used.
+# Logging in here is what makes `claude` work in the container at all. The login is shared
+# across the dev containers by default (infra's CLAUDE_UNDOCUMENTED_SHARED_LOGINS switch), so
+# a login made in any of them is already this one's. An OAuth login belongs to the device
+# that made it: never copy a credentials file in from elsewhere.
 bold "3/3  Claude Code"
-if claude auth status >/dev/null 2>&1; then
-  ok "$(claude auth status --text 2>&1 | grep -m1 -E 'Email|Login method' | sed 's/^[[:space:]]*//')"
+if claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; then
+  ok "logged in — \`claude\` will start without a login flow."
 else
   warn "Not logged in."
-  ask "Run 'claude auth login' now?" && claude auth login
+  info "No browser in here: it prints a URL, and you paste back the code."
+  ask "Run 'claude auth login' now?" \
+    && claude auth login --claudeai --email "${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}"
+fi
+
+# ── the workspace ────────────────────────────────────────────────────────────
+# /workspace is this container's own volume, cloned at first start from DEV_REPO with the
+# hub's token. A start before the token arrived leaves it empty; this is where it gets
+# filled, and child-init.sh then adds the project to the venv as a start would have.
+bold "the workspace (/workspace)"
+if [ -d /workspace/.git ]; then
+  ok "$(git -C /workspace remote get-url origin 2>/dev/null) at $(git -C /workspace log --oneline -1 2>/dev/null)"
+elif [ -n "$(ls -A /workspace 2>/dev/null)" ]; then
+  warn "/workspace holds files but no checkout; not cloning ${REPO} over them."
+elif ask "Clone ${REPO} into /workspace now?"; then
+  if git clone "https://github.com/${REPO}.git" /workspace; then
+    bash /home/dev/child-init.sh || warn "child-init.sh failed — its output is above."
+  else
+    warn "the clone failed — step 1 above says whether the token is the reason."
+  fi
 fi
 
 bold "Done."
-if claude auth status >/dev/null 2>&1; then
-  ok "Work in it over ssh: 'ssh ds-dev' lands on the claude-sessions menu."
-fi
 cat <<'EOF'
 
-  Attach a shell:   docker exec -it ds-dev fish
-  Work in it:       ssh ds-dev  — the claude-sessions menu
-  Idle sessions:    offloaded and left resumable from the menu
-  Re-run logins:    make dev-login
+  ds-dev is reached through the hub. From the phone or a PC:
+
+      ssh dev                 every dev container; Enter on ds-dev for its sessions,
+                              s for a shell in it
+
+  Every session the menu opens is a zmx session: Ctrl-\ detaches and the menu
+  comes back, and a dropped connection costs nothing — ssh in again and press Enter.
+  Idle sessions are offloaded and stay resumable from the menu.
+
+  From a terminal on zero, in ~/infra/dev:
+      make up S=ds-dev        start it (it rests stopped)
+      make shell C=ds-dev     a shell in it, without the hub
+      make status C=ds-dev    what it is running, and which logins it has
+      make login C=ds-dev     these steps again
 EOF

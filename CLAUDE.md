@@ -23,11 +23,10 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 
 > **Tooling is mirrored from the sibling project `destiny-director`** (same ruff/ty/pytest
 > setup), minus everything Railway/Atlas/DB/Discord-specific, which does not apply here.
-> The one Docker/Makefile piece we DO mirror is the **remote dev container**
-> (`Dockerfile.dev`, `docker-compose.dev.yml`, `docker-*.dev.sh`, `ssh_config.dev`,
-> `sshd_config.dev.d/`) — both repos are now thin children of the same base image —
-> see [Remote dev container](#remote-dev-container). The `Makefile` exists solely to
-> drive it; day-to-day work is still the `uv run` commands below, not make.
+> The **remote dev container** is no longer run from this repo: `ds-dev` is a service in
+> `infra`'s dev Compose project, built from this repo's `Dockerfile.dev` — see
+> [Remote dev container](#remote-dev-container). There is no `Makefile`; day-to-day work
+> is the `uv run` commands below.
 
 ## Package management — use uv
 
@@ -104,8 +103,8 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
   gh run view <id> --json conclusion,jobs \
     --jq '{overall: .conclusion, jobs: [.jobs[] | {name, conclusion}]}'
   ```
-- The `Makefile` holds **only** the remote-dev-container targets (`make dev`, `dev-up`,
-  `dev-login`, `dev-down`, `dev-down-volumes`) — not part of lint/test/build.
+- There is **no `Makefile`**: the gate is the `uv` commands above, nothing else. The dev
+  container's lifecycle is infra's `make … C=ds-dev`, not part of lint/test/build.
 
 ## License headers
 
@@ -140,69 +139,45 @@ Markdown + YAML files (one per document) plus a couple of TOML files; there is n
 
 ## Remote dev container
 
-For developing dossier remotely (e.g. on a Pi/home server, driven from claude.ai/code, the
-Claude mobile app, or Zed-remote), the repo ships a Docker dev environment. Since
-**2026-08-24** `Dockerfile.dev` no longer builds one — it is a **thin child of
-`gsrpi-dev-base`**, the shared image the four dev containers on that Pi run
-(`infra-dev`, `or3-dev`, `dd-dev`, this): python 3.13-slim-trixie, uv's siblings git and
-`gh`, Node + a self-updating Claude Code, claude-sessions, fish, screen, abduco, the ssh
-client and server, the `dev` user, the dotfiles and the entrypoint all come from there,
-pulled from
-`ghcr.io/gsfernandes81/gsrpi-dev-base` at the tag pinned in `ARG BASE_TAG`. This repo
-adds a compiler, `uv`, and its own venv (`--all-extras --group driver`). The clone is
-**bind-mounted** at `/workspace`; the venv lives at `/home/dev/venv`, outside the mount.
-The base's source is `dev/Dockerfile.base` in the `infra` repo, and nothing here needs
-that repo checked out — the `FROM` pulls.
+`ds-dev` runs on `zero` as one service in **infra's** dev Compose project
+(`dev/compose.yaml`, service `ds-dev`, since 2026-10-27), behind infra's hub. How it is
+started, stopped, logged into and reached — the hub, the GitHub token, the shared Claude
+login, the targets — is
+[infra's `dev/README.md`](https://github.com/gsfernandes81/infra/blob/main/dev/README.md)
+(gsfernandes81/infra); don't copy it here. This section is what dossier's own dev files
+still do: `Dockerfile.dev`, `docker-child-init.dev.sh`, `docker-login.dev.sh`,
+`ssh_config.dev`, `.dockerignore`.
 
-- **Files:** `Dockerfile.dev`, `docker-compose.dev.yml`, `docker-child-init.dev.sh`,
-  `docker-login.dev.sh`, `ssh_config.dev`,
-  `sshd_config.dev.d/`, `Makefile`, `.dockerignore`, `.env-example`.
-- **What this image does at start:** the base's entrypoint pulls the clone, then runs
-  `docker-child-init.dev.sh` — the `.dev-ssh` git identities, and `uv sync --frozen
-  --all-extras --group driver` to add the editable project to the pre-built venv. Keep
-  those flags identical to `Dockerfile.dev`'s build sync: `uv sync` makes the environment
-  match what it is asked for, so a start with fewer flags uninstalls the baked extras. A
-  failed sync warns and the container still comes up.
-- **One-time host setup:** `cp .env-example .env` and set `DEV_SSH_AUTHORIZED_KEYS` to the
-  host user's `.ssh/` dir (its `authorized_keys` gates the in-container sshd). Git
-  identities go in the gitignored `.dev-ssh/`, with the ssh config named
-  **`ssh_config.fleet`** — the base prepends that file to the baked defaults at every
-  start, before it pulls the clone, which is why it is not called `config` and why
-  nothing symlinks it. A clone still holding the old `.dev-ssh/config` keeps working:
-  `docker-child-init.dev.sh` copies it into place each start and says to rename it.
-- **The uid matters and is now checked.** The `dev` account is built in the BASE (uid
-  1001 in the published image), not from this clone's owner as it was before. `make
-  dev-up` runs `dev-check-uid`, which compares the container's `id -u` against the clone
-  owner and prints the fix — `cd ~/infra/dev && make base`, which builds the base at the
-  right uid under the same name. A mismatch otherwise shows up as an unwritable
-  `/workspace` and sshd refusing every login as "bad ownership or modes". Optionally set
-  `DEV_SSH_PORT` to change the **host-side** port mapped to the container's sshd (defaults to
-  `2222`; the container side stays `2222`) — bump it when `2222` is taken or you run more than
-  one dev container, then point Zed / SSH / the Cloudflare tunnel at the port you chose.
-- **Bring up:** `make dev` (build + start + idempotent login walkthrough: git SSH → GitHub
-  → Claude). Re-login later with `make dev-login`; tear down with `make dev-down` (add
-  `-volumes` to also drop the persisted uv/claude/gh/ssh/history volumes).
-- **Attach:** `docker exec -it ds-dev fish`, or over SSH: `ssh -t <host> 'docker exec -it
-  ds-dev fish'`. **There is no Remote Control here as of 2026-08-25** — the supervisor is
-  deleted, not defaulted off, and every dev container on this host is reached the same
-  way: `ssh ds-dev`, which lands on the
-  [claude-sessions](https://github.com/gsfernandes81/claude-sessions) menu. How sessions
-  are started, held and resumed is that repo's to describe. Don't set `ForceCommand` in
-  `sshd_config.dev.d/`, because it would replace the menu. The base still pre-seeds
-  Claude's workspace-trust flag for `/workspace` in `~/.claude.json` so a fresh volume
-  does not meet a dialog nobody can answer.
-- **Idle sessions are offloaded and can be resumed.** claude-sessions handles this. Expect
-  an idle session to be stopped and resumable from the menu later. A session with a timer
-  running or a wake-up scheduled is not idle.
-- **sshd is the foreground process**, and it is the only long-lived one: the container's
-  lifetime is the door's. `docker logs ds-dev` shows sshd and the start-up lines.
-- **Two sshd defaults the base changed are put back** in `sshd_config.dev.d/`:
-  `AuthorizedKeysFile` (the host account's, as always here) and `AllowTcpForwarding yes`
-  (the OpenSSH default this container's old config left in place, which the base turns
-  off). The `dev` account's login shell is likewise put back to **bash** in
-  `Dockerfile.dev` — sshd runs it from `/etc/passwd`, so it is what `ssh <host> '<cmd>'`
-  and Zed's remote bootstrap execute under, and this repo's tooling assumes POSIX there.
-  `docker exec -it ds-dev fish` is unchanged.
-- Container/image/volumes are prefixed `ds-` (the CLI name). There is **no MySQL/Atlas/
-  Railway** service, and no data store is mounted — tests use `tmp_path`; real documents
-  stay off the dev box.
+- **The image.** infra builds `Dockerfile.dev` from this repo's **`main` on GitHub**, `FROM
+  gsrpi-dev-base` at the tag infra passes as `BASE_TAG` (the `ARG` default is only a fallback
+  for a build outside infra). It adds a compiler, `uv`, and the venv at `/home/dev/venv`,
+  pre-synced with `--all-extras --group driver`. So a change to these files reaches the
+  container only once it is on `main` and infra rebuilds it (`make up S=ds-dev`).
+- **`/workspace` is a volume holding a fresh https clone** of this repo, not a host clone —
+  push to share work. No `.env` is linked in; dossier needs none. No data store is mounted:
+  tests use `tmp_path`, and real documents stay off the dev box.
+- **At every start** the base runs `docker-child-init.dev.sh` after its clone or pull:
+  `uv sync --frozen --all-extras --group driver` adds the editable project to the venv.
+  Keep those flags identical to `Dockerfile.dev`'s build sync — `uv sync` makes the
+  environment match what it is asked for, so a start with fewer flags uninstalls the baked
+  extras. A failed sync warns and the container still comes up.
+- **GitHub is the hub's token** for this repo alone, at `/run/github/token`, used by git and
+  `gh` — no `gh auth login`, no GitHub ssh key. `gh auth status` reports failure on it while
+  repo commands work.
+- **ssh identities**, if any, are on zero in `~/.ds-dev-secrets` (what was the clone's
+  `.dev-ssh/`), mounted read-only at `/run/ds-secrets` (`DEV_SECRETS_DIR`): the base copies
+  its `id_*` keys into `~/.ssh` and prepends its `ssh_config.fleet` to `ssh_config.dev`, the
+  baked half of `~/.ssh/config`. Nothing in the container can write there.
+- **`make login C=ds-dev`** (from `~/infra/dev` on zero) runs `docker-login.dev.sh`, baked
+  at `/home/dev/login.sh`: it reports the token and the identities, logs Claude in (one
+  login shared by the dev containers by default), and clones `/workspace` if start-up could
+  not. Idempotent and non-fatal.
+- **Getting in:** `ssh dev` lands on the hub's claude-sessions menu; pick ds-dev. It rests
+  stopped — `make up S=ds-dev` starts it. No port is published and there is no per-container
+  tunnel. sshd reads only the base's `sshd_config` (a child's drop-in is ignored, so there is
+  none here) and sends every session through the base's `dev-door`. Zed, scp and
+  port-forwards to a container have no route at present — an open gap in infra, not
+  something to work around here.
+- **The `dev` login shell is bash**, put back in `Dockerfile.dev`: `dev-door` runs a
+  forwarded command as `$SHELL -c` and a login as `$SHELL -l`, `$SHELL` comes from
+  `/etc/passwd`, and this repo's command lines assume POSIX. fish is still installed.

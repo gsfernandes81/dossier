@@ -38,7 +38,8 @@ coverage.xml
 # separate checkouts, not content to commit into the main tree.
 .claude/worktrees/
 
-# Dev-container git-identity keys + ssh config (see docker-*.dev.sh). Never commit.
+# The old dev container's in-clone git identities. They live on zero in ~/.ds-dev-secrets
+# now; still ignored so a clone that kept a .dev-ssh/ cannot commit it.
 .dev-ssh/
 
 # Environments (uv.lock IS committed — do not ignore it)

@@ -1,6 +1,8 @@
 # Build-context excludes for `docker build` (Dockerfile.dev). The dev image only
-# COPYs pyproject.toml + uv.lock + the dev scripts; the source is bind-mounted at
-# runtime, so this mainly keeps the context small and secrets/personal data out.
+# COPYs pyproject.toml + uv.lock + the dev scripts; the source arrives at runtime as a
+# clone in the /workspace volume, so this mainly keeps the context small and
+# secrets/personal data out of a local build. (infra builds from this repo's git URL,
+# whose context is the tracked tree only.)
 
 .git
 .claude/
